@@ -233,6 +233,72 @@ def strip_c_comments(text: str) -> str:
     return "".join(out)
 
 
+def strip_c_comments_and_literals(text: str) -> str:
+    """Mask comments and quoted literals while preserving offsets and newlines."""
+    without_comments = strip_c_comments(text)
+    out: list[str] = []
+    index = 0
+    quote = ""
+    while index < len(without_comments):
+        char = without_comments[index]
+        following = without_comments[index + 1] if index + 1 < len(without_comments) else ""
+        if quote:
+            if char == "\\" and following:
+                out.extend((" ", " "))
+                index += 1
+            elif char == quote:
+                out.append(" ")
+                quote = ""
+            else:
+                out.append("\n" if char == "\n" else " ")
+        elif char in {'"', "'", "`"}:
+            quote = char
+            out.append(" ")
+        else:
+            out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def java_type_span(source: str, symbol: str) -> tuple[int, int] | None:
+    """Return one Java type declaration span, ignoring declaration-shaped text in literals/comments."""
+    code = strip_c_comments_and_literals(source)
+    declaration = re.search(
+        rf"\b(?:class|record|interface|enum|@interface)\s+{re.escape(symbol)}\b", code,
+    )
+    if declaration is None:
+        return None
+    opening = code.find("{", declaration.end())
+    if opening < 0:
+        return None
+    depth = 0
+    for offset in range(opening, len(code)):
+        if code[offset] == "{":
+            depth += 1
+        elif code[offset] == "}":
+            depth -= 1
+            if depth == 0:
+                return declaration.start(), offset + 1
+    return None
+
+
+def java_type_declares_field(source: str, symbol: str, field: str) -> bool:
+    """Check a record component or member declaration inside the named Java type."""
+    span = java_type_span(source, symbol)
+    if span is None:
+        return False
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    opening = code.find("{")
+    identifier = field.rsplit(".", 1)[-1]
+    if re.search(rf"\b{re.escape(identifier)}\b", code[:opening]):
+        return True
+    declaration = re.compile(
+        rf"(?m)^\s*(?:(?:public|protected|private|static|final|volatile|transient)\s+)*"
+        rf"[A-Za-z_$][\w$<>,.?\[\] @]*\s+{re.escape(identifier)}\s*(?:=|;|,)",
+    )
+    return declaration.search(code[opening + 1:]) is not None
+
+
 def normalized(value: str) -> str:
     return " ".join(value.split())
 
@@ -469,12 +535,9 @@ def current_source_owner(root: Path, owner: str) -> tuple[Path, str] | None:
     source = authority.read_text(encoding="utf-8")
     suffix = relative.suffix
     symbol = re.escape(owner_symbol)
+    if suffix == ".java":
+        return (relative, owner_symbol) if java_type_span(source, owner_symbol) is not None else None
     declarations = {
-        ".java": (
-            rf"\b(?:class|record|interface|enum|@interface)\s+{symbol}\b",
-            rf"(?m)^\s*(?:(?:public|protected|private|static|final|abstract|synchronized|native|strictfp)\s+)*"
-            rf"[A-Za-z_$][\w$<>,.?\[\] ]*\s+{symbol}\s*(?:\(|=|;)",
-        ),
         ".py": (rf"(?m)^\s*(?:class|def|async\s+def)\s+{symbol}\b",),
         ".js": (rf"\b(?:class|function)\s+{symbol}\b", rf"\b(?:const|let|var)\s+{symbol}\s*="),
         ".mjs": (rf"\b(?:class|function)\s+{symbol}\b", rf"\b(?:const|let|var)\s+{symbol}\s*="),
@@ -488,6 +551,17 @@ def current_source_owner(root: Path, owner: str) -> tuple[Path, str] | None:
     if not declarations or not any(re.search(pattern, source) for pattern in declarations):
         return None
     return relative, owner_symbol
+
+
+def current_source_field(root: Path, owner: str, field: str) -> bool:
+    """Verify a Java operator field is declared by its typed current-source owner."""
+    resolved = current_source_owner(root, owner)
+    if resolved is None:
+        return False
+    relative, owner_symbol = resolved
+    if relative.suffix != ".java":
+        return True
+    return java_type_declares_field((root / relative).read_text(encoding="utf-8"), owner_symbol, field)
 
 
 @lru_cache(maxsize=None)
@@ -546,8 +620,8 @@ def conversion_evidence_errors(identifier: str, entry: dict[str, object],
     field = str(conversion["field"])
     before_expression = normalized(str(conversion["beforeExpression"]))
     after_expression = normalized(str(conversion["afterExpression"]))
-    before_code = normalized(strip_c_comments(before_source))
-    after_code = normalized(strip_c_comments(after_source))
+    before_code = normalized(strip_c_comments_and_literals(before_source))
+    after_code = normalized(strip_c_comments_and_literals(after_source))
     errors: list[str] = []
     bindings = entry.get("bindings", [])
     if not isinstance(bindings, list) or binding not in bindings:
@@ -566,10 +640,13 @@ def conversion_evidence_errors(identifier: str, entry: dict[str, object],
         errors.append(f"{identifier}: conversion binding already exists in beforeRevision")
     if not re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(after_source)):
         errors.append(f"{identifier}: conversion binding is absent from afterRevision")
-    declaration = re.compile(
-        rf"\b{re.escape(binding_symbol)}\b\s*=\s*\"{re.escape(binding)}\""
+    declaration = re.compile(rf"\b{re.escape(binding_symbol)}\b\s*=")
+    executable_after = strip_c_comments_and_literals(after_source)
+    declared_binding = any(
+        re.match(rf"\s*\"{re.escape(binding)}\"", after_source[match.end():])
+        for match in declaration.finditer(executable_after)
     )
-    if declaration.search(strip_c_comments(after_source)) is None:
+    if not declared_binding:
         errors.append(f"{identifier}: conversion bindingSymbol does not declare the named binding")
     return errors
 
@@ -644,6 +721,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             owner = str(entry.get("owner", ""))
             if current_source_owner(root, owner) is None:
                 errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
+            elif not current_source_field(root, owner, str(entry.get("field", ""))):
+                errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
             if status == "converted":
                 conversion = entry.get("conversion")
                 required = ("issue", "beforeRevision", "afterRevision", "path", "symbol",

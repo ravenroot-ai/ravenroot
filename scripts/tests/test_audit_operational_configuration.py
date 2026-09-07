@@ -276,10 +276,42 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             keyword_owner = audit.current_source_owner(
                 root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#package",
             )
+            source = root / "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"
+            source.write_text(source.read_text(encoding="utf-8").replace(
+                "package dev.example;",
+                'package dev.example;\n// final class CommentOwner {}\n'
+                'final class Holder { String text = "final class StringOwner {}"; }',
+            ), encoding="utf-8")
+            comment_owner = audit.current_source_owner(
+                root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#CommentOwner",
+            )
+            string_owner = audit.current_source_owner(
+                root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#StringOwner",
+            )
         self.assertIsNone(escaped)
         self.assertIsNone(untracked_owner)
         self.assertIsNone(keyword_owner)
+        self.assertIsNone(comment_owner)
+        self.assertIsNone(string_owner)
         self.assertIsNotNone(tracked_owner)
+
+    def test_operator_field_must_be_declared_by_its_typed_owner(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            reviewed = next(entry for entry in document["entries"] if entry["status"] == "pending-review")
+            reviewed.update(
+                status="already-centralized", classification="operator-configurable",
+                setting="example.runtime.policy",
+                owner="ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                field="fieldThatDoesNotExist", bindings=[], default="16",
+                defaultEvidence=[reviewed["id"]], validation="positive integer", scope="process",
+                pinning="read once at startup", coverage="synthetic test owner only",
+                rationale="Synthetic missing-field owner test.",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+        self.assertTrue(any("field is not declared by its typed owner" in error for error in errors), errors)
 
     def test_confirmed_hardcoded_setting_fails_the_completion_gate(self) -> None:
         with synthetic_repository() as location:
@@ -407,6 +439,47 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             )
             errors = audit.inventory_errors(root, document, audit.discover(root))
         self.assertTrue(any("expressions must both identify the setting field" in error
+                            for error in errors), errors)
+
+    def test_converted_setting_rejects_executable_evidence_inside_java_string(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+                            "commit", "-qm", "fixture"], cwd=root, check=True)
+            before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                    capture_output=True, text=True).stdout.strip()
+            source = root / "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"
+            source.write_text(source.read_text(encoding="utf-8").replace(
+                "}\n",
+                '  static final String RUNTIME_LIMIT_VARIABLE = "RAVENROOT_RUNTIME_LIMIT";\n'
+                '  String fake = "read(RUNTIME_LIMIT_VARIABLE, DERIVED_MASK)";\n}\n',
+            ), encoding="utf-8")
+            subprocess.run(["git", "add", "ravenroot"], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+                            "commit", "-qm", "string evidence"], cwd=root, check=True)
+            after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                   capture_output=True, text=True).stdout.strip()
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            reviewed = next(entry for entry in document["entries"] if entry["role"] == "DERIVED_MASK")
+            reviewed.update(
+                status="converted", classification="operator-configurable",
+                setting="example.runtime.policy", field="DERIVED_MASK",
+                owner="ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                bindings=["RAVENROOT_RUNTIME_LIMIT"], default="16", defaultEvidence=[reviewed["id"]],
+                validation="positive integer", scope="process", pinning="read once at startup",
+                coverage="synthetic test owner only", rationale="Synthetic string transition test.",
+                conversion={
+                    "issue": "#225", "beforeRevision": before, "afterRevision": after,
+                    "path": "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java",
+                    "symbol": "RuntimePolicy", "binding": "RAVENROOT_RUNTIME_LIMIT",
+                    "bindingSymbol": "RUNTIME_LIMIT_VARIABLE", "field": "DERIVED_MASK",
+                    "beforeExpression": "static final int DERIVED_MASK = 1 << 4;",
+                    "afterExpression": "read(RUNTIME_LIMIT_VARIABLE, DERIVED_MASK)",
+                },
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+        self.assertTrue(any("afterExpression does not identify the added source" in error
                             for error in errors), errors)
 
     def test_refresh_preserves_review_metadata_and_updates_source_line(self) -> None:

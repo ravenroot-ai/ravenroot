@@ -33,8 +33,8 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 13992 |
-| Reviewed | 2636 |
+| Atomic operational candidates discovered | 14018 |
+| Reviewed | 2662 |
 | Pending review | 11356 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 25 |
@@ -43,7 +43,7 @@ semantic review and focused source inventories remain required for those boundar
 | Retained security ceilings or defaults | 0 |
 | Retained protocol or format invariants | 0 |
 | Retained derived values | 0 |
-| Test fixtures | 2554 |
+| Test fixtures | 2580 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 279.
@@ -57,7 +57,7 @@ Surface counts are derived from the same inventory:
 - `deployment-example`: 16
 - `java`: 5738
 - `script`: 2304
-- `test-fixture`: 2554
+- `test-fixture`: 2580
 - `ui`: 2824
 
 ## Operator settings

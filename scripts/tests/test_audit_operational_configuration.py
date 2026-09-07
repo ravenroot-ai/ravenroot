@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -403,6 +404,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any("conversion beforeRevision is not a local commit" in error for error in errors), errors)
         self.assertTrue(any("conversion afterRevision is not a local commit" in error for error in errors), errors)
 
+    def test_revision_helpers_reject_option_shaped_or_abbreviated_ids_before_git(self) -> None:
+        with mock.patch.object(audit.subprocess, "run") as run:
+            self.assertFalse(audit.commit_exists(ROOT, "--output=/tmp/never-write"))
+            self.assertFalse(audit.commit_exists(ROOT, "deadbeef"))
+            self.assertIsNone(audit.committed_source(
+                ROOT, "--output=/tmp/never-write", "tracked.java"))
+            self.assertIsNone(audit.committed_source(ROOT, "deadbeef", "tracked.java"))
+            self.assertFalse(audit.revision_is_ancestor(
+                ROOT, "--output=/tmp/never-write", "0" * 40))
+            self.assertFalse(audit.revision_is_ancestor(ROOT, "0" * 40, "deadbeef"))
+        run.assert_not_called()
+
     def test_converted_setting_rejects_no_op_revision_provenance(self) -> None:
         with synthetic_repository() as location:
             root = Path(location)
@@ -576,6 +589,53 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         retry_cycle = next(row for row in cyclic if row[3] == "/properties/retries/oneOf/1/$ref")
         self.assertIn("cyclic", json.loads(retry_cycle[5])["resolutionError"])
 
+        schema["definitions"]["blank"] = {"type": "string", "maxLength": 0}
+        schema["definitions"]["positive"] = {
+            "$ref": "#/definitions/blank", "description": "unsupported transitive sibling",
+        }
+        transitive_sibling = audit.json_schema_reference_candidates(json.dumps(schema, indent=2))
+        retry_transitive = next(
+            row for row in transitive_sibling if row[3] == "/properties/retries/oneOf/1/$ref")
+        self.assertIn("unsupported sibling", json.loads(retry_transitive[5])["resolutionError"])
+
+    def test_java_resolver_methods_are_direct_members_of_the_named_type(self) -> None:
+        nested_only = '''final class Outer {
+  static final class Inner {
+    long whole(Object value) { return helper(value); }
+    long helper(Object value) { return 7; }
+  }
+}
+'''
+        self.assertIsNone(audit.java_method_span(nested_only, "Outer", "whole"))
+        self.assertEqual(set(), audit.java_declared_method_names(nested_only, "Outer"))
+        self.assertIsNone(audit.java_reachable_helper_methods(nested_only, "Outer", ("whole",)))
+
+        direct_and_nested = '''final class Outer {
+  long whole(Object value) { return helper(value); }
+  long helper(Object value) { return 9; }
+  static final class Inner {
+    long whole(Object value) { return helper(value); }
+    long helper(Object value) { return 7; }
+  }
+}
+'''
+        span = audit.java_method_span(direct_and_nested, "Outer", "whole")
+        self.assertIsNotNone(span)
+        self.assertIn("return helper(value)", direct_and_nested[slice(*span)])
+        self.assertEqual({"whole", "helper"}, audit.java_declared_method_names(
+            direct_and_nested, "Outer"))
+        self.assertEqual({"helper"}, audit.java_reachable_helper_methods(
+            direct_and_nested, "Outer", ("whole",)))
+
+        overloaded = direct_and_nested.replace(
+            "  long whole(Object value) { return helper(value); }",
+            "  long whole(Object value) { return helper(value); }\n"
+            "  long whole(String value) { return helper(value); }",
+        )
+        self.assertIsNone(audit.java_method_span(overloaded, "Outer", "whole"))
+        self.assertNotIn("whole", audit.java_declared_method_names(overloaded, "Outer"))
+        self.assertIsNone(audit.java_reachable_helper_methods(overloaded, "Outer", ("whole",)))
+
     def test_nested_record_binding_and_default_authorities_use_component_positions(self) -> None:
         policy = '''record Policy(Confirmation confirmation) {
   record Confirmation(long timeoutMillis, int responseBytes) {
@@ -622,6 +682,109 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "16 * 1024",
             audit.java_record_default_expression(policy, "Confirmation", "DEFAULTS", "responseBytes"),
         )
+
+    def test_constant_backed_default_is_tied_to_ordered_static_final_chain(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            policy_path = root / "ravenroot/example/src/main/java/dev/example/Limits.java"
+            policy_path.write_text(
+                "package dev.example;\n"
+                "record Limits(int maxDepth) {\n"
+                "  static final int LIMIT = Shared.MAX_DEPTH;\n"
+                "  static final Limits DEFAULTS = new Limits(LIMIT);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            shared_path = root / "ravenroot/example/src/main/java/dev/example/Shared.java"
+            shared_path.write_text(
+                "package dev.example;\n"
+                "final class Shared {\n"
+                "  static final int MAX_DEPTH = 7;\n"
+                "  static final int UNRELATED = 7;\n"
+                "  static final class Nested { static final int MAX_DEPTH = 7; }\n"
+                "  void local() { final int MAX_DEPTH = 7; }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "ravenroot"], cwd=root, check=True)
+            candidates = audit.discover(root)
+            discovered = {candidate.id: candidate for candidate in candidates}
+            terminal = next(candidate for candidate in candidates
+                            if candidate.path.endswith("Shared.java")
+                            and candidate.role == "MAX_DEPTH" and candidate.expression == "7")
+            unrelated = next(candidate for candidate in candidates
+                             if candidate.path.endswith("Shared.java")
+                             and candidate.role == "UNRELATED" and candidate.expression == "7")
+            setting = "example.max-depth"
+            entries = {
+                terminal.id: {"id": terminal.id, "setting": setting},
+                unrelated.id: {"id": unrelated.id, "setting": setting},
+            }
+
+            def hop(path: Path, symbol: str, field: str) -> dict[str, object]:
+                source = path.read_text(encoding="utf-8")
+                initializer = audit.java_static_final_initializer(source, symbol, field)
+                self.assertIsNotNone(initializer)
+                expression, start, end = initializer
+                ids = audit.candidate_ids_in_source_span(
+                    path.relative_to(root), source, start, end, "fixed-declaration", field, discovered)
+                return {
+                    "owner": f"{path.relative_to(root).as_posix()}#{symbol}", "field": field,
+                    "sourceExpression": expression,
+                    "initializerDigest": audit.hashlib.sha256(
+                        audit.normalized(expression).encode("utf-8")).hexdigest(),
+                    "candidateIds": ids,
+                }
+
+            authority = {
+                "owner": f"{policy_path.relative_to(root).as_posix()}#Limits",
+                "instanceSymbol": "DEFAULTS", "field": "maxDepth", "sourceExpression": "LIMIT",
+                "candidateIds": [],
+                "constantReferenceAuthority": {
+                    "kind": "java-static-final-chain-v1",
+                    "hops": [hop(policy_path, "Limits", "LIMIT"),
+                             hop(shared_path, "Shared", "MAX_DEPTH")],
+                },
+            }
+            contract = {
+                "owner": authority["owner"], "field": "maxDepth",
+                "defaultEvidence": [terminal.id], "defaultAuthority": authority,
+            }
+            valid = audit.constant_reference_authority_errors(
+                root, setting, contract, authority,
+                policy_path.read_text(encoding="utf-8"), discovered, entries)
+            self.assertEqual([], valid)
+
+            wrong_atom = copy.deepcopy(contract)
+            wrong_atom["defaultEvidence"] = [unrelated.id]
+            wrong_atom["defaultAuthority"]["constantReferenceAuthority"]["hops"][-1][
+                "candidateIds"] = [unrelated.id]
+            atom_errors = audit.constant_reference_authority_errors(
+                root, setting, wrong_atom, wrong_atom["defaultAuthority"],
+                policy_path.read_text(encoding="utf-8"), discovered, entries)
+            self.assertTrue(any("atom multiset" in error for error in atom_errors), atom_errors)
+
+            missing_hop = copy.deepcopy(contract)
+            missing_hop["defaultAuthority"]["constantReferenceAuthority"]["hops"] = [
+                missing_hop["defaultAuthority"]["constantReferenceAuthority"]["hops"][-1]]
+            hop_errors = audit.constant_reference_authority_errors(
+                root, setting, missing_hop, missing_hop["defaultAuthority"],
+                policy_path.read_text(encoding="utf-8"), discovered, entries)
+            self.assertTrue(any("preceding initializer" in error for error in hop_errors), hop_errors)
+
+            wrong_owner = copy.deepcopy(contract)
+            wrong_owner["defaultAuthority"]["constantReferenceAuthority"]["hops"][-1]["owner"] = \
+                f"{policy_path.relative_to(root).as_posix()}#Limits"
+            owner_errors = audit.constant_reference_authority_errors(
+                root, setting, wrong_owner, wrong_owner["defaultAuthority"],
+                policy_path.read_text(encoding="utf-8"), discovered, entries)
+            self.assertTrue(any("preceding initializer" in error for error in owner_errors), owner_errors)
+
+            duplicated = shared_path.read_text(encoding="utf-8").replace(
+                "  static final int UNRELATED = 7;",
+                "  static final int MAX_DEPTH = 7;\n  static final int UNRELATED = 7;",
+            )
+            self.assertIsNone(audit.java_static_final_initializer(duplicated, "Shared", "MAX_DEPTH"))
 
     def test_graph_platform_coverage_is_tied_to_carrier_candidates_and_test_bodies(self) -> None:
         with synthetic_repository() as location:
@@ -723,9 +886,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             config.write_text(
                 "package dev.example;\n"
                 "final class RuntimeLimitConfiguration {\n"
-                "  Object fromSources(Object properties, Object environment, RuntimeLimits defaults) {\n"
+                "  Object fromSources(Object properties, Object environment) {\n"
+                "    RuntimeLimits defaults = RuntimeLimits.DEFAULTS;\n"
+                "    confirmation(properties, environment, defaults);\n"
                 "    String diagnostic = \"RAVENROOT_EXAMPLE_MAX_RETRIES\"; "
                 f"return new RuntimeLimits({authority_call}, {second_call});\n"
+                "  }\n"
+                "  RuntimeLimits confirmation(Object properties, Object environment, RuntimeLimits defaults) {\n"
+                "    return defaults;\n"
                 "  }\n"
                 "  int integer(Object properties, Object environment, String property, String variable, int fallback) {\n"
                 "    return (int) whole(properties, environment, property, variable, fallback);\n"
@@ -814,6 +982,24 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                         tests.read_text(encoding="utf-8"), "RuntimeLimitConfigurationTest", method)
                     for method in ("propertyPrecedesEnvironment", "blankPropertyUsesEnvironment",
                                    "blankBothUseDefault", "malformedValueRefuses")
+                },
+                "compositionMethods": {
+                    "typedDefaultsFactory": "fromSources", "nestedDefaultsFactory": "confirmation",
+                },
+                "compositionMethodDigests": {
+                    method: audit.java_method_digest(
+                        config.read_text(encoding="utf-8"), "RuntimeLimitConfiguration", method)
+                    for method in ("fromSources", "confirmation")
+                },
+                "compositionLinks": {
+                    "typedDefaultsInitializer": {
+                        "method": "fromSources",
+                        "expression": "RuntimeLimits defaults = RuntimeLimits.DEFAULTS",
+                    },
+                    "nestedDefaultsAccessor": {
+                        "method": "fromSources",
+                        "expression": "confirmation(properties, environment, defaults)",
+                    },
                 },
             }}
             binding_authority = {
@@ -912,6 +1098,25 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in blank_drift_errors), blank_drift_errors)
             config.write_text(changed_blank_source, encoding="utf-8")
 
+            changed_composition_source = config.read_text(encoding="utf-8")
+            config.write_text(changed_composition_source.replace(
+                "RuntimeLimits defaults = RuntimeLimits.DEFAULTS",
+                "RuntimeLimits defaults = RuntimeLimits.ALTERNATE",
+            ), encoding="utf-8")
+            initializer_errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("composition method fromSources has drifted" in error
+                                for error in initializer_errors), initializer_errors)
+            self.assertTrue(any("fallback-composition link typedDefaultsInitializer has drifted" in error
+                                for error in initializer_errors), initializer_errors)
+            config.write_text(changed_composition_source.replace(
+                "confirmation(properties, environment, defaults)",
+                "confirmation(properties, environment, RuntimeLimits.DEFAULTS)",
+            ), encoding="utf-8")
+            delegation_errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("fallback-composition link nestedDefaultsAccessor has drifted" in error
+                                for error in delegation_errors), delegation_errors)
+            config.write_text(changed_composition_source, encoding="utf-8")
+
             other_resolver = root / "ravenroot/example/src/main/java/dev/example/OtherResolver.java"
             other_resolver.write_text(config.read_text(encoding="utf-8").replace(
                 "RuntimeLimitConfiguration", "OtherResolver"), encoding="utf-8")
@@ -1003,6 +1208,83 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(1, summary["retired"])
         self.assertEqual("Wire version advanced by reviewed protocol change.",
                          refreshed["retiredEntries"][0]["retirementRationale"])
+
+    def test_yaml_duplicate_default_removal_is_tied_to_exact_path_and_typed_default(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            policy = root / "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java"
+            policy.write_text(
+                "package dev.example;\n"
+                "record RuntimeLimits(int maxRetries) {\n"
+                "  static final RuntimeLimits DEFAULTS = new RuntimeLimits(7);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            values = root / "deploy/example/values.yaml"
+            values.parent.mkdir(parents=True)
+            values.write_text(
+                "humanTask:\n  maxRetries: 7\ngraph:\n  maxRetries: 7\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "ravenroot", "deploy"], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "numeric default"],
+                           cwd=root, check=True)
+            before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                    capture_output=True, text=True).stdout.strip()
+            values.write_text(
+                'humanTask:\n  maxRetries: ""\ngraph:\n  maxRetries: ""\n',
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "deploy"], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "blank carrier"],
+                           cwd=root, check=True)
+            after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                   capture_output=True, text=True).stdout.strip()
+            owner = "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java#RuntimeLimits"
+            setting = "example.runtime.max-retries"
+            active = {"oc-active": {
+                "id": "oc-active", "status": "already-centralized",
+                "classification": "operator-configurable", "setting": setting,
+                "owner": owner, "field": "maxRetries",
+                "defaultAuthority": {
+                    "owner": owner, "instanceSymbol": "DEFAULTS", "field": "maxRetries",
+                    "sourceExpression": "7", "candidateIds": [],
+                },
+            }}
+            retired = {
+                "id": "oc-retired", "path": "deploy/example/values.yaml", "line": 2,
+                "symbol": "module", "kind": "configuration-scalar", "role": "maxRetries",
+                "expression": "7", "setting": setting,
+            }
+            removal = {
+                "kind": "yaml-default-authority-v1", "issue": "#225",
+                "beforeRevision": before, "afterRevision": after,
+                "yamlPath": "humanTask.maxRetries", "beforeValue": "7", "afterValue": '\"\"',
+                "replacementOwner": owner, "replacementField": "maxRetries",
+                "replacementInstanceSymbol": "DEFAULTS", "replacementDefaultExpression": "7",
+            }
+            valid = audit.yaml_default_removal_errors(root, retired["id"], retired, removal, active)
+            self.assertEqual([], valid)
+
+            wrong_path = copy.deepcopy(removal)
+            wrong_path["yamlPath"] = "graph.maxRetries"
+            path_errors = audit.yaml_default_removal_errors(
+                root, retired["id"], retired, wrong_path, active)
+            self.assertTrue(any("retired source line" in error for error in path_errors), path_errors)
+
+            wrong_field = copy.deepcopy(removal)
+            wrong_field["replacementField"] = "otherRetries"
+            field_errors = audit.yaml_default_removal_errors(
+                root, retired["id"], retired, wrong_field, active)
+            self.assertTrue(any("no active typed replacement" in error for error in field_errors), field_errors)
+
+            wrong_before = copy.deepcopy(removal)
+            wrong_before["beforeValue"] = "9"
+            value_errors = audit.yaml_default_removal_errors(
+                root, retired["id"], retired, wrong_before, active)
+            self.assertTrue(any("beforeValue" in error for error in value_errors), value_errors)
 
     def test_accept_retired_pending_is_only_valid_for_refresh(self) -> None:
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:

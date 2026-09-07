@@ -566,7 +566,9 @@ def resolved_json_schema_value(document: object, value: object,
                                references: tuple[str, ...] = ()) -> object:
     """Return a canonicalizable local-ref expansion and fail closed on cycles."""
     if isinstance(value, dict):
-        if set(value) == {"$ref"} and isinstance(value["$ref"], str):
+        if "$ref" in value:
+            if set(value) != {"$ref"} or not isinstance(value["$ref"], str):
+                raise ValueError("unsupported sibling or value next to $ref")
             reference = value["$ref"]
             if reference in references:
                 raise ValueError("cyclic local JSON reference")
@@ -807,6 +809,43 @@ def java_record_default_expression(source: str, symbol: str, instance_symbol: st
     return result[0] if result is not None else None
 
 
+def java_static_final_initializer(source: str, symbol: str,
+                                  field: str) -> tuple[str, int, int] | None:
+    """Return one direct static-final field initializer in a named Java type."""
+    span = java_type_span(source, symbol)
+    if span is None:
+        return None
+    base, limit = span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    matches: list[tuple[str, int, int]] = []
+    for name in re.finditer(rf"\b{re.escape(field)}\b\s*=", code):
+        if depths[name.start()] != 1:
+            continue
+        statement_start = max(code.rfind(";", 0, name.start()), code.rfind("{", 0, name.start())) + 1
+        prefix = code[statement_start:name.start()]
+        if re.search(r"\bstatic\s+final\b|\bfinal\s+static\b", prefix) is None:
+            continue
+        equals = code.find("=", name.start(), name.end())
+        end = equals + 1
+        round_depth = square_depth = brace_depth = 0
+        while end < len(code):
+            char = code[end]
+            if char == "(": round_depth += 1
+            elif char == ")": round_depth -= 1
+            elif char == "[": square_depth += 1
+            elif char == "]": square_depth -= 1
+            elif char == "{": brace_depth += 1
+            elif char == "}": brace_depth -= 1
+            elif char == ";" and round_depth == square_depth == brace_depth == 0:
+                start = equals + 1
+                matches.append((normalized(actual[start:end]), base + start, base + end))
+                break
+            end += 1
+    return matches[0] if len(matches) == 1 else None
+
+
 def candidate_ids_in_source_span(relative: Path, source: str, start: int, end: int,
                                  kind: str, role: str,
                                  discovered: dict[str, Candidate]) -> list[str]:
@@ -832,6 +871,32 @@ def candidate_ids_in_source_span(relative: Path, source: str, start: int, end: i
             selected.append(ids[occurrence])
     return selected
 
+
+def java_package(source: str) -> str:
+    code = strip_c_comments_and_literals(source)
+    match = re.search(r"\bpackage\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*;", code)
+    return match.group(1) if match is not None else ""
+
+
+def java_constant_reference_matches(source: str, source_owner: str, expression: str,
+                                    target_owner: str, target_field: str,
+                                    target_source: str) -> bool:
+    """Match one bounded unqualified, imported/simple, or fully qualified Java field reference."""
+    normalized_expression = normalized(expression)
+    source_path, source_type = source_owner.rsplit("#", 1)
+    target_path, target_type = target_owner.rsplit("#", 1)
+    if normalized_expression == target_field:
+        return source_path == target_path and source_type == target_type
+    if normalized_expression == f"{target_type}.{target_field}":
+        target_package = java_package(target_source)
+        return java_package(source) == target_package or re.search(
+            rf"\bimport\s+{re.escape(target_package + '.' + target_type)}\s*;",
+            strip_c_comments_and_literals(source),
+        ) is not None
+    target_package = java_package(target_source)
+    return bool(target_package) and normalized_expression == \
+        f"{target_package}.{target_type}.{target_field}"
+
 def matching_delimiter(code: str, opening: int, left: str, right: str) -> int | None:
     depth = 0
     for offset in range(opening, len(code)):
@@ -844,16 +909,30 @@ def matching_delimiter(code: str, opening: int, left: str, right: str) -> int | 
     return None
 
 
+def java_brace_depths(code: str) -> list[int]:
+    """Return the brace depth immediately before each character in masked Java source."""
+    depths: list[int] = []
+    depth = 0
+    for char in code:
+        depths.append(depth)
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return depths
+
+
 def java_method_span(source: str, type_symbol: str, method: str) -> tuple[int, int] | None:
-    """Resolve exactly one Java method body in a named type, excluding calls and quoted text."""
+    """Resolve exactly one direct Java method body in a named type."""
     type_span = java_type_span(source, type_symbol)
     if type_span is None:
         return None
     base, limit = type_span
     code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
     matches: list[tuple[int, int]] = []
     for name in re.finditer(rf"\b{re.escape(method)}\s*\(", code):
-        if name.start() and code[name.start() - 1] == ".":
+        if depths[name.start()] != 1 or (name.start() and code[name.start() - 1] == "."):
             continue
         opening = code.find("(", name.start())
         closing = matching_delimiter(code, opening, "(", ")")
@@ -924,14 +1003,17 @@ def java_method_digest(source: str, type_symbol: str, method: str) -> str | None
 
 
 def java_declared_method_names(source: str, type_symbol: str) -> set[str]:
-    """Return unambiguous method names declared directly or lexically inside one Java type."""
+    """Return unambiguous method names declared directly by one Java type."""
     type_span = java_type_span(source, type_symbol)
     if type_span is None:
         return set()
     base, limit = type_span
     code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
     names: Counter[str] = Counter()
     for match in re.finditer(r"\b([A-Za-z_$][\w$]*)\s*\(", code):
+        if depths[match.start()] != 1:
+            continue
         name = match.group(1)
         if name in {"if", "for", "while", "switch", "catch", "synchronized", "try", "do"}:
             continue
@@ -981,6 +1063,8 @@ def java_reachable_helper_methods(source: str, type_symbol: str,
 
 @lru_cache(maxsize=None)
 def committed_source(root: Path, revision: str, path: str) -> str | None:
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        return None
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts:
         return None
@@ -991,12 +1075,17 @@ def committed_source(root: Path, revision: str, path: str) -> str | None:
 
 @lru_cache(maxsize=None)
 def commit_exists(root: Path, revision: str) -> bool:
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        return False
     return subprocess.run(["git", "cat-file", "-e", f"{revision}^{{commit}}"], cwd=root,
                           capture_output=True).returncode == 0
 
 
 @lru_cache(maxsize=None)
 def revision_is_ancestor(root: Path, before: str, after: str) -> bool:
+    if re.fullmatch(r"[0-9a-f]{40}", before) is None \
+            or re.fullmatch(r"[0-9a-f]{40}", after) is None:
+        return False
     return subprocess.run(["git", "merge-base", "--is-ancestor", before, after], cwd=root,
                           capture_output=True).returncode == 0
 
@@ -1022,6 +1111,113 @@ def revision_transition_errors(root: Path, identifier: str, provenance: dict[str
     if before_source is not None and after_source is not None and before_source == after_source:
         errors.append(f"{identifier}: {label} source is unchanged between revisions")
     return errors, before_source, after_source
+
+
+def yaml_scalar_rows(source: str) -> list[tuple[int, str, str]]:
+    """Return line, path, and value for mapping-only YAML scalars used by deployment values."""
+    stack: list[tuple[int, str]] = []
+    rows: list[tuple[int, str, str]] = []
+    for line, raw in enumerate(source.splitlines(), start=1):
+        if not raw.strip() or raw.lstrip().startswith(("#", "-")):
+            continue
+        match = re.match(r'^([ ]*)([A-Za-z_][A-Za-z0-9_.-]*)\s*:\s*(.*?)\s*$', raw)
+        if match is None:
+            continue
+        indent = len(match.group(1))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        key = match.group(2)
+        value = match.group(3)
+        path = tuple(item[1] for item in stack) + (key,)
+        if value:
+            rows.append((line, ".".join(path), normalized(value)))
+        else:
+            stack.append((indent, key))
+    return rows
+
+
+def yaml_scalar_at_path(source: str, dotted_path: str) -> str | None:
+    """Return one scalar at an exact mapping-only YAML path used by deployment values."""
+    found = [value for _line, path, value in yaml_scalar_rows(source) if path == dotted_path]
+    return found[0] if len(found) == 1 else None
+
+
+def yaml_default_removal_errors(root: Path, identifier: str, entry: dict[str, object],
+                                removal: dict[str, object],
+                                active_entries: dict[str, dict[str, object]]) -> list[str]:
+    """Verify removal of one exact YAML default in favor of a typed Java authority."""
+    required = ("yamlPath", "beforeValue", "afterValue", "replacementOwner", "replacementField",
+                "replacementInstanceSymbol", "replacementDefaultExpression")
+    if any(not isinstance(removal.get(field), str) or not str(removal[field]).strip()
+           for field in required):
+        return [f"{identifier}: YAML default removal requires {', '.join(required)}"]
+    errors: list[str] = []
+    before = str(removal.get("beforeRevision", ""))
+    after = str(removal.get("afterRevision", ""))
+    path = str(entry.get("path", ""))
+    if before == after:
+        errors.append(f"{identifier}: removal revisions must be distinct")
+    for field, revision in (("beforeRevision", before), ("afterRevision", after)):
+        if not commit_exists(root, revision):
+            errors.append(f"{identifier}: removal {field} is not a local commit")
+    if not errors and not revision_is_ancestor(root, before, after):
+        errors.append(f"{identifier}: removal beforeRevision is not an ancestor of afterRevision")
+    before_source = committed_source(root, before, path)
+    after_source = committed_source(root, after, path)
+    if before_source is None or after_source is None:
+        errors.append(f"{identifier}: removal YAML path is absent from a revision")
+        return errors
+    yaml_path = str(removal["yamlPath"])
+    before_value = yaml_scalar_at_path(before_source, yaml_path)
+    after_value = yaml_scalar_at_path(after_source, yaml_path)
+    exact_before = [(candidate_path, value) for line, candidate_path, value
+                    in yaml_scalar_rows(before_source) if line == entry.get("line")]
+    if exact_before != [(yaml_path, before_value)]:
+        errors.append(f"{identifier}: YAML default removal path does not identify the retired source line")
+    if before_value != normalized(str(removal["beforeValue"])) \
+            or before_value != normalized(str(entry.get("expression", ""))):
+        errors.append(f"{identifier}: YAML default removal beforeValue does not match the exact path")
+    if after_value != normalized(str(removal["afterValue"])):
+        errors.append(f"{identifier}: YAML default removal afterValue does not match the exact path")
+    if str(entry.get("role", "")) != yaml_path.rsplit(".", 1)[-1]:
+        errors.append(f"{identifier}: YAML default removal path does not match the candidate role")
+
+    setting = str(entry.get("setting", ""))
+    replacement_owner = str(removal["replacementOwner"])
+    replacement_field = str(removal["replacementField"])
+    representatives = [candidate for candidate in active_entries.values()
+                       if candidate.get("setting") == setting
+                       and candidate.get("classification") == "operator-configurable"
+                       and candidate.get("status") != "pending-review"
+                       and candidate.get("owner") == replacement_owner
+                       and candidate.get("field") == replacement_field]
+    if not setting or not representatives:
+        errors.append(f"{identifier}: YAML default removal has no active typed replacement setting")
+        return errors
+    authority = representatives[0].get("defaultAuthority")
+    if not isinstance(authority, dict) \
+            or authority.get("owner") != replacement_owner \
+            or authority.get("field") != replacement_field \
+            or authority.get("instanceSymbol") != removal["replacementInstanceSymbol"] \
+            or normalized(str(authority.get("sourceExpression", ""))) \
+            != normalized(str(removal["replacementDefaultExpression"])):
+        errors.append(f"{identifier}: YAML default removal does not match active defaultAuthority")
+
+    if "#" not in replacement_owner:
+        errors.append(f"{identifier}: replacementOwner must be path#symbol")
+        return errors
+    owner_path, owner_symbol = replacement_owner.rsplit("#", 1)
+    replacement_source = committed_source(root, after, owner_path)
+    if replacement_source is None or java_type_span(replacement_source, owner_symbol) is None \
+            or not java_type_declares_field(replacement_source, owner_symbol, replacement_field):
+        errors.append(f"{identifier}: typed replacement owner/field is absent from afterRevision")
+        return errors
+    actual_default = java_record_default_expression(
+        replacement_source, owner_symbol, str(removal["replacementInstanceSymbol"]), replacement_field)
+    if actual_default is None or normalized(actual_default) \
+            != normalized(str(removal["replacementDefaultExpression"])):
+        errors.append(f"{identifier}: typed replacement default has drifted in afterRevision")
+    return errors
 
 
 def conversion_evidence_errors(identifier: str, entry: dict[str, object],
@@ -1072,7 +1268,8 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
     errors: list[str] = []
     required = ("path", "type", "integerMethod", "wholeMethod", "integerBodyDigest",
                 "wholeBodyDigest", "dependencyBodyDigests", "testPath", "testType",
-                "testMethods", "testMethodDigests")
+                "testMethods", "testMethodDigests", "compositionMethods",
+                "compositionMethodDigests", "compositionLinks")
     for identifier, authority in authorities.items():
         if not isinstance(authority, dict) or any(key not in authority for key in required):
             errors.append(f"resolver authority {identifier} requires {', '.join(required)}")
@@ -1102,6 +1299,32 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
                 or any(java_method_digest(source, str(authority["type"]), method) != digest
                        for method, digest in dependencies.items()):
             errors.append(f"resolver authority {identifier} has incomplete or drifted helper dependencies")
+        composition_methods = authority["compositionMethods"]
+        composition_digests = authority["compositionMethodDigests"]
+        composition_links = authority["compositionLinks"]
+        if not isinstance(composition_methods, dict) or not composition_methods \
+                or not isinstance(composition_digests, dict) \
+                or set(composition_digests) != set(composition_methods.values()) \
+                or not isinstance(composition_links, dict) or not composition_links:
+            errors.append(f"resolver authority {identifier} has incomplete fallback-composition evidence")
+        else:
+            for method in composition_methods.values():
+                if java_method_digest(source, str(authority["type"]), str(method)) \
+                        != composition_digests.get(method):
+                    errors.append(f"resolver authority {identifier} composition method {method} has drifted")
+            for role, link in composition_links.items():
+                if not isinstance(link, dict) or set(link) != {"method", "expression"} \
+                        or link["method"] not in composition_methods.values() \
+                        or not isinstance(link["expression"], str) or not link["expression"].strip():
+                    errors.append(
+                        f"resolver authority {identifier} fallback-composition link {role} is incomplete")
+                    continue
+                span = java_method_span(source, str(authority["type"]), str(link["method"]))
+                code = normalized(strip_c_comments_and_literals(
+                    source[slice(*span)] if span is not None else ""))
+                if normalized(str(link["expression"])) not in code:
+                    errors.append(
+                        f"resolver authority {identifier} fallback-composition link {role} has drifted")
         test_relative = Path(str(authority["testPath"]))
         if current_source_owner(root, f"{test_relative.as_posix()}#{authority['testType']}") is None:
             errors.append(f"resolver authority {identifier} has no tracked Java test type")
@@ -1258,6 +1481,77 @@ def default_authority_errors(root: Path, setting: str, contract: dict[str, objec
         if [str(candidate_id) for candidate_id in candidate_ids] != expected_ids or any(
                 entries.get(candidate_id, {}).get("setting") != setting for candidate_id in expected_ids):
             errors.append(f"{setting}: defaultAuthority candidateIds are not the exact initializer atom multiset")
+        reference = authority.get("constantReferenceAuthority")
+        if expected_ids and reference is not None:
+            errors.append(f"{setting}: direct default atoms cannot also use constantReferenceAuthority")
+        if not expected_ids and reference is None:
+            errors.append(f"{setting}: indirect default requires constantReferenceAuthority")
+        if not expected_ids and reference is not None:
+            errors.extend(constant_reference_authority_errors(
+                root, setting, contract, authority, owner_source, discovered, entries))
+    return errors
+
+
+def constant_reference_authority_errors(root: Path, setting: str, contract: dict[str, object],
+                                        default_authority: dict[str, object], owner_source: str,
+                                        discovered: dict[str, Candidate],
+                                        entries: dict[str, dict[str, object]]) -> list[str]:
+    """Verify a bounded ordered static-final reference chain ending in fixed atoms."""
+    reference = default_authority.get("constantReferenceAuthority")
+    if not isinstance(reference, dict) or reference.get("kind") != "java-static-final-chain-v1" \
+            or not isinstance(reference.get("hops"), list) or not 1 <= len(reference["hops"]) <= 4:
+        return [f"{setting}: constantReferenceAuthority requires a bounded static-final hop chain"]
+    previous_owner = str(default_authority["owner"])
+    previous_source = owner_source
+    previous_expression = str(default_authority["sourceExpression"])
+    errors: list[str] = []
+    terminal_ids: list[str] = []
+    for index, hop in enumerate(reference["hops"]):
+        required = ("owner", "field", "sourceExpression", "initializerDigest", "candidateIds")
+        if not isinstance(hop, dict) or any(key not in hop for key in required) \
+                or not isinstance(hop.get("candidateIds"), list):
+            errors.append(f"{setting}: constant reference hop {index} is incomplete")
+            return errors
+        hop_owner = str(hop["owner"])
+        if "#" not in hop_owner:
+            errors.append(f"{setting}: constant reference hop {index} owner must be path#type")
+            return errors
+        resolved = current_source_owner(root, hop_owner)
+        if resolved is None or resolved[0].suffix != ".java":
+            errors.append(f"{setting}: constant reference hop {index} has no tracked Java owner")
+            return errors
+        relative, symbol = resolved
+        hop_source = (root / relative).read_text(encoding="utf-8")
+        field = str(hop["field"])
+        if not java_constant_reference_matches(
+                previous_source, previous_owner, previous_expression, hop_owner, field, hop_source):
+            errors.append(f"{setting}: constant reference hop {index} does not match the preceding initializer")
+        initializer = java_static_final_initializer(hop_source, symbol, field)
+        if initializer is None:
+            errors.append(f"{setting}: constant reference hop {index} is not one direct static-final field")
+            return errors
+        expression, start, end = initializer
+        if normalized(str(hop["sourceExpression"])) != normalized(expression):
+            errors.append(f"{setting}: constant reference hop {index} initializer has drifted")
+        digest = hashlib.sha256(normalized(expression).encode("utf-8")).hexdigest()
+        if hop["initializerDigest"] != digest:
+            errors.append(f"{setting}: constant reference hop {index} initializer digest has drifted")
+        expected_ids = candidate_ids_in_source_span(
+            relative, hop_source, start, end, "fixed-declaration", field, discovered)
+        actual_ids = [str(candidate_id) for candidate_id in hop["candidateIds"]]
+        if actual_ids != expected_ids or any(
+                entries.get(candidate_id, {}).get("setting") != setting for candidate_id in expected_ids):
+            errors.append(f"{setting}: constant reference hop {index} atom multiset has drifted")
+        if index < len(reference["hops"]) - 1 and expected_ids:
+            errors.append(f"{setting}: nonterminal constant reference hop contains fixed atoms")
+        terminal_ids = expected_ids
+        previous_owner = hop_owner
+        previous_source = hop_source
+        previous_expression = expression
+    default_evidence = contract.get("defaultEvidence")
+    if not terminal_ids or not isinstance(default_evidence, list) \
+            or [str(candidate_id) for candidate_id in default_evidence] != terminal_ids:
+        errors.append(f"{setting}: defaultEvidence must equal the terminal constant atom multiset")
     return errors
 
 
@@ -1486,6 +1780,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     not isinstance(removal.get(field), str) or not str(removal[field]).strip()
                     for field in required):
                 errors.append(f"{identifier}: duplicate removal requires source-verifiable removal provenance")
+            elif removal.get("kind") == "yaml-default-authority-v1":
+                errors.extend(yaml_default_removal_errors(root, identifier, entry, removal, entries))
             else:
                 transition, before_source, after_source = revision_transition_errors(
                     root, identifier, removal, path=str(entry.get("path", "")),

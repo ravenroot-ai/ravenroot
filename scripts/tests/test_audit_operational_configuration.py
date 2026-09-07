@@ -503,6 +503,37 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
             test_path.write_text(original_test, encoding="utf-8")
 
+            method_digest = audit.java_method_digest(
+                original_test, "RuntimeLimitsTest", "asciiTrim",
+            )
+            for label, mutant in (
+                ("disabled", original_test.replace(
+                    "final class RuntimeLimitsTest {",
+                    "@Disabled\nfinal class RuntimeLimitsTest {",
+                )),
+                ("abstract", original_test.replace(
+                    "final class RuntimeLimitsTest {",
+                    "abstract class RuntimeLimitsTest {",
+                )),
+                ("multiline-disabled", original_test.replace(
+                    "final class RuntimeLimitsTest {",
+                    "@Disabled(\n    \"maintenance\"\n)\nfinal class RuntimeLimitsTest {",
+                )),
+                ("split-abstract", original_test.replace(
+                    "final class RuntimeLimitsTest {",
+                    "abstract\nclass RuntimeLimitsTest {",
+                )),
+            ):
+                with self.subTest(non_runnable_test_type=label):
+                    self.assertEqual(method_digest, audit.java_method_digest(
+                        mutant, "RuntimeLimitsTest", "asciiTrim",
+                    ))
+                    test_path.write_text(mutant, encoding="utf-8")
+                    errors = audit.inventory_errors(root, document, discovered)
+                    self.assertTrue(any("not a supported runnable top-level class" in error
+                                        for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
             compose = root / "compose.yaml"
             compose.write_text(
                 "environment:\n  RAVENROOT_SYNTHETIC_MAX_RETRIES: 9\n", encoding="utf-8",

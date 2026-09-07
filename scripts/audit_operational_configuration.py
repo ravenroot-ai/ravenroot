@@ -1133,6 +1133,28 @@ def java_method_annotations(source: str, type_symbol: str, method: str) -> tuple
     return tuple(annotations)
 
 
+def java_test_type_is_directly_runnable(source: str, type_symbol: str) -> bool:
+    """Accept one unannotated top-level test class with no abstract/inherited execution shape."""
+    code = strip_c_comments_and_literals(source)
+    depths = java_brace_depths(code)
+    declarations = [
+        match for match in re.finditer(rf"\bclass\s+{re.escape(type_symbol)}\b", code)
+        if depths[match.start()] == 0
+    ]
+    if len(declarations) != 1:
+        return False
+    declaration = declarations[0]
+    opening = code.find("{", declaration.end())
+    if opening < 0 or re.fullmatch(r"\s*\{", code[declaration.end():opening + 1]) is None:
+        return False
+    boundary = 0
+    for offset, char in enumerate(code[:declaration.start()]):
+        if depths[offset] == 0 and char in ";}":
+            boundary = offset + 1
+    prefix = code[boundary:declaration.start()]
+    return re.fullmatch(r"\s*(?:final\s+)?", prefix) is not None
+
+
 def java_direct_stream_string_return(source: str, type_symbol: str,
                                      method: str) -> tuple[str, ...] | None:
     """Parse one direct `return Stream.of("...")` body with quoted literals only."""
@@ -1577,6 +1599,9 @@ def environment_resolver_authority_errors(root: Path, identifier: str,
         test_source = (root / test_relative).read_text(encoding="utf-8")
         methods = authority["testMethods"]
         digests = authority["testMethodDigests"]
+        if not java_test_type_is_directly_runnable(test_source, test_type):
+            errors.append(
+                f"resolver authority {identifier} test type is not a supported runnable top-level class")
         if not isinstance(methods, dict) or set(methods) != ENVIRONMENT_RESOLVER_TEST_ROLES \
                 or any(not isinstance(method, str) or not method.strip()
                        for method in methods.values()) \

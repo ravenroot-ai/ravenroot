@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class HttpSecurityConfigurationTest {
@@ -65,11 +66,24 @@ class HttpSecurityConfigurationTest {
 
     @Test
     void leaseIntervalIsBoundedAndStrictlyParsed() {
+        assertEquals(30, HttpSecurityConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", " \t "), 8080)
+                .sseAuthenticationRevalidation().toSeconds());
+        assertEquals(1, HttpSecurityConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "1"), 8080)
+                .sseAuthenticationRevalidation().toSeconds());
+        assertEquals(300, HttpSecurityConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "300"), 8080)
+                .sseAuthenticationRevalidation().toSeconds());
         assertThrows(IllegalArgumentException.class, () -> HttpSecurityConfiguration.fromEnvironment(Map.of(
                 "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "0"), 8080));
         assertThrows(IllegalArgumentException.class, () -> HttpSecurityConfiguration.fromEnvironment(Map.of(
                 "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "301"), 8080));
-        assertThrows(IllegalArgumentException.class, () -> HttpSecurityConfiguration.fromEnvironment(Map.of(
-                "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "often"), 8080));
+        var malformed = assertThrows(IllegalArgumentException.class,
+                () -> HttpSecurityConfiguration.fromEnvironment(Map.of(
+                        "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "secret-interval"), 8080));
+        assertEquals("RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS must be an integer between 1 and 300",
+                malformed.getMessage());
+        assertNull(malformed.getCause());
     }
 }

@@ -30,7 +30,7 @@ import java.util.Objects;
  */
 public record ExecutionStoreConfiguration(boolean enabled, SqliteStoreLocation location) {
 
-    /** Set to {@code false} (or {@code off}/{@code 0}/{@code no}) to run with no execution store. */
+    /** Set to {@code true}, or to {@code false} (or {@code off}/{@code 0}/{@code no}). */
     public static final String ENABLED_VARIABLE = "RAVENROOT_EXECUTION_STORE_ENABLED";
 
     /** Shared with {@code ravenroot-cli}'s backup/restore, deliberately spelled the same. */
@@ -62,9 +62,9 @@ public record ExecutionStoreConfiguration(boolean enabled, SqliteStoreLocation l
     }
 
     /**
-     * Absent means enabled. Only an explicit, recognised negative disables the store — an
-     * unrecognised value is not read as "off", because a typo silently turning durability off is the
-     * durability failure this setting prevents.
+     * Absent or blank means enabled. The canonical positive is {@code true}; the four documented
+     * negative aliases disable the store. Every other nonblank value is rejected so a typo cannot
+     * silently choose either durability posture.
      */
     private static boolean enabledIn(Map<String, String> environment) {
         String raw = environment.get(ENABLED_VARIABLE);
@@ -72,8 +72,10 @@ public record ExecutionStoreConfiguration(boolean enabled, SqliteStoreLocation l
             return true;
         }
         return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "true" -> true;
             case "false", "off", "0", "no" -> false;
-            default -> true;
+            default -> throw new IllegalArgumentException(ENABLED_VARIABLE
+                    + " must be 'true', 'false', 'off', '0', or 'no'");
         };
     }
 }

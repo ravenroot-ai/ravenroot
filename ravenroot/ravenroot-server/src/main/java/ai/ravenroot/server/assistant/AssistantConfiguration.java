@@ -56,7 +56,10 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
     public static final String ENDPOINT_VARIABLE = "RAVENROOT_ASSISTANT_ENDPOINT";
     /** Explicit opt-in for credential-free HTTP to a narrowly local endpoint. */
     public static final String ALLOW_LOCAL_HTTP_VARIABLE = "RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP";
-    /** Per-request wall clock bound on the provider call. */
+    /**
+     * Per-request wall clock bound on the provider call. Absence or blank selects 120 seconds;
+     * another declaration must be a positive whole number of seconds.
+     */
     public static final String TIMEOUT_VARIABLE = "RAVENROOT_ASSISTANT_TIMEOUT_SECONDS";
     /**
      * Which credential model this deployment uses: {@code api-key} (default) or {@code oauth}.
@@ -269,7 +272,7 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
             try {
                 parsed = new URI(override);
             } catch (java.net.URISyntaxException malformed) {
-                throw new IllegalArgumentException(ENDPOINT_VARIABLE + " is not a valid URI", malformed);
+                throw new IllegalArgumentException(ENDPOINT_VARIABLE + " is not a valid URI");
             }
             String scheme = String.valueOf(parsed.getScheme()).toLowerCase(java.util.Locale.ROOT);
             if (!("https".equals(scheme) || "http".equals(scheme))) {
@@ -328,11 +331,16 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
         if (value == null) {
             return DEFAULT_TIMEOUT;
         }
+        long seconds;
         try {
-            return Duration.ofSeconds(Long.parseLong(value));
+            seconds = Long.parseLong(value);
         } catch (NumberFormatException notANumber) {
-            return DEFAULT_TIMEOUT;
+            throw new IllegalArgumentException(TIMEOUT_VARIABLE + " must be a positive whole number of seconds");
         }
+        if (seconds <= 0) {
+            throw new IllegalArgumentException(TIMEOUT_VARIABLE + " must be a positive whole number of seconds");
+        }
+        return Duration.ofSeconds(seconds);
     }
 
     private static String trimmed(String value) {

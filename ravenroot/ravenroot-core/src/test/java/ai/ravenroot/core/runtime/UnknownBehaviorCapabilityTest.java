@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -41,12 +43,23 @@ class UnknownBehaviorCapabilityTest {
                 Map.<String, String>of(),
                 Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, "refuse"),
                 Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, "REFUSE"),
-                Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, "anything-unrecognised"))) {
+                Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, " Pass-Through "),
+                Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, " \t "))) {
             assertEquals("unknown-behavior:" + UnknownBehaviorPolicy.describe(environment),
                     UnknownBehaviorPolicy.fromEnvironment(environment).capability(),
                     () -> "the status surface and the startup line must describe the same deployment "
                             + "the same way: " + environment);
         }
+    }
+
+    @Test
+    void aNonblankUnknownModeIsRejectedWithoutEchoOrCause() {
+        var failure = assertThrows(IllegalArgumentException.class, () ->
+                UnknownBehaviorPolicy.fromEnvironment(Map.of(
+                        UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, "secret-unknown-mode")));
+        assertEquals("RAVENROOT_UNKNOWN_BEHAVIOR must be 'pass-through' or 'refuse'",
+                failure.getMessage());
+        assertNull(failure.getCause());
     }
 
     /**

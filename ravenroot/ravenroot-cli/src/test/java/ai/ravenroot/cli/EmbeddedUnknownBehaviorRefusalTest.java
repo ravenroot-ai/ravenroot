@@ -20,6 +20,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -127,6 +128,8 @@ class EmbeddedUnknownBehaviorRefusalTest {
         assertTrue(UnknownBehaviorPolicy.refusalSelected(
                 Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, " Refuse ")));
         assertFalse(UnknownBehaviorPolicy.refusalSelected(
+                Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, "Pass-Through")));
+        assertThrows(IllegalArgumentException.class, () -> UnknownBehaviorPolicy.refusalSelected(
                 Map.of(UnknownBehaviorPolicy.ENVIRONMENT_VARIABLE, "yes")));
         assertFalse(UnknownBehaviorPolicy.refusalSelected(Map.of()));
         assertEquals("refuse", UnknownBehaviorPolicy.describe(

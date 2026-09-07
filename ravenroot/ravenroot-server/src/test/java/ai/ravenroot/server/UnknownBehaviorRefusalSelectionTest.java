@@ -20,6 +20,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -134,15 +136,22 @@ class UnknownBehaviorRefusalSelectionTest {
                 Map.of(UnknownBehaviorConfiguration.VARIABLE, "  REFUSE ")).refuse(),
                 "trimmed and case-insensitive, like every other flag this server reads");
 
-        // Absent, blank, unrecognised and a plausible near-miss all mean the default. An unrecognised
-        // value must not fail startup: a typo becoming an outage is worse than a typo being ignored.
+        // Absent and blank preserve the default; the explicit default retains the same normalized
+        // spelling contract as refuse.
         assertFalse(UnknownBehaviorConfiguration.fromEnvironment(Map.of()).refuse());
         assertFalse(UnknownBehaviorConfiguration.fromEnvironment(
                 Map.of(UnknownBehaviorConfiguration.VARIABLE, "")).refuse());
         assertFalse(UnknownBehaviorConfiguration.fromEnvironment(
-                Map.of(UnknownBehaviorConfiguration.VARIABLE, "true")).refuse());
-        assertFalse(UnknownBehaviorConfiguration.fromEnvironment(
-                Map.of(UnknownBehaviorConfiguration.VARIABLE, "pass-through")).refuse());
+                Map.of(UnknownBehaviorConfiguration.VARIABLE, "  PASS-THROUGH ")).refuse());
+
+        for (String invalid : java.util.List.of("true", "refused")) {
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> UnknownBehaviorConfiguration.fromEnvironment(
+                            Map.of(UnknownBehaviorConfiguration.VARIABLE, invalid)));
+            assertEquals(UnknownBehaviorConfiguration.VARIABLE
+                    + " must be 'pass-through' or 'refuse'", failure.getMessage());
+            assertNull(failure.getCause());
+        }
         assertEquals("pass-through", UnknownBehaviorConfiguration.passThrough().describe());
         assertEquals("refuse", UnknownBehaviorConfiguration.refusing().describe());
     }

@@ -5,6 +5,8 @@ import ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetPolicy;
 
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.time.Clock;
+import java.util.Objects;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -25,6 +27,13 @@ public final class AgentAuthorityBudgetConfiguration {
     private AgentAuthorityBudgetConfiguration() { }
 
     public static AgentAuthorityBudgetPolicy fromEnvironment(Map<String, String> environment) {
+        return fromEnvironment(environment, Clock.systemUTC());
+    }
+
+    /** Resolves immutable policy and validates its finite root deadline before resource acquisition. */
+    public static AgentAuthorityBudgetPolicy fromEnvironment(Map<String, String> environment, Clock clock) {
+        Objects.requireNonNull(environment, "environment");
+        Objects.requireNonNull(clock, "clock");
         String runtime = identity(environment, "RAVENROOT_AGENT_RUNTIME_INSTANCE", "ravenroot-server");
         String policy = identity(environment, "RAVENROOT_AGENT_POLICY_VERSION", "server-finite-v1");
         String rateCard = identity(environment, "RAVENROOT_AGENT_RATE_CARD_VERSION",
@@ -44,13 +53,20 @@ public final class AgentAuthorityBudgetConfiguration {
         Set<String> dataScopes = tokens(environment, "RAVENROOT_AGENT_DATA_SCOPES", Set.of());
         Set<String> authorityScopes = tokens(environment, AUTHORITY_SCOPES, Set.of("runtime:delegate"));
         try {
-            return new AgentAuthorityBudgetPolicy(runtime, BOOT_EPOCHS.nextLong(Long.MAX_VALUE), policy,
+            var resolved = new AgentAuthorityBudgetPolicy(runtime, BOOT_EPOCHS.nextLong(Long.MAX_VALUE), policy,
                     rateCard, currency, Duration.ofSeconds(lifetime), maxima,
                     positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000),
                     positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000),
                     nonNegative(environment, "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", 10),
                     nonNegative(environment, "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", 30),
                     dataScopes, authorityScopes);
+            try {
+                resolved.rootDeadlineAt(clock.instant());
+            } catch (IllegalArgumentException invalidDeadline) {
+                throw new IllegalArgumentException(
+                        "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS must form a finite deadline at startup");
+            }
+            return resolved;
         } catch (IllegalArgumentException invalid) {
             if (EFFECTIVE_AUTHORITY_LIMIT.equals(invalid.getMessage())) {
                 throw new IllegalArgumentException(

@@ -216,8 +216,11 @@ Allowed hosts and allowed agent tools are operator allowlists. Empty or absent p
 ## Agent authority and budgets
 
 The packaged server composes finite process-rooted agent accounting whenever its execution store
-advertises `AGENT_AUTHORITY_BUDGETS`. The baseline rate card is explicit and conservative rather than
-treating unknown pricing as free. Operators can pin a different finite policy with these variables:
+advertises `AGENT_AUTHORITY_BUDGETS`. Its enabled SQLite store supports that capability. The server
+resolves the Agent policy and checks that its root lifetime forms a finite deadline before opening
+stores, creating the engine or binding the listener. With execution persistence disabled, Agent
+settings remain inapplicable and are not parsed. There is no separate Agent enable switch.
+The baseline rate card is explicit and conservative. Operators can configure these existing variables:
 
 | Variable family | Baseline default |
 |---|---|
@@ -232,9 +235,37 @@ treating unknown pricing as free. Operators can pin a different finite policy wi
 | `RAVENROOT_AGENT_DATA_SCOPES` | empty |
 | `RAVENROOT_AGENT_AUTHORITY_SCOPES` | `runtime:delegate` |
 
-All numeric maxima are positive integers; rates are non-negative integers, so an explicit zero is a
-known free rate. Currency is an uppercase three-letter code. Scope variables are bounded comma-separated
-opaque tokens. Omitting `runtime:delegate` disables child delegation without disabling top-level agents.
+All numeric maxima and root lifetime are positive integers; rates are non-negative integers, so an
+explicit zero is a known free rate. Absent or Java-whitespace-only numbers use their defaults. Agent
+numbers retain Java's signed `Long.parseLong(value.strip())` grammar, including a leading `+` and
+accepted Unicode decimal digits. Values must fit a signed 64-bit integer; root lifetime must also be
+addable to the startup clock as a finite deadline. Invalid explicit values refuse startup with the
+setting name and without repeating the supplied value or a nested parser exception. Currency is
+normalized to an uppercase three-letter code. Scope variables are bounded comma-separated tokens.
+An absent authority-scope variable defaults to `runtime:delegate`; an explicit blank sets an empty
+configured scope set. Omitting `runtime:delegate` disables child delegation without disabling top-level agents.
+
+Each new root stores separate SHA-256 policy and rate-card fingerprints alongside its unchanged
+operator version strings. The versioned policy encoding covers exact lifetime, all nine maxima,
+both per-turn limits and sorted configured scopes before the internal `runtime:root` union. The
+rate-card encoding covers its version, currency and both rates under a separate domain. Explicitly
+configuring `runtime:root` remains supported and changes the policy fingerprint. Runtime identity
+is checked separately; boot epoch is diagnostic and excluded from the fingerprints. A same-version
+configuration change therefore cannot silently authorize work admitted under different bounds or rates.
+
+Existing roots keep their accepted deadlines and accounting. New effects require matching stored
+proof before admission, cached-session reuse, new grants or reservations, approval consumption and
+dispatch. Root deadline creation is checked again at admission; it never saturates to an unlimited
+future. Author durations are attenuated to durable root/parent deadlines and remaining elapsed
+capacity before arithmetic. Requests too short to reserve one millisecond refuse before registration.
+For legacy data, cleanup and upgrade implications, see [Agent budget compatibility](../operator-guide/persistence-lifecycle.md#agent-budget-compatibility).
+
+Embedded Java integrations supply `AgentAuthorityBudgetPolicy` directly. A custom store must explicitly
+implement `loadAgentAuthorityBudgetSnapshot` and the atomic `applyWithPinnedAgentAuthorityRoot` entry,
+preserving proof through cleanup, to support new first-party Agent admissions. Advertising the old
+capability alone is insufficient: the default new entry refuses without invoking legacy `apply`;
+the default snapshot projection identifies old data as unverified. Existing public record shapes and
+legacy methods remain available.
 
 The runtime kill service is available only through authenticated `POST /v1/agent-authority/trip` and
 `POST /v1/agent-authority/reset`. It requires a `PLATFORM_ADMIN` with the

@@ -91,10 +91,24 @@ public final class RavenrootServerMain {
         // acquired before the audit trail is opened and retained until both stores are closed.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
                 .resolveEnvironment(System.getenv());
+        var agentBudgetPolicy = resolveAgentBudgetPolicy(System.getenv(),
+                executionStoreConfiguration.configuration(), java.time.Clock.systemUTC());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openResolved(
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
                 humanTaskPolicy);
         try (var startupGuard = executionStoreOwner.startupGuard()) {
+        // The service repeats deadline validation against its live clock. Keep this inside store
+        // ownership and before engine/program resources so even a boundary crossed during startup
+        // releases the store without leaving a newly created runtime behind.
+        var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
+        ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
+                ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
+                        approvalStore, java.time.Clock.systemUTC(),
+                        agentBudgetPolicy,
+                        agentBudgetTelemetry)
+                : null;
         var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
             case "graalvm" -> GraalVmProgramRuntime.fromEnvironment();
@@ -166,16 +180,6 @@ public final class RavenrootServerMain {
         // never be allowed to replace the real diagnosis with an unrelated audit failure. See
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
-        var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
-        ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
-        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
-                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
-                ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
-                        approvalStore, java.time.Clock.systemUTC(),
-                        ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration
-                                .fromEnvironment(System.getenv()),
-                        agentBudgetTelemetry)
-                : null;
         ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
                 ? new ai.ravenroot.core.approval.ToolApprovalService(
@@ -694,6 +698,20 @@ public final class RavenrootServerMain {
             }
             throw new PluginStartupRefused();
         }
+    }
+
+    /**
+     * The packaged execution adapter is SQLite and advertises Agent budgets whenever enabled.
+     * Resolve that policy before opening stores; disabled execution persistence leaves Agent
+     * settings inapplicable. The eventual service still checks the actual store capability.
+     */
+    static ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetPolicy resolveAgentBudgetPolicy(
+            Map<String, String> environment,
+            ai.ravenroot.server.persistence.ExecutionStoreConfiguration executionStoreConfiguration,
+            java.time.Clock clock) {
+        return executionStoreConfiguration.enabled()
+                ? ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration.fromEnvironment(environment, clock)
+                : null;
     }
 
     @FunctionalInterface

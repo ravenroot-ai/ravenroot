@@ -41,6 +41,37 @@ For embedded Java, supply `ExecutionStorePolicy` to the store configuration API.
 that API but is not selected by these packaged-server SQLite environment bindings. The local CLI
 embedded runtime does not create an execution store.
 
+## Agent budget compatibility
+
+New Agent roots carry separate policy and rate-card fingerprints. Compatible restarts preserve the
+root, grants, deadlines and requested/actual accounting; changing only the diagnostic boot epoch
+remains compatible. Changes to versions, lifetime, maxima, per-turn limits, configured scopes,
+currency or rates are checked before new effects, including before an approved tool call becomes
+`CONSUMED`. Changing a value while retaining its operator version string still changes the relevant
+fingerprint. See [Agent configuration](../reference/configuration.md#agent-authority-and-budgets).
+
+Legacy Agent aggregate format v1 remains readable and supports legitimate cleanup. It has no
+trustworthy policy/rate fingerprints, so the strict first-party service refuses new grants,
+reservations, resumed Agent sessions and dispatch from those roots. Loading a legacy row does not
+backfill it from current configuration, and registering the same root cannot add missing proof.
+This upgrade does not promise transparent continuation of every suspended legacy Agent effect.
+
+Release, settlement, indeterminate marking, terminal grant cleanup, kill and global reset remain
+available under legacy state or configuration drift. Restarted cleanup uses persisted vectors and
+does not reprice accepted work. A live model reservation retains the immutable policy/rate card of
+its admitting service. Global reset does not revive old roots or erase their proof.
+
+SQLite and PostgreSQL encode new pinned Agent roots as aggregate format v2 without changing the
+SQL table shape. Older readers reject v2, making those writes a downgrade boundary while v2 rows
+remain. Ordinary cleanup preserves each row's proof and format. An explicit low-level root reset,
+or a reboot that changes a fingerprint-covered field, produces an unverified v1 replacement;
+that particular row becomes old-readable again but cannot authorize new effects through the strict
+service. Compatible reboot only rebinds the original proof after the existing validation succeeds.
+
+No automatic historical migration, backfill, production deployment or data rewrite is performed by
+this compatibility support. Integrators with custom stores must opt into the atomic proof-carrying
+ports described in the configuration reference; old methods and record shapes remain available.
+
 ## Graph definitions
 
 Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored. An accepted execution is therefore always one whose graph is retained, and the retained document — not a copy held by whichever process accepted it — is the authoritative record of what that execution was accepted to run.

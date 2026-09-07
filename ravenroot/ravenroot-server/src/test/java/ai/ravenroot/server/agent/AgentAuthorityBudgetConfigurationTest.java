@@ -186,6 +186,67 @@ class AgentAuthorityBudgetConfigurationTest {
                 Map.of(name, includingRoot)).authorityScopes().size());
     }
 
+    @ParameterizedTest
+    @MethodSource("numericNames")
+    void signedAndUnicodeDigitsKeepTheEstablishedLongGrammar(String name) {
+        var parsed = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(name, "\u2003+١٧\u2003"),
+                java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
+        var decimal = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(name, "17"),
+                java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
+        assertSameConfiguredValues(decimal, parsed);
+        assertEquals(decimal.policyFingerprint(), parsed.policyFingerprint());
+        assertEquals(decimal.rateCardFingerprint(), parsed.rateCardFingerprint());
+        assertInvalidInteger(name, "\u00a0"); // NBSP is not Java blank/strip whitespace.
+    }
+
+    @Test
+    void ratesKeepSignedZeroAndOtherNumericFieldsKeepTheirFullLongRange() {
+        var clock = java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC);
+        var free = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", "-0",
+                "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", "+0"), clock);
+        assertEquals(0, free.inputTokenRateMicros()); assertEquals(0, free.outputTokenRateMicros());
+        var maximums = numericNames().filter(name -> !name.equals("RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS"))
+                .collect(Collectors.toUnmodifiableMap(Function.identity(), ignored -> Long.toString(Long.MAX_VALUE)));
+        var maximum = AgentAuthorityBudgetConfiguration.fromEnvironment(maximums, clock);
+        assertEquals(Long.MAX_VALUE, maximum.rootMaxima().elapsedMillis());
+        assertEquals(Long.MAX_VALUE, maximum.maximumInputTokensPerTurn());
+        assertEquals(Long.MAX_VALUE, maximum.outputTokenRateMicros());
+    }
+
+    @Test
+    void finiteDeadlineBoundaryUsesTheInjectedClockWithoutAnArbitraryLifetimeCap() {
+        var instant = java.time.Instant.EPOCH.plusNanos(999_999_999);
+        var clock = java.time.Clock.fixed(instant, java.time.ZoneOffset.UTC);
+        long seconds = java.time.Instant.MAX.getEpochSecond();
+        var policy = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", Long.toString(seconds)), clock);
+        assertEquals(java.time.Instant.MAX, policy.rootDeadlineAt(instant));
+        assertDeadlineRefused(Map.of("RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", Long.toString(seconds + 1)), clock);
+        assertDeadlineRefused(Map.of("RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", Long.toString(Long.MAX_VALUE)), clock);
+        assertDeadlineRefused(Map.of(), java.time.Clock.fixed(java.time.Instant.MAX, java.time.ZoneOffset.UTC));
+        var nearEdge = java.time.Clock.fixed(java.time.Instant.MAX.minusSeconds(1), java.time.ZoneOffset.UTC);
+        assertEquals(java.time.Instant.MAX, AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", "1"), nearEdge).rootDeadlineAt(nearEdge.instant()));
+    }
+
+    @Test
+    void oldFactoryRemainsAvailableAndConfiguredFingerprintsIgnoreFreshBootDiagnostics() {
+        var old = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of());
+        var explicit = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(),
+                java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
+        assertSameConfiguredValues(old, explicit);
+        assertEquals(old.policyFingerprint(), explicit.policyFingerprint());
+        assertEquals(old.rateCardFingerprint(), explicit.rateCardFingerprint());
+    }
+
+    private static void assertDeadlineRefused(Map<String, String> environment, java.time.Clock clock) {
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> AgentAuthorityBudgetConfiguration.fromEnvironment(environment, clock));
+        assertEquals("RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS must form a finite deadline at startup", failure.getMessage());
+        assertNull(failure.getCause());
+    }
+
     private static void assertSameConfiguredValues(AgentAuthorityBudgetPolicy expected,
                                                    AgentAuthorityBudgetPolicy actual) {
         assertEquals(expected.runtimeInstanceId(), actual.runtimeInstanceId());

@@ -93,6 +93,46 @@ class RavenrootServerMainLifecycleTest {
     }
 
     @Test
+    void agentPolicyRefusesBeforeStoreEngineOrListenerAndDisabledStoreKeepsItInapplicable() throws Exception {
+        var path = temporaryDirectory.resolve("must-not-open");
+        var configuration = new ExecutionStoreConfiguration(true, SqliteStoreLocation.underDirectory(path));
+        var clock = Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC);
+        var invalid = Map.of("RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", Long.toString(Long.MAX_VALUE));
+        var laterStartup = new AtomicBoolean();
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> {
+            RavenrootServerMain.resolveAgentBudgetPolicy(invalid, configuration, clock);
+            laterStartup.set(true);
+            try (var ignored = ExecutionStoreBootstrap.openOwned(configuration, clock)) { }
+        });
+        assertEquals("RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS must form a finite deadline at startup", failure.getMessage());
+        org.junit.jupiter.api.Assertions.assertNull(failure.getCause());
+        assertEquals(false, laterStartup.get()); assertEquals(false, Files.exists(path));
+        var disabled = new ExecutionStoreConfiguration(false, configuration.location());
+        org.junit.jupiter.api.Assertions.assertNull(RavenrootServerMain.resolveAgentBudgetPolicy(
+                Map.of("RAVENROOT_AGENT_MAX_TURNS", "private-invalid-value"), disabled, clock));
+        var valid = RavenrootServerMain.resolveAgentBudgetPolicy(Map.of(
+                "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", "+١٧"), configuration, clock);
+        assertEquals(java.time.Instant.EPOCH.plusSeconds(17), valid.rootDeadlineAt(clock.instant()));
+        assertEquals(false, Files.exists(path), "resolving valid policy also opens no resources");
+
+        String compact = Files.readString(Path.of("src/main/java/ai/ravenroot/server/RavenrootServerMain.java"))
+                .replaceAll("\\s+", " ");
+        String resolution = "var agentBudgetPolicy = resolveAgentBudgetPolicy(System.getenv(), "
+                + "executionStoreConfiguration.configuration(), java.time.Clock.systemUTC())";
+        assertEquals(1, compact.split(java.util.regex.Pattern.quote(resolution), -1).length - 1);
+        assertTrue(compact.indexOf(resolution) < compact.indexOf("ExecutionStoreBootstrap.openResolved("));
+        assertTrue(compact.indexOf(resolution) < compact.indexOf("executionRuntime.createEngine("));
+        int serviceCreation = compact.indexOf("? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(");
+        assertTrue(compact.indexOf("try (var startupGuard = executionStoreOwner.startupGuard())") < serviceCreation);
+        assertTrue(serviceCreation < compact.indexOf("executionRuntime.createEngine("),
+                "a repeated deadline check must run before engine/program resources exist");
+        assertTrue(compact.contains("approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)"));
+        assertTrue(compact.contains("approvalStore, java.time.Clock.systemUTC(), agentBudgetPolicy, agentBudgetTelemetry)"));
+        assertTrue(!compact.contains("AgentAuthorityBudgetConfiguration .fromEnvironment(System.getenv())"),
+                "the later service construction must reuse the checked policy");
+    }
+
+    @Test
     void pluginRefusalClosesAuditAndCheckpointsStoreBeforeExitStrategyRuns() throws Exception {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("store"));
         var configuration = new ExecutionStoreConfiguration(true, location);

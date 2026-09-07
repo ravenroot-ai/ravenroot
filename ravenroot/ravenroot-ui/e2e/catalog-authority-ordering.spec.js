@@ -58,6 +58,8 @@ async function openReadyWorkspace(page) {
   await page.goto('/');
   await expect.poll(() => page.evaluate(() =>
     window.ravenroot.workspacePersistence().authority.state)).toBe('ready');
+  await expect(page.locator('#node-catalog .catalog-empty'))
+    .toHaveAttribute('data-catalog-state', 'empty');
 }
 
 async function observeCatalogFailureTurn(page, token) {
@@ -147,8 +149,10 @@ async function pendingCatalogFailure(page, routes, restore, failureTurn, token) 
   ]);
   await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence()))
     .toMatchObject({ restoring: true, authority: { state: 'pending' } });
-  await expect(page.locator('#node-catalog .catalog-empty'))
-    .toHaveAttribute('data-catalog-state', 'connecting');
+  const empty = page.locator('#node-catalog .catalog-empty');
+  await expect(empty).toHaveAttribute('data-catalog-state', 'empty');
+  await expect(empty).not.toContainText('401');
+  await expect(empty).not.toContainText('unreachable');
 }
 
 test('publishes a catalog 401 only after its workspace authority becomes ready', async ({ page }) => {
@@ -213,8 +217,9 @@ test('does not publish a catalog error when configuration fails', async ({ page 
     .toMatchObject({ authority: { state: 'failed' }, writable: false,
       reason: expect.stringContaining('Workspace authority could not be verified') });
   const empty = page.locator('#node-catalog .catalog-empty');
-  await expect(empty).toHaveAttribute('data-catalog-state', 'connecting');
+  await expect(empty).toHaveAttribute('data-catalog-state', 'empty');
   await expect(empty).not.toContainText('401');
+  await expect(empty).not.toContainText('unreachable');
 });
 
 test('a replacement client cannot receive a delayed catalog error from its predecessor', async ({ page }) => {

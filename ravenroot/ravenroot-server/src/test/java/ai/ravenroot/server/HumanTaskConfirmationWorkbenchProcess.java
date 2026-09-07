@@ -363,16 +363,20 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                   <key id="confirmationActions" for="node" attr.name="confirmationActions" attr.type="string"/>
                   <key id="escalateAfterSeconds" for="node" attr.name="escalateAfterSeconds" attr.type="string"/>
                   <key id="expiresAfterSeconds" for="node" attr.name="expiresAfterSeconds" attr.type="string"/>
+                  <key id="layoutX" for="node" attr.name="layoutX" attr.type="double"/>
+                  <key id="layoutY" for="node" attr.name="layoutY" attr.type="double"/>
+                  <key id="layoutWidth" for="node" attr.name="layoutWidth" attr.type="double"/>
+                  <key id="layoutHeight" for="node" attr.name="layoutHeight" attr.type="double"/>
                   <key id="joinSemantics" for="graph" attr.name="join.semantics" attr.type="string"/>
                   <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
                   <graph id="human-task-confirmation-e2e" edgedefault="directed">
                     <data key="joinSemantics">declared</data>
-                    <node id="start"><data key="kind">start</data></node>
-                    <node id="human-task-e2e-source"><data key="kind">behavior</data><data key="behavior">test.confirmation-source</data></node>
+                    <node id="start"><data key="kind">start</data><data key="layoutX">120</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
+                    <node id="human-task-e2e-source"><data key="kind">behavior</data><data key="behavior">test.confirmation-source</data><data key="layoutX">300</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
                     <node id="human-confirmation"><data key="kind">behavior</data><data key="behavior">human-task</data><data key="title">Confirm durable restart</data><data key="responseContentType">application/vnd.ravenroot.payload+json</data><data key="responseSchema">ravenroot.human-task.response</data><data key="responseSchemaVersion">1</data><data key="responseKind">MAP</data><data key="maxResponseBytes">65536</data><data key="confirmationPresentationVersion">1</data><data key="confirmationPrompt">""" + "P".repeat(8192) + """
-                </data><data key="confirmationComment">REQUIRED</data><data key="confirmationActions">RESOLVE,DENY,CANCEL</data><data key="escalateAfterSeconds">1</data><data key="expiresAfterSeconds">300</data></node>
-                    <node id="human-confirmation-downstream"><data key="kind">behavior</data><data key="behavior">test.confirmation-downstream</data></node>
-                    <node id="end"><data key="kind">end</data></node>
+                </data><data key="confirmationComment">REQUIRED</data><data key="confirmationActions">RESOLVE,DENY,CANCEL</data><data key="escalateAfterSeconds">1</data><data key="expiresAfterSeconds">300</data><data key="layoutX">480</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
+                    <node id="human-confirmation-downstream"><data key="kind">behavior</data><data key="behavior">test.confirmation-downstream</data><data key="layoutX">660</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
+                    <node id="end"><data key="kind">end</data><data key="layoutX">840</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
                     <edge source="start" target="human-task-e2e-source"><data key="outcome">continue</data></edge>
                     <edge source="human-task-e2e-source" target="human-confirmation"><data key="outcome">continue</data></edge>
                     <edge source="human-confirmation" target="human-confirmation-downstream"><data key="outcome">resolved</data></edge>

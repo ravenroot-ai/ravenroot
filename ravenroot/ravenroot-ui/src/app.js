@@ -728,7 +728,7 @@ function beginWorkspaceAuthority(client, state = 'pending') {
   workspaceRestoreInProgress = false;
   workspacePersistenceSuspended = true;
   workspacePersistenceGeneration += 1;
-  humanTaskDecisionDialog?.suspend();
+  suspendHumanTaskRecovery();
   humanTaskController?.configure(null, null, workspace.active);
   void credentialsWindow?.setClient(null);
   void deploymentsWindow?.setClient(null);
@@ -947,9 +947,20 @@ let humanTaskController = null;
 let humanTaskControllerOwner = null;
 let humanTaskDecisionDialog = null;
 let humanTaskPulseTimer = null;
+let humanTaskRecoveryGeneration = 0;
 const HUMAN_TASK_SELECTION_KEY = 'ravenroot.human-task.selection.v1';
 
+function retireHumanTaskRecovery() {
+  humanTaskRecoveryGeneration += 1;
+}
+
+function suspendHumanTaskRecovery() {
+  retireHumanTaskRecovery();
+  humanTaskDecisionDialog?.suspend();
+}
+
 function clearHumanTaskSelection() {
+  retireHumanTaskRecovery();
   try { localStorage.removeItem(HUMAN_TASK_SELECTION_KEY); } catch {
     // Storage is an optional recovery aid. A disabled/quota-failed store must not block decisions.
   }
@@ -960,6 +971,7 @@ function currentHumanTaskServiceOrigin(client = runtimeClient) {
 }
 
 function rememberHumanTaskSelection(task) {
+  retireHumanTaskRecovery();
   try {
     localStorage.setItem(HUMAN_TASK_SELECTION_KEY, JSON.stringify({
       serviceOrigin: currentHumanTaskServiceOrigin(), taskId: task.taskId, generation: task.generation,
@@ -976,6 +988,11 @@ function readHumanTaskSelection() {
   }
 }
 
+function sameHumanTaskSelection(left, right) {
+  return Boolean(left && right && left.serviceOrigin === right.serviceOrigin
+    && left.taskId === right.taskId && left.generation === right.generation);
+}
+
 function restoreHumanTaskServiceOrigin() {
   const locator = readHumanTaskSelection();
   if (!locator || typeof locator.serviceOrigin !== 'string' || !locator.serviceOrigin) return;
@@ -990,7 +1007,8 @@ function restoreHumanTaskServiceOrigin() {
 
 function focusHumanTaskInspector() {
   const target = document.querySelector('[data-human-task-inspector] [data-human-task-id]')
-    || document.querySelector('[data-human-task-inspector] .human-task-status');
+    || document.querySelector('[data-human-task-inspector] .human-task-status')
+    || document.getElementById('menu-run');
   if (!target) return;
   if (!target.matches('button, input, select, textarea, a[href], [tabindex]')) target.tabIndex = -1;
   target.focus();
@@ -1089,11 +1107,11 @@ function humanTaskPageSignature(page) {
 function receiveHumanTaskProjection(state) {
   const owner = humanTaskControllerOwner;
   if (!owner || !tenantAuthorityAllows(owner)) return;
-  if (state.kind === 'error' && humanTaskDecisionDialog?.selected()) {
-    // A failed authoritative refresh makes every displayed task detail stale. Close the modal so
-    // the normal reconnect controls remain reachable, retaining only the opaque locator. A later
-    // successful poll or authentication rebuilds the form through the exact authorized lookup.
-    humanTaskDecisionDialog.suspend();
+  if (state.kind === 'error') {
+    // A failed authoritative refresh retires an exact recovery that may not have opened a dialog
+    // yet, and makes any displayed task detail stale. Keep only the opaque locator; a later
+    // successful poll or authentication starts a new exact lookup under the current lifetime.
+    suspendHumanTaskRecovery();
   }
   const signature = state.kind === 'ready' ? [...state.nodeCounts.entries()]
     .map(([nodeId, count]) => `${nodeId}:${count.pending}:${count.escalated}`).sort().join('|') : state.kind;
@@ -1126,6 +1144,7 @@ function configureHumanTasks(owner = workspace.active) {
 }
 
 async function recoverHumanTaskSelection(owner) {
+  const recoveryGeneration = ++humanTaskRecoveryGeneration;
   const client = runtimeClient;
   const capability = currentHumanTaskCapability();
   if (!client || !capability || !tenantAuthorityAllows(owner, client)) return;
@@ -1139,7 +1158,9 @@ async function recoverHumanTaskSelection(owner) {
     // including when a process-local deployment registration no longer exists.
     const page = await client.humanTaskAttention({ taskId: locator.taskId,
       generation: locator.generation }, { capability });
-    if (runtimeClient !== client || workspace.active !== owner || !tenantAuthorityAllows(owner, client)) return;
+    if (recoveryGeneration !== humanTaskRecoveryGeneration
+        || runtimeClient !== client || workspace.active !== owner || !tenantAuthorityAllows(owner, client)
+        || !sameHumanTaskSelection(readHumanTaskSelection(), locator)) return;
     const task = page.items.find(item => item.taskId === locator.taskId
       && item.generation === locator.generation);
     if (!task) { clearHumanTaskSelection(); return; }
@@ -2349,6 +2370,9 @@ function invalidateDocumentLayouts(owner) {
 }
 
 function applyActiveDocument() {
+  // A document transition retires an exact Human Task lookup even when the opaque locator is kept
+  // for a later return to its authenticated workspace.
+  suspendHumanTaskRecovery();
   cancelMinimapGesture();
   const document_ = workspace.active;
   cy = document_?.cy ?? null;
@@ -10702,7 +10726,7 @@ function authenticateRuntime() {
   hasRuntimeToken = true;
   // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
   // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
-  humanTaskDecisionDialog?.suspend();
+  suspendHumanTaskRecovery();
   refreshCommands();
   connectRuntime();
 }
@@ -10721,7 +10745,7 @@ async function revokeRuntimeAccess() {
   runtimeConfiguration = null;
   workspacePersistenceReason = 'Workspace authority was revoked. Documents remain open for export.';
   syncActiveDocumentChrome();
-  humanTaskDecisionDialog?.suspend();
+  suspendHumanTaskRecovery();
   void configureHumanTasks();
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
@@ -14277,25 +14301,32 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // that browser step instead of returning to a detached opener.
     requestAnimationFrame(focusHumanTaskInspector);
   },
-  onSubmit: async ({ task, action, comment }) => {
+  onSubmit: async ({ task, action, comment, isCurrent }) => {
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     const owner = workspace.active;
-    if (!client || !capability || !tenantAuthorityAllows(owner, client)) {
+    const incarnation = owner?.incarnation;
+    const authorityGeneration = workspaceAuthority.generation;
+    const current = () => isCurrent() && runtimeClient === client && workspace.active === owner
+      && owner?.incarnation === incarnation && currentHumanTaskCapability() === capability
+      && workspaceAuthority.generation === authorityGeneration && tenantAuthorityAllows(owner, client);
+    if (!client || !capability || !current()) {
       throw new Error('Reconnect to this document workspace before deciding this task.');
     }
     try {
       const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
         { capability });
+      if (!current()) return result;
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
         'completed');
+      if (!current()) return result;
       await humanTaskController.refresh();
       return result;
     } catch (error) {
       // Fetch rejection cannot prove whether the CAS committed. Refresh, but never retry the
       // decision automatically. The dialog remains open with the exact original generation.
-      void humanTaskController.refresh();
+      if (current()) void humanTaskController.refresh();
       throw error;
     }
   },

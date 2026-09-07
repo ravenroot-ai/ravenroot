@@ -120,6 +120,10 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
                 .redirectOutput(output.resolve("playwright-driver.log").toFile());
         process.environment().put("RAVENROOT_HUMAN_TASK_CONFIRMATION_CONTROL_ORIGIN", control.origin());
         process.environment().put("RAVENROOT_HUMAN_TASK_CONFIRMATION_FIXTURE_TOKEN", FIXTURE_TOKEN);
+        // Keep this nested project's evidence with its UUID-scoped harness output. The complete UI
+        // suite runs afterward and owns the UI project's default test-results directory.
+        process.environment().put("RAVENROOT_HUMAN_TASK_CONFIRMATION_OUTPUT_DIR",
+                output.resolve("playwright-results").toString());
         Process browser = process.start();
         if (!browser.waitFor(130, TimeUnit.SECONDS)) {
             browser.destroyForcibly();

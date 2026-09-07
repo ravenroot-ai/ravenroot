@@ -101,4 +101,56 @@ describe('Human Task inspector and decision dialog', () => {
     expect(doc.querySelector('[data-human-task-error]').hidden).toBe(true);
     expect(closed).not.toHaveBeenCalled();
   });
+
+  it('does not let an old success close or unlock a replacement decision already in flight', async () => {
+    const doc = dialogDocument();
+    const settlements = [];
+    const submitted = vi.fn(() => new Promise((resolve, reject) => settlements.push({ resolve, reject })));
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'), onSubmit: submitted });
+    controller.open(task, capability);
+    doc.querySelector('[data-human-task-comment]').value = 'old';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalledTimes(1));
+
+    const replacement = { ...task, taskId: 'replacement-task', generation: 8 };
+    controller.suspend();
+    controller.open(replacement, capability);
+    doc.querySelector('[data-human-task-comment]').value = 'new';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalledTimes(2));
+    settlements[0].resolve({ outcome: 'APPLIED' });
+    await Promise.resolve();
+    expect(controller.selected()).toEqual({ taskId: replacement.taskId, generation: replacement.generation });
+    expect(doc.getElementById('d').open).toBe(true);
+    expect(doc.querySelectorAll('button:disabled').length).toBeGreaterThan(0);
+    settlements[1].reject(new Error('replacement failure'));
+    await vi.waitFor(() => expect(doc.querySelector('[data-human-task-error]').textContent)
+      .toContain('replacement failure'));
+  });
+
+  it('does not let an old error or finally effect change the same task reopened in a new generation', async () => {
+    const doc = dialogDocument();
+    const settlements = [];
+    const submitted = vi.fn(() => new Promise((resolve, reject) => settlements.push({ resolve, reject })));
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'), onSubmit: submitted });
+    controller.open(task, capability);
+    doc.querySelector('[data-human-task-comment]').value = 'old';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalledTimes(1));
+
+    controller.suspend();
+    controller.open(task, capability);
+    doc.querySelector('[data-human-task-comment]').value = 'new';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalledTimes(2));
+    settlements[0].reject(new Error('old failure'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.selected()).toEqual({ taskId: task.taskId, generation: task.generation });
+    expect(doc.getElementById('d').open).toBe(true);
+    expect(doc.querySelector('[data-human-task-error]').hidden).toBe(true);
+    expect(doc.querySelectorAll('button:disabled').length).toBeGreaterThan(0);
+    settlements[1].resolve({ outcome: 'APPLIED' });
+    await vi.waitFor(() => expect(doc.getElementById('d').open).toBe(false));
+  });
 });

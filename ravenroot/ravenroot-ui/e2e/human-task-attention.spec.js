@@ -167,6 +167,114 @@ async function runAndSelect(page, graphVersion = executionContext.graphVersion) 
   });
 }
 
+async function selectHumanTaskNodeWithPointer(page) {
+  const hit = await page.evaluate(nodeId => {
+    const active = window.ravenroot.activeDocument();
+    const node = active.cy.getElementById(nodeId);
+    const position = node.renderedPosition();
+    const bounds = active.cy.container().getBoundingClientRect();
+    return {
+      point: { x: bounds.left + position.x, y: bounds.top + position.y },
+      viewport: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+      hits: active.cy.nodes().filter(candidate => {
+        const box = candidate.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+        return position.x >= box.x1 && position.x <= box.x2
+          && position.y >= box.y1 && position.y <= box.y2;
+      }).map(candidate => candidate.id()),
+    };
+  }, 'human-confirmation');
+  expect(hit.hits).toEqual(['human-confirmation']);
+  expect(hit.point.x).toBeGreaterThan(hit.viewport.left);
+  expect(hit.point.x).toBeLessThan(hit.viewport.right);
+  expect(hit.point.y).toBeGreaterThan(hit.viewport.top);
+  expect(hit.point.y).toBeLessThan(hit.viewport.bottom);
+  await page.mouse.click(hit.point.x, hit.point.y);
+  await expect.poll(() => page.evaluate(() => {
+    const selected = window.ravenroot.activeDocument().cy.nodes(':selected');
+    return { count: selected.length, nodeId: selected.length === 1 ? selected.first().id() : null };
+  })).toEqual({ count: 1, nodeId: 'human-confirmation' });
+  await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
+}
+
+async function holdExactRecovery(page, outcome) {
+  await connectAndCreate(page);
+  await page.locator('#access-token').fill('initial-token');
+  await page.locator('#access-token').press('Enter');
+  await expect(page.locator('#btn-revoke')).toBeEnabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
+  await runAndSelect(page);
+  await page.locator('[data-human-task-id="task-1"]').click();
+  const original = await page.evaluate(() => JSON.parse(
+    localStorage.getItem('ravenroot.human-task.selection.v1')));
+  // A native modal correctly blocks pointer interaction outside itself. DOM activation exercises
+  // the unchanged revoke lifecycle while deliberately retaining the opaque locator.
+  await page.evaluate(() => document.getElementById('btn-revoke').click());
+  await expect(page.locator('#btn-revoke')).toBeDisabled();
+  await expect(page.locator('#runtime-connection')).toHaveClass(/revoked/);
+  expect(await page.evaluate(() => JSON.parse(
+    localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(original);
+
+  const observed = [];
+  let release;
+  const released = new Promise(resolve => { release = resolve; });
+  await page.route('**/v1/human-tasks/attention?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('taskId') !== original.taskId
+        || url.searchParams.get('generation') !== String(original.generation)) {
+      await route.continue(); return;
+    }
+    const request = route.request();
+    let handlerFinished;
+    const handler = new Promise(resolve => { handlerFinished = resolve; });
+    const terminal = new Promise(resolve => {
+      const finish = candidate => settle(candidate, 'finished');
+      const fail = candidate => settle(candidate, 'failed');
+      function settle(candidate, kind) {
+        if (candidate !== request) return;
+        page.off('requestfinished', finish);
+        page.off('requestfailed', fail);
+        resolve(kind);
+      }
+      page.on('requestfinished', finish);
+      page.on('requestfailed', fail);
+    });
+    observed.push({ request, terminal, handler });
+    try {
+      const successResponse = outcome === 'success' ? await route.fetch() : null;
+      await released;
+      if (outcome === 'empty') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          schemaVersion: 1, items: [], nextCursor: null,
+          counts: { pending: 0, escalated: 0 }, nodeCounts: [],
+        }) });
+      } else if (outcome === 'error') {
+        await route.abort('connectionfailed');
+      } else {
+        await route.fulfill({ response: successResponse });
+      }
+    } finally {
+      handlerFinished();
+    }
+  });
+  await page.locator('#access-token').fill('replacement-token');
+  await page.locator('#access-token').press('Enter');
+  await expect.poll(() => observed.length).toBeGreaterThan(0);
+  await selectHumanTaskNodeWithPointer(page);
+  return { original, release: async () => {
+    release();
+    let drained;
+    do {
+      drained = observed.length;
+      const batch = observed.slice(0, drained);
+      const terminalKinds = await Promise.all(batch.map(entry => entry.terminal));
+      await Promise.all(batch.map(entry => entry.handler));
+      expect(terminalKinds).toEqual(batch.map(() => outcome === 'error' ? 'failed' : 'finished'));
+      await page.evaluate(() => new Promise(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    } while (observed.length !== drained);
+  } };
+}
+
 test.beforeEach(async () => {
   tasks = [task('task-1', 1, 'ESCALATED'), task('task-2', 2)];
   decisionMode = 'normal';
@@ -396,6 +504,47 @@ test('browser reload restores an exact task only after the service origin and to
   await expect(page.locator('#human-task-dialog')).toBeHidden();
   expect(tasks[0].status).toBe('DENIED');
   expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+});
+
+for (const outcome of ['success', 'empty', 'error']) {
+  test(`a late exact recovery ${outcome} stays inert after the user closes the task`, async ({ page }) => {
+    const held = await holdExactRecovery(page, outcome);
+    await page.locator('[data-human-task-id="task-1"]').click();
+    await expect(page.locator('#human-task-dialog')).toBeVisible();
+    await page.locator('[data-human-task-close]').click();
+    expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+
+    await held.release();
+    await expect(page.locator('#human-task-dialog')).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+  });
+
+  test(`a late exact recovery ${outcome} cannot replace a freshly selected task generation`, async ({ page }) => {
+    const held = await holdExactRecovery(page, outcome);
+    await page.locator('.human-task-pagination .btn', { hasText: 'Next' }).click();
+    await page.locator('[data-human-task-id="task-2"]').click();
+    const replacement = { serviceOrigin: SERVICE_ORIGIN, taskId: 'task-2', generation: 2 };
+    expect(await page.evaluate(() => JSON.parse(
+      localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(replacement);
+
+    await held.release();
+    await expect(page.locator('#human-task-dialog')).toBeVisible();
+    await expect(page.locator('[data-human-task-identity]')).toContainText('Task task-2');
+    expect(await page.evaluate(() => JSON.parse(
+      localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(replacement);
+  });
+}
+
+test('an attention outage retires an exact success that was already waiting to open', async ({ page }) => {
+  const held = await holdExactRecovery(page, 'success');
+  attentionMode = 'network';
+  await expect(page.locator('.human-task-status')).toContainText('could not be refreshed');
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+
+  await held.release();
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+  expect(await page.evaluate(() => JSON.parse(
+    localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(held.original);
 });
 
 test('an outage suspends stale modal details and retains only the exact recovery locator', async ({ page }) => {

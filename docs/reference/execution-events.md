@@ -105,7 +105,7 @@ Compare cursor identities only within the authenticated tenant and source. RING 
 
 ### Compatibility and validation
 
-New writers emit `eventType`. Live writers also retain `type`, with the same value, and `executionId` remains an alias of `traversalId`. Readers prefer `eventType` and accept legacy unversioned `type` inputs; conflicting aliases are invalid. This compatibility period continues until a separately announced breaking migration. No removal date or release count is scheduled.
+New writers emit `eventType`. RING writers also retain `type`, with the same value, and `executionId` remains an alias of `traversalId`. Readers accept an optional equal `type` alias on either source; the DURABLE writer need not emit it. Version 1 requires canonical `eventType` in the original object. Fallback to `type` applies only to legacy unversioned inputs; conflicting aliases are invalid. This compatibility period continues until a separately announced breaking migration. No removal date or release count is scheduled.
 
 Version 1 permits unknown extra fields and unknown event classifiers. Readers must still reject unsupported schema versions, unknown source variants and known contradictions, such as a RING event carrying a durable cursor or a DURABLE event claiming live measurements. Do not guess a version or silently reinterpret one variant as the other. Legacy source inference is possible only when the native cursor fields identify it unambiguously.
 

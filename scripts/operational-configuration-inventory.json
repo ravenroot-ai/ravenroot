@@ -18492,7 +18492,7 @@
       "validation": "1..256",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxDepth is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -18521,7 +18521,7 @@
       "validation": "1..1000000",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxCollectionSize is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -18550,7 +18550,7 @@
       "validation": "1..5000000",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxValueCount is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -18580,7 +18580,7 @@
       "validation": "1..67108864",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -18610,7 +18610,7 @@
       "validation": "1..67108864",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -18639,7 +18639,7 @@
       "validation": "1..4096",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxKeyLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25498,7 +25498,7 @@
       "validation": "1..1024",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxDepth is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25528,7 +25528,7 @@
       "validation": "1..67108864",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25558,7 +25558,7 @@
       "validation": "1..67108864",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25587,7 +25587,7 @@
       "validation": "1..100000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxKeys is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25616,7 +25616,7 @@
       "validation": "1..10000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxElements is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25645,7 +25645,7 @@
       "validation": "1..20000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxAttributes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -25674,7 +25674,7 @@
       "validation": "1..1000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxNamespaceDeclarations is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest."
     },
     {
@@ -28315,7 +28315,7 @@
       "validation": "1..1024",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxDepth is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28356,7 +28356,7 @@
       "validation": "1..1024",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxDepth is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28398,7 +28398,7 @@
       "validation": "1..67108864",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28440,7 +28440,7 @@
       "validation": "1..67108864",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28481,7 +28481,7 @@
       "validation": "1..100000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxKeys is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28522,7 +28522,7 @@
       "validation": "1..100000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxKeys is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28563,7 +28563,7 @@
       "validation": "1..10000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxElements is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28604,7 +28604,7 @@
       "validation": "1..10000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxElements is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28645,7 +28645,7 @@
       "validation": "1..20000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxAttributes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28686,7 +28686,7 @@
       "validation": "1..20000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxAttributes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28727,7 +28727,7 @@
       "validation": "1..1000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxNamespaceDeclarations is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -28768,7 +28768,7 @@
       "validation": "1..1000000",
       "scope": "one GraphML document",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxNamespaceDeclarations is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29043,7 +29043,7 @@
       "validation": "1..256",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxDepth is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29084,7 +29084,7 @@
       "validation": "1..256",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxDepth is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29125,7 +29125,7 @@
       "validation": "1..1000000",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxCollectionSize is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29166,7 +29166,7 @@
       "validation": "1..1000000",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxCollectionSize is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29207,7 +29207,7 @@
       "validation": "1..5000000",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxValueCount is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29248,7 +29248,7 @@
       "validation": "1..5000000",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxValueCount is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29290,7 +29290,7 @@
       "validation": "1..67108864",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29332,7 +29332,7 @@
       "validation": "1..67108864",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29373,7 +29373,7 @@
       "validation": "1..4096",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxKeyLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",
@@ -29414,7 +29414,7 @@
       "validation": "1..4096",
       "scope": "each structured payload",
       "pinning": "Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest.",
-      "coverage": "shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing",
+      "coverage": "shared configuration reference: present; Compose: missing; Helm: missing; raw Kubernetes: missing",
       "rationale": "maxKeyLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest.",
       "conversion": {
         "issue": "#225",

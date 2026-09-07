@@ -66,6 +66,8 @@
   items:
     - title: Architecture overview
       url: /architecture/
+    - title: Operational configuration audit
+      url: /architecture/operational-configuration-audit.html
     - title: Product boundaries and authority
       url: /architecture/product-boundaries.html
     - title: Graph and GraphML semantics

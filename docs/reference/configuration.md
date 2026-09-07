@@ -21,10 +21,21 @@ Values outside the supported ceilings refuse startup instead of silently expandi
 | Variable | Default | Supported maximum | What it bounds |
 |---|---:|---:|---|
 | `RAVENROOT_GRAPHML_MAX_BYTES` | 10 MiB | 256 MiB | one graph-document budget across the served UI, HTTP ingress, core admission and recovery, structured submissions, and durable canonical definitions |
+| `RAVENROOT_GRAPHML_MAX_DEPTH` | 64 | 1,024 | GraphML XML nesting levels |
+| `RAVENROOT_GRAPHML_MAX_STRING_LENGTH` | 1 MiB | 64 MiB | UTF-16 code units in one GraphML string value |
+| `RAVENROOT_GRAPHML_MAX_KEYS` | 4,096 | 100,000 | distinct GraphML key declarations |
+| `RAVENROOT_GRAPHML_MAX_ELEMENTS` | 250,000 | 10,000,000 | XML elements in one GraphML document |
+| `RAVENROOT_GRAPHML_MAX_ATTRIBUTES` | 500,000 | 20,000,000 | XML attributes in one GraphML document |
+| `RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS` | 10,000 | 1,000,000 | XML namespace declarations in one GraphML document |
 | `RAVENROOT_GRAPH_MAX_NODES` | 10,000 | 1,000,000 | nodes admitted |
 | `RAVENROOT_GRAPH_MAX_EDGES` | 25,000 | 5,000,000 | edges admitted |
 | `RAVENROOT_GRAPH_MAX_PROPERTIES` | 100,000 | 10,000,000 | graph, node, and edge properties |
 | `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | 256 KiB | 64 MiB | each input, node output, or attribute map |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH` | 32 | 256 | structured payload nesting levels |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE` | 1,000 | 1,000,000 | members in one payload list or map |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT` | 10,000 | 5,000,000 | values across one payload tree, including containers |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH` | 32 KiB | 64 MiB | UTF-16 code units in one payload text value |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH` | 256 | 4,096 | UTF-16 code units in one payload map key |
 | `RAVENROOT_GRAPH_MAX_FAN_OUT` | 64 | 256 | distinct targets for one routed outcome or failure route |
 | `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | 256 | 4,096 | resident actors allocated when a runner starts |
 | `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | 256 | 1,024 | demand-created worker and traversal actors alive or retiring in one traversal, with the same ceiling enforced across its runner |

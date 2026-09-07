@@ -27,30 +27,6 @@ function element(doc, name, className = '', text = '') {
   return result;
 }
 
-function humanTaskRow(doc, item, onSelect) {
-  const row = element(doc, 'li', `human-task-row${item.status === 'ESCALATED' ? ' is-escalated' : ''}`);
-  const button = element(doc, 'button', 'human-task-row-button');
-  button.type = 'button';
-  button.dataset.humanTaskId = item.taskId;
-  button.dataset.humanTaskGeneration = String(item.generation);
-  button.setAttribute('aria-label', `${item.status === 'ESCALATED' ? 'Escalated' : 'Pending'}: `
-    + `${item.presentation.prompt}. Task ${item.taskId}, generation ${item.generation}.`);
-  const head = element(doc, 'span', 'human-task-row-head');
-  head.append(element(doc, 'strong', 'human-task-row-prompt', item.presentation.prompt),
-    element(doc, 'span', 'human-task-state', item.status === 'ESCALATED' ? '▲ Escalated' : '● Pending'));
-  const identity = element(doc, 'span', 'human-task-row-identity',
-    `Task ${short(item.taskId)} · node ${short(item.nodeId)}`
-    + ` · process ${short(item.processInstanceId)} · traversal ${short(item.traversalId)}`
-    + `${item.deploymentId ? ` · deployment ${short(item.deploymentId)}` : ''}`
-    + ` · generation ${item.generation}`);
-  const dates = element(doc, 'span', 'human-task-row-time',
-    `Created ${time(item.createdAt)} · expires ${time(item.expiresAt)}`);
-  button.append(head, identity, dates);
-  button.addEventListener('click', () => onSelect(item));
-  row.append(button);
-  return row;
-}
-
 export function renderHumanTaskInspector(host, state, nodeId, {
   onSelect = () => {}, onNext = () => {}, onPrevious = () => {}, onRefresh = () => {},
 } = {}) {
@@ -92,7 +68,27 @@ export function renderHumanTaskInspector(host, state, nodeId, {
     const list = element(doc, 'ul', 'human-task-list');
     list.setAttribute('aria-label', `Actionable Human Tasks for node ${nodeId}`);
     for (const item of state.items) {
-      list.append(humanTaskRow(doc, item, onSelect));
+      const row = element(doc, 'li', `human-task-row${item.status === 'ESCALATED' ? ' is-escalated' : ''}`);
+      const button = element(doc, 'button', 'human-task-row-button');
+      button.type = 'button';
+      button.dataset.humanTaskId = item.taskId;
+      button.dataset.humanTaskGeneration = String(item.generation);
+      button.setAttribute('aria-label', `${item.status === 'ESCALATED' ? 'Escalated' : 'Pending'}: `
+        + `${item.presentation.prompt}. Task ${item.taskId}, generation ${item.generation}.`);
+      const head = element(doc, 'span', 'human-task-row-head');
+      head.append(element(doc, 'strong', 'human-task-row-prompt', item.presentation.prompt),
+        element(doc, 'span', 'human-task-state', item.status === 'ESCALATED' ? '▲ Escalated' : '● Pending'));
+      const identity = element(doc, 'span', 'human-task-row-identity',
+        `Task ${short(item.taskId)} · process ${short(item.processInstanceId)}`
+        + ` · traversal ${short(item.traversalId)}`
+        + `${item.deploymentId ? ` · deployment ${short(item.deploymentId)}` : ''}`
+        + ` · generation ${item.generation}`);
+      const dates = element(doc, 'span', 'human-task-row-time',
+        `Created ${time(item.createdAt)} · expires ${time(item.expiresAt)}`);
+      button.append(head, identity, dates);
+      button.addEventListener('click', () => onSelect(item));
+      row.append(button);
+      list.append(row);
     }
     section.append(list);
   }
@@ -118,10 +114,8 @@ export function renderHumanTaskInspector(host, state, nodeId, {
   return section;
 }
 
-export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => ({}), onClose = () => {},
-  onRelatedPage = async () => null, onRelatedSelect = () => false } = {}) {
+export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => ({}), onClose = () => {} } = {}) {
   if (!dialog) return { open() {}, close() {}, suspend() {}, selected: () => null };
-  const decisionView = dialog.querySelector('[data-human-task-decision-view]') || dialog.querySelector('form');
   const prompt = dialog.querySelector('[data-human-task-prompt]');
   const identity = dialog.querySelector('[data-human-task-identity]');
   const commentField = dialog.querySelector('[data-human-task-comment-field]');
@@ -129,48 +123,10 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   const commentHint = dialog.querySelector('[data-human-task-comment-hint]');
   const error = dialog.querySelector('[data-human-task-error]');
   const actions = dialog.querySelector('[data-human-task-actions]');
-  const relatedOpen = dialog.querySelector('[data-human-task-related-open]');
-  const relatedBack = dialog.querySelector('[data-human-task-related-back]');
-  const relatedView = dialog.querySelector('[data-human-task-related-view]');
-  const relatedTitle = dialog.querySelector('#human-task-related-title');
-  const relatedStatus = dialog.querySelector('[data-human-task-related-status]');
-  const relatedList = dialog.querySelector('[data-human-task-related-list]');
-  const relatedPagination = dialog.querySelector('[data-human-task-related-pagination]');
-  const relatedPrevious = dialog.querySelector('[data-human-task-related-previous]');
-  const relatedNext = dialog.querySelector('[data-human-task-related-next]');
-  const relatedPage = dialog.querySelector('[data-human-task-related-page]');
-  const relatedRefresh = dialog.querySelector('[data-human-task-related-refresh]');
-  const relatedCurrent = dialog.querySelector('[data-human-task-related-current]');
   let task = null;
   let capability = null;
-  let lease = null;
   let submitting = false;
-  let generation = 0;
-  let relatedController = null;
-  let decisionController = null;
-  let relatedCursors = [null];
-  let relatedPageIndex = 0;
-  let relatedPageValue = null;
-  let relatedCanReturn = true;
-  let relatedWasOpened = false;
-
-  const taskKey = value => value && `${value.taskId}\u0000${value.generation}`;
-  function isCurrent(token, expectedTask = task) {
-    return generation === token && (!expectedTask || taskKey(task) === taskKey(expectedTask));
-  }
-
-  function abortRelated() {
-    relatedController?.abort();
-    relatedController = null;
-  }
-
-  function advance() {
-    generation += 1;
-    abortRelated();
-    decisionController?.abort();
-    decisionController = null;
-    return generation;
-  }
+  let suspended = false;
 
   function say(message = '') {
     error.textContent = message;
@@ -184,29 +140,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     dialog.setAttribute('aria-busy', String(value));
   }
 
-  function resetRelatedView() {
-    relatedCursors = [null];
-    relatedPageIndex = 0;
-    relatedPageValue = null;
-    relatedCanReturn = true;
-    relatedWasOpened = false;
-    relatedList?.replaceChildren();
-    if (relatedStatus) relatedStatus.textContent = '';
-    if (relatedPagination) relatedPagination.hidden = true;
-    if (relatedPrevious) relatedPrevious.disabled = true;
-    if (relatedNext) relatedNext.disabled = true;
-    if (relatedPage) relatedPage.textContent = 'Page 1';
-    if (relatedRefresh) relatedRefresh.disabled = false;
-    if (relatedCurrent) relatedCurrent.hidden = false;
-  }
-
   function close() {
     if (submitting) return;
-    advance();
     task = null;
-    capability = null;
-    lease = null;
-    resetRelatedView();
     comment.value = '';
     say();
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
@@ -215,127 +151,13 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   }
 
   function suspend() {
-    advance();
-    submitting = false;
-    dialog.removeAttribute('aria-busy');
+    suspended = true;
     task = null;
     capability = null;
-    lease = null;
-    resetRelatedView();
     comment.value = '';
     say();
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
     else dialog.removeAttribute('open');
-  }
-
-  function focusDecision() {
-    const mode = task?.presentation.commentRequirement;
-    (mode === 'REQUIRED' ? comment : actions.querySelector('button'))?.focus();
-  }
-
-  function showDecision(nextTask, { fromRelated = false, focus = true } = {}) {
-    task = nextTask;
-    decisionView.hidden = false;
-    if (relatedView) relatedView.hidden = true;
-    prompt.textContent = task.presentation.prompt;
-    identity.textContent = `Task ${task.taskId} · process ${task.processInstanceId}`
-      + ` · traversal ${task.traversalId}`
-      + `${task.deploymentId ? ` · deployment ${task.deploymentId}` : ''}`
-      + ` · generation ${task.generation}`;
-    const mode = task.presentation.commentRequirement;
-    commentField.hidden = mode === 'DISALLOWED';
-    comment.required = mode === 'REQUIRED';
-    comment.value = '';
-    commentHint.textContent = mode === 'REQUIRED'
-      ? `Required · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`
-      : `Optional · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`;
-    actions.replaceChildren(...task.availableActions.map(action => {
-      const actionName = humanTaskActionName(action, task.presentation.labels[action]);
-      const button = element(dialog.ownerDocument, 'button',
-        `btn human-task-decision human-task-decision-${action.toLowerCase()}`, actionName);
-      button.type = 'button';
-      button.dataset.humanTaskAction = action;
-      button.setAttribute('aria-label', actionName);
-      return button;
-    }));
-    if (relatedOpen) relatedOpen.hidden = !lease?.relatedContext || relatedPageValue != null;
-    if (relatedBack) relatedBack.hidden = !lease?.relatedContext || !relatedWasOpened || !fromRelated;
-    say();
-    if (focus) focusDecision();
-  }
-
-  function renderRelatedPage(page) {
-    relatedPageValue = page;
-    const pending = page.counts.pending;
-    const escalated = page.counts.escalated;
-    relatedStatus.textContent = pending === 0
-      ? 'No actionable related Human Tasks remain for this node.'
-      : page.items.length === 0
-        ? `${pending} actionable related Human Task${pending === 1 ? '' : 's'} remain for this node; none are on this page.`
-        : `${pending} actionable related Human Task${pending === 1 ? '' : 's'} for this node`
-          + `${escalated ? ` · ${escalated} escalated` : ''}.`;
-    relatedList.replaceChildren(...page.items.map(item => humanTaskRow(dialog.ownerDocument, item, selected => {
-      if (!lease || !onRelatedSelect({ task: selected, lease })) return;
-      advance();
-      relatedCanReturn = true;
-      relatedCursors = [null];
-      relatedPageIndex = 0;
-      relatedPageValue = null;
-      showDecision(selected, { fromRelated: true });
-    })));
-    relatedPagination.hidden = false;
-    relatedPrevious.disabled = relatedPageIndex < 1;
-    relatedNext.disabled = !page.nextCursor;
-    relatedPage.textContent = `Page ${relatedPageIndex + 1}`;
-    relatedRefresh.disabled = false;
-  }
-
-  async function showRelated({ reset = false, focus = true, current = relatedCanReturn } = {}) {
-    if (!lease?.relatedContext || !task) return;
-    relatedWasOpened = true;
-    if (reset) { relatedCursors = [null]; relatedPageIndex = 0; }
-    const sourceTask = task;
-    const sourceLease = lease;
-    const token = advance();
-    relatedCanReturn = current;
-    decisionView.hidden = true;
-    relatedView.hidden = false;
-    if (relatedCurrent) relatedCurrent.hidden = !current;
-    relatedStatus.textContent = 'Loading related Human Tasks from the service…';
-    relatedList.replaceChildren();
-    relatedPagination.hidden = true;
-    relatedController = new AbortController();
-    const signal = relatedController.signal;
-    if (focus) relatedTitle?.focus();
-    try {
-      const page = await onRelatedPage({ task: sourceTask, lease: sourceLease,
-        cursor: relatedCursors[relatedPageIndex] || undefined, signal });
-      if (!isCurrent(token, sourceTask) || signal.aborted) return;
-      if (!page) {
-        relatedStatus.textContent = 'Related tasks are unavailable for this task.';
-        relatedCurrent?.focus();
-        return;
-      }
-      renderRelatedPage(page);
-      (relatedList.querySelector('button') || relatedStatus)?.focus?.();
-    } catch (failure) {
-      if (!isCurrent(token, sourceTask) || signal.aborted) return;
-      if (failure?.status === 400 && relatedPageIndex > 0) {
-        relatedCursors = [null];
-        relatedPageIndex = 0;
-        relatedPageValue = null;
-        void showRelated({ focus: false });
-        return;
-      }
-      relatedStatus.textContent = `Related Human Tasks could not be refreshed: ${failure?.message || failure}`;
-      relatedPagination.hidden = false;
-      relatedPrevious.disabled = relatedPageIndex < 1;
-      relatedNext.disabled = true;
-      relatedRefresh.disabled = false;
-      relatedRefresh.focus();
-    } finally {
-      if (generation === token) relatedController = null;
-    }
   }
 
   async function decide(action) {
@@ -343,59 +165,24 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     const check = validateDecisionComment(comment.value, task.presentation.commentRequirement,
       task.commentMaxUtf8Bytes);
     if (!check.ok) { say(check.error); comment.focus(); return; }
-    const sourceTask = task;
-    const sourceLease = lease;
-    const token = generation;
-    decisionController = new AbortController();
-    const signal = decisionController.signal;
     say();
     setBusy(true);
     try {
-      await onSubmit({ task: sourceTask, action, comment: check.value, lease: sourceLease, signal,
-        isCurrent: () => isCurrent(token, sourceTask) });
+      await onSubmit({ task, action, comment: check.value });
     } catch (failure) {
-      if (isCurrent(token, sourceTask)) {
-        decisionController = null;
+      if (!suspended) {
         say(failure?.message || 'The decision outcome is unknown. Refresh before trying another action.');
-        setBusy(false);
       }
       return;
+    } finally {
+      setBusy(false);
     }
-    if (!isCurrent(token, sourceTask)) return;
-    decisionController = null;
-    setBusy(false);
-    if (!sourceLease?.relatedContext || !relatedWasOpened) { close(); return; }
-    clearHumanTaskForm();
-    relatedCanReturn = false;
-    await showRelated({ reset: true, focus: true, current: false });
-  }
-
-  function clearHumanTaskForm() {
-    comment.value = '';
-    actions.replaceChildren();
-    say();
+    if (!suspended) close();
   }
 
   actions.addEventListener('click', event => {
     const button = event.target.closest('[data-human-task-action]');
     if (button) void decide(button.dataset.humanTaskAction);
-  });
-  relatedOpen?.addEventListener('click', () => { void showRelated({ reset: true }); });
-  relatedBack?.addEventListener('click', () => { void showRelated(); });
-  relatedCurrent?.addEventListener('click', () => {
-    if (task) { advance(); showDecision(task, { fromRelated: true }); }
-  });
-  relatedRefresh?.addEventListener('click', () => { void showRelated(); });
-  relatedPrevious?.addEventListener('click', () => {
-    if (relatedPageIndex < 1) return;
-    relatedPageIndex -= 1;
-    void showRelated();
-  });
-  relatedNext?.addEventListener('click', () => {
-    if (!relatedPageValue?.nextCursor) return;
-    relatedCursors[relatedPageIndex + 1] = relatedPageValue.nextCursor;
-    relatedPageIndex += 1;
-    void showRelated();
   });
   dialog.querySelector('[data-human-task-close]').addEventListener('click', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
@@ -406,15 +193,35 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   });
 
   return {
-    open(nextTask, nextCapability, { relatedLease = null } = {}) {
-      advance();
-      setBusy(false);
+    open(nextTask, nextCapability) {
+      suspended = false;
+      task = nextTask;
       capability = nextCapability;
-      lease = relatedLease;
-      resetRelatedView();
-      showDecision(nextTask, { focus: false });
+      prompt.textContent = task.presentation.prompt;
+      identity.textContent = `Task ${task.taskId} · process ${task.processInstanceId}`
+        + ` · traversal ${task.traversalId}`
+        + `${task.deploymentId ? ` · deployment ${task.deploymentId}` : ''}`
+        + ` · generation ${task.generation}`;
+      const mode = task.presentation.commentRequirement;
+      commentField.hidden = mode === 'DISALLOWED';
+      comment.required = mode === 'REQUIRED';
+      comment.value = '';
+      commentHint.textContent = mode === 'REQUIRED'
+        ? `Required · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`
+        : `Optional · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`;
+      actions.replaceChildren(...task.availableActions.map(action => {
+        const actionName = humanTaskActionName(action, task.presentation.labels[action]);
+        const button = element(dialog.ownerDocument, 'button',
+          `btn human-task-decision human-task-decision-${action.toLowerCase()}`,
+          actionName);
+        button.type = 'button';
+        button.dataset.humanTaskAction = action;
+        button.setAttribute('aria-label', actionName);
+        return button;
+      }));
+      say();
       dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
-      focusDecision();
+      (mode === 'REQUIRED' ? comment : actions.querySelector('button'))?.focus();
     },
     close, suspend,
     selected: () => task && { taskId: task.taskId, generation: task.generation },

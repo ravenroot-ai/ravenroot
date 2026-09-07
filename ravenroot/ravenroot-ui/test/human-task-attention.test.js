@@ -4,7 +4,6 @@ import {
   humanTaskActionLabelKey,
   humanTaskServiceOrigin,
   humanTaskContext,
-  humanTaskRelatedContext,
   nextHumanTaskBackoff,
   nodeAttention,
   utf8Length,
@@ -127,17 +126,6 @@ describe('Human Task capability and attention projection', () => {
     expect(humanTaskContext({ execution: { graphVersion: null } })).toBeNull();
     expect(humanTaskContext({ execution: { graphVersion: 'v7' }, humanTasks: {
       deploymentId: 'd7', graphVersion: null } })).toBeNull();
-  });
-
-  it('keeps recovered related-task reads on one exact node and enclosing context', () => {
-    expect(humanTaskRelatedContext(row())).toEqual({ graphVersion: 'graph-v1',
-      deploymentId: 'deployment-1', nodeId: 'review' });
-    expect(humanTaskRelatedContext(row({ deploymentId: null }))).toEqual({ graphVersion: 'graph-v1',
-      processInstanceId: 'process-1', nodeId: 'review' });
-    expect(humanTaskRelatedContext(row({ graphVersion: '' }))).toBeNull();
-    expect(humanTaskRelatedContext(row({ nodeId: null }))).toBeNull();
-    expect(humanTaskRelatedContext(row({ deploymentId: null, processInstanceId: '' }))).toBeNull();
-    expect(humanTaskRelatedContext(row())).not.toHaveProperty('processInstanceId');
   });
 
   it('persists the effective page origin when the runtime uses its same-origin default', () => {

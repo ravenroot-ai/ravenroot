@@ -81,7 +81,7 @@ import { createCredentialsWindow } from './credential-panel.js';
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
 // part of `RavenrootRuntimeClient`. The Deployments window owns registration and control.
 import { createDeploymentsWindow } from './deployment-panel.js';
-import { humanTaskContext, humanTaskRelatedContext, humanTaskServiceOrigin } from './human-task-attention.js';
+import { humanTaskContext, humanTaskServiceOrigin } from './human-task-attention.js';
 import { createHumanTaskController } from './human-task-controller.js';
 import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from './human-task-ui.js';
 import {
@@ -764,30 +764,6 @@ function tenantAuthorityAllows(owner, client = runtimeClient) {
     && owner.tenantId === workspaceAuthority.scope?.tenantId;
 }
 
-function captureHumanTaskAuthorityLease(owner, client = runtimeClient,
-  capability = currentHumanTaskCapability()) {
-  if (!client || !capability || !tenantAuthorityAllows(owner, client)) return null;
-  return Object.freeze({ client, capability, owner, incarnation: owner.incarnation,
-    authorityGeneration: workspaceAuthority.generation,
-    scopeKey: workspaceAuthority.scope?.key ?? null,
-    serviceOrigin: currentHumanTaskServiceOrigin(client) });
-}
-
-function humanTaskAuthorityLeaseAllows(lease) {
-  return Boolean(lease && runtimeClient === lease.client && workspace.active === lease.owner
-    && lease.owner?.incarnation === lease.incarnation
-    && currentHumanTaskCapability() === lease.capability
-    && workspaceAuthority.generation === lease.authorityGeneration
-    && (workspaceAuthority.scope?.key ?? null) === lease.scopeKey
-    && currentHumanTaskServiceOrigin(lease.client) === lease.serviceOrigin
-    && tenantAuthorityAllows(lease.owner, lease.client));
-}
-
-function sameHumanTaskContext(left, right) {
-  return Boolean(left && right && left.graphVersion === right.graphVersion && left.nodeId === right.nodeId
-    && left.deploymentId === right.deploymentId && left.processInstanceId === right.processInstanceId);
-}
-
 function normalizedWorkspaceServiceUrl(client) {
   return new URL(client?.baseUrl || globalThis.location.origin, globalThis.location.origin).href.replace(/\/$/, '');
 }
@@ -983,10 +959,10 @@ function currentHumanTaskServiceOrigin(client = runtimeClient) {
   return humanTaskServiceOrigin(client?.baseUrl, globalThis.location?.origin);
 }
 
-function rememberHumanTaskSelection(task, serviceOrigin = currentHumanTaskServiceOrigin()) {
+function rememberHumanTaskSelection(task) {
   try {
     localStorage.setItem(HUMAN_TASK_SELECTION_KEY, JSON.stringify({
-      serviceOrigin, taskId: task.taskId, generation: task.generation,
+      serviceOrigin: currentHumanTaskServiceOrigin(), taskId: task.taskId, generation: task.generation,
     }));
   } catch {
     // The durable service remains authoritative; this only forfeits browser-reload convenience.
@@ -1014,8 +990,7 @@ function restoreHumanTaskServiceOrigin() {
 
 function focusHumanTaskInspector() {
   const target = document.querySelector('[data-human-task-inspector] [data-human-task-id]')
-    || document.querySelector('[data-human-task-inspector] .human-task-status')
-    || document.getElementById('menu-run');
+    || document.querySelector('[data-human-task-inspector] .human-task-status');
   if (!target) return;
   if (!target.matches('button, input, select, textarea, a[href], [tabindex]')) target.tabIndex = -1;
   target.focus();
@@ -1153,8 +1128,7 @@ function configureHumanTasks(owner = workspace.active) {
 async function recoverHumanTaskSelection(owner) {
   const client = runtimeClient;
   const capability = currentHumanTaskCapability();
-  const authorityLease = captureHumanTaskAuthorityLease(owner, client, capability);
-  if (!authorityLease) return;
+  if (!client || !capability || !tenantAuthorityAllows(owner, client)) return;
   const locator = readHumanTaskSelection();
   if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
       || typeof locator.taskId !== 'string'
@@ -1165,15 +1139,11 @@ async function recoverHumanTaskSelection(owner) {
     // including when a process-local deployment registration no longer exists.
     const page = await client.humanTaskAttention({ taskId: locator.taskId,
       generation: locator.generation }, { capability });
-    if (!humanTaskAuthorityLeaseAllows(authorityLease)) return;
+    if (runtimeClient !== client || workspace.active !== owner || !tenantAuthorityAllows(owner, client)) return;
     const task = page.items.find(item => item.taskId === locator.taskId
       && item.generation === locator.generation);
     if (!task) { clearHumanTaskSelection(); return; }
-    const relatedContext = humanTaskRelatedContext(task);
-    const relatedLease = Object.freeze({ ...authorityLease, relatedContext });
-    if (!humanTaskDecisionDialog.selected()) {
-      humanTaskDecisionDialog.open(task, capability, { relatedLease });
-    }
+    if (!humanTaskDecisionDialog.selected()) humanTaskDecisionDialog.open(task, capability);
   } catch {
     // A rejected or unreachable lookup carries no proof that the durable task disappeared. Keep
     // only the locator and let the next authenticated reconnect try again; never cache the row.
@@ -2379,10 +2349,6 @@ function invalidateDocumentLayouts(owner) {
 }
 
 function applyActiveDocument() {
-  // Every document transition retires a recovered task lease, including New/Open/Replace paths
-  // that do not call activateDocument. The durable opaque locator remains available for a later
-  // exact lookup when the matching workspace is active again.
-  if (humanTaskDecisionDialog?.selected()) humanTaskDecisionDialog.suspend();
   cancelMinimapGesture();
   const document_ = workspace.active;
   cy = document_?.cy ?? null;
@@ -14311,43 +14277,25 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // that browser step instead of returning to a detached opener.
     requestAnimationFrame(focusHumanTaskInspector);
   },
-  onRelatedPage: async ({ task, lease, cursor, signal }) => {
-    const context = humanTaskRelatedContext(task);
-    if (!humanTaskAuthorityLeaseAllows(lease)
-        || !sameHumanTaskContext(context, lease.relatedContext)) return null;
-    const page = await lease.client.humanTaskAttention({ ...lease.relatedContext, cursor },
-      { signal, capability: lease.capability });
-    return humanTaskAuthorityLeaseAllows(lease) ? page : null;
-  },
-  onRelatedSelect: ({ task, lease }) => {
-    if (!humanTaskAuthorityLeaseAllows(lease)
-        || !sameHumanTaskContext(humanTaskRelatedContext(task), lease.relatedContext)) return false;
-    rememberHumanTaskSelection(task, lease.serviceOrigin);
-    return true;
-  },
-  onSubmit: async ({ task, action, comment, lease: recoveredLease, signal, isCurrent }) => {
-    const activeLease = recoveredLease || captureHumanTaskAuthorityLease(workspace.active);
-    const selected = () => {
-      const value = humanTaskDecisionDialog.selected();
-      return isCurrent() && value?.taskId === task.taskId && value?.generation === task.generation;
-    };
-    if (!humanTaskAuthorityLeaseAllows(activeLease) || !selected()) {
+  onSubmit: async ({ task, action, comment }) => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    const owner = workspace.active;
+    if (!client || !capability || !tenantAuthorityAllows(owner, client)) {
       throw new Error('Reconnect to this document workspace before deciding this task.');
     }
     try {
-      const result = await activeLease.client.confirmHumanTask(task.taskId, task.generation, action, comment,
-        { signal, capability: activeLease.capability });
-      if (!humanTaskAuthorityLeaseAllows(activeLease) || !selected()) return result;
+      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
+        { capability });
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
         'completed');
-      if (!humanTaskAuthorityLeaseAllows(activeLease) || !selected()) return result;
       await humanTaskController.refresh();
       return result;
     } catch (error) {
       // Fetch rejection cannot prove whether the CAS committed. Refresh, but never retry the
       // decision automatically. The dialog remains open with the exact original generation.
-      if (humanTaskAuthorityLeaseAllows(activeLease) && selected()) void humanTaskController.refresh();
+      void humanTaskController.refresh();
       throw error;
     }
   },

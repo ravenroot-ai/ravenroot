@@ -188,30 +188,13 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     expect(exactUrl.searchParams.has('deploymentId')).toBe(false);
     expect(exactUrl.searchParams.has('processInstanceId')).toBe(false);
     await assertPinnedDialog(page, storedLocator.taskId);
-    expect(await page.evaluate(() => ({
-      selected: window.ravenroot.activeDocument().cy.nodes(':selected').length,
-      context: window.ravenroot.activeDocument().humanTasks,
-    }))).toMatchObject({ selected: 0, context: { deploymentId: null, graphVersion: null } });
-    const relatedRequest = page.waitForRequest(request_ => {
-      const url = new URL(request_.url());
-      return url.pathname === '/v1/human-tasks/attention'
-        && url.searchParams.get('graphVersion') === recovery.graphVersion
-        && url.searchParams.get('deploymentId') === recovery.deploymentId
-        && url.searchParams.get('nodeId') === NODE_ID;
-    });
-    await page.locator('[data-human-task-related-open]').click();
-    const relatedUrl = new URL((await relatedRequest).url());
-    expect(relatedUrl.searchParams.has('processInstanceId')).toBe(false);
-    await expect(page.locator('[data-human-task-related-status]')).toContainText('2 actionable related Human Tasks');
-    await expect(page.locator('[data-human-task-related-list] [data-human-task-id]')).toHaveCount(2);
+    await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks');
+    await expect(page.locator('[data-human-task-id]')).toHaveCount(2);
     const recoveredScreenshot = testInfo.outputPath('real-human-task-recovered.png');
     await page.screenshot({ path: recoveredScreenshot, fullPage: true });
     await testInfo.attach('real-human-task-recovered.png', {
       path: recoveredScreenshot, contentType: 'image/png',
     });
-
-    await page.locator(`[data-human-task-related-list] [data-human-task-id="${selectedTaskId}"]`).click();
-    await assertPinnedDialog(page, storedLocator.taskId);
 
     const decisionUrl = `${recovery.serviceOrigin}/v1/human-tasks/${encodeURIComponent(storedLocator.taskId)}`
       + `/confirmation/resolve?generation=${storedLocator.generation}`;
@@ -239,10 +222,10 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     expect(replay.status()).toBe(200);
     expect(await replay.json()).toMatchObject({ schemaVersion: 1, outcome: 'ALREADY_APPLIED',
       task: { taskId: storedLocator.taskId, status: 'RESOLVED', availableActions: [] } });
-    await page.locator('[data-human-task-related-back]').click();
-    await expect(page.locator('[data-human-task-related-status]')).toContainText('1 actionable related Human Task');
+    await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
+    await page.locator('[data-human-task-close]').click();
 
-    const remaining = page.locator('[data-human-task-related-list] [data-human-task-id]');
+    const remaining = page.locator('[data-human-task-id]');
     await expect(remaining).toHaveCount(1);
     const remainingTaskId = await remaining.getAttribute('data-human-task-id');
     expect(remainingTaskId).not.toBe(storedLocator.taskId);
@@ -250,12 +233,15 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await assertPinnedDialog(page, remainingTaskId);
     await page.locator('[data-human-task-comment]').fill('Reviewed once through the central form.');
     await page.locator('[data-human-task-action="RESOLVE"]').click();
-    await expect(page.locator('[data-human-task-related-status]')).toContainText('No actionable related Human Tasks');
-    await expect(page.locator('[data-human-task-related-list] [data-human-task-id]')).toHaveCount(0);
-    expect(await page.evaluate(() => window.ravenroot.activeDocument().cy.nodes(':selected').length)).toBe(0);
+    await expect(page.locator('.human-task-status')).toContainText('No actionable');
+    await expect(page.locator('[data-human-task-id]')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(nodeId => {
+      const node = window.ravenroot.activeDocument().cy.getElementById(nodeId);
+      return { label: node.renderedStyle('label'), pending: node.data('humanTaskPending'),
+        escalated: node.data('humanTaskEscalated'), pulsing: node.hasClass('human-task-pulse') };
+    }, NODE_ID)).toEqual({ label: expect.not.stringContaining('⚑'), pending: 0, escalated: 0,
+      pulsing: false });
     expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
-    await page.locator('[data-human-task-close]').click();
-    await expect(page.locator('#menu-run')).toBeFocused();
 
     await stopPhase(request);
   });

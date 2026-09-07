@@ -252,25 +252,6 @@ export function humanTaskContext(documentRecord) {
     processInstanceId: String(execution.processInstanceId) };
 }
 
-/**
- * Builds the narrow related-task query coordinates carried by one freshly authorized row.
- *
- * The row is not an authority grant. The server applies the caller's current tenant and action
- * authority again when this context is queried. Keeping the node in the query is deliberate: an
- * exact task locator must not silently widen into every task in its deployment or process.
- */
-export function humanTaskRelatedContext(item) {
-  const required = value => typeof value === 'string' && value.length > 0 ? value : null;
-  const graphVersion = required(item?.graphVersion);
-  const nodeId = required(item?.nodeId);
-  const deploymentId = required(item?.deploymentId);
-  const processInstanceId = required(item?.processInstanceId);
-  if (!graphVersion || !nodeId || (!deploymentId && !processInstanceId)) return null;
-  return Object.freeze(deploymentId
-    ? { graphVersion, deploymentId, nodeId }
-    : { graphVersion, processInstanceId, nodeId });
-}
-
 export function humanTaskServiceOrigin(clientBaseUrl, pageOrigin) {
   return String(clientBaseUrl || pageOrigin || '');
 }

@@ -44,7 +44,9 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -441,6 +444,12 @@ class OrchestrationRetryTest {
         var key = new ExecutionKey(TENANT, processInstanceId);
         var joins = new InMemoryJoinStore();
         var scheduler = engine.manualScheduler();
+        // Both sends still execute on the real pool. Waiting for START before its send returns makes
+        // its non-async fan-out compose on the owned invocation thread; doing the same for b1 makes
+        // its join arrival and scheduler call compose there too. b0 stays asynchronous so its
+        // durable retry can park independently while that invocation thread is held in schedule().
+        engine.completeBeforeSendReturns("start");
+        engine.completeBeforeSendReturns("b1");
         // The join's deadline is fired by hand rather than waited for, exactly as the join suite
         // drives every other timeout: the point of the test is the ORDER of two events, and a
         // wall-clock race between them would prove whichever the machine happened to run first.
@@ -452,14 +461,16 @@ class OrchestrationRetryTest {
             long revision = createRunningInstance(store, key, traversalId, manager.start().id());
             try (var recorder = ExecutionRecorder.open(store, key, "test-worker", TTL, revision)) {
                 CompletableFuture<?> execution;
-                try {
-                    execution = runner.execute(security, processInstanceId, traversalId, "payload",
-                            GRAPH_VERSION, null, null, recorder).toCompletableFuture();
+                try (var invocation = OwnedInvocation.start("retry-inline-completion", scheduler::releaseSchedule,
+                        () -> runner.execute(security, processInstanceId, traversalId, "payload",
+                                GRAPH_VERSION, null, null, recorder).toCompletableFuture())) {
                     awaitAttemptCount(store, key, "b0", 2);
                     assertEquals(1, retryingEntries.get(), "b0 is in backoff, not running");
 
                     assertTrue(scheduler.awaitInsideSchedule(BOUND_MILLIS),
                             "b1 must reach the scheduler while b0 remains in backoff");
+                    assertSame(invocation.thread(), scheduler.firstScheduleThread(),
+                            "the completed b1 dispatch must compose inline on the owned invocation thread");
                     assertEquals(List.of(), scheduler.requestedDelays(),
                             "entering schedule is earlier than registering a task that can fire");
                     assertEquals(0, scheduler.liveCount(),
@@ -468,6 +479,7 @@ class OrchestrationRetryTest {
                             "firing at callback entry is premature because registration is still gated");
 
                     scheduler.releaseSchedule();
+                    execution = invocation.await();
                     assertTrue(scheduler.awaitFirstRegistration(BOUND_MILLIS),
                             "the join timeout must become visible to the manual scheduler");
                     assertEquals(1, scheduler.liveCount(),
@@ -475,9 +487,6 @@ class OrchestrationRetryTest {
                     awaitParkedBranchCount(runner, 1);
                     assertEquals(1, scheduler.fireAll(),
                             "exactly one join timeout was scheduled, and this is it");
-                } finally {
-                    // A failed rendezvous must not leave b1 holding the engine during fixture cleanup.
-                    scheduler.releaseSchedule();
                 }
 
                 var thrown = assertThrows(ExecutionException.class,
@@ -496,6 +505,90 @@ class OrchestrationRetryTest {
                         "the decision stays durable and truthful: it was made, and then the traversal "
                                 + "ended before it could be acted on");
             }
+        }
+    }
+
+    private static final class OwnedInvocation<T> implements AutoCloseable {
+        private final Runnable release;
+        private final FutureTask<T> task;
+        private final Thread thread;
+        private boolean failureObserved;
+
+        private OwnedInvocation(String name, Runnable release, java.util.concurrent.Callable<T> action) {
+            this.release = release;
+            this.task = new FutureTask<>(action);
+            this.thread = new Thread(task, name);
+            thread.start();
+        }
+
+        static <T> OwnedInvocation<T> start(
+                String name, Runnable release, java.util.concurrent.Callable<T> action) {
+            return new OwnedInvocation<>(name, release, action);
+        }
+
+        Thread thread() {
+            return thread;
+        }
+
+        T await() throws InterruptedException, ExecutionException, TimeoutException {
+            try {
+                return task.get(BOUND_MILLIS, TimeUnit.MILLISECONDS);
+            } catch (ExecutionException failure) {
+                failureObserved = true;
+                throw failure;
+            }
+        }
+
+        @Override
+        public void close() {
+            release.run();
+            boolean interrupted = joinUntil(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BOUND_MILLIS));
+            if (thread.isAlive()) {
+                thread.interrupt();
+                interrupted |= joinUntil(System.nanoTime() + TimeUnit.SECONDS.toNanos(1));
+            }
+            RuntimeException taskFailure = null;
+            if (!thread.isAlive() && !failureObserved) {
+                try {
+                    task.get(0, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException unexpected) {
+                    interrupted = true;
+                } catch (ExecutionException failure) {
+                    taskFailure = failure.getCause() instanceof RuntimeException runtime
+                            ? runtime
+                            : new IllegalStateException("owned graph invocation failed", failure.getCause());
+                } catch (TimeoutException impossible) {
+                    taskFailure = new IllegalStateException("terminated invocation did not settle its task");
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            if (thread.isAlive()) {
+                throw new IllegalStateException("owned graph invocation did not terminate");
+            }
+            if (taskFailure != null) {
+                throw taskFailure;
+            }
+            if (interrupted) {
+                throw new IllegalStateException("owned graph invocation cleanup was interrupted");
+            }
+        }
+
+        private boolean joinUntil(long deadlineNanos) {
+            boolean interrupted = false;
+            while (thread.isAlive()) {
+                long remaining = deadlineNanos - System.nanoTime();
+                if (remaining <= 0) {
+                    break;
+                }
+                try {
+                    thread.join(Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining)));
+                } catch (InterruptedException cleanupInterrupted) {
+                    interrupted = true;
+                }
+            }
+            return interrupted;
         }
     }
 

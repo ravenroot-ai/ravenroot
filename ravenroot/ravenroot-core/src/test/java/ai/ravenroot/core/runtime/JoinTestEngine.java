@@ -25,10 +25,13 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Engine for fan-in tests: nodes really run, and they run on a pool so branches of a fan-out are
@@ -42,6 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class JoinTestEngine implements ExecutionEngine {
 
     private final Map<NodeRef, RavenNode> nodes = new ConcurrentHashMap<>();
+    private final Set<String> completedBeforeSendReturns = ConcurrentHashMap.newKeySet();
     private final ExecutorService pool;
     private final ManualScheduler scheduler = new ManualScheduler();
     private volatile EngineState state = EngineState.RUNNING;
@@ -62,6 +66,11 @@ final class JoinTestEngine implements ExecutionEngine {
     /** Nodes spawned so far. Used to assert that composition rejected a graph before any actor existed. */
     int spawnCount() {
         return spawned.get();
+    }
+
+    /** Makes sends for one exact graph node ID return only after their real pool dispatch settles. */
+    void completeBeforeSendReturns(String nodeId) {
+        completedBeforeSendReturns.add(nodeId);
     }
 
     @Override
@@ -107,6 +116,18 @@ final class JoinTestEngine implements ExecutionEngine {
                 result.completeExceptionally(error);
             }
         });
+        if (completedBeforeSendReturns.contains(message.nodeId())) {
+            try {
+                result.handle((ignored, failure) -> null).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("test dispatch completion wait was interrupted");
+            } catch (ExecutionException impossible) {
+                throw new IllegalStateException("test dispatch completion observation failed");
+            } catch (TimeoutException timeout) {
+                throw new IllegalStateException("test dispatch did not complete within the fixture bound");
+            }
+        }
         return result;
     }
 
@@ -158,6 +179,7 @@ final class JoinTestEngine implements ExecutionEngine {
     public void close() {
         state = EngineState.CLOSED;
         nodes.clear();
+        completedBeforeSendReturns.clear();
         pool.shutdownNow();
         try {
             pool.awaitTermination(5, TimeUnit.SECONDS);
@@ -202,6 +224,7 @@ final class JoinTestEngine implements ExecutionEngine {
          */
         private volatile CountDownLatch releaseSchedule;
         private final CountDownLatch enteredSchedule = new CountDownLatch(1);
+        private final AtomicReference<Thread> firstScheduleThread = new AtomicReference<>();
 
         /**
          * Signals the first task that has actually become visible to {@link #fireAll()}.
@@ -252,6 +275,10 @@ final class JoinTestEngine implements ExecutionEngine {
             return enteredSchedule.await(millis, TimeUnit.MILLISECONDS);
         }
 
+        Thread firstScheduleThread() {
+            return firstScheduleThread.get();
+        }
+
         boolean awaitFirstRegistration(long millis) throws InterruptedException {
             return firstRegistration.await(millis, TimeUnit.MILLISECONDS);
         }
@@ -283,11 +310,15 @@ final class JoinTestEngine implements ExecutionEngine {
         public ScheduledTask schedule(Duration delay, Runnable task) {
             CountDownLatch release = releaseSchedule;
             if (release != null) {
+                firstScheduleThread.compareAndSet(null, Thread.currentThread());
                 enteredSchedule.countDown();
                 try {
-                    release.await(10, TimeUnit.SECONDS);
+                    if (!release.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("manual scheduler gate was not released");
+                    }
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
+                    throw new IllegalStateException("manual scheduler gate was interrupted");
                 }
             }
             var entry = new Pending(delay, task);

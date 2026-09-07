@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises';
+
 import { expect, test } from '@playwright/test';
 
 import { logSummary, scanForViolations, summarizeViolations } from '../accessibility-helpers.mjs';
@@ -182,8 +184,10 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     const accessibility = summarizeViolations(await scanForViolations(page,
       { include: ['#human-task-dialog'] }));
     logSummary('Real Human Task confirmation dialog', accessibility);
+    const dialogAxePath = testInfo.outputPath('real-human-task-dialog-axe.json');
+    await writeFile(dialogAxePath, `${JSON.stringify(accessibility, null, 2)}\n`, 'utf8');
     await testInfo.attach('real-human-task-dialog-axe.json', {
-      body: Buffer.from(JSON.stringify(accessibility, null, 2)), contentType: 'application/json',
+      path: dialogAxePath, contentType: 'application/json',
     });
 
     await stopPhase(request);
@@ -243,8 +247,10 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     const recoveredAccessibility = summarizeViolations(await scanForViolations(page,
       { include: ['#info-body'] }));
     logSummary('Recovered Human Task Inspector', recoveredAccessibility);
+    const recoveredAxePath = testInfo.outputPath('real-human-task-recovered-inspector-axe.json');
+    await writeFile(recoveredAxePath, `${JSON.stringify(recoveredAccessibility, null, 2)}\n`, 'utf8');
     await testInfo.attach('real-human-task-recovered-inspector-axe.json', {
-      body: Buffer.from(JSON.stringify(recoveredAccessibility, null, 2)), contentType: 'application/json',
+      path: recoveredAxePath, contentType: 'application/json',
     });
     const recoveredScreenshot = testInfo.outputPath('real-human-task-recovered.png');
     await page.screenshot({ path: recoveredScreenshot, fullPage: true });

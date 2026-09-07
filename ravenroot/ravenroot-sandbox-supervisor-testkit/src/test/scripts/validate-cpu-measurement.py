@@ -160,7 +160,9 @@ def main() -> None:
                 "nestedFailed": "1",
                 "descriptor": CPU_DESCRIPTOR,
                 "throwable": "org.opentest4j.AssertionFailedError",
-                "actual": "COMPLETED",
+                "cause": None,
+                "expected": None,
+                "actual": None,
             }
             if any(marker.get(key) != value for key, value in completed_shape.items()):
                 fail("auxiliary COMPLETED outcome lacked the intended CPU assertion shape")

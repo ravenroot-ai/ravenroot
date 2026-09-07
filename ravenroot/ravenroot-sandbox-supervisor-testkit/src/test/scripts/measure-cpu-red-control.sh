@@ -44,7 +44,10 @@ validator="$module/src/test/scripts/validate-cpu-measurement.py"
 
 mkdir -p "$output_dir/logs" "$output_dir/load" "$output_dir/reports" "$output_dir/markers"
 records="$output_dir/samples.jsonl"
-touch "$records"
+scheduled_records="$output_dir/scheduled.jsonl"
+touch "$records" "$scheduled_records"
+initial_record_count=$(wc -l <"$records")
+initial_scheduled_count=$(wc -l <"$scheduled_records")
 module_tree=$(git -C "$checkout" rev-parse "$commit:ravenroot/ravenroot-sandbox-supervisor-testkit")
 printf 'commit\t%s\nmoduleTree\t%s\nmode\t%s\ncondition\t%s\n' \
   "$commit" "$module_tree" "$mode" "$condition" >"$output_dir/source-identity.tsv"
@@ -165,11 +168,14 @@ last_index=$((start_index + count - 1))
 for ((sample=start_index; sample<=last_index; sample++)); do
   sample_id=$(printf '%03d' "$sample")
   scheduled_at=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
-  jq -cn --arg commit "$commit" --arg mode "$mode" --arg condition "$condition" \
+  if ! jq -cn --arg commit "$commit" --arg mode "$mode" --arg condition "$condition" \
     --arg sample "$sample_id" --arg scheduledAt "$scheduled_at" \
     '{commit:$commit,mode:$mode,condition:$condition,sample:$sample,scheduledAt:$scheduledAt}' \
-    >>"$output_dir/scheduled.jsonl"
+    >>"$scheduled_records"; then
+    phase_failed=1
+  fi
   calibration='null'
+  calibration_harness_valid=true
   calibration_load_valid=true
   calibration_before=""
   calibration_after=""
@@ -199,22 +205,44 @@ for ((sample=start_index; sample<=last_index; sample++)); do
       fi
     fi
     external_wall_millis=$(((external_end - external_start) / 1000000))
-    calibration_line=$(sed -n 's/^RAVENROOT_CPU_CALIBRATION=//p' "$calibration_log" | tail -1)
-    if (( calibration_code == 0 )) && [[ -n "$calibration_line" ]]; then
-      calibration=$(jq -cn --argjson value "$calibration_line" \
-        --argjson external "$external_wall_millis" \
+    mapfile -t calibration_lines < <(sed -n 's/^RAVENROOT_CPU_CALIBRATION=//p' "$calibration_log")
+    if (( calibration_code == 0 && ${#calibration_lines[@]} == 1 )) \
+        && jq -e 'type == "object" and (.supported | type == "boolean")
+          and (.cpuMillis | type == "number") and (.wallMillis | type == "number")' \
+          <<<"${calibration_lines[0]}" >/dev/null; then
+      if ! calibration=$(jq -cn --argjson value "${calibration_lines[0]}" \
+          --argjson external "$external_wall_millis" \
+          --arg heartbeatBefore "$calibration_before" --arg heartbeatAfter "$calibration_after" \
+          --argjson loadValid "$calibration_load_valid" \
+          '$value + {externalWallMillis:$external,loadHeartbeatBefore:$heartbeatBefore,
+            loadHeartbeatAfter:$heartbeatAfter,loadValid:$loadValid,
+            runnable:($value.supported and $value.cpuMillis >= 4000 and $external <= 6000 and $loadValid),
+            category:(if $value.supported and $value.cpuMillis >= 4000
+              and $external <= 6000 and $loadValid then "RUNNABLE" else "NOT_RUNNABLE" end)}'); then
+        calibration='{"supported":false,"runnable":false,"category":"HARNESS_INVALID","reason":"CALIBRATION_JSON_COMPOSITION_FAILED"}'
+        calibration_harness_valid=false
+      fi
+    elif (( calibration_code == 124 )); then
+      calibration=$(jq -cn --argjson external "$external_wall_millis" \
         --arg heartbeatBefore "$calibration_before" --arg heartbeatAfter "$calibration_after" \
         --argjson loadValid "$calibration_load_valid" \
-        '$value + {externalWallMillis:$external,loadHeartbeatBefore:$heartbeatBefore,
-          loadHeartbeatAfter:$heartbeatAfter,loadValid:$loadValid,
-          runnable:($value.supported and $value.cpuMillis >= 4000 and $external <= 6000 and $loadValid)}')
+        '{supported:false,runnable:false,category:"NOT_RUNNABLE",reason:"CALIBRATION_TIMEOUT",
+          harnessExit:124,externalWallMillis:$external,loadHeartbeatBefore:$heartbeatBefore,
+          loadHeartbeatAfter:$heartbeatAfter,loadValid:$loadValid}')
     else
       calibration=$(jq -cn --argjson code "$calibration_code" \
         --argjson external "$external_wall_millis" \
         --arg heartbeatBefore "$calibration_before" --arg heartbeatAfter "$calibration_after" \
         --argjson loadValid "$calibration_load_valid" \
-        '{supported:false,runnable:false,harnessExit:$code,externalWallMillis:$external,
+        '{supported:false,runnable:false,category:"HARNESS_INVALID",
+          reason:"CALIBRATION_PROCESS_OR_MARKER_INVALID",harnessExit:$code,externalWallMillis:$external,
           loadHeartbeatBefore:$heartbeatBefore,loadHeartbeatAfter:$heartbeatAfter,loadValid:$loadValid}')
+      calibration_harness_valid=false
+    fi
+    if [[ "$calibration_load_valid" != true ]]; then
+      calibration_harness_valid=false
+      calibration=$(jq -c '. + {runnable:false,category:"HARNESS_INVALID",
+        reason:"CALIBRATION_LOAD_HEARTBEAT_INVALID"}' <<<"$calibration")
     fi
   fi
 
@@ -366,7 +394,7 @@ for ((sample=start_index; sample<=last_index; sample++)); do
     fi
   fi
 
-  jq -cn \
+  if ! jq -cn \
     --arg commit "$commit" --arg moduleTree "$module_tree" --arg mode "$mode" \
     --arg condition "$condition" --arg sample "$sample_id" --arg scheduledAt "$scheduled_at" \
     --arg startedAt "$outer_started_at" --arg endedAt "$outer_ended_at" \
@@ -390,12 +418,23 @@ for ((sample=start_index; sample<=last_index; sample++)); do
       auxiliaryHeartbeatBefore:$auxiliaryHeartbeatBefore,
       auxiliaryHeartbeatAfter:$auxiliaryHeartbeatAfter,auxiliaryLoadValid:$auxiliaryLoadValid,
       loadHeartbeatBefore:$heartbeatBefore,loadHeartbeatAfter:$heartbeatAfter,
-      loadValid:$loadValid}' >>"$records"
+      loadValid:$loadValid}' >>"$records"; then
+    phase_failed=1
+  fi
 
-  if [[ "$report_valid" != true || "$load_valid" != true || "$timed_out" == true ]]; then
+  if [[ "$report_valid" != true || "$load_valid" != true || "$timed_out" == true \
+      || "$calibration_harness_valid" != true ]]; then
     phase_failed=1
   fi
 done
+
+final_record_count=$(wc -l <"$records")
+final_scheduled_count=$(wc -l <"$scheduled_records")
+if (( final_record_count - initial_record_count != count \
+      || final_scheduled_count - initial_scheduled_count != count )); then
+  echo "scheduled/sample record count does not equal declared phase count $count" >&2
+  phase_failed=1
+fi
 
 {
   [[ -r /sys/fs/cgroup/cpu.max ]] && cat /sys/fs/cgroup/cpu.max

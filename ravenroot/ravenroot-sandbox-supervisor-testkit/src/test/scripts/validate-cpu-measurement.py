@@ -11,6 +11,10 @@ from pathlib import Path
 
 CPU_METHOD = "aSupervisorNotEnforcingCpuFailsOnlyTheCpuTest"
 CPU_DESCRIPTOR = "theSupervisorEnforcesTheDeclaredCpuBudget()"
+CPU_FAILURE_MESSAGE = (
+    "a workload that spends roughly 4s of real CPU time against a 250ms CPU budget, "
+    "well inside an 8s deadline, must not be reported as COMPLETED"
+)
 EXPECTED_FIXTURES = {
     "NonCompliantOnDeadline": "theSupervisorEnforcesTheDeclaredDeadline()",
     "NonCompliantOnCpu": CPU_DESCRIPTOR,
@@ -55,6 +59,8 @@ def main() -> None:
     errors = int(root.attrib.get("errors", "-1"))
     skipped = int(root.attrib.get("skipped", "-1"))
     cases = root.findall("testcase")
+    reruns = root.findall(".//rerunFailure") + root.findall(".//rerunError")
+    flaky = root.findall(".//flakyFailure") + root.findall(".//flakyError")
     exit_code = int(outer_exit)
 
     summary: dict[str, object] = {
@@ -64,9 +70,13 @@ def main() -> None:
         "errors": errors,
         "skipped": skipped,
         "exit": exit_code,
+        "reruns": len(reruns),
+        "flaky": len(flaky),
         "sample": sample,
         "condition": condition,
     }
+    if reruns or flaky:
+        fail("Surefire report contained a rerun or flaky result")
 
     if mode == "base":
         case_name = cases[0].attrib.get("name", "").removesuffix("()") if len(cases) == 1 else ""
@@ -137,11 +147,40 @@ def main() -> None:
             fail("auxiliary marker identity did not match its scheduled index")
         if marker.get("nestedStarted") != "11" or marker.get("observedRecipe") != "BUSY 4000\n":
             fail("auxiliary did not observe the exact real CPU contract recipe")
-        if marker.get("observedOutcome") not in {
+        outcome = marker.get("observedOutcome")
+        if outcome not in {
             "COMPLETED", "DEADLINE_EXCEEDED", "POLICY_REJECTED", "SETUP_FAILURE",
             "SECCOMP_DENIED", "OUT_OF_MEMORY", "CANCELLED", "REAP_FAILED", "PROTOCOL_FAILURE",
         }:
             fail("auxiliary did not record a supervisor outcome")
+        if outcome == "COMPLETED":
+            completed_shape = {
+                "category": "INTENDED_CPU_ASSERTION",
+                "nestedSucceeded": "10",
+                "nestedFailed": "1",
+                "descriptor": CPU_DESCRIPTOR,
+                "throwable": "org.opentest4j.AssertionFailedError",
+                "actual": "COMPLETED",
+            }
+            if any(marker.get(key) != value for key, value in completed_shape.items()):
+                fail("auxiliary COMPLETED outcome lacked the intended CPU assertion shape")
+            if CPU_FAILURE_MESSAGE not in str(marker.get("message", "")):
+                fail("auxiliary COMPLETED assertion lacked the distinctive CPU message")
+        else:
+            expected_category = (
+                "FALSE_CLEAN_DEADLINE"
+                if outcome == "DEADLINE_EXCEEDED"
+                else "FALSE_CLEAN_OTHER_OUTCOME"
+            )
+            clean_shape = {
+                "category": expected_category,
+                "nestedSucceeded": "11",
+                "nestedFailed": "0",
+                "descriptor": None,
+                "throwable": None,
+            }
+            if any(marker.get(key) != value for key, value in clean_shape.items()):
+                fail("auxiliary non-COMPLETED outcome lacked a coherent clean nested result")
         summary["category"] = "AUXILIARY_REAL_PROCESS_OBSERVATION"
         summary["marker"] = marker
     else:

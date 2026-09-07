@@ -211,8 +211,19 @@ async function holdExactRecovery(page, outcome) {
   await expect.poll(() => started).toBeGreaterThan(0);
   await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
   return { original, release: async () => {
+    const consumed = page.waitForEvent(outcome === 'error' ? 'requestfailed' : 'requestfinished', {
+      predicate: request_ => {
+        const url = new URL(request_.url());
+        return url.pathname === '/v1/human-tasks/attention'
+          && url.searchParams.get('taskId') === original.taskId
+          && url.searchParams.get('generation') === String(original.generation);
+      },
+    });
     release();
+    await consumed;
     await expect.poll(() => finished).toBe(started);
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))));
   } };
 }
 

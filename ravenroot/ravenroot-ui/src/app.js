@@ -6480,12 +6480,13 @@ function renderNodeForm(model, creating) {
         syncAutosavedNodeRenderer(model.id);
       }
     }
-    updateHistoryUi();
     if (creating) {
       retireInspectorDraft(form);
       rebuildGraph();
+      updateHistoryUi();
       showNodeInfo(cy.getElementById(id));
     } else if (savedDraft) {
+      updateHistoryUi();
       preserveNodeInspectorAfterSave({ owner, target, draft: savedDraft, selectedIds });
     }
     scheduleProgramGraphReadiness(workspace.active);

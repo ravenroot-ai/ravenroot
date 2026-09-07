@@ -228,14 +228,22 @@ class PostgresBackupRestoreDrillTest {
         // in observe() has a benign empty answer: Optional.empty(), an empty page, an empty list. A
         // family that silently stopped being populated would therefore be compared as "absent equals
         // absent" and the drill would keep passing while covering one family fewer than it claims.
+        // The scalar answers, which report a count or a position rather than a rendered record and so
+        // are invisible to the two emptiness checks above.
+        final java.util.Set<String> COUNTED_ANSWERS = java.util.Set.of(
+                "idempotency.count", "journal.retainedFrom", "outbox.cursor", "inbox.count");
         observedBeforeTheDump.forEach((question, answer) -> {
             assertNotEquals("absent", answer, question + " read as absent before the dump, so the "
                     + "fixture no longer populates it and the restore is not being tested for it");
             assertNotEquals("[]", answer, question + " read as empty before the dump, so the fixture "
                     + "no longer populates it and the restore is not being tested for it");
-            if (question.startsWith("rows.")) {
-                assertNotEquals("0", answer, question + " holds no rows before the dump, so comparing "
-                        + "the count after the restore compares zero with zero");
+            if (question.startsWith("rows.") || COUNTED_ANSWERS.contains(question)) {
+                // Extended past the rows.* prefix deliberately. These four answer with a bare number
+                // rather than with a rendered record, so "absent" and "[]" cannot catch them, and a
+                // fixture that stopped populating them would compare zero with zero and keep passing
+                // while the drill went on naming the family in its own documentation.
+                assertNotEquals("0", answer, question + " holds nothing before the dump, so comparing "
+                        + "it after the restore compares zero with zero");
             }
         });
 
@@ -252,9 +260,11 @@ class PostgresBackupRestoreDrillTest {
      * <p>No flag beyond the format is passed to either tool. That is the claim being made as much as
      * the data comparison is: an operator who runs the documented {@code pg_dump} and the documented
      * {@code pg_restore}, with nothing else, gets this database back. {@code --exit-on-error} is added
-     * to {@code pg_restore} not to change what it does but to make it report what it did — without it
-     * the tool continues past a failed statement and exits zero, so a restore that dropped half the
-     * rows on foreign-key errors would look exactly like this one.</p>
+     * so the restore stops at the first failure instead of continuing and applying part of the dump.
+     * It is not added to make the failure visible: {@code pg_restore} already exits 1 and prints
+     * {@code errors ignored on restore: N} when it continues past one. The tool that fails silently is
+     * {@code psql}, which restores a plain-format dump reporting every error and exiting zero, and
+     * which this drill therefore does not use.</p>
      */
     @Test
     void aDumpAndRestorePreservesEveryEntityFamilyAndTheReferencesBetweenThem() throws Exception {
@@ -322,6 +332,11 @@ class PostgresBackupRestoreDrillTest {
         run("pg_restore -U " + user + " -d " + database + " --exit-on-error " + dataOnly);
 
         Map<String, String> observedAfter = observe(target, fixture);
+        // The same guard the full restore carries: without it, an observation that stopped being taken
+        // would drop out of both maps and the loop below would compare nothing and pass.
+        assertEquals(observedBeforeTheDump.keySet(), observedAfter.keySet(),
+                "the restored database answers a different set of questions than the source did, so "
+                        + "the comparison below is vacuous for whatever is missing");
         for (Map.Entry<String, String> expected : observedBeforeTheDump.entrySet()) {
             assertEquals(expected.getValue(), observedAfter.get(expected.getKey()),
                     "the data-only restore answers differently for " + expected.getKey());
@@ -1154,7 +1169,15 @@ class PostgresBackupRestoreDrillTest {
         return digestOf(seed.getBytes(StandardCharsets.UTF_8)).substring("sha256:".length());
     }
 
-    /** The only reads done in SQL: two tables the ports publish no reader for. */
+    /**
+     * The only reads done in SQL, and the four tables they cover.
+     *
+     * <p>Three of them — {@code work_claim}, {@code timer} and {@code invocation_parent} — have no port
+     * reader at all, so a row count is the whole of what can be observed about them. The fourth,
+     * {@code deployment_command}, does have one: the ledger replay drives it through the registry. It
+     * is counted here as well because a count and a replay answer different questions — that the rows
+     * survived, and that replaying one of them still yields the outcome it recorded.</p>
+     */
     private static long countRows(DataSource dataSource, String table) {
         // The table name is a literal from this class, never a caller-supplied value, which is what
         // makes concatenating it here different from every other statement in this module.

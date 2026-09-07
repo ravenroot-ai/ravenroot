@@ -4278,6 +4278,377 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.main(["--accept-retired-pending"])
         self.assertEqual(2, failure.exception.code)
 
+    def verification_script_fixture(self, root: Path):
+        paths = [Path(path) for path in audit.VERIFICATION_SCRIPT_FIXTURES]
+        supporting = [Path(path) for path in audit.VERIFICATION_SCRIPT_INBOUND_GUARDS]
+        supporting.append(Path(".github/workflows/ci.yml"))
+        for relative in (*paths, *supporting):
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+            if relative in paths:
+                target.chmod(0o755)
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        candidates = audit.discover_paths(root, paths)
+        authority = audit.verification_script_fixture_authority_from_source(root, candidates)
+        self.assertIsNotNone(authority)
+        entries = {candidate.id: candidate.inventory_entry() for candidate in candidates}
+        for entry in entries.values():
+            entry.update(
+                retainedAuthority=audit.VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID,
+                rationale=audit.VERIFICATION_SCRIPT_FIXTURE_RATIONALE,
+            )
+        authorities = {audit.VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID: authority}
+        return authorities, entries, {candidate.id: candidate for candidate in candidates}
+
+    def github_schema_source_fixture(self, root: Path):
+        paths = {Path(path) for path in audit.GITHUB_SCHEMA_PATHS}
+        paths.update({audit.GITHUB_SCHEMA_INDEX_PATH, audit.GITHUB_SCHEMA_TEST_PATH})
+        paths.update(Path(spec[0]) for spec in audit.GITHUB_SECURITY_GUARD_METHODS.values())
+        for relative in paths:
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        candidates = audit.discover_paths(
+            root, [Path(path) for path in audit.GITHUB_SCHEMA_PATHS])
+        return candidates, {candidate.id: candidate for candidate in candidates}
+
+    def github_schema_authority_fixture(self, root: Path):
+        candidates, discovered = self.github_schema_source_fixture(root)
+        entries = {candidate.id: candidate.inventory_entry() for candidate in candidates}
+        for identifier, entry in entries.items():
+            entry.update(
+                status="retained",
+                classification="security-ceiling-or-default"
+                if identifier in audit.GITHUB_SECURITY_OWNER_SYMBOLS
+                else "protocol-or-format-invariant",
+                retainedAuthority=audit.GITHUB_SCHEMA_FAMILY_ID,
+                rationale=f"reviewed schema rationale {identifier}",
+            )
+        partition_digest = audit.github_schema_partition_digest(entries, set(discovered))
+        patcher = mock.patch.object(audit, "GITHUB_SCHEMA_PARTITION_SHA256", partition_digest)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        authority = audit.github_schema_authority_from_source(root, candidates)
+        self.assertIsNotNone(authority)
+        return ({audit.GITHUB_SCHEMA_FAMILY_ID: authority}, entries, discovered)
+
+    def test_github_schema_authority_proves_four_blobs_636_rows_and_nine_input_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.github_schema_authority_fixture(root)
+            authority = authorities[audit.GITHUB_SCHEMA_FAMILY_ID]
+            self.assertEqual(636, len(candidates))
+            self.assertEqual(4, len(authority["files"]))
+            self.assertEqual(9, len(authority[
+                "candidateIdsByClassification"]["security-ceiling-or-default"]))
+            self.assertEqual(627, len(authority[
+                "candidateIdsByClassification"]["protocol-or-format-invariant"]))
+            self.assertEqual([], audit.github_schema_authority_errors(
+                root, authorities, entries, candidates))
+
+    def test_github_schema_authority_rejects_partition_source_and_disabled_test_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.github_schema_authority_fixture(root)
+            family = audit.GITHUB_SCHEMA_FAMILY_ID
+            security_id = next(iter(audit.GITHUB_SECURITY_OWNER_SYMBOLS))
+
+            wrong_class = copy.deepcopy(entries)
+            wrong_class[security_id]["classification"] = "protocol-or-format-invariant"
+            self.assertTrue(audit.github_schema_authority_errors(
+                root, authorities, wrong_class, candidates))
+            opted_out = copy.deepcopy(entries)
+            opted_out[security_id].pop("retainedAuthority")
+            self.assertTrue(audit.github_schema_authority_errors(
+                root, authorities, opted_out, candidates))
+            changed_rationale = copy.deepcopy(entries)
+            changed_rationale[security_id]["rationale"] += " changed"
+            self.assertTrue(any("classification/rationale partition" in error for error in
+                                audit.github_schema_authority_errors(
+                                    root, authorities, changed_rationale, candidates)))
+            missing = copy.deepcopy(authorities)
+            missing[family]["files"].pop()
+            self.assertTrue(audit.github_schema_authority_errors(
+                root, missing, entries, candidates))
+
+            schema_path = root / next(iter(audit.GITHUB_SCHEMA_PATHS))
+            schema = schema_path.read_text(encoding="utf-8")
+            schema_path.write_text(schema.replace("9007199254740990", "9007199254740989", 1),
+                                   encoding="utf-8")
+            refreshed = audit.discover_paths(
+                root, [Path(path) for path in audit.GITHUB_SCHEMA_PATHS])
+            self.assertIsNone(audit.github_schema_authority_from_source(root, refreshed))
+            schema_path.write_text(schema, encoding="utf-8")
+
+            guard_path = root / audit.GITHUB_SECURITY_GUARD_METHODS[
+                "GithubAppReviewBehavior.Input.parse"][0]
+            guard = guard_path.read_text(encoding="utf-8")
+            guard_path.write_text(guard.replace("8_192", "8_193", 1), encoding="utf-8")
+            self.assertIsNone(audit.github_schema_authority_from_source(
+                root, tuple(candidates.values())))
+            guard_path.write_text(guard, encoding="utf-8")
+
+            test_path = root / audit.GITHUB_SCHEMA_TEST_PATH
+            test_source = test_path.read_text(encoding="utf-8")
+            test_path.write_text(test_source.replace(
+                "class GithubBoundaryTest", "@Disabled\nclass GithubBoundaryTest", 1),
+                encoding="utf-8")
+            self.assertIsNone(audit.github_schema_authority_from_source(
+                root, tuple(candidates.values())))
+
+    def test_strict_json_document_rejects_duplicate_members(self) -> None:
+        with self.assertRaisesRegex(ValueError, "duplicate JSON member"):
+            audit.strict_json_document('{"input": 1, "input": 2}')
+
+    def ui_text_authority_fixture(self, root: Path):
+        paths = (
+            audit.UI_TEXT_CATALOG_PATH, audit.UI_TEXT_TEST_PATH,
+            audit.UI_TEXT_APP_COMMANDS_PATH, audit.UI_TEXT_APP_PATH,
+        )
+        for relative in paths:
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        candidates = audit.discover_paths(root, [audit.UI_TEXT_CATALOG_PATH])
+        rekey = audit.ui_text_atomic_rekey_record(
+            ROOT, {candidate.id for candidate in candidates})
+        self.assertIsNotNone(rekey)
+        patcher = mock.patch.object(audit, "ui_text_atomic_rekey_record", return_value=rekey)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        authority = audit.ui_text_catalog_authority_from_source(root, candidates)
+        self.assertIsNotNone(authority)
+        entries = {candidate.id: candidate.inventory_entry() for candidate in candidates}
+        for identifier, entry in entries.items():
+            presentation = identifier in audit.UI_TEXT_PRESENTATION_IDS
+            entry.update(
+                status="retained",
+                classification="presentation-text" if presentation
+                else "protocol-or-format-invariant",
+                retainedAuthority=audit.UI_TEXT_FAMILY_ID,
+                rationale=audit.UI_TEXT_PRESENTATION_RATIONALE if presentation
+                else audit.UI_TEXT_PROTOCOL_RATIONALE,
+            )
+        return ({audit.UI_TEXT_FAMILY_ID: authority}, entries,
+                {candidate.id: candidate for candidate in candidates})
+
+    def test_ui_text_authority_proves_exact_268_row_catalog_and_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.ui_text_authority_fixture(root)
+            partitions = authorities[audit.UI_TEXT_FAMILY_ID]["candidateIdsByClassification"]
+            self.assertEqual({"presentation-text": 133, "protocol-or-format-invariant": 135},
+                             {key: len(value) for key, value in partitions.items()})
+            self.assertEqual(268, len(candidates))
+            self.assertEqual([], audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+
+    def test_ui_text_authority_rejects_metadata_source_sink_and_disabled_test_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.ui_text_authority_fixture(root)
+            family = audit.UI_TEXT_FAMILY_ID
+            identifier = next(iter(audit.UI_TEXT_PRESENTATION_IDS))
+
+            missing = copy.deepcopy(authorities)
+            missing[family]["candidateIdsByClassification"]["presentation-text"].pop()
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, missing, entries, candidates))
+            opted_out = copy.deepcopy(entries)
+            opted_out[identifier].pop("retainedAuthority")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, opted_out, candidates))
+            wrong_class = copy.deepcopy(entries)
+            wrong_class[identifier]["classification"] = "protocol-or-format-invariant"
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, wrong_class, candidates))
+            wrong_rekey = copy.deepcopy(authorities)
+            wrong_rekey[family]["atomicRekey"]["beforePrecursors"].pop()
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, wrong_rekey, entries, candidates))
+
+            source_path = root / audit.UI_TEXT_CATALOG_PATH
+            original = source_path.read_text(encoding="utf-8")
+            source_path.write_text(original.replace("New Document", "New document", 1),
+                                   encoding="utf-8")
+            refreshed = audit.discover_paths(root, [audit.UI_TEXT_CATALOG_PATH])
+            change = audit.ui_text_pair_change_summary(
+                original, source_path.read_text(encoding="utf-8"))
+            self.assertIsNotNone(change)
+            self.assertEqual(132, len(change["unchangedPairs"]))
+            self.assertEqual(1, len(change["changedPairs"]))
+            self.assertEqual([], change["addedPairs"])
+            self.assertEqual([], change["removedPairs"])
+            self.assertEqual(2, len(set(candidates)
+                                    & {candidate.id for candidate in refreshed}))
+            self.assertIsNone(audit.ui_text_catalog_authority_from_source(root, refreshed))
+            source_path.write_text(original, encoding="utf-8")
+
+            app_path = root / audit.UI_TEXT_APP_PATH
+            app = app_path.read_text(encoding="utf-8")
+            app_path.write_text(app.replace(
+                "uiText('controls.nodeActionScale.help')", "'Node minibar size'", 1),
+                encoding="utf-8")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+            app_path.write_text(app, encoding="utf-8")
+
+            app_path.write_text(app.replace(
+                "import { uiText } from './ui-text.js';",
+                "const importDecoy = `import { uiText } from './ui-text.js';`;\n"
+                "const uiText = () => '';", 1),
+                encoding="utf-8")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+            app_path.write_text(app, encoding="utf-8")
+
+            app_commands_path = root / audit.UI_TEXT_APP_COMMANDS_PATH
+            app_commands = app_commands_path.read_text(encoding="utf-8")
+            app_commands_path.write_text(app_commands.replace(
+                "import { hasUiText, uiText } from './ui-text.js';",
+                "const hasUiText = () => true; const uiText = () => '';", 1),
+                encoding="utf-8")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+            app_commands_path.write_text(app_commands, encoding="utf-8")
+
+            app_commands_path.write_text(app_commands.replace(
+                "].map(command => localizeCommand(command, t));", "].map(command => command);", 1),
+                encoding="utf-8")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+            app_commands_path.write_text(app_commands, encoding="utf-8")
+
+            app_path.write_text(app.replace(
+                "createCommandRegistry(createAppCommands({",
+                "createCommandRegistry([{", 1), encoding="utf-8")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+            app_path.write_text(app, encoding="utf-8")
+
+            test_path = root / audit.UI_TEXT_TEST_PATH
+            test_source = test_path.read_text(encoding="utf-8")
+            test_path.write_text(test_source.replace("  it('", "  it.skip('", 1),
+                                 encoding="utf-8")
+            self.assertTrue(audit.ui_text_catalog_authority_errors(
+                root, authorities, entries, candidates))
+
+    def test_verification_script_fixture_authority_proves_exact_513_row_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.verification_script_fixture(root)
+            self.assertEqual(513, len(candidates))
+            self.assertEqual(11, len(authorities[
+                audit.VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID]["files"]))
+            self.assertEqual([], audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates))
+            unlisted = Path("scripts/verify-similar-but-unlisted.sh")
+            self.assertEqual("script", audit.surface(unlisted))
+
+    def test_verification_script_fixture_authority_rejects_drift_and_opt_outs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.verification_script_fixture(root)
+            family = audit.VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID
+
+            missing = copy.deepcopy(authorities)
+            missing[family]["files"].pop()
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, missing, entries, candidates))
+
+            identifier = next(iter(candidates))
+            opted_out = copy.deepcopy(entries)
+            opted_out[identifier].pop("retainedAuthority")
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, authorities, opted_out, candidates))
+            wrong_class = copy.deepcopy(entries)
+            wrong_class[identifier]["classification"] = "derived"
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, authorities, wrong_class, candidates))
+
+            path = root / "scripts/verify-extension-pack-consumer.sh"
+            original = path.read_text(encoding="utf-8")
+            path.write_text("exit 0\n" + original, encoding="utf-8")
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates))
+            path.write_text(original, encoding="utf-8")
+
+            launcher = root / "dev.sh"
+            launcher.write_text(
+                launcher.read_text(encoding="utf-8")
+                + "\nscripts/verify-extension-pack-consumer.sh\n", encoding="utf-8")
+            errors = audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates)
+            self.assertTrue(any("unreviewed executable caller" in error
+                                for error in errors), errors)
+
+    def test_verification_script_fixture_rejects_caller_and_mode_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates = self.verification_script_fixture(root)
+
+            workflow = root / ".github/workflows/ci.yml"
+            ci = workflow.read_text(encoding="utf-8")
+            workflow.write_text(ci.replace(
+                "run: ./scripts/verify-extension-pack-consumer.sh",
+                "run: ./scripts/verify-extension-pack-consumer.sh --changed", 1), encoding="utf-8")
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates))
+            workflow.write_text(ci, encoding="utf-8")
+
+            for relative, content in (
+                (Path("Dockerfile"), "FROM scratch\nRUN ./scripts/verify-extension-pack-consumer.sh\n"),
+                (Path("package.json"), json.dumps({"scripts": {
+                    "verify": "./scripts/verify-extension-pack-consumer.sh"}})),
+                (Path("src/Launcher.java"), 'class Launcher { void run() { new ProcessBuilder('
+                 '"scripts/verify-extension-pack-consumer.sh").start(); } }'),
+            ):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+                subprocess.run(["git", "add", relative.as_posix()], cwd=root, check=True)
+                errors = audit.verification_script_fixture_authority_errors(
+                    root, authorities, entries, candidates)
+                self.assertTrue(any("unreviewed executable caller" in error
+                                    for error in errors), (relative, errors))
+                subprocess.run(["git", "rm", "-q", "-f", relative.as_posix()],
+                               cwd=root, check=True)
+
+            comment = root / "scripts/comment-only.sh"
+            guidance = root / "docs/verification-guide.md"
+            comment.write_text(
+                "#!/bin/sh\n# ./scripts/verify-extension-pack-consumer.sh\n", encoding="utf-8")
+            guidance.parent.mkdir(parents=True, exist_ok=True)
+            guidance.write_text(
+                "Run `./scripts/verify-extension-pack-consumer.sh` before release.\n",
+                encoding="utf-8")
+            subprocess.run(["git", "add", comment.as_posix(), guidance.as_posix()],
+                           cwd=root, check=True)
+            self.assertEqual([], audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates))
+            subprocess.run(["git", "rm", "-q", "-f", comment.as_posix(),
+                            guidance.as_posix()], cwd=root, check=True)
+
+            script = root / "scripts/verify-extension-pack-consumer.sh"
+            original = script.read_bytes()
+            script.chmod(0o644)
+            subprocess.run(["git", "add", script.relative_to(root).as_posix()],
+                           cwd=root, check=True)
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates))
+            script.chmod(0o755)
+            subprocess.run(["git", "add", script.relative_to(root).as_posix()],
+                           cwd=root, check=True)
+
+            script.unlink()
+            script.symlink_to("verify-empty-plugins-parity.sh")
+            self.assertTrue(audit.verification_script_fixture_authority_errors(
+                root, authorities, entries, candidates))
+            script.unlink()
+            script.write_bytes(original)
+
 
 if __name__ == "__main__":
     unittest.main()

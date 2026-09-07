@@ -113,6 +113,51 @@ RESOLVER_COMPOSITION_LINK_ROLES = {
     "typedDefaultsInitializer",
     "nestedDefaultsAccessor",
 }
+ENVIRONMENT_RESOLVER_TEST_ROLES = {
+    "bindingEnumeration",
+    "blankTypedDefault",
+    "asciiTrimContract",
+    "malformedOverflowRefusal",
+    "nonPositiveRefusal",
+    "documentedBoundaryAcceptance",
+    "relationalConstraintRefusal",
+}
+DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS = {
+    "compose": frozenset({"compose.yaml"}),
+    "helm": frozenset({
+        "deploy/helm/ravenroot/values.yaml",
+        "deploy/helm/ravenroot/values.schema.json",
+        "deploy/helm/ravenroot/templates/deployment.yaml",
+    }),
+    "rawKubernetes": frozenset({"deploy/kubernetes/ravenroot.yaml"}),
+}
+LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES = frozenset({
+    ("graph.execution.max-amplified-deliveries", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxAmplifiedDeliveries", "RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES"),
+    ("graph.execution.max-cumulative-payload-bytes", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxCumulativePayloadBytes", "RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES"),
+    ("graph.execution.max-fan-out", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxFanOut", "RAVENROOT_GRAPH_MAX_FAN_OUT"),
+    ("graph.execution.max-in-flight-hops-per-traversal", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxInFlightHopsPerTraversal", "RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS"),
+    ("graph.execution.max-live-actors-per-traversal", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxLiveActorsPerTraversal", "RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL"),
+    ("graph.execution.max-queued-admissions-per-node", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxQueuedAdmissionsPerNode", "RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE"),
+    ("graph.execution.max-recovery-deliveries-per-attempt", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxRecoveryDeliveriesPerAttempt", "RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT"),
+    ("graph.execution.max-resident-actors", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxResidentActors", "RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS"),
+    ("graph.execution.max-traversal-steps", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxTraversalSteps", "RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS"),
+    ("graph.graphml.max-attributes", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxAttributes", "RAVENROOT_GRAPHML_MAX_ATTRIBUTES"),
+    ("graph.graphml.max-bytes", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxBytes", "RAVENROOT_GRAPHML_MAX_BYTES"),
+    ("graph.graphml.max-depth", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxDepth", "RAVENROOT_GRAPHML_MAX_DEPTH"),
+    ("graph.graphml.max-edges", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxEdges", "RAVENROOT_GRAPH_MAX_EDGES"),
+    ("graph.graphml.max-elements", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxElements", "RAVENROOT_GRAPHML_MAX_ELEMENTS"),
+    ("graph.graphml.max-keys", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxKeys", "RAVENROOT_GRAPHML_MAX_KEYS"),
+    ("graph.graphml.max-namespace-declarations", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxNamespaceDeclarations", "RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS"),
+    ("graph.graphml.max-nodes", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxNodes", "RAVENROOT_GRAPH_MAX_NODES"),
+    ("graph.graphml.max-properties", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxProperties", "RAVENROOT_GRAPH_MAX_PROPERTIES"),
+    ("graph.graphml.max-string-length", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits", "maxStringLength", "RAVENROOT_GRAPHML_MAX_STRING_LENGTH"),
+    ("graph.payload.max-collection-size", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxCollectionSize", "RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE"),
+    ("graph.payload.max-depth", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxDepth", "RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH"),
+    ("graph.payload.max-encoded-bytes", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxEncodedBytes", "RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES"),
+    ("graph.payload.max-key-length", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxKeyLength", "RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH"),
+    ("graph.payload.max-text-length", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxTextLength", "RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH"),
+    ("graph.payload.max-value-count", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxValueCount", "RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT"),
+})
 
 
 @dataclass(frozen=True)
@@ -1058,6 +1103,112 @@ def java_method_digest(source: str, type_symbol: str, method: str) -> str | None
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
+def java_method_header(source: str, type_symbol: str, method: str) -> str | None:
+    """Return the normalized declaration header for one supported direct method."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    start = source.rfind("\n", 0, span[0]) + 1
+    code = strip_c_comments_and_literals(source)
+    opening = code.find("{", span[0], span[1])
+    if opening < 0:
+        return None
+    return normalized(source[start:opening])
+
+
+def java_compact_constructor_span(source: str, type_symbol: str) -> tuple[int, int] | None:
+    """Resolve one direct compact record constructor, excluding methods and nested types."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return None
+    base, limit = type_span
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    matches: list[tuple[int, int]] = []
+    for name in re.finditer(rf"\b{re.escape(type_symbol)}\s*\{{", code):
+        if depths[name.start()] != 1:
+            continue
+        opening = code.find("{", name.start())
+        closing = matching_delimiter(code, opening, "{", "}")
+        if closing is not None:
+            matches.append((base + name.start(), base + closing + 1))
+    return matches[0] if len(matches) == 1 else None
+
+
+def java_span_digest(source: str, span: tuple[int, int] | None) -> str | None:
+    if span is None:
+        return None
+    body = normalized(strip_c_comments(source[slice(*span)]))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def java_reachable_helpers_from_span(source: str, type_symbol: str,
+                                    span: tuple[int, int] | None) -> set[str] | None:
+    """Close same-type calls beginning in a direct constructor or initializer span."""
+    if span is None:
+        return None
+    declared = java_declared_method_names(source, type_symbol)
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    roots = {name for name in declared if re.search(rf"\b{re.escape(name)}\s*\(", code)}
+    reachable = set(roots)
+    pending = list(roots)
+    while pending:
+        method = pending.pop()
+        calls = java_method_calls(source, type_symbol, method, declared)
+        if calls is None:
+            return None
+        for called in calls - reachable:
+            reachable.add(called)
+            pending.append(called)
+    return reachable
+
+
+JAVA_DECIMAL_INTEGER = re.compile(r"(?:0|[1-9](?:_?[0-9])*)")
+JAVA_INT_MAX = (1 << 31) - 1
+JAVA_LONG_MAX = (1 << 63) - 1
+
+
+def java_positive_decimal(value: str, maximum: int) -> int | None:
+    if JAVA_DECIMAL_INTEGER.fullmatch(value) is None:
+        return None
+    parsed = int(value.replace("_", ""))
+    return parsed if 0 < parsed <= maximum else None
+
+
+def evaluated_java_default(expression: str, component_is_duration: bool) -> dict[str, object] | None:
+    """Evaluate the closed positive int/default-duration forms used by rate configuration."""
+    expression = normalized(expression)
+    if component_is_duration:
+        matched = re.fullmatch(
+            r"Duration\.of(Seconds|Minutes|Hours|Days)\(((?:0|[1-9](?:_?[0-9])*))\)",
+            expression,
+        )
+        if matched is None:
+            return None
+        value = java_positive_decimal(matched.group(2), JAVA_LONG_MAX)
+        multipliers = {"Seconds": 1, "Minutes": 60, "Hours": 3600, "Days": 86400}
+        if value is None or value > JAVA_LONG_MAX // multipliers[matched.group(1)]:
+            return None
+        seconds = value * multipliers[matched.group(1)]
+        if seconds > JAVA_INT_MAX:
+            return None
+        return {"kind": "duration-seconds", "value": seconds}
+    direct = java_positive_decimal(expression, JAVA_INT_MAX)
+    if direct is not None:
+        return {"kind": "integer", "value": direct}
+    multiplied = re.fullmatch(
+        r"((?:0|[1-9](?:_?[0-9])*))\s*\*\s*((?:0|[1-9](?:_?[0-9])*))",
+        expression,
+    )
+    if multiplied is None:
+        return None
+    left = java_positive_decimal(multiplied.group(1), JAVA_INT_MAX)
+    right = java_positive_decimal(multiplied.group(2), JAVA_INT_MAX)
+    if left is None or right is None or left > JAVA_INT_MAX // right:
+        return None
+    return {"kind": "integer", "value": left * right}
+
+
 def java_declared_method_names(source: str, type_symbol: str) -> set[str]:
     """Return unambiguous method names declared directly by one Java type."""
     type_span = java_type_span(source, type_symbol)
@@ -1318,6 +1469,78 @@ def conversion_evidence_errors(identifier: str, entry: dict[str, object],
     return errors
 
 
+def environment_resolver_authority_errors(root: Path, identifier: str,
+                                          authority: dict[str, object]) -> list[str]:
+    required = {
+        "kind", "path", "type", "factoryMethod", "factoryBodyDigest", "integerMethod",
+        "integerBodyDigest", "dependencyBodyDigests", "validationBodyDigest",
+        "validationDependencyBodyDigests", "testPath", "testType", "testMethods",
+        "testMethodDigests",
+    }
+    if set(authority) != required:
+        return [f"resolver authority {identifier} requires exactly {', '.join(sorted(required))}"]
+    relative = Path(str(authority["path"]))
+    type_symbol = str(authority["type"])
+    if current_source_owner(root, f"{relative.as_posix()}#{type_symbol}") is None:
+        return [f"resolver authority {identifier} has no tracked Java type"]
+    source = (root / relative).read_text(encoding="utf-8")
+    factory = str(authority["factoryMethod"])
+    integer = str(authority["integerMethod"])
+    errors: list[str] = []
+    expected_factory = f"public static {type_symbol} {factory}(Map<String, String> environment)"
+    expected_integer = (
+        f"private static int {integer}(Map<String, String> environment, "
+        "String name, int defaultValue)"
+    )
+    if java_method_header(source, type_symbol, factory) != expected_factory:
+        errors.append(f"resolver authority {identifier} factory signature is unsupported")
+    if java_method_header(source, type_symbol, integer) != expected_integer:
+        errors.append(f"resolver authority {identifier} integer signature is unsupported")
+    if java_method_digest(source, type_symbol, factory) != authority["factoryBodyDigest"]:
+        errors.append(f"resolver authority {identifier} factory body digest has drifted")
+    if java_method_digest(source, type_symbol, integer) != authority["integerBodyDigest"]:
+        errors.append(f"resolver authority {identifier} integer body digest has drifted")
+    dependencies = authority["dependencyBodyDigests"]
+    reachable = java_reachable_helper_methods(source, type_symbol, (integer,))
+    if not isinstance(dependencies, dict) or reachable != set() or set(dependencies) != reachable \
+            or any(java_method_digest(source, type_symbol, method) != digest
+                   for method, digest in dependencies.items()):
+        errors.append(f"resolver authority {identifier} has incomplete integer helper dependencies")
+    constructor = java_compact_constructor_span(source, type_symbol)
+    if java_span_digest(source, constructor) != authority["validationBodyDigest"]:
+        errors.append(f"resolver authority {identifier} compact constructor digest has drifted")
+    validation_dependencies = authority["validationDependencyBodyDigests"]
+    validation_reachable = java_reachable_helpers_from_span(source, type_symbol, constructor)
+    if not isinstance(validation_dependencies, dict) or validation_reachable is None \
+            or validation_reachable != {"positive", "burst"} \
+            or set(validation_dependencies) != validation_reachable \
+            or any(java_method_digest(source, type_symbol, method) != digest
+                   for method, digest in validation_dependencies.items()):
+        errors.append(f"resolver authority {identifier} has incomplete validation helper dependencies")
+    declared_methods = java_declared_method_names(source, type_symbol)
+    burst_calls = java_method_calls(source, type_symbol, "burst", declared_methods)
+    if burst_calls is None or "positive" not in burst_calls:
+        errors.append(f"resolver authority {identifier} burst validation no longer delegates to positive")
+
+    test_relative = Path(str(authority["testPath"]))
+    test_type = str(authority["testType"])
+    if current_source_owner(root, f"{test_relative.as_posix()}#{test_type}") is None:
+        errors.append(f"resolver authority {identifier} has no tracked Java test type")
+    else:
+        test_source = (root / test_relative).read_text(encoding="utf-8")
+        methods = authority["testMethods"]
+        digests = authority["testMethodDigests"]
+        if not isinstance(methods, dict) or set(methods) != ENVIRONMENT_RESOLVER_TEST_ROLES \
+                or any(not isinstance(method, str) or not method.strip()
+                       for method in methods.values()) \
+                or len(set(methods.values())) != len(ENVIRONMENT_RESOLVER_TEST_ROLES) \
+                or not isinstance(digests, dict) or set(digests) != set(methods.values()) \
+                or any(java_method_digest(test_source, test_type, method) != digests.get(method)
+                       for method in methods.values()):
+            errors.append(f"resolver authority {identifier} has missing rate-limit test evidence")
+    return errors
+
+
 def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
     if not isinstance(authorities, dict):
         return ["property-bound settings require a resolverAuthorities object"]
@@ -1327,6 +1550,12 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
                 "testMethods", "testMethodDigests", "compositionMethods",
                 "compositionMethodDigests", "compositionLinks")
     for identifier, authority in authorities.items():
+        if isinstance(authority, dict) and authority.get("kind") == "java-environment-integer-resolver-v1":
+            errors.extend(environment_resolver_authority_errors(root, str(identifier), authority))
+            continue
+        if isinstance(authority, dict) and "kind" in authority:
+            errors.append(f"resolver authority {identifier} has unsupported kind {authority['kind']}")
+            continue
         if not isinstance(authority, dict) or any(key not in authority for key in required):
             errors.append(f"resolver authority {identifier} requires {', '.join(required)}")
             continue
@@ -1402,10 +1631,177 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
     return errors
 
 
-def binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
-                             entries: dict[str, dict[str, object]],
-                             discovered: dict[str, Candidate],
-                             resolver_authorities: object) -> list[str]:
+def legacy_graph_environment_errors(setting: str, contract: dict[str, object],
+                                    setting_entries: list[dict[str, object]],
+                                    discovered: dict[str, Candidate]) -> list[str] | None:
+    bindings = contract.get("bindings", [])
+    environment = str(bindings[0]) if isinstance(bindings, list) and len(bindings) == 1 else ""
+    authority = (setting, str(contract.get("owner", "")), str(contract.get("field", "")), environment)
+    if authority not in LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES:
+        return None
+    coverage = contract.get("coverageEvidence")
+    if not isinstance(coverage, dict) or coverage.get("kind") != "graph-platform-carriers-v1":
+        return [f"{setting}: legacy graph binding exemption requires complete graph carrier evidence"]
+    source_path = str(contract["owner"]).rsplit("#", 1)[0]
+    expected_ids = {
+        candidate.id for candidate in discovered.values()
+        if candidate.kind == "environment-binding" and candidate.expression == environment
+        and candidate.path == source_path
+    }
+    for field in ("composeCandidateIds", "helmTemplateCandidateIds",
+                  "helmSchemaEnvironmentCandidateIds", "rawKubernetesCandidateIds"):
+        identifiers = coverage.get(field, [])
+        if isinstance(identifiers, list):
+            expected_ids.update(str(identifier) for identifier in identifiers)
+    assigned_ids = {
+        str(entry["id"]) for entry in setting_entries
+        if entry.get("kind") == "environment-binding"
+    }
+    if assigned_ids != expected_ids or any(
+            candidate_id not in discovered
+            or discovered[candidate_id].expression != environment
+            for candidate_id in expected_ids):
+        return [f"{setting}: legacy graph environment candidate set is incomplete or contains an alien candidate"]
+    return []
+
+
+def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object],
+                                       entries: dict[str, dict[str, object]],
+                                       discovered: dict[str, Candidate]) -> tuple[list[str], set[str]]:
+    evidence = contract.get("carrierEvidence")
+    required = {"kind", "environment", "expectedCandidateIds"}
+    if not isinstance(evidence, dict) or set(evidence) != required:
+        return ([f"{setting}: environment-bound setting requires exact carrierEvidence fields"], set())
+    errors: list[str] = []
+    if evidence["kind"] != "deployment-environment-carriers-v1":
+        errors.append(f"{setting}: unsupported carrierEvidence kind")
+    bindings = contract.get("bindings", [])
+    environment = str(evidence["environment"])
+    if not isinstance(bindings, list) or bindings != [environment]:
+        errors.append(f"{setting}: carrier environment must be the setting's sole binding")
+    expected = evidence["expectedCandidateIds"]
+    if not isinstance(expected, dict) or set(expected) != set(DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS):
+        return (errors + [f"{setting}: carrierEvidence must retain every checker-owned carrier group"], set())
+    accounted: set[str] = set()
+    for group, paths in DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS.items():
+        actual_ids = sorted(
+            candidate.id for candidate in discovered.values()
+            if candidate.path in paths and candidate.kind == "environment-binding"
+            and candidate.expression == environment
+        )
+        declared = expected[group]
+        if not isinstance(declared, list) or [str(identifier) for identifier in declared] != actual_ids:
+            errors.append(f"{setting}: {group} carrier candidate set has drifted")
+            continue
+        accounted.update(actual_ids)
+        if any(entries.get(identifier, {}).get("setting") != setting for identifier in actual_ids):
+            errors.append(f"{setting}: {group} carrier candidate is absent or assigned elsewhere")
+    return errors, accounted
+
+
+def environment_binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
+                                         setting_entries: list[dict[str, object]],
+                                         entries: dict[str, dict[str, object]],
+                                         discovered: dict[str, Candidate],
+                                         resolver_authorities: object) -> list[str]:
+    required = {
+        "kind", "sourceOwner", "method", "constructorType", "component", "componentIndex",
+        "helper", "environmentCandidateId", "sourceEnvironmentCandidateIds", "environment",
+        "defaultAccessor", "valueTransform", "callDigest", "resolverAuthority",
+    }
+    authority = contract.get("bindingAuthority")
+    if not isinstance(authority, dict) or set(authority) != required:
+        return [f"{setting}: environment-bound setting requires exact bindingAuthority fields"]
+    errors: list[str] = []
+    if authority["kind"] != "java-environment-constructor-v1":
+        errors.append(f"{setting}: unsupported environment bindingAuthority kind")
+    source_owner = str(authority["sourceOwner"])
+    if source_owner != contract.get("owner"):
+        errors.append(f"{setting}: environment binding sourceOwner must equal the typed setting owner")
+        return errors
+    resolved = current_source_owner(root, source_owner)
+    if resolved is None or resolved[0].suffix != ".java":
+        return errors + [f"{setting}: environment binding sourceOwner must be a tracked Java record"]
+    source_path, source_type = resolved
+    source = (root / source_path).read_text(encoding="utf-8")
+    components = java_record_components(source, source_type)
+    component = str(authority["component"])
+    index = authority["componentIndex"]
+    if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(components) \
+            or components[index] != component or component != contract.get("field"):
+        errors.append(f"{setting}: environment binding component index/field has drifted")
+        return errors
+    if authority["constructorType"] != source_type:
+        errors.append(f"{setting}: environment constructorType must be the exact owner record")
+        return errors
+    method = str(authority["method"])
+    call = java_constructor_component_call(source, source_type, method, source_type, components, component)
+    if call is None:
+        return errors + [f"{setting}: environment binding has no unique constructor-position call"]
+    argument, start, end = call
+    environment = str(authority["environment"])
+    identity = re.fullmatch(
+        rf'integer\(environment, "{re.escape(environment)}", DEFAULTS\.{re.escape(component)}\)',
+        argument,
+    )
+    duration = re.fullmatch(
+        rf'Duration\.ofSeconds\(integer\(environment, "{re.escape(environment)}", '
+        rf'\(int\) DEFAULTS\.{re.escape(component)}\.toSeconds\(\)\)\)',
+        argument,
+    )
+    expected_transform = "identity" if identity else "duration-seconds" if duration else None
+    expected_accessor = (f"DEFAULTS.{component}" if identity
+                         else f"(int) DEFAULTS.{component}.toSeconds()" if duration else None)
+    if authority["helper"] != "integer" or authority["valueTransform"] != expected_transform \
+            or authority["defaultAccessor"] != expected_accessor:
+        errors.append(f"{setting}: constructor component is not a supported environment integer call")
+    if hashlib.sha256(argument.encode("utf-8")).hexdigest() != authority["callDigest"]:
+        errors.append(f"{setting}: environment binding callDigest has drifted")
+    if contract.get("bindings") != [environment]:
+        errors.append(f"{setting}: environment binding must be the setting's sole binding")
+    constructor_ids = candidate_ids_in_source_span(
+        source_path, source, start, end, "environment-binding", environment, discovered,
+    )
+    if constructor_ids != [str(authority["environmentCandidateId"])]:
+        errors.append(f"{setting}: constructor environment candidate is not the exact component literal")
+    source_ids = sorted(
+        candidate.id for candidate in discovered.values()
+        if candidate.path == source_path.as_posix() and candidate.kind == "environment-binding"
+        and candidate.expression == environment
+    )
+    declared_source_ids = authority["sourceEnvironmentCandidateIds"]
+    if not isinstance(declared_source_ids, list) \
+            or [str(identifier) for identifier in declared_source_ids] != source_ids:
+        errors.append(f"{setting}: source environment candidate partition has drifted")
+    carrier_errors, carrier_ids = deployment_carrier_evidence_errors(
+        setting, contract, entries, discovered,
+    )
+    errors.extend(carrier_errors)
+    assigned_ids = {
+        str(entry["id"]) for entry in setting_entries
+        if entry.get("kind") == "environment-binding"
+    }
+    if assigned_ids != set(source_ids) | carrier_ids:
+        errors.append(f"{setting}: assigned environment candidates are not fully partitioned")
+    resolver = str(authority["resolverAuthority"])
+    if not isinstance(resolver_authorities, dict) or resolver not in resolver_authorities:
+        errors.append(f"{setting}: environment bindingAuthority references an absent resolver authority")
+    else:
+        resolved_authority = resolver_authorities[resolver]
+        if not isinstance(resolved_authority, dict) \
+                or resolved_authority.get("kind") != "java-environment-integer-resolver-v1" \
+                or resolved_authority.get("path") != source_path.as_posix() \
+                or resolved_authority.get("type") != source_type \
+                or resolved_authority.get("factoryMethod") != method \
+                or resolved_authority.get("integerMethod") != authority["helper"]:
+            errors.append(f"{setting}: environment resolver authority does not match the binding source")
+    return errors
+
+
+def dual_source_binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
+                                        entries: dict[str, dict[str, object]],
+                                        discovered: dict[str, Candidate],
+                                        resolver_authorities: object) -> list[str]:
     bindings = contract.get("bindings", [])
     property_candidates = [entry for entry in entries.values()
                            if entry.get("setting") == setting and entry.get("kind") == "property-binding"]
@@ -1505,17 +1901,112 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
             errors.append(f"{setting}: resolver authority must be the binding source type")
     return errors
 
+
+def binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
+                             setting_entries: list[dict[str, object]],
+                             entries: dict[str, dict[str, object]],
+                             discovered: dict[str, Candidate],
+                             resolver_authorities: object) -> list[str]:
+    property_candidates = [entry for entry in setting_entries if entry.get("kind") == "property-binding"]
+    environment_candidates = [
+        entry for entry in setting_entries if entry.get("kind") == "environment-binding"
+    ]
+    if property_candidates:
+        return dual_source_binding_authority_errors(
+            root, setting, contract, entries, discovered, resolver_authorities,
+        )
+    if not environment_candidates:
+        return ([] if contract.get("bindingAuthority") is None
+                else [f"{setting}: bindingAuthority exists without a binding candidate"])
+    legacy = legacy_graph_environment_errors(setting, contract, setting_entries, discovered)
+    if legacy is not None and contract.get("bindingAuthority") is None:
+        return legacy
+    return environment_binding_authority_errors(
+        root, setting, contract, setting_entries, entries, discovered, resolver_authorities,
+    )
+
+
+def environment_resolver_group_errors(root: Path,
+                                      representatives: dict[str, dict[str, object]],
+                                      resolver_authorities: object) -> list[str]:
+    """Require one reviewed authority for every component of each supported env-only factory."""
+    if not isinstance(resolver_authorities, dict):
+        return (["environment-bound settings require a resolverAuthorities object"]
+                if any(isinstance(item.get("bindingAuthority"), dict)
+                       and item["bindingAuthority"].get("kind") == "java-environment-constructor-v1"
+                       for item in representatives.values()) else [])
+    groups: dict[str, list[tuple[str, dict[str, object], dict[str, object]]]] = {}
+    for setting, contract in representatives.items():
+        authority = contract.get("bindingAuthority")
+        if isinstance(authority, dict) and authority.get("kind") == "java-environment-constructor-v1":
+            groups.setdefault(str(authority.get("resolverAuthority", "")), []).append(
+                (setting, contract, authority),
+            )
+    errors: list[str] = []
+    environment_resolvers = {
+        str(identifier) for identifier, authority in resolver_authorities.items()
+        if isinstance(authority, dict)
+        and authority.get("kind") == "java-environment-integer-resolver-v1"
+    }
+    if set(groups) != environment_resolvers:
+        errors.append("environment resolver authorities must be referenced by one exact component set")
+    for resolver_id, contracts in groups.items():
+        resolver = resolver_authorities.get(resolver_id)
+        if not isinstance(resolver, dict):
+            continue
+        path = Path(str(resolver.get("path", "")))
+        type_symbol = str(resolver.get("type", ""))
+        if current_source_owner(root, f"{path.as_posix()}#{type_symbol}") is None:
+            continue
+        source = (root / path).read_text(encoding="utf-8")
+        components = java_record_components(source, type_symbol)
+        actual = {(item[2].get("componentIndex"), item[2].get("component")) for item in contracts}
+        expected = set(enumerate(components))
+        if actual != expected or len(contracts) != len(components):
+            errors.append(f"resolver authority {resolver_id} does not bijectively cover every record component")
+        environments = [str(item[2].get("environment", "")) for item in contracts]
+        if len(set(environments)) != len(components):
+            errors.append(f"resolver authority {resolver_id} environment bindings are not one-to-one")
+        if any(item[2].get("sourceOwner") != item[1].get("owner")
+               or item[2].get("method") != resolver.get("factoryMethod")
+               for item in contracts):
+            errors.append(f"resolver authority {resolver_id} component ownership/factory has drifted")
+        test_methods = resolver.get("testMethods", {})
+        enumeration = (test_methods.get("bindingEnumeration")
+                       if isinstance(test_methods, dict) else None)
+        test_path = Path(str(resolver.get("testPath", "")))
+        test_type = str(resolver.get("testType", ""))
+        test_source = ((root / test_path).read_text(encoding="utf-8")
+                       if current_source_owner(root, f"{test_path.as_posix()}#{test_type}") is not None
+                       else "")
+        enumeration_span = (java_method_span(test_source, test_type, str(enumeration))
+                            if enumeration else None)
+        enumerated = (Counter(ENVIRONMENT_BINDING.findall(test_source[slice(*enumeration_span)]))
+                      if enumeration_span is not None else Counter())
+        if enumerated != Counter(environments):
+            errors.append(f"resolver authority {resolver_id} binding enumeration is not the exact environment set")
+    return errors
+
+
 def default_authority_errors(root: Path, setting: str, contract: dict[str, object],
                              entries: dict[str, dict[str, object]],
                              discovered: dict[str, Candidate]) -> list[str]:
     property_bound = any(entry.get("setting") == setting and entry.get("kind") == "property-binding"
                          for entry in entries.values())
+    binding_authority = contract.get("bindingAuthority")
+    environment_bound = isinstance(binding_authority, dict) \
+        and binding_authority.get("kind") == "java-environment-constructor-v1"
     authority = contract.get("defaultAuthority")
     if authority is None:
-        return ([f"{setting}: property-bound setting requires defaultAuthority"] if property_bound else [])
-    required = ("owner", "instanceSymbol", "field", "sourceExpression", "candidateIds")
-    if not isinstance(authority, dict) or any(key not in authority for key in required):
-        return [f"{setting}: defaultAuthority requires {', '.join(required)}"]
+        return ([f"{setting}: bound setting requires defaultAuthority"]
+                if property_bound or environment_bound else [])
+    required = {"owner", "instanceSymbol", "field", "sourceExpression", "candidateIds"}
+    if environment_bound:
+        required.update({"componentIndex", "evaluatedDefault"})
+    if not isinstance(authority, dict) or not required.issubset(authority):
+        return [f"{setting}: defaultAuthority requires {', '.join(sorted(required))}"]
+    if environment_bound and set(authority) != required:
+        return [f"{setting}: environment defaultAuthority requires exactly {', '.join(sorted(required))}"]
     errors: list[str] = []
     owner = str(authority["owner"])
     field = str(authority["field"])
@@ -1531,6 +2022,23 @@ def default_authority_errors(root: Path, setting: str, contract: dict[str, objec
             owner_source, symbol, str(authority["instanceSymbol"]), field)
         if actual_span is None or normalized(str(authority["sourceExpression"])) != normalized(actual_span[0]):
             errors.append(f"{setting}: defaultAuthority sourceExpression does not match the record component")
+        if environment_bound:
+            components = java_record_components(owner_source, symbol)
+            index = authority["componentIndex"]
+            if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(components) \
+                    or components[index] != field:
+                errors.append(f"{setting}: defaultAuthority componentIndex has drifted")
+            evaluated = evaluated_java_default(
+                actual_span[0] if actual_span is not None else "",
+                isinstance(binding_authority, dict)
+                and binding_authority.get("valueTransform") == "duration-seconds",
+            )
+            declared = authority["evaluatedDefault"]
+            if not isinstance(declared, dict) or set(declared) != {"kind", "value"} \
+                    or declared != evaluated:
+                errors.append(f"{setting}: evaluatedDefault does not match the typed Java expression")
+            elif contract.get("default") != str(declared["value"]):
+                errors.append(f"{setting}: default must be the canonical evaluated decimal value")
     candidate_ids = authority.get("candidateIds")
     if not isinstance(candidate_ids, list):
         errors.append(f"{setting}: defaultAuthority candidateIds must be an array")
@@ -1910,6 +2418,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             json.dumps(entry.get("defaultAuthority"), sort_keys=True),
             json.dumps(entry.get("schemaEvidence"), sort_keys=True),
             json.dumps(entry.get("coverageEvidence"), sort_keys=True),
+            json.dumps(entry.get("carrierEvidence"), sort_keys=True),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -1921,23 +2430,26 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             authorities[setting] = (identifier, metadata)
 
     resolver_authorities = document.get("resolverAuthorities")
-    if any(entry.get("kind") == "property-binding" and entry.get("classification") == "operator-configurable"
-           and entry.get("status") != "pending-review" for entry in entries.values()):
+    if resolver_authorities is not None:
         errors.extend(resolver_authority_errors(root, resolver_authorities))
 
     tracked_paths = set(tracked_files(root))
+    representatives: dict[str, dict[str, object]] = {}
     for setting in authorities:
         setting_entries = [entry for entry in entries.values() if entry.get("setting") == setting]
         setting_ids = {str(entry["id"]) for entry in setting_entries}
         representative = entries[authorities[setting][0]]
+        representatives[setting] = representative
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
             evidenced_bindings = {str(entry.get("expression")) for entry in setting_entries
                                   if entry.get("kind") == "environment-binding"}
             for binding in sorted(bindings - evidenced_bindings):
                 errors.append(f"{setting}: binding {binding} has no same-setting environment-binding candidate")
-        errors.extend(binding_authority_errors(root, setting, representative, entries, discovered,
-                                               resolver_authorities))
+        errors.extend(binding_authority_errors(
+            root, setting, representative, setting_entries, entries, discovered,
+            resolver_authorities,
+        ))
         errors.extend(default_authority_errors(root, setting, representative, entries, discovered))
         errors.extend(schema_evidence_errors(setting, representative, entries, discovered, evidence_records))
         errors.extend(graph_platform_coverage_errors(
@@ -1949,6 +2461,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 for evidence_id in evidence_ids:
                     if evidence_id not in setting_ids:
                         errors.append(f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
+    errors.extend(environment_resolver_group_errors(root, representatives, resolver_authorities))
     return errors
 
 

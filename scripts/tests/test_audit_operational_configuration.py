@@ -60,6 +60,182 @@ def classify_non_pending(root: Path) -> None:
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def environment_authority_fixture(self, root: Path):
+        source_path = root / "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java"
+        source_path.write_text(
+            "package dev.example;\n"
+            "import java.time.Duration;\n"
+            "import java.util.Map;\n"
+            "record RuntimeLimits(int maxRetries, int maxBurst, Duration leaseTtl) {\n"
+            "  static final RuntimeLimits DEFAULTS = new RuntimeLimits(\n"
+            "      16 * 1024, 8 * 1024, Duration.ofHours(1));\n"
+            "  public RuntimeLimits {\n"
+            "    positive(\"RAVENROOT_SYNTHETIC_MAX_RETRIES\", maxRetries);\n"
+            "    burst(\"RAVENROOT_SYNTHETIC_MAX_BURST\", maxBurst, maxRetries);\n"
+            "    if (leaseTtl.compareTo(Duration.ofSeconds(1)) < 0) throw new IllegalArgumentException(\n"
+            "        \"RAVENROOT_SYNTHETIC_LEASE_SECONDS must be positive\");\n"
+            "  }\n"
+            "  public static RuntimeLimits fromEnvironment(Map<String, String> environment) {\n"
+            "    return new RuntimeLimits(\n"
+            "        integer(environment, \"RAVENROOT_SYNTHETIC_MAX_RETRIES\", DEFAULTS.maxRetries),\n"
+            "        integer(environment, \"RAVENROOT_SYNTHETIC_MAX_BURST\", DEFAULTS.maxBurst),\n"
+            "        Duration.ofSeconds(integer(environment, \"RAVENROOT_SYNTHETIC_LEASE_SECONDS\",\n"
+            "            (int) DEFAULTS.leaseTtl.toSeconds())));\n"
+            "  }\n"
+            "  private static void positive(String name, int value) {\n"
+            "    if (value < 1) throw new IllegalArgumentException(name);\n"
+            "  }\n"
+            "  private static void burst(String name, int value, int rate) {\n"
+            "    positive(name, value); if (value < rate) throw new IllegalArgumentException(name);\n"
+            "  }\n"
+            "  private static int integer(Map<String, String> environment, String name, int defaultValue) {\n"
+            "    String value = environment.get(name);\n"
+            "    if (value == null || value.isBlank()) return defaultValue;\n"
+            "    try { return Integer.parseInt(value.trim()); }\n"
+            "    catch (NumberFormatException invalid) { throw new IllegalArgumentException(name); }\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        test_path = root / "ravenroot/example/src/test/java/dev/example/RuntimeLimitsTest.java"
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.write_text(
+            "package dev.example;\n"
+            "import java.util.stream.Stream;\n"
+            "final class RuntimeLimitsTest {\n"
+            "  void blankDefaults() {}\n"
+            "  void asciiTrim() {}\n"
+            "  void malformedOverflow() {}\n"
+            "  void nonPositive() {}\n"
+            "  void boundaries() {}\n"
+            "  void relations() {}\n"
+            "  Stream<String> settingNames() { return Stream.of(\n"
+            "      \"RAVENROOT_SYNTHETIC_MAX_RETRIES\", \"RAVENROOT_SYNTHETIC_MAX_BURST\",\n"
+            "      \"RAVENROOT_SYNTHETIC_LEASE_SECONDS\"); }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        for carrier in ("compose.yaml", "deploy/helm/ravenroot/values.yaml",
+                        "deploy/helm/ravenroot/values.schema.json",
+                        "deploy/helm/ravenroot/templates/deployment.yaml",
+                        "deploy/kubernetes/ravenroot.yaml"):
+            path = root / carrier
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "ravenroot", "compose.yaml", "deploy"], cwd=root, check=True)
+        errors, _summary = audit.refresh_inventory(
+            root, root / "scripts/operational-configuration-inventory.json",
+            root / "docs/architecture/operational-configuration-audit.md",
+        )
+        self.assertEqual([], errors)
+        inventory = root / "scripts/operational-configuration-inventory.json"
+        document = json.loads(inventory.read_text(encoding="utf-8"))
+        discovered = audit.discover(root)
+        by_id = {entry["id"]: entry for entry in document["entries"]}
+        source = source_path.read_text(encoding="utf-8")
+        components = audit.java_record_components(source, "RuntimeLimits")
+        compact = audit.java_compact_constructor_span(source, "RuntimeLimits")
+        test_source = test_path.read_text(encoding="utf-8")
+        test_methods = {
+            "bindingEnumeration": "settingNames",
+            "blankTypedDefault": "blankDefaults",
+            "asciiTrimContract": "asciiTrim",
+            "malformedOverflowRefusal": "malformedOverflow",
+            "nonPositiveRefusal": "nonPositive",
+            "documentedBoundaryAcceptance": "boundaries",
+            "relationalConstraintRefusal": "relations",
+        }
+        resolver_id = "synthetic-environment-resolver-v1"
+        validation_helpers = audit.java_reachable_helpers_from_span(
+            source, "RuntimeLimits", compact,
+        )
+        document["resolverAuthorities"] = {resolver_id: {
+            "kind": "java-environment-integer-resolver-v1",
+            "path": str(source_path.relative_to(root)), "type": "RuntimeLimits",
+            "factoryMethod": "fromEnvironment",
+            "factoryBodyDigest": audit.java_method_digest(source, "RuntimeLimits", "fromEnvironment"),
+            "integerMethod": "integer",
+            "integerBodyDigest": audit.java_method_digest(source, "RuntimeLimits", "integer"),
+            "dependencyBodyDigests": {},
+            "validationBodyDigest": audit.java_span_digest(source, compact),
+            "validationDependencyBodyDigests": {
+                method: audit.java_method_digest(source, "RuntimeLimits", method)
+                for method in validation_helpers
+            },
+            "testPath": str(test_path.relative_to(root)), "testType": "RuntimeLimitsTest",
+            "testMethods": test_methods,
+            "testMethodDigests": {
+                method: audit.java_method_digest(test_source, "RuntimeLimitsTest", method)
+                for method in test_methods.values()
+            },
+        }}
+        fields = [
+            ("synthetic.max-retries", "maxRetries", "RAVENROOT_SYNTHETIC_MAX_RETRIES"),
+            ("synthetic.max-burst", "maxBurst", "RAVENROOT_SYNTHETIC_MAX_BURST"),
+            ("synthetic.lease-ttl", "leaseTtl", "RAVENROOT_SYNTHETIC_LEASE_SECONDS"),
+        ]
+        owner = str(source_path.relative_to(root)) + "#RuntimeLimits"
+        for index, (setting, field, environment) in enumerate(fields):
+            call = audit.java_constructor_component_call(
+                source, "RuntimeLimits", "fromEnvironment", "RuntimeLimits", components, field,
+            )
+            self.assertIsNotNone(call)
+            argument, start, end = call
+            constructor_ids = audit.candidate_ids_in_source_span(
+                source_path.relative_to(root), source, start, end,
+                "environment-binding", environment, {candidate.id: candidate for candidate in discovered},
+            )
+            self.assertEqual(1, len(constructor_ids))
+            source_ids = sorted(
+                candidate.id for candidate in discovered
+                if candidate.path == str(source_path.relative_to(root))
+                and candidate.kind == "environment-binding" and candidate.expression == environment
+            )
+            default_span = audit.java_record_default_expression_span(
+                source, "RuntimeLimits", "DEFAULTS", field,
+            )
+            self.assertIsNotNone(default_span)
+            default_ids = audit.candidate_ids_in_source_span(
+                source_path.relative_to(root), source, default_span[1], default_span[2],
+                "fixed-declaration", "DEFAULTS", {candidate.id: candidate for candidate in discovered},
+            )
+            duration = field == "leaseTtl"
+            evaluated = audit.evaluated_java_default(default_span[0], duration)
+            contract = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "setting": setting, "owner": owner, "field": field, "bindings": [environment],
+                "default": str(evaluated["value"]), "defaultEvidence": default_ids,
+                "bindingAuthority": {
+                    "kind": "java-environment-constructor-v1", "sourceOwner": owner,
+                    "method": "fromEnvironment", "constructorType": "RuntimeLimits",
+                    "component": field, "componentIndex": index, "helper": "integer",
+                    "environmentCandidateId": constructor_ids[0],
+                    "sourceEnvironmentCandidateIds": source_ids, "environment": environment,
+                    "defaultAccessor": (f"(int) DEFAULTS.{field}.toSeconds()" if duration
+                                        else f"DEFAULTS.{field}"),
+                    "valueTransform": "duration-seconds" if duration else "identity",
+                    "callDigest": audit.hashlib.sha256(argument.encode("utf-8")).hexdigest(),
+                    "resolverAuthority": resolver_id,
+                },
+                "defaultAuthority": {
+                    "owner": owner, "instanceSymbol": "DEFAULTS", "field": field,
+                    "sourceExpression": default_span[0], "candidateIds": default_ids,
+                    "componentIndex": index, "evaluatedDefault": evaluated,
+                },
+                "carrierEvidence": {
+                    "kind": "deployment-environment-carriers-v1", "environment": environment,
+                    "expectedCandidateIds": {
+                        "compose": [], "helm": [], "rawKubernetes": [],
+                    },
+                },
+                "validation": "positive bounded value", "scope": "process",
+                "pinning": "read once at startup", "coverage": "bounded synthetic proof",
+                "rationale": "Synthetic environment authority.",
+            }
+            for candidate_id in set(source_ids) | set(default_ids):
+                by_id[candidate_id].update(copy.deepcopy(contract))
+        return document, discovered, source_path, test_path
+
     def test_real_repository_incremental_inventory_and_generated_report_are_current(self) -> None:
         errors = audit.check(ROOT, require_complete=False)
         self.assertEqual([], errors, "\n".join(errors[:20]))
@@ -86,6 +262,234 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                  root / "docs/architecture/operational-configuration-audit.md")
         self.assertTrue(any("audit is incomplete" in error and "1 deferred" in error
                             for error in errors), errors)
+
+    def test_environment_authority_is_candidate_driven_bijective_and_closed(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            document, discovered, _source, _tests = self.environment_authority_fixture(root)
+            self.assertEqual([], audit.inventory_errors(root, document, discovered))
+
+            missing_binding = copy.deepcopy(document)
+            for entry in missing_binding["entries"]:
+                if entry.get("setting") == "synthetic.max-retries":
+                    entry.pop("bindingAuthority")
+            errors = audit.inventory_errors(root, missing_binding, discovered)
+            self.assertTrue(any("requires exact bindingAuthority" in error for error in errors), errors)
+
+            missing_resolver_link = copy.deepcopy(document)
+            for entry in missing_resolver_link["entries"]:
+                if entry.get("setting") == "synthetic.max-retries":
+                    entry["bindingAuthority"].pop("resolverAuthority")
+            errors = audit.inventory_errors(root, missing_resolver_link, discovered)
+            self.assertTrue(any("requires exact bindingAuthority" in error for error in errors), errors)
+
+            missing_default = copy.deepcopy(document)
+            for entry in missing_default["entries"]:
+                if entry.get("setting") == "synthetic.max-retries":
+                    entry.pop("defaultAuthority")
+            errors = audit.inventory_errors(root, missing_default, discovered)
+            self.assertTrue(any("requires defaultAuthority" in error for error in errors), errors)
+
+            missing_carrier = copy.deepcopy(document)
+            for entry in missing_carrier["entries"]:
+                if entry.get("setting") == "synthetic.max-retries":
+                    entry.pop("carrierEvidence")
+            errors = audit.inventory_errors(root, missing_carrier, discovered)
+            self.assertTrue(any("requires exact carrierEvidence" in error for error in errors), errors)
+
+            missing_resolver = copy.deepcopy(document)
+            missing_resolver.pop("resolverAuthorities")
+            errors = audit.inventory_errors(root, missing_resolver, discovered)
+            self.assertTrue(any("references an absent resolver authority" in error
+                                for error in errors), errors)
+
+            unsupported_extra_field = copy.deepcopy(document)
+            unsupported_extra_field["resolverAuthorities"][
+                "synthetic-environment-resolver-v1"
+            ]["selfDeclaredExemption"] = True
+            errors = audit.inventory_errors(root, unsupported_extra_field, discovered)
+            self.assertTrue(any("requires exactly" in error for error in errors), errors)
+
+            missing_test_role = copy.deepcopy(document)
+            resolver = missing_test_role["resolverAuthorities"]["synthetic-environment-resolver-v1"]
+            method = resolver["testMethods"].pop("asciiTrimContract")
+            resolver["testMethodDigests"].pop(method)
+            errors = audit.inventory_errors(root, missing_test_role, discovered)
+            self.assertTrue(any("missing rate-limit test evidence" in error for error in errors), errors)
+
+            dangling_resolver = copy.deepcopy(document)
+            dangling_resolver["resolverAuthorities"]["unused"] = copy.deepcopy(
+                dangling_resolver["resolverAuthorities"]["synthetic-environment-resolver-v1"],
+            )
+            errors = audit.inventory_errors(root, dangling_resolver, discovered)
+            self.assertTrue(any("referenced by one exact component set" in error for error in errors), errors)
+
+            missing_component = copy.deepcopy(document)
+            for entry in missing_component["entries"]:
+                if entry.get("setting") == "synthetic.lease-ttl":
+                    entry["bindingAuthority"]["componentIndex"] = 1
+            errors = audit.inventory_errors(root, missing_component, discovered)
+            self.assertTrue(any("component index/field" in error
+                                or "bijectively cover" in error for error in errors), errors)
+
+            missing_source_partition = copy.deepcopy(document)
+            for entry in missing_source_partition["entries"]:
+                if entry.get("setting") == "synthetic.max-retries":
+                    entry["bindingAuthority"]["sourceEnvironmentCandidateIds"].pop()
+            errors = audit.inventory_errors(root, missing_source_partition, discovered)
+            self.assertTrue(any("source environment candidate partition" in error
+                                for error in errors), errors)
+
+            missing_carrier_group = copy.deepcopy(document)
+            for entry in missing_carrier_group["entries"]:
+                if entry.get("setting") == "synthetic.max-retries":
+                    entry["carrierEvidence"]["expectedCandidateIds"].pop("compose")
+            errors = audit.inventory_errors(root, missing_carrier_group, discovered)
+            self.assertTrue(any("every checker-owned carrier group" in error for error in errors), errors)
+
+    def test_environment_authority_source_test_and_carrier_mutations_fail(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            document, discovered, source_path, test_path = self.environment_authority_fixture(root)
+            original_source = source_path.read_text(encoding="utf-8")
+            source_path.write_text(
+                original_source.replace("if (value < 1)", "if (value < 2)"), encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("validation helper dependencies" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            source_path.write_text(
+                original_source.replace("if (value < rate)", "if (value <= rate)"),
+                encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("validation helper dependencies" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            source_path.write_text(
+                original_source.replace(
+                    "positive(name, value); if (value < rate)",
+                    "if (value < rate)",
+                ),
+                encoding="utf-8",
+            )
+            modified = source_path.read_text(encoding="utf-8")
+            updated = copy.deepcopy(document)
+            resolver = updated["resolverAuthorities"]["synthetic-environment-resolver-v1"]
+            resolver["validationDependencyBodyDigests"]["burst"] = audit.java_method_digest(
+                modified, "RuntimeLimits", "burst",
+            )
+            errors = audit.inventory_errors(root, updated, audit.discover(root))
+            self.assertTrue(any("burst validation no longer delegates" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            source_path.write_text(
+                original_source.replace("value.isBlank()", "value.isEmpty()"), encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("integer body digest" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            swapped = original_source.replace(
+                '"RAVENROOT_SYNTHETIC_MAX_RETRIES", DEFAULTS.maxRetries',
+                '"RAVENROOT_SYNTHETIC_SWAP", DEFAULTS.maxRetries',
+            ).replace(
+                '"RAVENROOT_SYNTHETIC_MAX_BURST", DEFAULTS.maxBurst',
+                '"RAVENROOT_SYNTHETIC_MAX_RETRIES", DEFAULTS.maxBurst',
+            ).replace(
+                '"RAVENROOT_SYNTHETIC_SWAP", DEFAULTS.maxRetries',
+                '"RAVENROOT_SYNTHETIC_MAX_BURST", DEFAULTS.maxRetries',
+            )
+            source_path.write_text(swapped, encoding="utf-8")
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("environment candidate" in error
+                                or "factory body digest" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            source_path.write_text(
+                original_source.replace("16 * 1024", "8 * 2048"), encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("sourceExpression" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            source_path.write_text(
+                original_source.replace("Duration.ofHours(1)", "Duration.ofMinutes(60)"),
+                encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("sourceExpression" in error for error in errors), errors)
+            source_path.write_text(original_source, encoding="utf-8")
+
+            original_test = test_path.read_text(encoding="utf-8")
+            test_path.write_text(
+                original_test.replace(', "RAVENROOT_SYNTHETIC_MAX_BURST"', ""),
+                encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("binding enumeration is not the exact environment set" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            compose = root / "compose.yaml"
+            compose.write_text(
+                "environment:\n  RAVENROOT_SYNTHETIC_MAX_RETRIES: 9\n", encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("compose carrier candidate set has drifted" in error
+                                for error in errors), errors)
+
+    def test_typed_java_default_evaluator_is_closed_and_checked(self) -> None:
+        self.assertEqual({"kind": "integer", "value": 16_384},
+                         audit.evaluated_java_default("16 * 1_024", False))
+        self.assertEqual({"kind": "duration-seconds", "value": 3_600},
+                         audit.evaluated_java_default("Duration.ofHours(1)", True))
+        self.assertEqual({"kind": "duration-seconds", "value": 86_400},
+                         audit.evaluated_java_default("Duration.ofDays(1)", True))
+        for expression in ("01", "1__0", "_10", "10_", "-1", "1L", "0x10",
+                           "2147483647 * 2", "Duration.ofSeconds(2147483648)",
+                           "Duration.ofMillis(1)", "Duration.ofHours(-1)"):
+            with self.subTest(expression=expression):
+                self.assertIsNone(audit.evaluated_java_default(
+                    expression, expression.startswith("Duration."),
+                ))
+
+    def test_legacy_graph_exemption_rejects_an_alien_environment_candidate(self) -> None:
+        self.assertEqual(25, len(audit.LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES))
+        setting, owner, field, environment = next(iter(audit.LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES))
+        source_path = owner.rsplit("#", 1)[0]
+        source = audit.Candidate(
+            id="oc-source", path=source_path, line=1, symbol=field,
+            kind="environment-binding", role="environment-binding", expression=environment,
+            expression_digest=audit.hashlib.sha256(environment.encode()).hexdigest(),
+            evidence=environment, evidence_digest=audit.hashlib.sha256(environment.encode()).hexdigest(),
+            surface="java",
+        )
+        alien = audit.Candidate(
+            id="oc-alien", path="ravenroot/example/Rate.java", line=1,
+            symbol="fromEnvironment", kind="environment-binding", role="environment-binding",
+            expression="RAVENROOT_RATELIMIT_ADDRESS_RPS",
+            expression_digest=audit.hashlib.sha256(b"alien").hexdigest(),
+            evidence="RAVENROOT_RATELIMIT_ADDRESS_RPS",
+            evidence_digest=audit.hashlib.sha256(b"alien").hexdigest(), surface="java",
+        )
+        contract = {
+            "owner": owner, "field": field, "bindings": [environment],
+            "coverageEvidence": {
+                "kind": "graph-platform-carriers-v1",
+                "composeCandidateIds": [], "helmTemplateCandidateIds": [],
+                "helmSchemaEnvironmentCandidateIds": [], "rawKubernetesCandidateIds": [],
+            },
+        }
+        entries = [
+            {"id": source.id, "kind": "environment-binding"},
+            {"id": alien.id, "kind": "environment-binding"},
+        ]
+        errors = audit.legacy_graph_environment_errors(
+            setting, contract, entries, {source.id: source, alien.id: alien},
+        )
+        self.assertTrue(any("alien candidate" in error for error in errors), errors)
 
     def test_new_named_operational_constant_is_rejected(self) -> None:
         with synthetic_repository() as location:
@@ -1219,6 +1623,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 by_id[candidate.id].update(contract)
             valid = audit.inventory_errors(root, document, discovered)
             self.assertFalse([error for error in valid if setting in error], valid)
+
+            unknown_resolver_kind = copy.deepcopy(document)
+            unknown_resolver_kind["resolverAuthorities"][resolver_id]["kind"] = "alien"
+            unknown_kind_errors = audit.resolver_authority_errors(
+                root, unknown_resolver_kind["resolverAuthorities"],
+            )
+            self.assertTrue(any("unsupported kind alien" in error
+                                for error in unknown_kind_errors), unknown_kind_errors)
 
             missing_property = copy.deepcopy(document)
             for entry in missing_property["entries"]:

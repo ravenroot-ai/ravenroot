@@ -6,6 +6,10 @@ import { defineConfig } from '@playwright/test';
 // evaluation time.
 export default defineConfig({
   testDir: './e2e/human-task-confirmation-real',
+  // The JUnit owner supplies a UUID-scoped server-target directory so the ordinary Playwright suite
+  // cannot clear this project's screenshot, axe attachment, or failure trace. Direct local runs keep
+  // Playwright's existing project-local default.
+  outputDir: process.env.RAVENROOT_HUMAN_TASK_CONFIRMATION_OUTPUT_DIR || './test-results',
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

@@ -169,6 +169,10 @@ async function runAndSelect(page, graphVersion = executionContext.graphVersion) 
 
 async function holdExactRecovery(page, outcome) {
   await connectAndCreate(page);
+  await page.locator('#access-token').fill('initial-token');
+  await page.locator('#access-token').press('Enter');
+  await expect(page.locator('#btn-revoke')).toBeEnabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await runAndSelect(page);
   await page.locator('[data-human-task-id="task-1"]').click();
   const original = await page.evaluate(() => JSON.parse(
@@ -176,10 +180,12 @@ async function holdExactRecovery(page, outcome) {
   // A native modal correctly blocks pointer interaction outside itself. DOM activation exercises
   // the unchanged revoke lifecycle while deliberately retaining the opaque locator.
   await page.evaluate(() => document.getElementById('btn-revoke').click());
+  await expect(page.locator('#btn-revoke')).toBeDisabled();
   await expect(page.locator('#runtime-connection')).toHaveClass(/revoked/);
+  expect(await page.evaluate(() => JSON.parse(
+    localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(original);
 
-  let started = 0;
-  let finished = 0;
+  const observed = [];
   let release;
   const released = new Promise(resolve => { release = resolve; });
   await page.route('**/v1/human-tasks/attention?*', async route => {
@@ -188,10 +194,25 @@ async function holdExactRecovery(page, outcome) {
         || url.searchParams.get('generation') !== String(original.generation)) {
       await route.continue(); return;
     }
-    const successResponse = outcome === 'success' ? await route.fetch() : null;
-    started += 1;
-    await released;
+    const request = route.request();
+    let handlerFinished;
+    const handler = new Promise(resolve => { handlerFinished = resolve; });
+    const terminal = new Promise(resolve => {
+      const finish = candidate => settle(candidate, 'finished');
+      const fail = candidate => settle(candidate, 'failed');
+      function settle(candidate, kind) {
+        if (candidate !== request) return;
+        page.off('requestfinished', finish);
+        page.off('requestfailed', fail);
+        resolve(kind);
+      }
+      page.on('requestfinished', finish);
+      page.on('requestfailed', fail);
+    });
+    observed.push({ request, terminal, handler });
     try {
+      const successResponse = outcome === 'success' ? await route.fetch() : null;
+      await released;
       if (outcome === 'empty') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
           schemaVersion: 1, items: [], nextCursor: null,
@@ -203,27 +224,25 @@ async function holdExactRecovery(page, outcome) {
         await route.fulfill({ response: successResponse });
       }
     } finally {
-      finished += 1;
+      handlerFinished();
     }
   });
   await page.locator('#access-token').fill('replacement-token');
   await page.locator('#access-token').press('Enter');
-  await expect.poll(() => started).toBeGreaterThan(0);
+  await expect.poll(() => observed.length).toBeGreaterThan(0);
   await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
   return { original, release: async () => {
-    const consumed = page.waitForEvent(outcome === 'error' ? 'requestfailed' : 'requestfinished', {
-      predicate: request_ => {
-        const url = new URL(request_.url());
-        return url.pathname === '/v1/human-tasks/attention'
-          && url.searchParams.get('taskId') === original.taskId
-          && url.searchParams.get('generation') === String(original.generation);
-      },
-    });
     release();
-    await consumed;
-    await expect.poll(() => finished).toBe(started);
-    await page.evaluate(() => new Promise(resolve =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    let drained;
+    do {
+      drained = observed.length;
+      const batch = observed.slice(0, drained);
+      const terminalKinds = await Promise.all(batch.map(entry => entry.terminal));
+      await Promise.all(batch.map(entry => entry.handler));
+      expect(terminalKinds).toEqual(batch.map(() => outcome === 'error' ? 'failed' : 'finished'));
+      await page.evaluate(() => new Promise(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    } while (observed.length !== drained);
   } };
 }
 

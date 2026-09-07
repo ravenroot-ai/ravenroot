@@ -62,7 +62,7 @@ class RavenrootServerMainLifecycleTest {
                 "ResolvedExecutionRuntime\\.fromEnvironment\\(System\\.getenv\\(\\)\\)", -1).length - 1,
                 "the server must resolve the engine/runner tuple exactly once");
         assertTrue(source.indexOf("ResolvedExecutionRuntime.fromEnvironment(System.getenv())")
-                        < source.indexOf("ExecutionStoreBootstrap.openOwned("),
+                        < source.indexOf("ExecutionStoreBootstrap.openResolved("),
                 "runtime bounds must refuse invalid startup before a durable store opens");
         String compact = source.replaceAll("\\s+", " ");
         assertTrue(compact.contains("executionRuntime.createEngine(engineId, \"ravenroot-server\", "
@@ -77,6 +77,19 @@ class RavenrootServerMainLifecycleTest {
         assertTrue(compact.contains("executionManifests, "
                         + "executionRuntime.humanTaskRunnerShutdownStepBound())"),
                 "human-task recovery must use its named projection");
+    }
+
+    @Test
+    void packagedServerUsesTheFullyResolvedStorePolicyBeforeOpeningResources() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/ai/ravenroot/server/RavenrootServerMain.java"));
+        String compact = source.replaceAll("\\s+", " ");
+        String resolver = "ExecutionStoreConfiguration .resolveEnvironment(System.getenv())";
+        assertEquals(1, compact.split(java.util.regex.Pattern.quote(resolver), -1).length - 1);
+        String opening = "ExecutionStoreBootstrap.openResolved( executionStoreConfiguration, "
+                + "java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(), humanTaskPolicy)";
+        assertTrue(compact.contains(opening), "the real startup site must consume the resolved store settings");
+        assertTrue(compact.indexOf(resolver) < compact.indexOf(opening));
+        assertTrue(compact.indexOf(opening) < compact.indexOf("executionRuntime.createEngine("));
     }
 
     @Test

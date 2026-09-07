@@ -2641,12 +2641,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // enabled yet.
                 long deliveredEverywhere = journal.cursors.isEmpty() ? 0L
                         : journal.cursors.values().stream().mapToLong(Long::longValue).min().orElse(0L);
-                Instant cutoff = clock.instant().minus(journalRetention);
+                Instant now = clock.instant();
+                Instant cutoff = minusClamped(now, journalRetention);
+                boolean representableCutoff = journalRetention.compareTo(Duration.between(Instant.MIN, now)) <= 0;
 
                 long discarded = 0;
                 var survivors = new ArrayList<JournalRecord>(journal.records.size());
                 for (JournalRecord record : journal.records) {
-                    boolean expired = !record.recordedAt().isAfter(cutoff);
+                    boolean expired = representableCutoff && !record.recordedAt().isAfter(cutoff);
                     boolean delivered = record.journalOffset() <= deliveredEverywhere;
                     if (expired && delivered && survivors.isEmpty()) {
                         // Only a contiguous prefix is discarded. Punching a hole in the middle would

@@ -8,6 +8,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
+import ai.ravenroot.persistence.sqlite.SqliteStoreConfig;
 import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
 import ai.ravenroot.persistence.sqlite.SqliteStoreMaintenanceLock;
 
@@ -49,6 +50,22 @@ public final class ExecutionStoreBootstrap {
     public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
                                    GraphMlLimits graphMlLimits,
                                    ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        return openConfigured(configuration, clock, graphMlLimits, humanTaskPolicy, SqliteStoreConfig.defaults());
+    }
+
+    /** Opens the fully resolved startup policy without reading ambient configuration. */
+    public static Opened openResolved(ExecutionStoreConfiguration.Resolved resolved, Clock clock,
+                                      GraphMlLimits graphMlLimits,
+                                      ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        Objects.requireNonNull(resolved, "resolved");
+        return openConfigured(resolved.configuration(), clock, graphMlLimits, humanTaskPolicy,
+                resolved.sqliteStoreConfig());
+    }
+
+    private static Opened openConfigured(ExecutionStoreConfiguration configuration, Clock clock,
+                                         GraphMlLimits graphMlLimits,
+                                         ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                         SqliteStoreConfig storeConfig) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(graphMlLimits, "graphMlLimits");
@@ -64,7 +81,7 @@ public final class ExecutionStoreBootstrap {
                     return new Opened(null, null, null, () -> { }, maintenanceLock::close);
                 }
                 var store = new SqliteExecutionStore(configuration.location(), clock,
-                        ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), humanTaskPolicy);
+                        storeConfig, humanTaskPolicy);
                 // Same database file as the executions that pin these definitions, which is what puts
                 // both into one backup snapshot and lets retention decide reachability from the
                 // execution rows in the transaction that removes a definition. The store's own

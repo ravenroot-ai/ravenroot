@@ -163,6 +163,75 @@ class ExecutionStoreBootstrapTest {
         }
     }
 
+    @Test
+    void resolvedEnvironmentReachesTheOpenedStoreAndPreservesOtherCompositionBudgets() {
+        var resolved = ExecutionStoreConfiguration.resolveEnvironment(java.util.Map.of(
+                ExecutionStoreConfiguration.DIRECTORY_VARIABLE, temporaryDirectory.resolve("resolved").toString(),
+                ExecutionStoreConfiguration.MAX_LEASE_TTL_SECONDS_VARIABLE, "13",
+                ExecutionStoreConfiguration.MAX_PAYLOAD_BYTES_VARIABLE, "257",
+                ExecutionStoreConfiguration.MAX_CLOCK_SKEW_MILLIS_VARIABLE, "17",
+                ExecutionStoreConfiguration.JOURNAL_RETENTION_SECONDS_VARIABLE, "7200",
+                ExecutionStoreConfiguration.MAX_INVENTORY_PAGE_SIZE_VARIABLE, "3",
+                ExecutionStoreConfiguration.TERMINAL_RETENTION_SECONDS_VARIABLE, "172800",
+                ExecutionStoreConfiguration.RESULT_RETENTION_SECONDS_VARIABLE, "14400",
+                ExecutionStoreConfiguration.SQLITE_BUSY_TIMEOUT_MILLIS_VARIABLE, "19"));
+        var defaults = GraphMlLimits.DEFAULTS;
+        var graph = new GraphMlLimits(4096, defaults.maxNodes(), defaults.maxEdges(), defaults.maxProperties(),
+                defaults.maxDepth(), defaults.maxStringLength(), defaults.maxKeys(), defaults.maxElements(),
+                defaults.maxAttributes(), defaults.maxNamespaceDeclarations());
+        try (var opened = ExecutionStoreBootstrap.openResolved(resolved, Clock.systemUTC(), graph,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS)) {
+            var store = opened.store();
+            assertEquals(java.time.Duration.ofSeconds(13), store.maxLeaseTtl());
+            assertEquals(257, store.maxPayloadBytes());
+            assertEquals(257, store.maxExecutionResultPayloadBytes());
+            assertEquals(java.time.Duration.ofMillis(17), store.maxClockSkew());
+            assertEquals(java.time.Duration.ofHours(2), store.journalRetention());
+            assertEquals(3, store.maxInventoryPageSize());
+            assertEquals(java.time.Duration.ofDays(2), store.terminalRetention());
+            assertEquals(java.time.Duration.ofHours(4), store.executionResultRetention());
+            assertEquals(4096, opened.graphDefinitionStore().maxDefinitionBytes());
+            assertTrue(store.capabilities().contains(ai.ravenroot.api.persistence.StoreCapability.DURABLE));
+            store.listProcessInstances("tenant", ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(3))
+                    .toCompletableFuture().join();
+            assertThrows(java.util.concurrent.CompletionException.class,
+                    () -> store.listProcessInstances("tenant",
+                            ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(4)).toCompletableFuture().join());
+        }
+    }
+
+    @Test
+    void malformedResolvedSettingsCannotPrepareTheDirectoryOrAcquireAMaintenanceLease() {
+        for (String enabled : new String[]{"true", "false"}) {
+            Path directory = temporaryDirectory.resolve("invalid-before-open-" + enabled);
+            var environment = java.util.Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, enabled,
+                    ExecutionStoreConfiguration.DIRECTORY_VARIABLE, directory.toString(),
+                    ExecutionStoreConfiguration.MAX_PAYLOAD_BYTES_VARIABLE, "secret-overflow-value");
+            var failure = assertThrows(IllegalArgumentException.class, () -> ExecutionStoreBootstrap.openResolved(
+                    ExecutionStoreConfiguration.resolveEnvironment(environment), Clock.systemUTC(),
+                    GraphMlLimits.DEFAULTS, ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS));
+            assertNull(failure.getCause());
+            assertFalse(Files.exists(directory));
+        }
+    }
+
+    @Test
+    void resolvedDisabledModeRetainsMaintenanceAuthorityWithoutOpeningSQLite() {
+        var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("resolved-disabled"));
+        var resolved = new ExecutionStoreConfiguration.Resolved(new ExecutionStoreConfiguration(false, location),
+                ai.ravenroot.api.persistence.ExecutionStorePolicy.DEFAULTS, java.time.Duration.ZERO);
+        try (var opened = ExecutionStoreBootstrap.openResolved(resolved, Clock.systemUTC(), GraphMlLimits.DEFAULTS,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS)) {
+            assertNull(opened.store());
+            assertFalse(Files.exists(location.databaseFile()));
+            assertThrows(SqliteStoreMaintenanceLock.MaintenanceLockException.class,
+                    () -> SqliteStoreMaintenanceLock.acquire(location));
+        }
+        try (var ignored = SqliteStoreMaintenanceLock.acquire(location)) {
+            assertFalse(Files.exists(location.databaseFile()));
+        }
+    }
+
     private static long uncheckedSize(Path path) {
         try {
             return Files.size(path);

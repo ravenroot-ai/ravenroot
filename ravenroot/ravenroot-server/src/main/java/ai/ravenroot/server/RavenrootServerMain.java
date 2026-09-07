@@ -90,8 +90,8 @@ public final class RavenrootServerMain {
         // This lease is the offline-maintenance authority shared with backup/restore. It is
         // acquired before the audit trail is opened and retained until both stores are closed.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
-                .fromEnvironment(System.getenv());
-        var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
+                .resolveEnvironment(System.getenv());
+        var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openResolved(
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
                 humanTaskPolicy);
         try (var startupGuard = executionStoreOwner.startupGuard()) {

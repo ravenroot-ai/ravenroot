@@ -4610,12 +4610,17 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 // not been enabled yet, and no publisher would ever notice, because a publisher that
                 // never saw an event has nothing to miss.
                 long deliveredEverywhere = minimumCursor(tenantId);
-                Instant cutoff = clock.instant().minus(config.journalRetention());
+                Instant now = clock.instant();
+                Instant cutoff = minusClamped(now, config.journalRetention());
 
                 // Only a contiguous prefix goes. Punching a hole in the middle would leave surviving
                 // offsets that no single retained_from could honestly describe.
                 long ceiling;
-                try (PreparedStatement statement = connection.prepareStatement(
+                if (config.journalRetention().compareTo(Duration.between(Instant.MIN, now)) > 0) {
+                    // Even an event at Instant.MIN is newer than an unrepresentable cutoff.
+                    // Keep all journal rows while still allowing inbox cleanup below.
+                    ceiling = 0;
+                } else try (PreparedStatement statement = connection.prepareStatement(
                         "SELECT MIN(journal_offset) FROM event_journal WHERE tenant_id = ? "
                                 + "AND (journal_offset > ? OR " + StoredInstant.strictlyAfter("recorded_at") + ")")) {
                     statement.setString(1, tenantId);

@@ -238,6 +238,23 @@ spec:
               value: /opt/ravenroot/data/audit
             - name: RAVENROOT_EXECUTION_STORE_DIR
               value: /opt/ravenroot/data/execution-store
+            # Blank values resolve the shared Java policy at startup.
+            - name: RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS
+              value: ""
+            - name: RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES
+              value: ""
+            - name: RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS
+              value: ""
+            - name: RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS
+              value: ""
+            - name: RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS
+              value: ""
+            - name: RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS
+              value: ""
+            - name: RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS
+              value: ""
             - name: RAVENROOT_ARTIFACT_STORE_DIR
               value: /opt/ravenroot/data/artifact-store
             # Fail-closed: RAVENROOT_AUTH_MODE defaults to oidc in the image, and startup requires

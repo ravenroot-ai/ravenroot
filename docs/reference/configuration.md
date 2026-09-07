@@ -381,6 +381,77 @@ persist in the credential database and can rotate without rebuilding GraphML. Se
 Directory changes require restart and do not migrate existing data. Stop the service before offline
 backup or restore and use the [persistence lifecycle](../operator-guide/persistence-lifecycle.md).
 
+## Execution-store operational policy
+
+The packaged server uses SQLite for executions, retained graph definitions and execution manifests.
+These startup bindings configure its execution-store policy. Absent or Java-whitespace-only values
+select the defaults owned by `ExecutionStorePolicy.DEFAULTS` and `SqliteStoreConfig.defaults()`.
+Explicit values use unsigned ASCII decimal digits with optional surrounding Java whitespace and
+leading zeroes; signs, fractions, non-ASCII digits and non-breaking spaces are invalid. Restart or
+recreate the process to change them. Invalid values fail before store resources open, even with
+`RAVENROOT_EXECUTION_STORE_ENABLED=false`; diagnostics name the field without echoing the supplied value.
+
+| Variable | Default | Accepted range and unit |
+|---|---|---|
+| `RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS` | 300 seconds | 1–9223372036854775807 seconds |
+| `RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES` | 1048576 bytes | 1–2147483647 bytes; also the execution-result payload bound |
+| `RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS` | 5000 milliseconds | 0–9223372036854775807 milliseconds |
+| `RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS` | 86400 seconds | 1–9223372036854775807 seconds |
+| `RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE` | 100 records | 1–2147483647 records per store inventory page |
+| `RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS` | 604800 seconds | 1–9223372036854775807 seconds; at least journal and result retention |
+| `RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS` | 604800 seconds | 1–9223372036854775807 seconds |
+| `RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS` | 5000 milliseconds | 0–2147483647 milliseconds; zero disables waiting for a write lock |
+
+The maximum integers above are representation limits, not recommended operating targets. The busy
+wait uses SQLite's native signed-int millisecond range. It reaches the three connections opened by
+`ExecutionStoreBootstrap`, all retaining `synchronous=FULL`. It does not configure separate artifact,
+credential or deployment registries. The process-inventory API publishes this store maximum as its
+page-size limit. Human Task pagination retains its own separate policy contract.
+
+Compose forwards all eight variables with blank defaults. For example, these environment assignments
+select smaller payload and page bounds and a shorter busy wait while leaving the retention defaults
+in Java (export them for the packaged JVM, or put them in the Compose environment file):
+
+```dotenv
+RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS=
+RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES=524288
+RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS=
+RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS=
+RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE=50
+RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS=
+RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS=
+RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS=1000
+```
+
+The raw Kubernetes manifest carries blank string values. Set them in an overlay. Helm exposes the
+same bindings under `executionStore`; **every explicit value must be a quoted decimal string**, or
+be passed with `--set-string`. YAML numbers are refused even when small, so large signed-long values
+never pass through YAML/Go floating-point conversion. For example:
+
+```yaml
+executionStore:
+  maxLeaseTtlSeconds: "300"
+  maxPayloadBytes: "524288"
+  maxClockSkewMillis: "5000"
+  journalRetentionSeconds: "86400"
+  maxInventoryPageSize: "50"
+  terminalRetentionSeconds: "604800"
+  resultRetentionSeconds: "604800"
+  sqliteBusyTimeoutMillis: "1000"
+```
+
+An omitted Helm leaf inherits its blank chart value. The chart checks each string's grammar and
+range; the server checks `terminal >= journal` and `terminal >= result` after resolving all blanks.
+Helm rendering alone does not validate those two relations. A changed retention setting does not
+rewrite existing stored deadlines; see [policy changes and retained deadlines](../operator-guide/persistence-lifecycle.md#policy-changes-and-retained-deadlines).
+
+Embedded Java callers compose `ExecutionStorePolicy` explicitly through the policy constructors of
+`InMemoryExecutionStore`, `SqliteStoreConfig` or `PostgresStoreConfig`; those APIs do not read these
+variables. A Java caller using the server bootstrap can opt into `resolveEnvironment` and
+`openResolved`. Existing `fromEnvironment`/`openOwned` APIs preserve their historical default policy.
+The local CLI embedded runtime continues without an execution store. PostgreSQL shares the Java
+policy API, but these bindings do not select or configure a packaged PostgreSQL server backend.
+
 ## Plugins and authoring assistant
 
 `RAVENROOT_ENABLED_PLUGINS` is a comma-separated set of exact installed manifest IDs. Unset or blank

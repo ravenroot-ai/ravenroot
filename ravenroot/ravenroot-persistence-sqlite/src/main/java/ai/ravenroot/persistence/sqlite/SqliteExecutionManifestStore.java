@@ -77,6 +77,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
     private final SqliteStoreLocation location;
     private final Path databaseFile;
     private final Clock clock;
+    private final int busyTimeoutMillis;
     private final ExecutionManifestReferences references;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -103,10 +104,31 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
      */
     public SqliteExecutionManifestStore(SqliteStoreLocation location, Clock clock,
                                         ExecutionManifestReferences references) {
+        this(location, clock, references,
+                Math.toIntExact(SqliteStoreConfig.defaults().busyTimeout().toMillis()));
+    }
+
+    /** Opens the file-backed store with an explicit SQLite busy timeout in milliseconds. */
+    public SqliteExecutionManifestStore(Path databaseFile, Clock clock,
+                                        ExecutionManifestReferences references, int busyTimeoutMillis) {
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, references, busyTimeoutMillis);
+    }
+
+    /**
+     * Opens the store with an explicit SQLite busy timeout. Zero disables waiting for a write lock;
+     * positive values wait up to that many milliseconds. The int range is SQLite's native range.
+     * The connection retains its FULL synchronous mode.
+     */
+    public SqliteExecutionManifestStore(SqliteStoreLocation location, Clock clock,
+                                        ExecutionManifestReferences references, int busyTimeoutMillis) {
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.references = Objects.requireNonNull(references, "references");
+        if (busyTimeoutMillis < 0) {
+            throw new IllegalArgumentException("busyTimeoutMillis must be non-negative");
+        }
+        this.busyTimeoutMillis = busyTimeoutMillis;
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-manifests-"
                     + this.databaseFile.getFileName());
@@ -439,8 +461,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                         "the database at " + databaseFile + " refused write-ahead logging and reported '"
                                 + journalMode + "'; DURABLE is not honourable without it"));
             }
-            statement.execute("PRAGMA busy_timeout="
-                    + SqliteStoreConfig.defaults().busyTimeout().toMillis());
+            statement.execute("PRAGMA busy_timeout=" + busyTimeoutMillis);
             statement.execute("PRAGMA foreign_keys=ON");
             SqliteSchema.migrate(opened, clock);
             return opened;

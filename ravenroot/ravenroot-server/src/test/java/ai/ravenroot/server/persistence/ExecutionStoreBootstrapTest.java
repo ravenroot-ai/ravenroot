@@ -24,6 +24,38 @@ class ExecutionStoreBootstrapTest {
     Path temporaryDirectory;
 
     @Test
+    void resolvedBusyTimeoutReachesAllThreeOwnedConnections() throws Exception {
+        var resolved = ExecutionStoreConfiguration.resolveEnvironment(java.util.Map.of(
+                ExecutionStoreConfiguration.DIRECTORY_VARIABLE, temporaryDirectory.resolve("three-connections").toString(),
+                ExecutionStoreConfiguration.SQLITE_BUSY_TIMEOUT_MILLIS_VARIABLE, "17"));
+        try (var opened = ExecutionStoreBootstrap.openResolved(resolved, Clock.systemUTC(), GraphMlLimits.DEFAULTS,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS)) {
+            for (Object store : new Object[] {opened.store(), opened.graphDefinitionStore(),
+                    opened.executionManifestStore()}) {
+                var connectionField = store.getClass().getDeclaredField("connection");
+                var workerField = store.getClass().getDeclaredField("worker");
+                connectionField.setAccessible(true);
+                workerField.setAccessible(true);
+                var connection = (java.sql.Connection) connectionField.get(store);
+                var worker = (java.util.concurrent.ExecutorService) workerField.get(store);
+                worker.submit(() -> {
+                    try (var statement = connection.createStatement()) {
+                        try (var rows = statement.executeQuery("PRAGMA busy_timeout")) {
+                            assertTrue(rows.next());
+                            assertEquals(17, rows.getInt(1));
+                        }
+                        try (var rows = statement.executeQuery("PRAGMA synchronous")) {
+                            assertTrue(rows.next());
+                            assertEquals(2, rows.getInt(1));
+                        }
+                    }
+                    return null;
+                }).get();
+            }
+        }
+    }
+
+    @Test
     void enabledConfigurationIsOpenedAndPreparedBeforeStartupCanContinue() {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("store"));
 

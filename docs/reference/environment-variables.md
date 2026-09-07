@@ -258,6 +258,14 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_ENABLED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS` | See the linked contract for exact type, default, and applicability. |
 
 ## Package activation
 

@@ -70,6 +70,7 @@ public final class ExecutionStoreBootstrap {
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(graphMlLimits, "graphMlLimits");
         Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        int busyTimeoutMillis = Math.toIntExact(storeConfig.busyTimeout().toMillis());
         try {
             // Preserve the adapter's useful location classification before the maintenance API
             // deliberately reduces its own diagnostics to path-free lock failures.
@@ -92,7 +93,7 @@ public final class ExecutionStoreBootstrap {
                 try {
                     definitions = new SqliteGraphDefinitionStore(configuration.location(), clock,
                             ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE,
-                            graphMlLimits.maxBytes());
+                            graphMlLimits.maxBytes(), busyTimeoutMillis);
                 } catch (RuntimeException failed) {
                     store.close();
                     throw failed;
@@ -105,7 +106,7 @@ public final class ExecutionStoreBootstrap {
                 ExecutionManifestStore manifests;
                 try {
                     manifests = new SqliteExecutionManifestStore(configuration.location(), clock,
-                            ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE);
+                            ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE, busyTimeoutMillis);
                 } catch (RuntimeException failed) {
                     try {
                         definitions.close();

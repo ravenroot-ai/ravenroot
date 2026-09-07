@@ -11,6 +11,36 @@ Protect accepted executions and audit evidence across drain, backup, restart, an
 5. After restart or restore, the durable process inventory (`GET /v1/executions/inventory`, or `ravenroot inventory`) is queryable immediately, with no rebuild delay: it is read from the same rows the lifecycle committed, not from a projection that has to catch up. Use it, not the process-local live-execution view, to find work that outlived the restart. `ravenroot inventory` reads the tenant's whole answer in one call — it pages through the HTTP route internally rather than returning a first page, so its output is never a truncated view of a large tenant.
 6. When an instance you expect to find is absent from `GET /v1/executions/inventory` or `ravenroot inventory`, do not compare against its creation time — the `retainedFrom` floor every inventory listing carries (both process-instance and per-instance traversal listings, and the trailing `retained-from=` line the CLI prints) is measured in retention-deadline space, not creation space, and the boundary is exclusive: a row whose own deadline (`retainedUntil`, or its terminal-transition instant plus the configured terminal retention if you never read the row) sits strictly after the floor is guaranteed still present, while a deadline at or before the floor may have been purged. Compare the instance's deadline against the floor, not when it was created, before concluding the identifier is wrong. In this release that comparison will read as "still present" for every terminal instance regardless of age: see Authority below for why.
 
+## Policy changes and retained deadlines
+
+Configure the packaged server's SQLite execution-store policy with the eight startup bindings in
+[execution-store operational policy](../reference/configuration.md#execution-store-operational-policy).
+Blank deployment values keep defaults in Java. Compose, raw Kubernetes and Helm expose the same
+bindings; Helm requires quoted decimal strings or `--set-string` to preserve the full integer range.
+Invalid policy values or retention relations refuse startup even when execution persistence is off.
+The busy timeout applies to the execution, graph-definition and manifest connections in that database;
+it does not reach separately composed registries. Their connection policy remains independent.
+
+Terminal-instance and execution-result retention deadlines are recorded with the rows. Restarting
+with a different policy does not recalculate those deadlines: a result written with a six-day window
+keeps that deadline after reopening with a one-day result window, and new results use one day.
+The terminal window must be at least both journal and result windows. This relation is checked after
+all defaults resolve. A duration beyond the representable timestamp range saturates a stored
+retention deadline at the largest representable instant; it does not wrap into the past.
+
+Journal retention is a live policy: when compaction runs, it computes the age cutoff from the current
+clock and current journal window, including for events written under an earlier policy. If that cutoff
+would predate every representable instant, no journal event is old enough to delete. A representable
+cutoff includes events exactly at that cutoff, subject to the store's other compaction conditions.
+Changing lease, clock-skew, payload or inventory-page bounds likewise changes the live store policy;
+it does not rewrite persisted terminal or result deadlines or retroactively alter a lease already
+issued. Configuring a retention window does not introduce a deletion scheduler or operator command:
+the existing [retention authority](#authority) still governs when retained rows can be removed.
+
+For embedded Java, supply `ExecutionStorePolicy` to the store configuration API. PostgreSQL shares
+that API but is not selected by these packaged-server SQLite environment bindings. The local CLI
+embedded runtime does not create an execution store.
+
 ## Graph definitions
 
 Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored. An accepted execution is therefore always one whose graph is retained, and the retained document — not a copy held by whichever process accepted it — is the authoritative record of what that execution was accepted to run.
@@ -58,7 +88,7 @@ Only an operator may drain, copy or replace durable state, restore a deployment,
 
 **No shipped surface removes expired terminal rows from the durable inventory in this release.** The retention operation exists at the store level — nothing is ever deleted implicitly by a listing or a lookup, only terminal instances are ever eligible, and running it advances the retention floor for the tenant it was run against and no other — but there is no CLI verb, no HTTP route, and no scheduler that calls it. It is reachable today only by an embedder composing its own execution store directly. This is a deliberate scoping decision, not an oversight: a verb that permanently deletes terminal execution records is destructive and needs its own confirmation posture, and it was left out of this change rather than added late. Until a future change exposes it to an operator, the retention floor stays at its minimum in every real deployment and every terminal row is retained regardless of age. That minimum is not hidden as `null`: every `retainedFrom` field and the CLI's `retained-from=` line serialise it like any other instant, so what you will actually see today is the literal `-1000000000-01-01T00:00:00Z`. Read that value as "nothing has ever been forgotten," not as a malformed timestamp — collapsing it to `null` would erase the one distinction the field exists to make, between "nothing purged yet" and "unknown."
 
-Terminal-retention configuration cannot be set shorter than event-journal retention, so once retention removal is exposed, a terminal instance will never be pruned while its own events are still readable. The default terminal retention is seven days, chosen to span a weekend so a failure late on a Friday is still discoverable when someone looks on Monday — a bound that constrains configuration today but removes nothing until the operation above is reachable.
+Terminal-retention configuration must be at least both the current event-journal and execution-result retention windows. This configuration rule does not rewrite deadlines already stored under an earlier policy. The default terminal retention is seven days, chosen to span a weekend so a failure late on a Friday is still discoverable when someone looks on Monday — a bound that constrains configuration today but removes nothing until the operation above is reachable.
 
 ## Telling a cancellation from a failure
 

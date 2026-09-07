@@ -221,6 +221,22 @@ spec:
               value: /opt/ravenroot/data/audit
             - name: RAVENROOT_EXECUTION_STORE_DIR
               value: /opt/ravenroot/data/execution-store
+            - name: RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS
+              value: {{ .Values.executionStore.maxLeaseTtlSeconds | quote }}
+            - name: RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES
+              value: {{ .Values.executionStore.maxPayloadBytes | quote }}
+            - name: RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS
+              value: {{ .Values.executionStore.maxClockSkewMillis | quote }}
+            - name: RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS
+              value: {{ .Values.executionStore.journalRetentionSeconds | quote }}
+            - name: RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE
+              value: {{ .Values.executionStore.maxInventoryPageSize | quote }}
+            - name: RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS
+              value: {{ .Values.executionStore.terminalRetentionSeconds | quote }}
+            - name: RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS
+              value: {{ .Values.executionStore.resultRetentionSeconds | quote }}
+            - name: RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS
+              value: {{ .Values.executionStore.sqliteBusyTimeoutMillis | quote }}
             - name: RAVENROOT_ARTIFACT_STORE_DIR
               value: /opt/ravenroot/data/artifact-store
             - name: RAVENROOT_AUTH_ISSUER

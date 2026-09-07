@@ -234,6 +234,15 @@ services:
       # live on the same writable, persistent local volume as the audit trail; the read-only root
       # filesystem and /tmp tmpfs are intentionally not candidates for either durable subject.
       RAVENROOT_EXECUTION_STORE_DIR: /opt/ravenroot/data/execution-store
+      # Blank values resolve the shared Java policy at startup.
+      RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS: ${RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS:-}
+      RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES: ${RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES:-}
+      RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS: ${RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS:-}
+      RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS: ${RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS:-}
+      RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE: ${RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE:-}
+      RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS: ${RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS:-}
+      RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS: ${RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS:-}
+      RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS: ${RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS:-}
       # Durable tenant-scoped source qualification authority. It shares the persistent data volume
       # so graph readiness survives container replacement; startup never falls back to memory.
       RAVENROOT_ARTIFACT_STORE_DIR: /opt/ravenroot/data/artifact-store

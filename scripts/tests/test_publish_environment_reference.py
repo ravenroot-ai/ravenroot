@@ -40,6 +40,22 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
             "configuration.md#execution-runtime-and-engine-limits", published
         )
 
+    def test_execution_store_policy_bindings_belong_to_persistence(self):
+        names = (
+            "RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS",
+            "RAVENROOT_EXECUTION_STORE_MAX_PAYLOAD_BYTES",
+            "RAVENROOT_EXECUTION_STORE_MAX_CLOCK_SKEW_MILLIS",
+            "RAVENROOT_EXECUTION_STORE_JOURNAL_RETENTION_SECONDS",
+            "RAVENROOT_EXECUTION_STORE_MAX_INVENTORY_PAGE_SIZE",
+            "RAVENROOT_EXECUTION_STORE_TERMINAL_RETENTION_SECONDS",
+            "RAVENROOT_EXECUTION_STORE_RESULT_RETENTION_SECONDS",
+            "RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS",
+        )
+        inventory = variables()
+        for name in names:
+            self.assertIn(name, inventory)
+            self.assertEqual("persistence", group(name))
+
     def test_render_names_every_production_literal(self):
         published = render()
         for name in variables():

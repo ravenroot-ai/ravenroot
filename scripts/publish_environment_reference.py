@@ -140,8 +140,9 @@ def group(name: str) -> str:
         return "tool"
     if name.startswith(("RAVENROOT_GRAAL_", "RAVENROOT_PROGRAM_", "RAVENROOT_ARTIFACT_")):
         return "program"
-    if name in {"RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_ENABLED",
-                "RAVENROOT_AUDIT_DIR", "RAVENROOT_CREDENTIAL_DIR"}:
+    if name.startswith("RAVENROOT_EXECUTION_STORE_") or name in {
+        "RAVENROOT_SQLITE_BUSY_TIMEOUT_MILLIS", "RAVENROOT_AUDIT_DIR", "RAVENROOT_CREDENTIAL_DIR"
+    }:
         return "persistence"
     if name.startswith(("RAVENROOT_ENABLED_PLUGINS", "RAVENROOT_NODE_PACKAGE_SERVICES_")) \
             or name in {"RAVENROOT_NODE_PACKAGES", "RAVENROOT_PLUGINS_INSTALL_DIR"}:

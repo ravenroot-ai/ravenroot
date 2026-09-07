@@ -72,6 +72,7 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
     private final SqliteStoreLocation location;
     private final Path databaseFile;
     private final Clock clock;
+    private final int busyTimeoutMillis;
     private final GraphDefinitionReferences references;
     private final int maxDefinitionBytes;
     private final ExecutorService worker;
@@ -118,10 +119,31 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
      */
     public SqliteGraphDefinitionStore(SqliteStoreLocation location, Clock clock,
                                       GraphDefinitionReferences references, int maxDefinitionBytes) {
+        this(location, clock, references, maxDefinitionBytes,
+                Math.toIntExact(SqliteStoreConfig.defaults().busyTimeout().toMillis()));
+    }
+
+    /** Opens the file-backed store with an explicit SQLite busy timeout in milliseconds. */
+    public SqliteGraphDefinitionStore(Path databaseFile, Clock clock,
+                                      GraphDefinitionReferences references, int maxDefinitionBytes, int busyTimeoutMillis) {
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, references, maxDefinitionBytes, busyTimeoutMillis);
+    }
+
+    /**
+     * Opens the store with an explicit SQLite busy timeout. Zero disables waiting for a write lock;
+     * positive values wait up to that many milliseconds. The int range is SQLite's native range.
+     * The connection retains its FULL synchronous mode.
+     */
+    public SqliteGraphDefinitionStore(SqliteStoreLocation location, Clock clock,
+                                      GraphDefinitionReferences references, int maxDefinitionBytes, int busyTimeoutMillis) {
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.references = Objects.requireNonNull(references, "references");
+        if (busyTimeoutMillis < 0) {
+            throw new IllegalArgumentException("busyTimeoutMillis must be non-negative");
+        }
+        this.busyTimeoutMillis = busyTimeoutMillis;
         if (maxDefinitionBytes < 1) {
             throw new IllegalArgumentException("maxDefinitionBytes must be positive");
         }
@@ -584,7 +606,7 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
             // Two connections write to this file: a definition commit and an execution commit take the
             // same lock in turn. Without a busy timeout the second would fail immediately instead of
             // waiting, turning ordinary contention into a refused acceptance.
-            statement.execute("PRAGMA busy_timeout=" + SqliteStoreConfig.defaults().busyTimeout().toMillis());
+            statement.execute("PRAGMA busy_timeout=" + busyTimeoutMillis);
             // The definition-to-binding cascade depends on this, and it is off by default in SQLite.
             statement.execute("PRAGMA foreign_keys=ON");
             SqliteSchema.migrate(opened, clock);

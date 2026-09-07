@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -266,19 +267,51 @@ class AssistantCompositionTest {
                 () -> "the refusal must name the missing variable: " + refused.getMessage());
     }
 
-    /** A credential exchange over plaintext is refused at parse, not attempted and audited later. */
+    /** Invalid credential endpoints are refused before an egress client can be constructed. */
     @Test
-    void aDeviceEndpointThatIsNotHttpsIsRefused() {
-        Map<String, String> plaintext = oauthDeployment();
-        plaintext.put(AssistantComposition.TOKEN_ENDPOINT_VARIABLE,
-                "http://api.anthropic.com/v1/oauth/token");
+    void invalidDeviceEndpointsAreRejectedBySettingNameWithoutValueOrCause() {
+        for (String variable : List.of(AssistantComposition.DEVICE_AUTHORIZATION_ENDPOINT_VARIABLE,
+                AssistantComposition.TOKEN_ENDPOINT_VARIABLE)) {
+            for (String invalid : List.of("endpoint-canary", "http://api.anthropic.com/path",
+                    "https:opaque-canary", "https:///missing-host-canary",
+                    "https://userinfo-canary@api.anthropic.com/path",
+                    "https://api.anthropic.com/path#fragment-canary")) {
+                Map<String, String> environment = oauthDeployment();
+                environment.put(variable, invalid);
 
-        var refused = assertThrows(IllegalArgumentException.class,
-                () -> AssistantComposition.fromEnvironment(plaintext, noProviderReached()));
+                var refused = assertThrows(IllegalArgumentException.class,
+                        () -> AssistantComposition.fromEnvironment(environment, noProviderReached()));
 
-        assertTrue(refused.getMessage().contains("https"), refused.getMessage());
-        assertFalse(refused.getMessage().contains("api.anthropic.com"),
-                "the refusal names the setting, not the value it repeats back");
+                assertEquals(variable + " must be an https URL with a host and no user info or fragment",
+                        refused.getMessage());
+                assertNull(refused.getCause());
+                assertFalse(refused.getMessage().contains("canary"),
+                        "the refusal names the setting, not the value it repeats back");
+            }
+        }
+    }
+
+    @Test
+    void deviceEndpointsPreserveProviderPathsPortsAndQueries() {
+        Map<String, String> environment = oauthDeployment();
+        String device = "https://api.anthropic.com:443/v1/oauth/device?audience=ravenroot";
+        String token = "https://api.anthropic.com:443/v1/oauth/token?resource=assistant";
+        environment.put(AssistantComposition.DEVICE_AUTHORIZATION_ENDPOINT_VARIABLE, device);
+        environment.put(AssistantComposition.TOKEN_ENDPOINT_VARIABLE, token);
+        var requests = new ArrayList<HttpRequest>();
+        var bodies = new ArrayList<String>();
+        Deque<String> responses = new ArrayDeque<>(List.of(GRANT, REDEEMED));
+
+        try (var composed = assertDoesNotThrow(
+                () -> AssistantComposition.fromEnvironment(environment,
+                        () -> new ScriptedHttpClient(requests, bodies, responses)))) {
+            AssistantConnection connection = composed.service().connection();
+            assertInstanceOf(DeviceFlowAssistantConnection.class, connection);
+            connection.begin(AUTHOR);
+            assertInstanceOf(AssistantConnection.Progress.Linked.class, connection.poll(AUTHOR));
+            assertEquals(List.of(device, token),
+                    requests.stream().map(request -> request.uri().toString()).toList());
+        }
     }
 
     /**
@@ -309,17 +342,38 @@ class AssistantCompositionTest {
         }
     }
 
-    /** A non-positive session lifetime stores nothing, so it is refused where the variable is named. */
+    /** The session setting accepts only positive whole minutes representable as a Duration. */
     @Test
-    void aNonPositiveSessionLifetimeIsRefusedByVariableName() {
-        Map<String, String> zeroed = oauthDeployment();
-        zeroed.put(AssistantComposition.SESSION_MINUTES_VARIABLE, "0");
+    void sessionLifetimeReturnsExactDefaultsAndRepresentableBoundaries() {
+        assertEquals(AssistantComposition.DEFAULT_SESSION_LIFETIME,
+                AssistantComposition.sessionLifetime(Map.of()));
+        assertEquals(AssistantComposition.DEFAULT_SESSION_LIFETIME,
+                AssistantComposition.sessionLifetime(Map.of(
+                        AssistantComposition.SESSION_MINUTES_VARIABLE, " \t\u2003 ")));
+        assertEquals(Duration.ofMinutes(1), AssistantComposition.sessionLifetime(Map.of(
+                AssistantComposition.SESSION_MINUTES_VARIABLE, " 1 ")));
+        assertEquals(Duration.ofMinutes(Long.MAX_VALUE / 60),
+                AssistantComposition.sessionLifetime(Map.of(
+                        AssistantComposition.SESSION_MINUTES_VARIABLE,
+                        Long.toString(Long.MAX_VALUE / 60))));
+    }
 
-        var refused = assertThrows(IllegalArgumentException.class,
-                () -> AssistantComposition.fromEnvironment(zeroed, noProviderReached()));
+    @Test
+    void invalidSessionLifetimesAreRejectedBySettingNameWithoutValueOrCause() {
+        long firstUnrepresentableMinute = Long.MAX_VALUE / 60 + 1;
+        for (String invalid : List.of("0", "-1", "1.5", Long.toString(firstUnrepresentableMinute),
+                Long.toString(Long.MAX_VALUE), "9223372036854775808", "session-canary")) {
+            Map<String, String> environment = oauthDeployment();
+            environment.put(AssistantComposition.SESSION_MINUTES_VARIABLE, invalid);
 
-        assertTrue(refused.getMessage().contains(AssistantComposition.SESSION_MINUTES_VARIABLE),
-                refused.getMessage());
+            var refused = assertThrows(IllegalArgumentException.class,
+                    () -> AssistantComposition.fromEnvironment(environment, noProviderReached()));
+
+            assertEquals(AssistantComposition.SESSION_MINUTES_VARIABLE
+                    + " must be a positive whole number of minutes", refused.getMessage());
+            assertNull(refused.getCause());
+            assertFalse(refused.getMessage().contains(invalid));
+        }
     }
 
     /**

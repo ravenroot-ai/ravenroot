@@ -21,16 +21,16 @@ and require reconnection after restart.
 | `RAVENROOT_ASSISTANT_CREDENTIAL_SOURCE` | `api-key` or `oauth`; default `api-key` | Selects one credential model. There is no fallback between an author token and the operator key. Unknown values retain the `api-key` default. |
 | `RAVENROOT_ASSISTANT_API_KEY` | Secret string; no default | Operator key read only in `api-key` mode. Do not put it in GraphML, a command-line flag, or a browser setting. `openai-compatible` may be deliberately credential-free for a local endpoint. |
 | `RAVENROOT_ASSISTANT_ALLOWED_HOSTS` | Comma-separated exact hosts; no default | Operator-owned outbound allowlist. A provider and credential without this setting remain inert. |
-| `RAVENROOT_ASSISTANT_ALLOWED_PORTS` | Comma-separated ports; no default | Ports allowed for the provider and device-flow endpoints. Name a non-default local-model port explicitly. |
-| `RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP` | Boolean; default `false` | Allows plaintext only for a credential-free `openai-compatible` endpoint on localhost, a loopback literal, a `.localhost` name, or `host.docker.internal`. It does not bypass host/port allowlists. OAuth and credential-bearing HTTP remain refused. |
-| `RAVENROOT_ASSISTANT_TIMEOUT_SECONDS` | Positive whole seconds; default 120; malformed and non-positive values fall back to 120 | Wall-clock bound for a provider operation. |
+| `RAVENROOT_ASSISTANT_ALLOWED_PORTS` | Comma-separated ports from 1 to 65535; default `80,443` | Ports allowed for the provider and device-flow endpoints. Name a non-default local-model port explicitly. Malformed nonblank values refuse startup. |
+| `RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP` | `true` or `false`; default `false` | Allows plaintext only for a credential-free `openai-compatible` endpoint on localhost, a loopback literal, a `.localhost` name, or `host.docker.internal`. It does not bypass host/port allowlists. OAuth and credential-bearing HTTP remain refused. Malformed nonblank values refuse startup. |
+| `RAVENROOT_ASSISTANT_TIMEOUT_SECONDS` | Positive whole seconds; default 120 | Wall-clock bound for a provider operation. Malformed and non-positive nonblank values refuse startup. |
 | `RAVENROOT_ASSISTANT_CONSENT_DIR` | Directory; default `./data/assistant-consent` | Holds `ravenroot-assistant-consent.db`. In the published container working directory, the default is inside the mounted data volume. Back up this directory with the deployment's durable data. |
-| `RAVENROOT_ASSISTANT_DEVICE_AUTHORIZATION_ENDPOINT` | HTTPS URI; no default | OAuth RFC 8628 device-authorization endpoint. It is used only with the complete OAuth configuration. |
-| `RAVENROOT_ASSISTANT_TOKEN_ENDPOINT` | HTTPS URI; no default | OAuth token endpoint. |
+| `RAVENROOT_ASSISTANT_DEVICE_AUTHORIZATION_ENDPOINT` | Absolute HTTPS URI with a host and no user info or fragment; no default | OAuth RFC 8628 device-authorization endpoint. Provider-specific paths, ports, and queries are preserved. It is used only with the complete OAuth configuration. |
+| `RAVENROOT_ASSISTANT_TOKEN_ENDPOINT` | Absolute HTTPS URI with a host and no user info or fragment; no default | OAuth token endpoint. Provider-specific paths, ports, and queries are preserved. |
 | `RAVENROOT_ASSISTANT_OAUTH_CLIENT_ID` | Public client identifier; no default | Provider's device-flow client ID; it is not a client secret. |
-| `RAVENROOT_ASSISTANT_SESSION_MINUTES` | Positive whole minutes; default 480 | Maximum lifetime of a redeemed token inside one process. Restart ends the session sooner. |
+| `RAVENROOT_ASSISTANT_SESSION_MINUTES` | Positive whole minutes representable as a duration; default 480 | Maximum lifetime of a redeemed token inside one process. Unrepresentable values refuse startup; if adding a valid duration to the actual redemption time cannot be represented, the token and consumed grant are not retained. Restart ends the session sooner. |
 
-The provider call also has fixed build-time ceilings of 16,000 output tokens and eight tool
+The provider call also has fixed in-code runtime ceilings of 16,000 output tokens and eight tool
 iterations per author message. There are no environment overrides for those two values in this
 baseline.
 

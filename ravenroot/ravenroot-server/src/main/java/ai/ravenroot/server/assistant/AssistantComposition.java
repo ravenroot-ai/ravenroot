@@ -218,7 +218,7 @@ public final class AssistantComposition implements AutoCloseable {
         return providerId != null && !ScriptedAssistantProvider.ID.equals(providerId);
     }
 
-    private static Duration sessionLifetime(Map<String, String> env) {
+    static Duration sessionLifetime(Map<String, String> env) {
         String configured = trimmed(env.get(SESSION_MINUTES_VARIABLE));
         if (configured == null) {
             return DEFAULT_SESSION_LIFETIME;
@@ -233,6 +233,12 @@ public final class AssistantComposition implements AutoCloseable {
         if (minutes <= 0) {
             // DeviceFlowAssistantConnection refuses a non-positive lifetime for the same reason, and
             // refusing here names the variable instead of the argument.
+            throw new IllegalArgumentException(SESSION_MINUTES_VARIABLE
+                    + " must be a positive whole number of minutes");
+        }
+        if (minutes > Long.MAX_VALUE / 60) {
+            // Duration.ofMinutes multiplies by 60 with exact arithmetic. Refusing before that call
+            // keeps the trusted setting name in the diagnostic and leaves no raw value or JDK cause.
             throw new IllegalArgumentException(SESSION_MINUTES_VARIABLE
                     + " must be a positive whole number of minutes");
         }
@@ -304,12 +310,17 @@ public final class AssistantComposition implements AutoCloseable {
             try {
                 parsed = URI.create(value);
             } catch (IllegalArgumentException notAUri) {
-                // Deliberately not carrying the cause: the message repeats the raw value, and the only
-                // useful answer at startup is that this setting is unusable.
-                throw new IllegalArgumentException(variable + " must be an https URL");
+                // Deliberately not carrying the cause: its message repeats the raw value, and the only
+                // useful answer at startup is which trusted setting is unusable.
+                throw new IllegalArgumentException(variable
+                        + " must be an https URL with a host and no user info or fragment");
             }
-            if (!"https".equals(String.valueOf(parsed.getScheme()).toLowerCase(Locale.ROOT))) {
-                throw new IllegalArgumentException(variable + " must be an https URL");
+            if (!parsed.isAbsolute()
+                    || !"https".equals(String.valueOf(parsed.getScheme()).toLowerCase(Locale.ROOT))
+                    || parsed.getHost() == null || parsed.getHost().isBlank()
+                    || parsed.getUserInfo() != null || parsed.getRawFragment() != null) {
+                throw new IllegalArgumentException(variable
+                        + " must be an https URL with a host and no user info or fragment");
             }
             return parsed;
         }

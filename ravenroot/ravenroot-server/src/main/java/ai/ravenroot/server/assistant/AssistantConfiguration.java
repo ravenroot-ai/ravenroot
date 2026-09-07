@@ -153,12 +153,26 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
         AssistantCredential credential = source == AssistantCredentialSource.API_KEY
                 ? AssistantCredential.ofNullable(env.get(API_KEY_VARIABLE))
                 : null;
-        var egress = OutboundHttpPolicy.fromCommaSeparated(
-                trimmed(env.get(ALLOWED_HOSTS_VARIABLE)),
-                trimmed(env.get(ALLOWED_PORTS_VARIABLE)), 0);
+        String configuredPorts = trimmed(env.get(ALLOWED_PORTS_VARIABLE));
+        if (configuredPorts != null && java.util.Arrays.stream(configuredPorts.split(",", -1))
+                .map(String::trim).allMatch(String::isEmpty)) {
+            throw invalidPorts();
+        }
+        OutboundHttpPolicy egress;
+        try {
+            egress = OutboundHttpPolicy.fromCommaSeparated(
+                    trimmed(env.get(ALLOWED_HOSTS_VARIABLE)),
+                    configuredPorts, 0);
+        } catch (IllegalArgumentException invalidPortList) {
+            // The shared parser includes the offending token in its diagnostic. This boundary knows
+            // which trusted setting supplied it and can give the operator a useful answer without
+            // copying that value (which may itself contain sensitive deployment text) into a log.
+            throw invalidPorts();
+        }
         String model = trimmed(env.get(MODEL_VARIABLE));
         URI endpoint = endpointFor(providerId, trimmed(env.get(ENDPOINT_VARIABLE)));
-        boolean allowLocalHttp = "true".equalsIgnoreCase(trimmed(env.get(ALLOW_LOCAL_HTTP_VARIABLE)));
+        boolean allowLocalHttp = strictBoolean(env.get(ALLOW_LOCAL_HTTP_VARIABLE),
+                ALLOW_LOCAL_HTTP_VARIABLE, false);
         if (ANTHROPIC_PROVIDER.equals(providerId) && model == null) {
             model = ANTHROPIC_DEFAULT_MODEL;
         }
@@ -341,6 +355,25 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
             throw new IllegalArgumentException(TIMEOUT_VARIABLE + " must be a positive whole number of seconds");
         }
         return Duration.ofSeconds(seconds);
+    }
+
+    private static boolean strictBoolean(String value, String variable, boolean defaultValue) {
+        String normalized = trimmed(value);
+        if (normalized == null) {
+            return defaultValue;
+        }
+        if ("true".equalsIgnoreCase(normalized)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(normalized)) {
+            return false;
+        }
+        throw new IllegalArgumentException(variable + " must be true or false");
+    }
+
+    private static IllegalArgumentException invalidPorts() {
+        return new IllegalArgumentException(ALLOWED_PORTS_VARIABLE
+                + " must contain comma-separated ports from 1 to 65535");
     }
 
     private static String trimmed(String value) {

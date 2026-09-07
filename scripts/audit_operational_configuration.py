@@ -94,6 +94,14 @@ RESOLVER_TEST_ROLES = {
     "blankSourcesTypedDefault",
     "malformedNonblankRefusal",
 }
+RESOLVER_COMPOSITION_METHOD_ROLES = {
+    "typedDefaultsFactory",
+    "nestedDefaultsFactory",
+}
+RESOLVER_COMPOSITION_LINK_ROLES = {
+    "typedDefaultsInitializer",
+    "nestedDefaultsAccessor",
+}
 
 
 @dataclass(frozen=True)
@@ -1302,10 +1310,15 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
         composition_methods = authority["compositionMethods"]
         composition_digests = authority["compositionMethodDigests"]
         composition_links = authority["compositionLinks"]
-        if not isinstance(composition_methods, dict) or not composition_methods \
+        if not isinstance(composition_methods, dict) \
+                or set(composition_methods) != RESOLVER_COMPOSITION_METHOD_ROLES \
+                or any(not isinstance(method, str) or not method.strip()
+                       for method in composition_methods.values()) \
+                or len(set(composition_methods.values())) != len(RESOLVER_COMPOSITION_METHOD_ROLES) \
                 or not isinstance(composition_digests, dict) \
                 or set(composition_digests) != set(composition_methods.values()) \
-                or not isinstance(composition_links, dict) or not composition_links:
+                or not isinstance(composition_links, dict) \
+                or set(composition_links) != RESOLVER_COMPOSITION_LINK_ROLES:
             errors.append(f"resolver authority {identifier} has incomplete fallback-composition evidence")
         else:
             for method in composition_methods.values():
@@ -1816,16 +1829,15 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             continue
         source_revision = str(migration["sourceRevision"])
         source_path = str(migration["sourcePath"])
-        source = subprocess.run(["git", "show", f"{source_revision}:{source_path}"], cwd=root,
-                                capture_output=True)
-        if source.returncode != 0:
+        source = committed_source(root, source_revision, source_path)
+        if source is None:
             errors.append(f"inventory migration source is not locally resolvable: {source_revision}:{source_path}")
             continue
-        digest = hashlib.sha256(source.stdout).hexdigest()
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
         if digest != migration["sourceFileDigest"]:
             errors.append(f"inventory migration source digest mismatch: {source_revision}:{source_path}")
         try:
-            source_document = json.loads(source.stdout)
+            source_document = json.loads(source)
         except json.JSONDecodeError:
             errors.append(f"inventory migration source is not JSON: {source_revision}:{source_path}")
             continue

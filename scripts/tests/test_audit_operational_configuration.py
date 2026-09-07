@@ -416,6 +416,78 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertFalse(audit.revision_is_ancestor(ROOT, "0" * 40, "deadbeef"))
         run.assert_not_called()
 
+    def test_migration_history_rejects_unsafe_revision_or_source_path_before_git(self) -> None:
+        base = {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": [],
+            "retiredEntries": [],
+            "evidenceRecords": {},
+            "resolverAuthorities": {},
+        }
+        cases = (
+            ("--output=/tmp/never-write", "inventory.json"),
+            ("deadbeef", "inventory.json"),
+            ("0" * 40, "../inventory.json"),
+            ("0" * 40, "/tmp/inventory.json"),
+        )
+        for revision, source_path in cases:
+            with self.subTest(revision=revision, source_path=source_path):
+                document = copy.deepcopy(base)
+                document["migrationHistory"] = [{
+                    "fromSchema": 1,
+                    "toSchema": audit.SCHEMA_VERSION,
+                    "sourceRevision": revision,
+                    "sourcePath": source_path,
+                    "sourceFileDigest": "0" * 64,
+                    "candidateCount": 0,
+                    "statusCounts": {},
+                    "rationale": "Synthetic invalid migration source.",
+                }]
+                with mock.patch.object(audit, "tracked_files", return_value=()), \
+                        mock.patch.object(audit.subprocess, "run") as run:
+                    errors = audit.inventory_errors(Path("/unused"), document, ())
+                self.assertTrue(any("migration source is not locally resolvable" in error
+                                    for error in errors), errors)
+                run.assert_not_called()
+
+    def test_migration_history_accepts_full_revision_and_tracked_json_source(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            source = root / "inventory.json"
+            source_document = {
+                "entries": [{"status": "pending-review"}, {"status": "retained"}],
+            }
+            source.write_text(json.dumps(source_document) + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "inventory.json"], cwd=root, check=True)
+            subprocess.run([
+                "git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+                "commit", "-qm", "migration source",
+            ], cwd=root, check=True)
+            revision = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            document = {
+                "schemaVersion": audit.SCHEMA_VERSION,
+                "entries": [],
+                "retiredEntries": [],
+                "evidenceRecords": {},
+                "resolverAuthorities": {},
+                "migrationHistory": [{
+                    "fromSchema": 1,
+                    "toSchema": audit.SCHEMA_VERSION,
+                    "sourceRevision": revision,
+                    "sourcePath": "inventory.json",
+                    "sourceFileDigest": audit.hashlib.sha256(source.read_bytes()).hexdigest(),
+                    "candidateCount": 2,
+                    "statusCounts": {"pending-review": 1, "retained": 1},
+                    "rationale": "Synthetic valid migration source.",
+                }],
+            }
+            errors = audit.inventory_errors(root, document, ())
+        self.assertEqual([], errors)
+
     def test_converted_setting_rejects_no_op_revision_provenance(self) -> None:
         with synthetic_repository() as location:
             root = Path(location)
@@ -1116,6 +1188,57 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("fallback-composition link nestedDefaultsAccessor has drifted" in error
                                 for error in delegation_errors), delegation_errors)
             config.write_text(changed_composition_source, encoding="utf-8")
+
+            for field in ("compositionMethods", "compositionMethodDigests", "compositionLinks"):
+                with self.subTest(missing_composition_map=field):
+                    missing_map = copy.deepcopy(document)
+                    del missing_map["resolverAuthorities"][resolver_id][field]
+                    missing_map_errors = audit.resolver_authority_errors(
+                        root, missing_map["resolverAuthorities"])
+                    self.assertTrue(any("requires" in error for error in missing_map_errors),
+                                    missing_map_errors)
+
+            for role in ("typedDefaultsFactory", "nestedDefaultsFactory"):
+                with self.subTest(missing_composition_method=role):
+                    missing_method = copy.deepcopy(document)
+                    authority = missing_method["resolverAuthorities"][resolver_id]
+                    method = authority["compositionMethods"].pop(role)
+                    authority["compositionMethodDigests"].pop(method)
+                    missing_method_errors = audit.resolver_authority_errors(
+                        root, missing_method["resolverAuthorities"])
+                    self.assertTrue(any("incomplete fallback-composition evidence" in error
+                                        for error in missing_method_errors), missing_method_errors)
+
+            for role in ("typedDefaultsInitializer", "nestedDefaultsAccessor"):
+                with self.subTest(missing_composition_link=role):
+                    missing_link = copy.deepcopy(document)
+                    del missing_link["resolverAuthorities"][resolver_id]["compositionLinks"][role]
+                    missing_link_errors = audit.resolver_authority_errors(
+                        root, missing_link["resolverAuthorities"])
+                    self.assertTrue(any("incomplete fallback-composition evidence" in error
+                                        for error in missing_link_errors), missing_link_errors)
+
+            aliased_method = copy.deepcopy(document)
+            authority = aliased_method["resolverAuthorities"][resolver_id]
+            nested_method = authority["compositionMethods"]["nestedDefaultsFactory"]
+            authority["compositionMethods"]["nestedDefaultsFactory"] = \
+                authority["compositionMethods"]["typedDefaultsFactory"]
+            authority["compositionMethodDigests"].pop(nested_method)
+            aliased_errors = audit.resolver_authority_errors(
+                root, aliased_method["resolverAuthorities"])
+            self.assertTrue(any("incomplete fallback-composition evidence" in error
+                                for error in aliased_errors), aliased_errors)
+
+            blank_method = copy.deepcopy(document)
+            authority = blank_method["resolverAuthorities"][resolver_id]
+            method = authority["compositionMethods"]["nestedDefaultsFactory"]
+            digest = authority["compositionMethodDigests"].pop(method)
+            authority["compositionMethods"]["nestedDefaultsFactory"] = " "
+            authority["compositionMethodDigests"][" "] = digest
+            blank_method_errors = audit.resolver_authority_errors(
+                root, blank_method["resolverAuthorities"])
+            self.assertTrue(any("incomplete fallback-composition evidence" in error
+                                for error in blank_method_errors), blank_method_errors)
 
             other_resolver = root / "ravenroot/example/src/main/java/dev/example/OtherResolver.java"
             other_resolver.write_text(config.read_text(encoding="utf-8").replace(

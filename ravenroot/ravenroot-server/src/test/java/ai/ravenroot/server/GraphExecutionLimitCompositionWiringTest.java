@@ -22,23 +22,26 @@ class GraphExecutionLimitCompositionWiringTest {
     @Test
     void shippedCompositionUsesOneConfigurationForLiveReentryAndRecoveryDeliveryLimits()
             throws Exception {
-        String source = Files.readString(MAIN);
+        assertCompositionWiring(Files.readString(MAIN));
+    }
 
-        assertEquals(1, source.split(
+    private static void assertCompositionWiring(String source) {
+        String code = maskNonCode(source);
+        assertEquals(1, code.split(
                         "GraphExecutionLimits\\s*\\.fromEnvironment\\(System\\.getenv\\(\\)\\)", -1)
                         .length - 1,
                 () -> MAIN + " must read operator graph limits exactly once");
-        int resolution = source.indexOf("var graphExecutionLimits");
-        int storeOpen = source.indexOf("ExecutionStoreBootstrap.openOwned(");
+        int resolution = code.indexOf("var graphExecutionLimits");
+        int storeOpen = code.indexOf("ExecutionStoreBootstrap.openOwned(");
         assertTrue(resolution >= 0 && resolution < storeOpen,
                 () -> MAIN + " must resolve graph limits before opening durable stores");
-        assertTrue(source.contains("java.time.Clock.systemUTC(), graphExecutionLimits.graphMl()"),
+        assertTrue(code.contains("java.time.Clock.systemUTC(), graphExecutionLimits.graphMl()"),
                 () -> MAIN + " must give the durable definition store the same graph byte limit");
-        assertTrue(source.contains("embedConfiguration, userCredentials, graphExecutionLimits.graphMl()"),
+        assertTrue(code.contains("embedConfiguration, userCredentials, graphExecutionLimits.graphMl()"),
                 () -> MAIN + " must give HTTP admission and served configuration the same graph byte limit");
         assertRecoveryConstructorWiring(source);
         assertExecutionManifestBinding(source);
-        assertTrue(source.contains("graphExecutionLimits.maxRecoveryDeliveriesPerAttempt())"),
+        assertTrue(code.contains("graphExecutionLimits.maxRecoveryDeliveriesPerAttempt())"),
                 () -> MAIN + " must bound production recovery delivery attempts from operator configuration");
     }
 
@@ -57,11 +60,31 @@ class GraphExecutionLimitCompositionWiringTest {
         assertThrows(AssertionError.class, () -> assertRecoveryConstructorWiring(replaceOne(source,
                 "executionManifests, executionRuntime\\.humanTaskRunnerShutdownStepBound\\(\\)",
                 "secondExecutionManifests, executionRuntime.humanTaskRunnerShutdownStepBound()")));
+    }
 
-        String commentedDecoy = missingManifest + "\n// new PinnedGraphToolApprovalContinuationExecutor("
-                + "ignored, recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets, "
-                + "executionManifests, executionRuntime.toolApprovalRunnerShutdownStepBound());\n";
-        assertThrows(AssertionError.class, () -> assertRecoveryConstructorWiring(commentedDecoy));
+    @Test
+    void nonCodeLookalikesNeitherDuplicateNorReplaceLiveWiring() throws Exception {
+        String source = Files.readString(MAIN);
+        String withDecoys = withNonCodeDecoys(source);
+        assertCompositionWiring(withDecoys);
+
+        String missingManifest = replaceOne(source,
+                "executionManifests, executionRuntime\\.toolApprovalRunnerShutdownStepBound\\(\\)",
+                "executionRuntime.toolApprovalRunnerShutdownStepBound()");
+        assertThrows(AssertionError.class,
+                () -> assertCompositionWiring(withNonCodeDecoys(missingManifest)));
+
+        String secondManifestBinding = replaceOne(source,
+                "var\\s+executionManifests\\s*=\\s*application\\.executionManifests\\(\\);",
+                "var executionManifests = secondApplication.executionManifests();");
+        assertThrows(AssertionError.class,
+                () -> assertCompositionWiring(withNonCodeDecoys(secondManifestBinding)));
+
+        String missingStoreForwarding = replaceOne(source,
+                "java\\.time\\.Clock\\.systemUTC\\(\\), graphExecutionLimits\\.graphMl\\(\\)",
+                "java.time.Clock.systemUTC(), GraphMlLimits.DEFAULTS");
+        assertThrows(AssertionError.class,
+                () -> assertCompositionWiring(withNonCodeDecoys(missingStoreForwarding)));
     }
 
     private static void assertRecoveryConstructorWiring(String source) {
@@ -170,6 +193,40 @@ class GraphExecutionLimitCompositionWiringTest {
         String changed = source.substring(0, start) + replacement + source.substring(end);
         assertTrue(!changed.equals(source), () -> "source mutation did not change " + expression);
         return changed;
+    }
+
+    private static String withNonCodeDecoys(String source) {
+        String decoys = String.join("\n",
+                "    // new PinnedGraphToolApprovalContinuationExecutor(ignored,",
+                "    //     recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,",
+                "    //     executionManifests, executionRuntime.toolApprovalRunnerShutdownStepBound());",
+                "    // var executionManifests = application.executionManifests();",
+                "    /* var executionManifests = application.executionManifests();",
+                "       new PinnedGraphHumanTaskContinuationExecutor(ignored,",
+                "           recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,",
+                "           executionManifests, executionRuntime.humanTaskRunnerShutdownStepBound());",
+                "       java.time.Clock.systemUTC(), graphExecutionLimits.graphMl()",
+                "       embedConfiguration, userCredentials, graphExecutionLimits.graphMl()",
+                "       graphExecutionLimits.maxRecoveryDeliveriesPerAttempt()) */",
+                "    private static final String WIRING_STRING_DECOY =",
+                "            \"new PinnedGraphHumanTaskContinuationExecutor(ignored, \"",
+                "            + \"recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets, \"",
+                "            + \"executionManifests, executionRuntime.humanTaskRunnerShutdownStepBound());\";",
+                "    private static final String WIRING_BINDING_STRING_DECOY =",
+                "            \"var executionManifests = application.executionManifests();\";",
+                "    private static final String WIRING_TEXT_BLOCK_DECOY = \"\"\"",
+                "            GraphExecutionLimits.fromEnvironment(System.getenv())",
+                "            var graphExecutionLimits",
+                "            ExecutionStoreBootstrap.openOwned(",
+                "            var executionManifests = application.executionManifests();",
+                "            new PinnedGraphToolApprovalContinuationExecutor(ignored,",
+                "                recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,",
+                "                executionManifests, executionRuntime.toolApprovalRunnerShutdownStepBound());",
+                "            \"\"\";",
+                "");
+        int closingBrace = source.lastIndexOf('}');
+        assertTrue(closingBrace >= 0, "source must contain its class closing brace");
+        return source.substring(0, closingBrace) + decoys + source.substring(closingBrace);
     }
 
     private static String maskNonCode(String source) {

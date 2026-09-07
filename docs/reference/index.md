@@ -17,6 +17,7 @@ Look up exact GraphML, node, execution, API, configuration, embed, extension, an
 - [Command-line tools](command-line-tools.md) — Operate `plugin.sh`, `service.sh`, `dev.sh`, and every supported application CLI verb and option.
 - [Configuration and deployment defaults](configuration.md) — Look up environment variables, defaults, safe domains, and fail-closed combinations.
 - [Backup and recovery bundle](backup-recovery.md) — Use the offline version 2 bundle, verify its inventory and limits, and interpret stable recovery reasons.
+- [Shared PostgreSQL persistence](postgresql-persistence.md) — Run the shared store for several hosts: supported topology, credentials and TLS, pool sizing, migration, backup, retention, and high-availability limits.
 - [Embed and extension contracts](embed-extension-contracts.md) — Find the seven gates, session flow, plugin manifests, adapter capabilities, and sandbox contract.
 
 ## Authority boundary

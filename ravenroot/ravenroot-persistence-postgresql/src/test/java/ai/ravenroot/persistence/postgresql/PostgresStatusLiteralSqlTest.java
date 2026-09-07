@@ -1,5 +1,6 @@
 package ai.ravenroot.persistence.postgresql;
 
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,9 @@ class PostgresStatusLiteralSqlTest {
     private static final String FROZEN_HUMAN_TASK_PREDICATE =
             "WHERE status IN ('WAITING', 'ESCALATED')";
 
+    /** The execution-pause partial-index predicate exactly as migration 1 shipped it. */
+    private static final String FROZEN_EXECUTION_PAUSE_PREDICATE = "WHERE status = 'HELD'";
+
     @Test
     void theDerivedHandlerListsAreExactlyTheNonTerminalAndTerminalMembers() {
         assertEquals(expectedHandlerList(false), PostgresExecutionStore.LIVE_HANDLER_STATUSES);
@@ -68,17 +72,45 @@ class PostgresStatusLiteralSqlTest {
     }
 
     @Test
+    void theDerivedHumanTaskListIsExactlyTheNonTerminalMembers() {
+        // Against the enum, not against another constant. The earlier shape of this test compared
+        // LIVE_HUMAN_TASK_STATUSES with a hardcoded frozen predicate that named the same two
+        // statuses, so it could not fail for the reason the test exists: adding a live status would
+        // have left both sides unchanged and the shipped index quietly wrong.
+        assertEquals(expectedList(HumanTaskStatus.values(), HumanTaskStatus::terminal, false),
+                PostgresExecutionStore.LIVE_HUMAN_TASK_STATUSES);
+    }
+
+    @Test
     void theShippedHumanTaskIndexStillCoversExactlyTheLiveStatuses() {
         String statement = theOneStatementContaining("human_task_live_correlation");
         assertTrue(statement.contains(FROZEN_HUMAN_TASK_PREDICATE),
                 "the shipped index predicate changed, which a frozen migration's text may not do: "
                         + statement);
         assertEquals(namesIn(PostgresExecutionStore.LIVE_HUMAN_TASK_STATUSES),
-                namesIn(FROZEN_HUMAN_TASK_PREDICATE));
-        assertTrue(namesIn(PostgresExecutionStore.LIVE_HUMAN_TASK_STATUSES).stream()
-                        .allMatch(name -> Arrays.stream(HumanTaskStatus.values())
-                                .anyMatch(status -> status.name().equals(name))),
-                "the live human-task list names a status this build does not have");
+                namesIn(FROZEN_HUMAN_TASK_PREDICATE),
+                "a human-task status was added or its terminality changed, so the shipped partial "
+                        + "index no longer enforces correlation-key uniqueness over every live task; "
+                        + "a NEW migration has to rebuild the index rather than this one being edited");
+    }
+
+    @Test
+    void theDerivedExecutionPauseListIsExactlyTheNonTerminalMembers() {
+        assertEquals(expectedList(ExecutionPauseStatus.values(), ExecutionPauseStatus::terminal, false),
+                PostgresExecutionStore.LIVE_EXECUTION_PAUSE_STATUSES);
+    }
+
+    @Test
+    void theShippedExecutionPauseIndexStillCoversExactlyTheLiveStatuses() {
+        String statement = theOneStatementContaining("execution_pause_held_traversal");
+        assertTrue(statement.contains(FROZEN_EXECUTION_PAUSE_PREDICATE),
+                "the shipped index predicate changed, which a frozen migration's text may not do: "
+                        + statement);
+        assertEquals(namesIn(PostgresExecutionStore.LIVE_EXECUTION_PAUSE_STATUSES),
+                namesIn(FROZEN_EXECUTION_PAUSE_PREDICATE),
+                "an execution-pause status became live, so the shipped partial index no longer makes "
+                        + "\"is this traversal held\" a single deterministic answer; a NEW migration "
+                        + "has to rebuild the index rather than this one being edited");
     }
 
     /**
@@ -100,8 +132,15 @@ class PostgresStatusLiteralSqlTest {
     }
 
     private static String expectedHandlerList(boolean terminal) {
-        return Arrays.stream(HandlerStatus.values())
-                .filter(status -> status.terminal() == terminal)
+        return expectedList(HandlerStatus.values(), HandlerStatus::terminal, terminal);
+    }
+
+    /** The list the store should have derived, rebuilt here from the enum rather than restated. */
+    private static <T extends Enum<T>> String expectedList(T[] values,
+                                                           java.util.function.Predicate<T> terminal,
+                                                           boolean wanted) {
+        return Arrays.stream(values)
+                .filter(status -> terminal.test(status) == wanted)
                 .map(status -> "'" + status.name() + "'")
                 .collect(Collectors.joining(", ", "(", ")"));
     }

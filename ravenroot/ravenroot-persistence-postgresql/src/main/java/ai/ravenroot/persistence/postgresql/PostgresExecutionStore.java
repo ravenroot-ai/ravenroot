@@ -299,19 +299,52 @@ public final class PostgresExecutionStore implements ExecutionStore {
     static final String TERMINAL_HANDLER_STATUSES = handlerStatusList(true);
 
     /**
-     * The live human-task statuses, derived for the reason the handler lists are derived.
+     * The live human-task statuses, derived for exactly the reason the handler lists are derived.
      *
-     * <p>A human task's split is its own: {@link HumanTaskStatus} has no {@code terminal()} of its
-     * own shape here, so liveness is the two statuses that can still be decided. They are named
-     * rather than derived from a predicate, and pinned by a test against the shipped partial
-     * index.</p>
+     * <p>{@link HumanTaskStatus#terminal()} partitions the enum the same way
+     * {@link HandlerStatus#terminal()} does, so this is derived from it rather than written out. A
+     * hand-written list is not a shortcut here, it is a second definition of liveness that nothing
+     * keeps in step: a new non-terminal status would be honoured by the port's own {@code terminal()}
+     * and silently ignored by the list, so correlation-key uniqueness would stop covering it, and the
+     * attention query and the live lookups would stop returning it — all without failing anything.</p>
+     *
+     * <p>{@link PostgresSchema}'s migration cannot use this — a migration's text is history and must
+     * never be rewritten — so the partial index there spells the literal out, and the schema test pins
+     * the shipped literal against this derived list, so a new status fails the build rather than
+     * quietly making the shipped index wrong.</p>
      */
-    static final String LIVE_HUMAN_TASK_STATUSES = "('WAITING', 'ESCALATED')";
+    static final String LIVE_HUMAN_TASK_STATUSES = humanTaskStatusList(false);
+
+    /**
+     * The live execution-pause status, derived for the same reason.
+     *
+     * <p>{@link ExecutionPauseStatus#terminal()} leaves exactly one live status today, so this list
+     * has one member and looks like a constant. It is derived anyway: a single-valued list is the
+     * easiest one to write out by hand and the easiest to leave behind when a second live status
+     * arrives.</p>
+     */
+    static final String LIVE_EXECUTION_PAUSE_STATUSES = executionPauseStatusList(false);
 
     private static String handlerStatusList(boolean terminal) {
-        return Arrays.stream(HandlerStatus.values())
+        return statusList(Arrays.stream(HandlerStatus.values())
                 .filter(status -> status.terminal() == terminal)
-                .map(status -> "'" + status.name() + "'")
+                .map(Enum::name));
+    }
+
+    private static String humanTaskStatusList(boolean terminal) {
+        return statusList(Arrays.stream(HumanTaskStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(Enum::name));
+    }
+
+    private static String executionPauseStatusList(boolean terminal) {
+        return statusList(Arrays.stream(ExecutionPauseStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(Enum::name));
+    }
+
+    private static String statusList(java.util.stream.Stream<String> names) {
+        return names.map(name -> "'" + name + "'")
                 .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
     }
 
@@ -3733,11 +3766,17 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     throw failure(ExecutionStoreFailure.invalid(
                             "agent authority control epoch is exhausted"));
                 }
+                // One instant for the whole transition, threaded rather than read twice. Two reads
+                // would stamp the killed budgets and the control row with different instants, and
+                // although the skew runs in the harmless direction, every other path in this adapter
+                // carries one clock reading through a batch and a lone exception is the kind of
+                // inconsistency that later gets copied rather than questioned.
+                Instant now = clock.instant();
                 long releasedTeamActive = targetState == AgentAuthorityControlState.KILLED
-                        ? killAgentAuthorityBudgets(connection, expectedEpoch) : 0L;
+                        ? killAgentAuthorityBudgets(connection, expectedEpoch, now) : 0L;
                 AgentAuthorityControl next;
                 try {
-                    next = new AgentAuthorityControl(targetState, nextEpoch, clock.instant(),
+                    next = new AgentAuthorityControl(targetState, nextEpoch, now,
                             Math.addExact(current.teamActiveReleased(), releasedTeamActive));
                 } catch (ArithmeticException overflow) {
                     throw failure(ExecutionStoreFailure.invalid(
@@ -3834,11 +3873,10 @@ public final class PostgresExecutionStore implements ExecutionStore {
      * running today, since both hold the control row exclusively first, and the order costs nothing
      * to keep true.</p>
      */
-    private long killAgentAuthorityBudgets(Connection connection, long expectedEpoch)
+    private long killAgentAuthorityBudgets(Connection connection, long expectedEpoch, Instant now)
             throws SQLException {
         var replacements = new ArrayList<BudgetReplacement>();
         long releasedTeamActive = 0L;
-        Instant now = clock.instant();
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget "
                         + "ORDER BY tenant_id, process_instance_id FOR UPDATE");
@@ -3858,8 +3896,19 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         || budget.controlEpoch() != expectedEpoch) {
                     continue;
                 }
-                DurableAgentAuthorityBudget killed = AgentAuthorityBudgetFold.apply(key, budget,
-                        new AgentBudgetOperation.KillRoot(expectedEpoch), now);
+                DurableAgentAuthorityBudget killed;
+                try {
+                    killed = AgentAuthorityBudgetFold.apply(key, budget,
+                            new AgentBudgetOperation.KillRoot(expectedEpoch), now);
+                } catch (IllegalArgumentException | IllegalStateException invalid) {
+                    // Wrapped for the same reason the batch path wraps it, and not because this call
+                    // is expected to reject: only budgets already filtered to ACTIVE at the expected
+                    // epoch reach here, and a kill accepts those. What the wrap buys is that a fold
+                    // rule this sweep has not anticipated arrives as a classified store failure rather
+                    // than as a raw argument exception escaping the port, which is the one outcome the
+                    // port forbids regardless of how it was reached.
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
                 try {
                     releasedTeamActive = Math.addExact(releasedTeamActive,
                             budget.reserved().teamActive() - killed.reserved().teamActive());
@@ -4174,7 +4223,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private DurableExecutionPause readHeldExecutionPause(Connection connection, String tenantId,
                                                          UUID traversalId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(EXECUTION_PAUSE_COLUMNS
-                + " WHERE p.tenant_id = ? AND p.traversal_id = ? AND p.status = 'HELD'")) {
+                + " WHERE p.tenant_id = ? AND p.traversal_id = ? AND p.status IN "
+                + LIVE_EXECUTION_PAUSE_STATUSES)) {
             statement.setString(1, tenantId);
             StoredUuid.bind(statement, 2, traversalId);
             try (ResultSet rows = statement.executeQuery()) {

@@ -34,7 +34,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import javax.net.ssl.SSLSocketFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.RepetitionInfo;
@@ -519,45 +521,60 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             AtomicInteger secrets = new AtomicInteger();
             var credentialEntered = new CompletableFuture<Void>();
             var releaseCredential = new CompletableFuture<Void>();
+            var clock = new CleanupClock();
+            var acceptedOperations = new ArrayList<CompletableFuture<?>>();
             NodeAction action = limitedAction(server.port(), profile, ref -> {
                 if (secrets.incrementAndGet() == 1) {
                     credentialEntered.complete(null);
                     awaitSignal(releaseCredential, "credential release");
                 }
                 return secret();
-            });
+            }, clock);
             var first = action.handle(node(tenant, Map.of("version", "mail.imap.query.v1")))
                     .toCompletableFuture();
+            acceptedOperations.add(first);
             try {
-                awaitEventOrStage("credential resolver entry", credentialEntered, first);
-                assertFalse(first.isDone(), "the admitted call must remain held before transport");
-                assertEquals(0, server.acceptedSockets(),
-                        "the credential gate must hold the admitted call before its first socket");
+                try {
+                    awaitEventOrStage("credential resolver entry", credentialEntered, first);
+                    assertFalse(first.isDone(), "the admitted call must remain held before transport");
+                    assertEquals(0, server.acceptedSockets(),
+                            "the credential gate must hold the admitted call before its first socket");
 
-                ImapQueryException saturated = failure(action.handle(
-                        node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture());
-                assertEquals(ImapQueryException.Code.SATURATED, saturated.code());
-                assertEquals(1, secrets.get(), "rejected work must not resolve a second secret");
-                assertEquals(0, server.acceptedSockets(), "rejected work must not open a second connection");
+                    ImapQueryException saturated = failure(action.handle(
+                            node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture());
+                    assertEquals(ImapQueryException.Code.SATURATED, saturated.code());
+                    assertEquals(1, secrets.get(), "rejected work must not resolve a second secret");
+                    assertEquals(0, server.acceptedSockets(), "rejected work must not open a second connection");
+                } finally {
+                    releaseCredential.complete(null);
+                }
+
+                server.awaitFirstConnection(first);
+                assertEquals(1, server.acceptedSockets(),
+                        "the first admitted call must open exactly one connection");
+                server.stopTransport();
+                ImapQueryException admittedFailure = failure(first);
+                assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, admittedFailure.code());
+                assertEquals(1, server.acceptedSockets(),
+                        "the admitted call must reach exactly one connection before transport failure");
+
+                var recovery = action.handle(node(tenant, Map.of("version", "mail.imap.query.v1")))
+                        .toCompletableFuture();
+                acceptedOperations.add(recovery);
+                ImapQueryException recovered = failure(recovery);
+                assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, recovered.code());
+                assertEquals(2, secrets.get(), "released permit must admit and resolve the recovery request");
+                assertEquals(1, server.acceptedSockets(),
+                        "the rejected call must never add a connection, and recovery must use the stopped transport");
             } finally {
                 releaseCredential.complete(null);
+                try {
+                    server.stopTransport();
+                } finally {
+                    clock.expireForCleanup();
+                    awaitTerminalOperations(acceptedOperations);
+                }
             }
-
-            server.awaitFirstConnection(first);
-            assertEquals(1, server.acceptedSockets(),
-                    "the first admitted call must open exactly one connection");
-            server.stopTransport();
-            ImapQueryException admittedFailure = failure(first);
-            assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, admittedFailure.code());
-            assertEquals(1, server.acceptedSockets(),
-                    "the admitted call must reach exactly one connection before transport failure");
-
-            ImapQueryException recovered = failure(action.handle(
-                    node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture());
-            assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, recovered.code());
-            assertEquals(2, secrets.get(), "released permit must admit and resolve the recovery request");
-            assertEquals(1, server.acceptedSockets(),
-                    "the rejected call must never add a connection, and recovery must use the stopped transport");
         }
     }
 
@@ -672,7 +689,16 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, fixture.port(), "localhost", "STARTTLS", Set.of("INBOX"), 10)), credentials,
                 properties -> { properties.put("mail.imap.ssl.socketFactory", socketFactory); return properties; }).create(configuration());
     }
-    private static NodeAction limitedAction(int port, String profile, CredentialResolver credentials) { return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, port, "localhost", "IMAPS", Set.of("INBOX"), 10)), credentials).create(new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR, Map.of("profile", profile, "folder", "INBOX", "limit", "10", "maxConcurrency", "1"))); }
+    private static NodeAction limitedAction(int port, String profile, CredentialResolver credentials,
+                                            LongSupplier clock) {
+        return new MailImapQueryNodeBehavior(
+                (tenant, name) -> Optional.of(profile(tenant, name, port, "localhost", "IMAPS", Set.of("INBOX"), 10)),
+                credentials, java.util.function.UnaryOperator.identity(),
+                task -> Thread.ofVirtual().name("ravenroot-imap-admission-", 0).start(task),
+                clock, clock, loopbackPolicy("localhost"))
+                .create(new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR,
+                        Map.of("profile", profile, "folder", "INBOX", "limit", "10", "maxConcurrency", "1")));
+    }
     private static NodeAction localAction(int preview, Set<String> folders, CredentialResolver credentials) { return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, 1, "localhost", "IMAPS", folders, preview)), credentials).create(configuration()); }
     private static ImapProfile profile(String tenant, String id, int port, String host, String mode, Set<String> folders, int preview) { return new ImapProfile(tenant, id, host, port, mode, "reader", "credential", folders, GENEROUS_TIMEOUT_MS, GENEROUS_TIMEOUT_MS, 2, 10, preview); }
     private static ImapProfile profile(String tenant, String id, int port, String host, String mode, Set<String> folders, int preview, int maxResults) { return new ImapProfile(tenant, id, host, port, mode, "reader", "credential", folders, GENEROUS_TIMEOUT_MS, GENEROUS_TIMEOUT_MS, 2, maxResults, preview); }
@@ -714,6 +740,23 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         }
         if (!event.isDone()) throw new AssertionError(
                 "The admitted stage completed before " + description + ": " + stageOutcome(stage));
+    }
+    private static void awaitTerminalOperations(List<CompletableFuture<?>> operations) {
+        CompletableFuture<?>[] drained = operations.stream()
+                .map(stage -> stage.handle((ignored, failure) -> null))
+                .toArray(CompletableFuture<?>[]::new);
+        try {
+            CompletableFuture.allOf(drained).get(20, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while draining admitted IMAP operations", interrupted);
+        } catch (ExecutionException failure) {
+            throw new AssertionError("Failed while draining admitted IMAP operations", failure.getCause());
+        } catch (TimeoutException timeout) {
+            throw new AssertionError("Timed out draining admitted IMAP operations: "
+                    + operations.stream().map(MailImapQueryNodeBehaviorIntegrationTest::stageOutcome).toList(),
+                    timeout);
+        }
     }
     private static ImapQueryException failure(CompletableFuture<?> stage) throws Exception {
         try {
@@ -802,6 +845,23 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             assertTrue(worker.join(java.time.Duration.ofSeconds(5)),
                     "the deterministic IMAP fixture must stop after its listener closes");
             if (workerFailure.get() != null) throw new AssertionError("IMAP fixture failed", workerFailure.get());
+        }
+    }
+
+    /** Fixed during assertions; cleanup expires existing work and gives late starts a real budget. */
+    private static final class CleanupClock implements LongSupplier {
+        private static final long CLEANUP_OFFSET = TimeUnit.DAYS.toNanos(1);
+        private final AtomicLong cleanupStartedAt = new AtomicLong(Long.MIN_VALUE);
+
+        @Override public long getAsLong() {
+            long startedAt = cleanupStartedAt.get();
+            return startedAt == Long.MIN_VALUE
+                    ? 0L
+                    : CLEANUP_OFFSET + Math.max(0L, System.nanoTime() - startedAt);
+        }
+
+        void expireForCleanup() {
+            cleanupStartedAt.compareAndSet(Long.MIN_VALUE, System.nanoTime());
         }
     }
 }

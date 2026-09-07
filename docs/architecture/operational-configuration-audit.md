@@ -6,7 +6,7 @@ This report is generated from the checked operational-configuration inventory. T
 finds a reviewable superset of fixed values; a candidate is not an operator setting until its
 semantic classification says so.
 
-**Audit state:** in progress. 11237 candidate(s) still require semantic review, 0 are deferred, and 0 confirmed hard-coded candidates remain unresolved.
+**Audit state:** in progress. 11356 candidate(s) still require semantic review, 0 are deferred, and 0 confirmed hard-coded candidates remain unresolved.
 
 ## Coverage
 
@@ -21,8 +21,8 @@ and vendored content.
 
 Each row represents one atomic fixed value or binding. Its full containing expression is retained as
 evidence without excerpt truncation. Candidate identity is `path + containing symbol + candidate
-kind/semantic role + normalized atomic value + lexical duplicate index`; source line and full evidence
-are checked metadata rather than identity.
+kind/semantic role + normalized atomic value + normalized full-expression digest + lexical duplicate
+index`; source line remains checked metadata.
 
 The scanner is deliberately lexical: it covers declared constants, known policy constructors and
 timeout APIs, environment bindings, deployment scalars, and container identity/port directives. It
@@ -33,20 +33,20 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 13748 |
-| Reviewed | 2511 |
-| Pending review | 11237 |
+| Atomic operational candidates discovered | 13992 |
+| Reviewed | 2636 |
+| Pending review | 11356 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
-| Unique confirmed operator-configurable parameters | 0 |
-| Unique parameters converted to centralized configuration | 0 |
+| Unique confirmed operator-configurable parameters | 25 |
+| Unique parameters converted to centralized configuration | 11 |
 | Duplicate authorities removed | 0 |
 | Retained security ceilings or defaults | 0 |
 | Retained protocol or format invariants | 0 |
 | Retained derived values | 0 |
-| Test fixtures | 2511 |
+| Test fixtures | 2554 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 0.
+Retired source candidates preserved in inventory history: 279.
 
 Checked inventory-schema migrations: 1. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
@@ -55,19 +55,44 @@ Surface counts are derived from the same inventory:
 
 - `deployment`: 556
 - `deployment-example`: 16
-- `java`: 5706
+- `java`: 5738
 - `script`: 2304
-- `test-fixture`: 2511
-- `ui`: 2655
+- `test-fixture`: 2554
+- `ui`: 2824
 
 ## Operator settings
 
 Every reviewed operator setting must name one typed owner, bindings, default, validation,
-scope, and pinning policy. Pending candidates do not appear in this table.
+scope, pinning policy, and deployment/reference coverage. Pending candidates do not appear
+in this table.
 
-| Setting | State | Owner | Bindings | Default | Validation | Scope | Pinning |
-|---|---|---|---|---|---|---|---|
-| _None reviewed yet_ |  |  |  |  |  |  |  |
+| Setting | State | Owner | Field | Bindings | Default | Validation | Scope | Pinning | Coverage |
+|---|---|---|---|---|---|---|---|---|---|
+| graph.execution.max-amplified-deliveries | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxAmplifiedDeliveries` | `RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES` | 100000 deliveries | 1..1000000 | one traversal | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-cumulative-payload-bytes | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxCumulativePayloadBytes` | `RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES` | 67108864 bytes | 1..268435456 | one traversal | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-fan-out | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxFanOut` | `RAVENROOT_GRAPH_MAX_FAN_OUT` | 64 targets | 1..256 | one routed outcome or failure route | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-in-flight-hops-per-traversal | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxInFlightHopsPerTraversal` | `RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS` | 1024 messages | 1..4096 | one traversal | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-live-actors-per-traversal | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxLiveActorsPerTraversal` | `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | 256 actors | 1..1024 | one traversal | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-queued-admissions-per-node | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxQueuedAdmissionsPerNode` | `RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE` | 1024 messages | 1..4096 | one node gate | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-recovery-deliveries-per-attempt | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxRecoveryDeliveriesPerAttempt` | `RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT` | 8 delivery claims | 1..64 | one recovery attempt | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-resident-actors | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxResidentActors` | `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | 256 actors | 1..4096 | one runner | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.execution.max-traversal-steps | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits` | `maxTraversalSteps` | `RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS` | 100000 deliveries | 1..1000000 | one traversal | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-attributes | converted | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxAttributes` | `RAVENROOT_GRAPHML_MAX_ATTRIBUTES` | 500000 XML attributes | 1..20000000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-bytes | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxBytes` | `RAVENROOT_GRAPHML_MAX_BYTES` | 10485760 bytes | 1..268435456 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: yes; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-depth | converted | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxDepth` | `RAVENROOT_GRAPHML_MAX_DEPTH` | 64 nesting levels | 1..1024 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-edges | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxEdges` | `RAVENROOT_GRAPH_MAX_EDGES` | 25000 edges | 1..5000000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-elements | converted | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxElements` | `RAVENROOT_GRAPHML_MAX_ELEMENTS` | 250000 XML elements | 1..10000000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-keys | converted | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxKeys` | `RAVENROOT_GRAPHML_MAX_KEYS` | 4096 distinct keys | 1..100000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-namespace-declarations | converted | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxNamespaceDeclarations` | `RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS` | 10000 namespace declarations | 1..1000000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-nodes | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxNodes` | `RAVENROOT_GRAPH_MAX_NODES` | 10000 nodes | 1..1000000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-properties | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxProperties` | `RAVENROOT_GRAPH_MAX_PROPERTIES` | 100000 properties | 1..10000000 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.graphml.max-string-length | converted | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java#GraphMlLimits` | `maxStringLength` | `RAVENROOT_GRAPHML_MAX_STRING_LENGTH` | 1048576 UTF-16 code units | 1..67108864 | one GraphML document | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.payload.max-collection-size | converted | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits` | `maxCollectionSize` | `RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE` | 1000 members per collection | 1..1000000 | each structured payload | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.payload.max-depth | converted | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits` | `maxDepth` | `RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH` | 32 nesting levels | 1..256 | each structured payload | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.payload.max-encoded-bytes | already-centralized | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits` | `maxEncodedBytes` | `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | 262144 bytes | 1..67108864 | each structured payload | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: yes; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.payload.max-key-length | converted | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits` | `maxKeyLength` | `RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH` | 256 UTF-16 code units | 1..4096 | each structured payload | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.payload.max-text-length | converted | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits` | `maxTextLength` | `RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH` | 32768 UTF-16 code units | 1..67108864 | each structured payload | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
+| graph.payload.max-value-count | converted | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits` | `maxValueCount` | `RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT` | 10000 values | 1..5000000 | each structured payload | Every effective GraphMlLimits, PayloadLimits, and GraphExecutionLimits component is ordered into ExecutionManifestResolver.limitsDigestOf (lines 167-196); the manifest pins that digest. | shared configuration reference: missing; Compose: missing; Helm: missing; raw Kubernetes: missing |
 
 ## Deferred values
 
@@ -159,7 +184,7 @@ into the operator report.
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundWebSocketRequest.java` | 1 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadEnvelope.java` | 7 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadException.java` | 1 |
-| `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java` | 19 |
+| `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java` | 11 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadValue.java` | 1 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentAuthorityBudgetFold.java` | 66 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentAuthorityRootRegistration.java` | 2 |
@@ -179,7 +204,7 @@ into the operator report.
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionStoreException.java` | 1 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphContentId.java` | 1 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionIdentity.java` | 2 |
-| `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStore.java` | 6 |
+| `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStore.java` | 3 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStoreException.java` | 1 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HandlerEventData.java` | 6 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HandlerRegistration.java` | 1 |
@@ -277,7 +302,7 @@ into the operator report.
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionTermination.java` | 1 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphComplexityAdmission.java` | 2 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionContinuationCheckpoint.java` | 3 |
-| `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java` | 50 |
+| `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java` | 11 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java` | 12 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/IterationContext.java` | 1 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/JoinConfigurationException.java` | 1 |
@@ -620,7 +645,7 @@ into the operator report.
 | `ravenroot/ravenroot-ui/public/theme-bootstrap.js` | 1 |
 | `ravenroot/ravenroot-ui/src/adapter-binding.js` | 2 |
 | `ravenroot/ravenroot-ui/src/app-commands.js` | 18 |
-| `ravenroot/ravenroot-ui/src/app.js` | 966 |
+| `ravenroot/ravenroot-ui/src/app.js` | 1019 |
 | `ravenroot/ravenroot-ui/src/assistant-client.js` | 20 |
 | `ravenroot/ravenroot-ui/src/assistant-context.js` | 3 |
 | `ravenroot/ravenroot-ui/src/assistant-graph-proposal.js` | 47 |
@@ -638,11 +663,11 @@ into the operator report.
 | `ravenroot/ravenroot-ui/src/execution-outcome-description.js` | 2 |
 | `ravenroot/ravenroot-ui/src/execution-reconciliation.js` | 8 |
 | `ravenroot/ravenroot-ui/src/graph-commands.js` | 4 |
-| `ravenroot/ravenroot-ui/src/graph-document.js` | 74 |
-| `ravenroot/ravenroot-ui/src/graph-editing.js` | 15 |
+| `ravenroot/ravenroot-ui/src/graph-document.js` | 77 |
+| `ravenroot/ravenroot-ui/src/graph-editing.js` | 16 |
 | `ravenroot/ravenroot-ui/src/graph-interaction.js` | 3 |
 | `ravenroot/ravenroot-ui/src/graph-lifecycle.js` | 4 |
-| `ravenroot/ravenroot-ui/src/graph-parsers.js` | 182 |
+| `ravenroot/ravenroot-ui/src/graph-parsers.js` | 184 |
 | `ravenroot/ravenroot-ui/src/graph-view-state.js` | 3 |
 | `ravenroot/ravenroot-ui/src/human-task-attention.js` | 44 |
 | `ravenroot/ravenroot-ui/src/human-task-controller.js` | 11 |
@@ -669,16 +694,21 @@ into the operator report.
 | `ravenroot/ravenroot-ui/src/stable-edge-id.js` | 1 |
 | `ravenroot/ravenroot-ui/src/theme-palette.js` | 21 |
 | `ravenroot/ravenroot-ui/src/theme-resolution.js` | 1 |
-| `ravenroot/ravenroot-ui/src/ui-text.js` | 252 |
+| `ravenroot/ravenroot-ui/src/ui-text.js` | 268 |
 | `ravenroot/ravenroot-ui/src/viewer-core.js` | 13 |
 | `ravenroot/ravenroot-ui/src/viewer-edge-style.js` | 1 |
 | `ravenroot/ravenroot-ui/src/viewer-elastic-renderer.js` | 110 |
 | `ravenroot/ravenroot-ui/src/viewer-renderer-adapter.js` | 13 |
 | `ravenroot/ravenroot-ui/src/viewer-route-budget.js` | 6 |
+| `ravenroot/ravenroot-ui/src/visual-group-elastic-renderer.js` | 33 |
+| `ravenroot/ravenroot-ui/src/visual-group-projection.js` | 5 |
+| `ravenroot/ravenroot-ui/src/visual-group-renderer.js` | 27 |
+| `ravenroot/ravenroot-ui/src/visual-group-transition.js` | 8 |
+| `ravenroot/ravenroot-ui/src/visual-groups.js` | 20 |
 | `ravenroot/ravenroot-ui/src/visual-tooltip.js` | 57 |
 | `ravenroot/ravenroot-ui/src/workspace-layout.js` | 34 |
 | `ravenroot/ravenroot-ui/src/workspace-persistence.js` | 5 |
-| `ravenroot/ravenroot-ui/src/workspace.js` | 4 |
+| `ravenroot/ravenroot-ui/src/workspace.js` | 5 |
 | `ravenroot/scripts/build-release.sh` | 8 |
 | `ravenroot/scripts/run-local.sh` | 5 |
 | `ravenroot/scripts/server.sh` | 97 |
@@ -726,7 +756,88 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 
 | ID | Source | Surface | State | Classification | Rationale |
 |---|---|---|---|---|---|
-| _No reviewed non-fixture candidates yet_ |  |  |  |  |  |
+| `oc-e2e35cc6e57e183f966b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:47` `PayloadLimits` | java | already-centralized | operator-configurable | maxEncodedBytes is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-edd6d2498a2bda7f9bf1` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:47` `PayloadLimits` | java | already-centralized | operator-configurable | maxEncodedBytes is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-d1f4db91b858e8ddedbd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:48` `PayloadLimits` | java | already-centralized | operator-configurable | maxDepth is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-013bf0998b2eaf2183a1` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:49` `PayloadLimits` | java | already-centralized | operator-configurable | maxCollectionSize is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-6e4c20b6b918c5a22549` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:50` `PayloadLimits` | java | already-centralized | operator-configurable | maxValueCount is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-0d0d535b09e901034f5a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:51` `PayloadLimits` | java | already-centralized | operator-configurable | maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-4bbc77fdc81ccf4dfa08` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:51` `PayloadLimits` | java | already-centralized | operator-configurable | maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-ef34479090c17895ad66` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java:52` `PayloadLimits` | java | already-centralized | operator-configurable | maxKeyLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-2f030c18b06c04d7ca7d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStore.java:66` `GraphDefinitionStore` | java | already-centralized | operator-configurable | maxBytes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-4fcd39d64aa4eba16a87` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStore.java:66` `GraphDefinitionStore` | java | already-centralized | operator-configurable | maxBytes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8a17ba40f2d9eefefd3c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStore.java:66` `GraphDefinitionStore` | java | already-centralized | operator-configurable | maxBytes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-50d7a7f77ce6ab5ca154` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:37` `GraphMlLimits` | java | already-centralized | operator-configurable | maxNodes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-6c5ce542acfd70e47b3a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:38` `GraphMlLimits` | java | already-centralized | operator-configurable | maxEdges is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-c90e00869aaae58d7d5d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:39` `GraphMlLimits` | java | already-centralized | operator-configurable | maxProperties is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-60222a531832ed7d4ef6` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:40` `GraphMlLimits` | java | already-centralized | operator-configurable | maxDepth is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-47d51b01c1fed02cdb1f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:41` `GraphMlLimits` | java | already-centralized | operator-configurable | maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-7c9a12df773079fe10af` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:41` `GraphMlLimits` | java | already-centralized | operator-configurable | maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-775d05bdb7d7b52338c9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:42` `GraphMlLimits` | java | already-centralized | operator-configurable | maxKeys is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-cd087dfaab7c25152bd0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:43` `GraphMlLimits` | java | already-centralized | operator-configurable | maxElements is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-2d0addc1b0d690e192fd` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:44` `GraphMlLimits` | java | already-centralized | operator-configurable | maxAttributes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-b4ebc35c96b10524114f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java:45` `GraphMlLimits` | java | already-centralized | operator-configurable | maxNamespaceDeclarations is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-4fbe23f8303dfbae718e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:24` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxFanOut is the typed one routed outcome or failure route budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-877eb2528007c7fd3ada` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:24` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxFanOut is the typed one routed outcome or failure route budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-1a89fe7101f125a58366` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:25` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxBytes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-2b87a8a722d0817f5cf5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:25` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxBytes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-c51852a6090890d29aa4` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:26` `GraphExecutionLimits` | java | converted | operator-configurable | maxDepth is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-ce63cc904e21bf5a5551` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:26` `GraphExecutionLimits` | java | converted | operator-configurable | maxDepth is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-d7527511bc3e73c82f76` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:27` `GraphExecutionLimits` | java | converted | operator-configurable | maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-eefa8ad9c16390126958` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:27` `GraphExecutionLimits` | java | converted | operator-configurable | maxStringLength is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-928c61a6d9875bda51ab` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:28` `GraphExecutionLimits` | java | converted | operator-configurable | maxKeys is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-9ab7ca961b09a3ec2de8` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:28` `GraphExecutionLimits` | java | converted | operator-configurable | maxKeys is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-269f062e9115584d3ffa` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:29` `GraphExecutionLimits` | java | converted | operator-configurable | maxElements is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-b00f5bd061f8d438594b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:29` `GraphExecutionLimits` | java | converted | operator-configurable | maxElements is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-a424e7413e2a72df0f58` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:30` `GraphExecutionLimits` | java | converted | operator-configurable | maxAttributes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-fa4632b3960a7c54b30a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:30` `GraphExecutionLimits` | java | converted | operator-configurable | maxAttributes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-54bd2886227e1236ee92` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:32` `GraphExecutionLimits` | java | converted | operator-configurable | maxNamespaceDeclarations is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-70c1da72c1a02dab8e98` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:32` `GraphExecutionLimits` | java | converted | operator-configurable | maxNamespaceDeclarations is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-2582809e05f58712a7e0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:33` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxNodes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-62c29096c5b72d258077` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:33` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxNodes is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-0f73da79adefcf600a76` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:34` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxEdges is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-9a9aa61040903c42e122` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:34` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxEdges is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8dac0f42b81f3c3dc484` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:35` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxProperties is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-99b173b250e65403c04e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:35` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxProperties is the typed one GraphML document budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-0ebb968fab9e32551234` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:36` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxEncodedBytes is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-61123191a6fb84a62c00` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:36` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxEncodedBytes is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-77550bdd606e9b18276c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:37` `GraphExecutionLimits` | java | converted | operator-configurable | maxDepth is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-fce075a8b6afa81c390f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:37` `GraphExecutionLimits` | java | converted | operator-configurable | maxDepth is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-0e70e0637d9cb27dc8df` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:39` `GraphExecutionLimits` | java | converted | operator-configurable | maxCollectionSize is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-5b9c54f514b1d7aa787f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:39` `GraphExecutionLimits` | java | converted | operator-configurable | maxCollectionSize is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-1ed04cd6abe1506d9eec` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:40` `GraphExecutionLimits` | java | converted | operator-configurable | maxValueCount is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-7856f7078fc25a861716` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:40` `GraphExecutionLimits` | java | converted | operator-configurable | maxValueCount is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-06bf0bf9ac96eaa20161` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:41` `GraphExecutionLimits` | java | converted | operator-configurable | maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-359215112d8d0ade3f7e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:41` `GraphExecutionLimits` | java | converted | operator-configurable | maxTextLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-6e93e1eb7c84191c4263` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:42` `GraphExecutionLimits` | java | converted | operator-configurable | maxKeyLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-fc9b3ca070114a510a67` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:42` `GraphExecutionLimits` | java | converted | operator-configurable | maxKeyLength is the typed each structured payload budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-853a651755b8ae91cced` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:43` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxResidentActors is the typed one runner budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-de3a3f132740658a1fe7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:43` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxResidentActors is the typed one runner budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-c99d104a8977acc1cf56` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:44` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxLiveActorsPerTraversal is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-ec4b9c22541a8a30c61a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:44` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxLiveActorsPerTraversal is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-2f523d908dbc7af6b607` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:45` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxInFlightHopsPerTraversal is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-527a8440de6d1c79f391` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:45` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxInFlightHopsPerTraversal is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-522f23e21bd777a68173` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:46` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxQueuedAdmissionsPerNode is the typed one node gate budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8f2bf568547ed1a8e46b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:46` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxQueuedAdmissionsPerNode is the typed one node gate budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-9056b26433366f9755ad` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:47` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxTraversalSteps is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-d661d446fd8990185903` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:47` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxTraversalSteps is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-973a03b0284401fbdd23` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:48` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxAmplifiedDeliveries is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-af5934c70713a383f9e7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:48` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxAmplifiedDeliveries is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-7457519f6bea0b49d6ac` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:49` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxCumulativePayloadBytes is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8e9d8f07262caab4b46f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:49` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxCumulativePayloadBytes is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8eaa5a177d939ac44d07` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:50` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxRecoveryDeliveriesPerAttempt is the typed one recovery attempt budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-da6fa9c997759ca8f6ae` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:50` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxRecoveryDeliveriesPerAttempt is the typed one recovery attempt budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-806f6b5d36d4c560ebf7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:65` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxFanOut is the typed one routed outcome or failure route budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-e237c12341969a3a690c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:66` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxResidentActors is the typed one runner budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8d1bc148fc92317787c0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:67` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxLiveActorsPerTraversal is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-96b939a85d5e608b5a7d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:68` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxInFlightHopsPerTraversal is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-8570b4d575dd0c7305e7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:69` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxQueuedAdmissionsPerNode is the typed one node gate budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-b1fef245ba2543a327e5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:70` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxTraversalSteps is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-b766abe7e29a282aaa5a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:71` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxAmplifiedDeliveries is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-0c3de8e3bf47a8b6cecb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:72` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxCumulativePayloadBytes is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-823afa06d95d90de42fc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:72` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxCumulativePayloadBytes is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-bdcad9f1e7fdb2f7b2ef` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:72` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxCumulativePayloadBytes is the typed one traversal budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
+| `oc-e88cbbcf590ef1d38564` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java:73` `GraphExecutionLimits` | java | already-centralized | operator-configurable | maxRecoveryDeliveriesPerAttempt is the typed one recovery attempt budget resolved by GraphExecutionLimits and pinned in the execution manifest. |
 
 ## Validation
 

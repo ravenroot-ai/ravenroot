@@ -18,6 +18,7 @@ import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -446,6 +447,7 @@ def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = Fals
     return document
 
 
+@lru_cache(maxsize=None)
 def current_source_owner(root: Path, owner: str) -> tuple[Path, str] | None:
     """Resolve a tracked in-repository ``path#symbol`` authority without following escapes."""
     if "#" not in owner:
@@ -465,11 +467,30 @@ def current_source_owner(root: Path, owner: str) -> tuple[Path, str] | None:
     if tracked.returncode != 0 or not authority.is_file():
         return None
     source = authority.read_text(encoding="utf-8")
-    if not re.search(rf"\b{re.escape(owner_symbol)}\b", source):
+    suffix = relative.suffix
+    symbol = re.escape(owner_symbol)
+    declarations = {
+        ".java": (
+            rf"\b(?:class|record|interface|enum|@interface)\s+{symbol}\b",
+            rf"(?m)^\s*(?:(?:public|protected|private|static|final|abstract|synchronized|native|strictfp)\s+)*"
+            rf"[A-Za-z_$][\w$<>,.?\[\] ]*\s+{symbol}\s*(?:\(|=|;)",
+        ),
+        ".py": (rf"(?m)^\s*(?:class|def|async\s+def)\s+{symbol}\b",),
+        ".js": (rf"\b(?:class|function)\s+{symbol}\b", rf"\b(?:const|let|var)\s+{symbol}\s*="),
+        ".mjs": (rf"\b(?:class|function)\s+{symbol}\b", rf"\b(?:const|let|var)\s+{symbol}\s*="),
+        ".ts": (rf"\b(?:class|interface|type|enum|function)\s+{symbol}\b",
+                rf"\b(?:const|let|var)\s+{symbol}\s*="),
+        ".sh": (rf"(?m)^\s*(?:function\s+)?{symbol}\s*(?:\(\s*\))?\s*\{{",
+                rf"(?m)^\s*{symbol}="),
+        ".yaml": (rf"(?m)^\s*{symbol}\s*:",),
+        ".yml": (rf"(?m)^\s*{symbol}\s*:",),
+    }.get(suffix, ())
+    if not declarations or not any(re.search(pattern, source) for pattern in declarations):
         return None
     return relative, owner_symbol
 
 
+@lru_cache(maxsize=None)
 def committed_source(root: Path, revision: str, path: str) -> str | None:
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts:
@@ -477,6 +498,18 @@ def committed_source(root: Path, revision: str, path: str) -> str | None:
     result = subprocess.run(["git", "show", f"{revision}:{relative.as_posix()}"], cwd=root,
                             capture_output=True, text=True)
     return result.stdout if result.returncode == 0 else None
+
+
+@lru_cache(maxsize=None)
+def commit_exists(root: Path, revision: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{revision}^{{commit}}"], cwd=root,
+                          capture_output=True).returncode == 0
+
+
+@lru_cache(maxsize=None)
+def revision_is_ancestor(root: Path, before: str, after: str) -> bool:
+    return subprocess.run(["git", "merge-base", "--is-ancestor", before, after], cwd=root,
+                          capture_output=True).returncode == 0
 
 
 def revision_transition_errors(root: Path, identifier: str, provenance: dict[str, object],
@@ -487,11 +520,9 @@ def revision_transition_errors(root: Path, identifier: str, provenance: dict[str
     if before == after:
         errors.append(f"{identifier}: {label} revisions must be distinct")
     for revision_field, revision in (("beforeRevision", before), ("afterRevision", after)):
-        if subprocess.run(["git", "cat-file", "-e", f"{revision}^{{commit}}"], cwd=root,
-                          capture_output=True).returncode != 0:
+        if not commit_exists(root, revision):
             errors.append(f"{identifier}: {label} {revision_field} is not a local commit")
-    if not errors and subprocess.run(["git", "merge-base", "--is-ancestor", before, after], cwd=root,
-                                     capture_output=True).returncode != 0:
+    if not errors and not revision_is_ancestor(root, before, after):
         errors.append(f"{identifier}: {label} beforeRevision is not an ancestor of afterRevision")
     before_source = committed_source(root, before, path)
     after_source = committed_source(root, after, path)
@@ -502,6 +533,45 @@ def revision_transition_errors(root: Path, identifier: str, provenance: dict[str
     if before_source is not None and after_source is not None and before_source == after_source:
         errors.append(f"{identifier}: {label} source is unchanged between revisions")
     return errors, before_source, after_source
+
+
+def conversion_evidence_errors(identifier: str, entry: dict[str, object],
+                               conversion: dict[str, object], before_source: str | None,
+                               after_source: str | None) -> list[str]:
+    """Verify that a converted setting's declared binding transition occurred in executable source."""
+    if before_source is None or after_source is None:
+        return []
+    binding = str(conversion["binding"])
+    binding_symbol = str(conversion["bindingSymbol"])
+    field = str(conversion["field"])
+    before_expression = normalized(str(conversion["beforeExpression"]))
+    after_expression = normalized(str(conversion["afterExpression"]))
+    before_code = normalized(strip_c_comments(before_source))
+    after_code = normalized(strip_c_comments(after_source))
+    errors: list[str] = []
+    bindings = entry.get("bindings", [])
+    if not isinstance(bindings, list) or binding not in bindings:
+        errors.append(f"{identifier}: conversion binding is not declared by the setting")
+    if field not in before_expression or field not in after_expression:
+        errors.append(f"{identifier}: conversion expressions must both identify the setting field")
+    if binding_symbol not in after_expression:
+        errors.append(f"{identifier}: conversion afterExpression must use bindingSymbol")
+    if before_expression == after_expression:
+        errors.append(f"{identifier}: conversion expressions must be distinct")
+    if before_expression not in before_code or before_expression in after_code:
+        errors.append(f"{identifier}: conversion beforeExpression does not identify the replaced source")
+    if after_expression in before_code or after_expression not in after_code:
+        errors.append(f"{identifier}: conversion afterExpression does not identify the added source")
+    if re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(before_source)):
+        errors.append(f"{identifier}: conversion binding already exists in beforeRevision")
+    if not re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(after_source)):
+        errors.append(f"{identifier}: conversion binding is absent from afterRevision")
+    declaration = re.compile(
+        rf"\b{re.escape(binding_symbol)}\b\s*=\s*\"{re.escape(binding)}\""
+    )
+    if declaration.search(strip_c_comments(after_source)) is None:
+        errors.append(f"{identifier}: conversion bindingSymbol does not declare the named binding")
+    return errors
 
 
 def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...]) -> list[str]:
@@ -558,7 +628,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if classification == "test-fixture" and candidate.surface != "test-fixture":
             errors.append(f"{identifier}: only a test-fixture surface may use the test-fixture classification")
         if classification == "operator-configurable" and status != "pending-review":
-            for field in ("setting", "owner", "default", "validation", "scope", "pinning"):
+            for field in ("setting", "owner", "field", "default", "validation", "scope", "pinning",
+                          "coverage"):
                 if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
                     errors.append(f"{identifier}: reviewed operator setting requires {field}")
             bindings = entry.get("bindings")
@@ -575,17 +646,26 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
             if status == "converted":
                 conversion = entry.get("conversion")
-                required = ("issue", "beforeRevision", "afterRevision", "path", "symbol")
+                required = ("issue", "beforeRevision", "afterRevision", "path", "symbol",
+                            "binding", "bindingSymbol", "field", "beforeExpression", "afterExpression")
                 if not isinstance(conversion, dict) or any(
                         not isinstance(conversion.get(field), str) or not str(conversion[field]).strip()
                         for field in required):
-                    errors.append(f"{identifier}: converted setting requires source-verifiable conversion provenance")
+                    errors.append(
+                        f"{identifier}: converted setting requires setting-specific source-verifiable "
+                        "conversion provenance"
+                    )
                 else:
-                    transition, _before, _after = revision_transition_errors(
+                    transition, before_source, after_source = revision_transition_errors(
                         root, identifier, conversion, path=str(conversion["path"]),
                         symbol=str(conversion["symbol"]), label="conversion",
                     )
                     errors.extend(transition)
+                    errors.extend(conversion_evidence_errors(
+                        identifier, entry, conversion, before_source, after_source,
+                    ))
+                    if str(conversion["field"]) != str(entry.get("field", "")):
+                        errors.append(f"{identifier}: conversion field does not match the setting field")
         if status == "deferred" and not re.search(r"(?:#\d+|https://)", str(entry.get("followUp", ""))):
             errors.append(f"{identifier}: deferred candidate requires a concrete linked followUp")
 
@@ -668,7 +748,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append(f"inventory migration source counts mismatch: {source_revision}:{source_path}")
 
     authorities: dict[str, tuple[str, tuple[object, ...]]] = {}
-    authority_fields = ("status", "owner", "default", "validation", "scope", "pinning")
+    authority_fields = ("owner", "field", "default", "validation", "scope", "pinning", "coverage")
     for identifier, entry in entries.items():
         if entry.get("classification") != "operator-configurable" or entry.get("status") == "pending-review":
             continue
@@ -678,7 +758,6 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             continue
         metadata = tuple(entry.get(field) for field in authority_fields) + (
             tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
-            json.dumps(entry.get("conversion"), sort_keys=True),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -750,8 +829,8 @@ def render_report(document: dict[str, object]) -> str:
         "and vendored content.", "",
         "Each row represents one atomic fixed value or binding. Its full containing expression is retained as",
         "evidence without excerpt truncation. Candidate identity is `path + containing symbol + candidate",
-        "kind/semantic role + normalized atomic value + lexical duplicate index`; source line and full evidence",
-        "are checked metadata rather than identity.", "",
+        "kind/semantic role + normalized atomic value + normalized full-expression digest + lexical duplicate",
+        "index`; source line remains checked metadata.", "",
         "The scanner is deliberately lexical: it covers declared constants, known policy constructors and",
         "timeout APIs, environment bindings, deployment scalars, and container identity/port directives. It",
         "does not infer values assembled only through reflection, generated sources, or arbitrary data flow;",
@@ -777,23 +856,27 @@ def render_report(document: dict[str, object]) -> str:
     ]
     lines.extend(f"- `{name}`: {count}" for name, count in sorted(surfaces.items()))
     lines.extend(("", "## Operator settings", "",
-                  "Every reviewed operator setting must name one typed owner, bindings, default, validation,",
-                  "scope, and pinning policy. Pending candidates do not appear in this table.", "",
-                  "| Setting | State | Owner | Bindings | Default | Validation | Scope | Pinning |", "|---|---|---|---|---|---|---|---|"))
+        "Every reviewed operator setting must name one typed owner, bindings, default, validation,",
+                  "scope, pinning policy, and deployment/reference coverage. Pending candidates do not appear",
+                  "in this table.", "",
+                  "| Setting | State | Owner | Field | Bindings | Default | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|"))
     if operator_entries:
         canonical: dict[str, list[dict[str, object]]] = {}
         for entry in operator_entries:
             canonical.setdefault(str(entry["setting"]), []).append(entry)
         for setting, setting_entries in sorted(canonical.items()):
             entry = setting_entries[0]
-            states = ", ".join(sorted({str(item["status"]) for item in setting_entries}))
+            item_states = {str(item["status"]) for item in setting_entries}
+            states = "converted" if "converted" in item_states else ", ".join(sorted(item_states))
             bindings = ", ".join(f"`{value}`" for value in entry.get("bindings", []))
-            lines.append("| {setting} | {status} | `{owner}` | {bindings} | {default} | {validation} | {scope} | {pinning} |".format(
+            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {validation} | {scope} | {pinning} | {coverage} |".format(
                 setting=setting, status=states, owner=entry.get("owner", ""),
+                field=entry.get("field", ""),
                 bindings=bindings or "none", default=entry.get("default", ""), validation=entry.get("validation", ""),
-                scope=entry.get("scope", ""), pinning=entry.get("pinning", "")))
+                scope=entry.get("scope", ""), pinning=entry.get("pinning", ""),
+                coverage=entry.get("coverage", "")))
     else:
-        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |")
+        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
     deferred_entries = [entry for entry in typed if entry.get("status") == "deferred"]
     if deferred_entries:

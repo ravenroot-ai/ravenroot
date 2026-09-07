@@ -218,12 +218,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "classification": "operator-configurable",
                 "setting": "example.runtime.policy",
                 "owner": "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                "field": "DERIVED_MASK",
                 "bindings": [],
                 "default": "16",
                 "defaultEvidence": [reviewed[0]["id"]],
                 "validation": "positive integer",
                 "scope": "process",
                 "pinning": "read once at startup",
+                "coverage": "synthetic test owner only",
                 "rationale": "Both expressions implement one logical operator setting.",
             }
             reviewed[0].update(contract)
@@ -250,8 +252,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             reviewed.update(
                 status="already-centralized", classification="operator-configurable",
                 setting="example.runtime.policy", owner="missing.java#MissingOwner",
+                field="DERIVED_MASK",
                 bindings=["RAVENROOT_MISSING"], default="16", defaultEvidence=[reviewed["id"]],
                 validation="positive integer", scope="process", pinning="read once at startup",
+                coverage="synthetic test owner only",
             )
             owner_errors = audit.inventory_errors(root, document, audit.discover(root))
         self.assertTrue(any("invalid for classification" in error for error in errors), errors)
@@ -269,8 +273,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             tracked_owner = audit.current_source_owner(
                 root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
             )
+            keyword_owner = audit.current_source_owner(
+                root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#package",
+            )
         self.assertIsNone(escaped)
         self.assertIsNone(untracked_owner)
+        self.assertIsNone(keyword_owner)
         self.assertIsNotNone(tracked_owner)
 
     def test_confirmed_hardcoded_setting_fails_the_completion_gate(self) -> None:
@@ -283,8 +291,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 status="confirmed-hardcoded", classification="operator-configurable",
                 setting="example.runtime.policy",
                 owner="ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                field="DERIVED_MASK",
                 bindings=[], default="16", defaultEvidence=[reviewed["id"]],
                 validation="positive integer", scope="process", pinning="read once at startup",
+                coverage="synthetic test owner only",
                 rationale="Confirmed but intentionally unresolved in this test.",
             )
             for entry in document["entries"]:
@@ -307,13 +317,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 status="converted", classification="operator-configurable",
                 setting="example.runtime.policy",
                 owner="ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                field="DERIVED_MASK",
                 bindings=[], default="16", defaultEvidence=[reviewed["id"]],
                 validation="positive integer", scope="process", pinning="read once at startup",
+                coverage="synthetic test owner only",
                 rationale="Synthetic conversion provenance test.",
                 conversion={
                     "issue": "#225", "beforeRevision": "0" * 40, "afterRevision": "1" * 40,
                     "path": "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java",
                     "symbol": "RuntimePolicy",
+                    "binding": "RAVENROOT_RUNTIME_LIMIT", "bindingSymbol": "RUNTIME_LIMIT_VARIABLE",
+                    "field": "DERIVED_MASK", "beforeExpression": "DERIVED_MASK = 1 << 4",
+                    "afterExpression": "RUNTIME_LIMIT_VARIABLE, DERIVED_MASK",
                 },
             )
             errors = audit.inventory_errors(root, document, audit.discover(root))
@@ -334,18 +349,65 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 status="converted", classification="operator-configurable",
                 setting="example.runtime.policy",
                 owner="ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                field="DERIVED_MASK",
                 bindings=[], default="16", defaultEvidence=[reviewed["id"]],
                 validation="positive integer", scope="process", pinning="read once at startup",
+                coverage="synthetic test owner only",
                 rationale="Synthetic no-op conversion provenance test.",
                 conversion={
                     "issue": "#225", "beforeRevision": revision, "afterRevision": revision,
                     "path": "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java",
                     "symbol": "RuntimePolicy",
+                    "binding": "RAVENROOT_RUNTIME_LIMIT", "bindingSymbol": "RUNTIME_LIMIT_VARIABLE",
+                    "field": "DERIVED_MASK", "beforeExpression": "DERIVED_MASK = 1 << 4",
+                    "afterExpression": "RUNTIME_LIMIT_VARIABLE, DERIVED_MASK",
                 },
             )
             errors = audit.inventory_errors(root, document, audit.discover(root))
         self.assertTrue(any("revisions must be distinct" in error for error in errors), errors)
         self.assertTrue(any("source is unchanged" in error for error in errors), errors)
+
+    def test_converted_setting_rejects_comment_only_or_unrelated_source_changes(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+                            "commit", "-qm", "fixture"], cwd=root, check=True)
+            before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                    capture_output=True, text=True).stdout.strip()
+            source = root / "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"
+            source.write_text(source.read_text(encoding="utf-8").replace(
+                "}\n",
+                '  static final String RUNTIME_LIMIT_VARIABLE = "RAVENROOT_RUNTIME_LIMIT";\n'
+                '  int unrelated() { return read(RUNTIME_LIMIT_VARIABLE, OTHER_FIELD); }\n'
+                "  // DERIVED_MASK review did not change.\n}\n",
+            ), encoding="utf-8")
+            subprocess.run(["git", "add", "ravenroot"], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+                            "commit", "-qm", "unrelated binding"], cwd=root, check=True)
+            after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                   capture_output=True, text=True).stdout.strip()
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            reviewed = next(entry for entry in document["entries"] if entry["role"] == "DERIVED_MASK")
+            reviewed.update(
+                status="converted", classification="operator-configurable",
+                setting="example.runtime.policy", field="DERIVED_MASK",
+                owner="ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#RuntimePolicy",
+                bindings=["RAVENROOT_RUNTIME_LIMIT"], default="16", defaultEvidence=[reviewed["id"]],
+                validation="positive integer", scope="process", pinning="read once at startup",
+                coverage="synthetic test owner only", rationale="Synthetic unrelated transition test.",
+                conversion={
+                    "issue": "#225", "beforeRevision": before, "afterRevision": after,
+                    "path": "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java",
+                    "symbol": "RuntimePolicy", "binding": "RAVENROOT_RUNTIME_LIMIT",
+                    "bindingSymbol": "RUNTIME_LIMIT_VARIABLE", "field": "DERIVED_MASK",
+                    "beforeExpression": "static final int DERIVED_MASK = 1 << 4;",
+                    "afterExpression": "read(RUNTIME_LIMIT_VARIABLE, OTHER_FIELD)",
+                },
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+        self.assertTrue(any("expressions must both identify the setting field" in error
+                            for error in errors), errors)
 
     def test_refresh_preserves_review_metadata_and_updates_source_line(self) -> None:
         with synthetic_repository() as location:

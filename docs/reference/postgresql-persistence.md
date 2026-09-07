@@ -107,6 +107,10 @@ Two tables record the state: `store_schema_version` holds the authoritative vers
 `store_schema_history` records what ran and when, for an operator inspecting a database they did not
 migrate themselves.
 
+The schema arrives in steps rather than in one, so an installation created by an earlier build is
+upgraded in place rather than rebuilt. Each step is applied once, in order, and recorded; a database
+already carrying the earlier steps keeps its rows untouched.
+
 Plan a migration as an ordinary database change: take a backup first, verify it restores, and expect
 the upgrade to be one-way.
 

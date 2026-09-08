@@ -40,6 +40,7 @@ export function createCommandRegistry(definitions, options = {}) {
     const command = get(id);
     return {
       enabled: command.isEnabled ? Boolean(command.isEnabled(context)) : true,
+      visible: command.isVisible ? Boolean(command.isVisible(context)) : true,
       checked: command.isChecked ? Boolean(command.isChecked(context)) : undefined,
     };
   }

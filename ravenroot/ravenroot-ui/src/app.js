@@ -149,6 +149,7 @@ import {
   enforceExecutionOutcomeCapacity,
   executionCommandIsCurrent,
   executionOutcomeFetchSignal,
+  isTerminalExecution,
   preflightBoundExecutionCommand,
   reconcileExecution,
   releaseExecutionCommand,
@@ -309,7 +310,7 @@ import {
   syncGraphPositionsFromCy,
 } from './graph-view-state.js';
 import { createCommandRegistry } from './command-registry.js';
-import { requestGraphLifecycle } from './graph-lifecycle.js';
+import { requestExecutionLifecycle, UNAVAILABLE_LIFECYCLE_REASONS } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { uiText } from './ui-text.js';
 import {
@@ -934,6 +935,8 @@ const PROGRAM_WORKSPACE_PROPERTY_NAMES = new Set(['language', 'source', 'testPay
 let hasRuntimeToken = false;
 let confirmedServiceOrigin = '';
 let activeExecutionId = null;
+let activeExecutionPaused = false;
+let activeExecutionCommandInFlight = false;
 let activeSourceSession = null;
 let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
@@ -2316,6 +2319,7 @@ function captureActiveDocument() {
   document_.cursorId = graphCursorId;
   document_.fontSize = fontSize;
   document_.execution.executionId = activeExecutionId;
+  document_.execution.paused = activeExecutionPaused;
   document_.execution.graphVersion = activeGraphVersion;
   document_.execution.finished = finishedExecutions;
   document_.execution.events = recentRuntimeEvents;
@@ -2405,6 +2409,8 @@ function applyActiveDocument() {
   graphCursorId = document_?.cursorId ?? null;
   fontSize = document_?.fontSize ?? DEFAULT_FONT_SIZE;
   activeExecutionId = document_?.execution.executionId ?? null;
+  activeExecutionPaused = document_?.execution.paused ?? false;
+  activeExecutionCommandInFlight = Boolean(document_?.execution.commandFlight);
   activeSourceSession = document_?.sourceSession ?? null;
   activeGraphVersion = document_?.execution.graphVersion ?? null;
   finishedExecutions = document_?.execution.finished ?? new Set();
@@ -3261,6 +3267,8 @@ function completeReplaceActiveDocument(target, graph, name) {
   graphCursorId = null;
   fontSize = DEFAULT_FONT_SIZE;
   activeExecutionId = null;
+  activeExecutionPaused = false;
+  activeExecutionCommandInFlight = false;
   activeGraphVersion = null;
   activeExecutionReconciliation = 'known';
   finishedExecutions = new Set();
@@ -3406,6 +3414,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
   document_.execution.executionId = executionId;
   document_.execution.processInstanceId = processInstanceId;
   document_.execution.graphVersion = graphVersion;
+  document_.execution.paused = false;
   document_.execution.reconciliationState = 'known';
   document_.execution.reconciliationClient = reconciliationClient;
   document_.execution.monitoringFlow ||= createMonitoringRuntimeState();
@@ -3417,6 +3426,8 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
   }
   if (document_ === workspace.active) {
     activeExecutionId = executionId;
+    activeExecutionPaused = false;
+    activeExecutionCommandInFlight = false;
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
     if (humanTaskController) void configureHumanTasks(document_);
@@ -3428,6 +3439,15 @@ function setExecutionReconciliationState(owner, state) {
   owner.execution.reconciliationState = state;
   if (owner.id === workspace.activeId) activeExecutionReconciliation = state;
   refreshCommands();
+}
+
+function setExecutionPaused(owner, paused) {
+  const next = Boolean(paused);
+  if (owner.execution.paused === next) return false;
+  owner.execution.paused = next;
+  if (owner.id === workspace.activeId) activeExecutionPaused = next;
+  refreshCommands();
+  return true;
 }
 
 // The auxiliary panels are single and follow the active document, so switching document has to
@@ -10878,29 +10898,90 @@ function setRuntimeConnectionState(status, message) {
   state.setAttribute('aria-label', `Runtime status: ${status.replaceAll('-', ' ')}. ${message}`);
 }
 
-function graphLifecycleCommand(action) {
+function stopCurrentSourceSession() {
   if (!workspace.active || !graphData) return showInspectorMessage('Create or load a workflow first.');
   if (!tenantAuthorityAllows(workspace.active)) {
     return showInspectorMessage('Wait for this document workspace authority to be verified.');
   }
-  if (action === 'stop' && sourceSessionIsActive(activeSourceSession)) {
-    void stopActiveSourceSession(workspace.active);
-    return { status: 'stopping', deploymentId: activeSourceSession.sessionId };
+  if (!sourceSessionIsActive(activeSourceSession)) {
+    return showInspectorMessage('No process-local source session is active for this document.');
   }
-  const result = requestGraphLifecycle(action, {
-    documentId: workspace.activeId,
-    graphName: graphDisplayName,
-    // A transient Test graph version is deliberately not treated as a durable deployment ID.
-    deploymentId: null,
-  });
-  const target = result.deploymentId
-    ? `deployment ${shortId(result.deploymentId)}`
-    : `current graph “${result.graphName || result.documentId}”`;
-  const message = `${result.status}: ${result.message} The command is scoped to ${target}, never the shared ActorSystem.`;
-  addActivityMessage(action === 'forceStop' ? 'Force stop' : action, message, 'failed');
-  document.getElementById('info-title').textContent = `${action === 'forceStop' ? 'Force stop' : action} · not yet implemented`;
-  document.getElementById('info-body').innerHTML = `<div class="info-empty">${escapeHtml(message)}</div>`;
-  return result;
+  void stopActiveSourceSession(workspace.active);
+  return true;
+}
+
+function showUnavailableLifecycle(reason) {
+  showInspectorMessage(reason);
+  addActivityMessage('Lifecycle control unavailable', reason, 'failed');
+  return false;
+}
+
+async function executionLifecycleCommand(action) {
+  const owner = workspace.active;
+  if (!owner || !graphData) return showInspectorMessage('Create or load a workflow first.');
+  if (!tenantAuthorityAllows(owner)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified.');
+  }
+  const flight = acquireExecutionCommand(owner.execution);
+  if (!flight || !flight.executionId || flight.executionId === PENDING_EXECUTION) {
+    if (flight) releaseExecutionCommand(flight);
+    addActivityMessage('Execution control unavailable',
+      'Another command is already in flight, or this execution has not received its runtime ID.', 'failed');
+    refreshCommands();
+    return false;
+  }
+  const current = () => workspace.find(owner.id) === owner && tenantAuthorityAllows(owner, flight.client)
+    && executionCommandIsCurrent(flight);
+  if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
+  refreshCommands();
+  addActivityMessage(action, `${action[0].toUpperCase()}${action.slice(1)} requested for execution ${shortId(flight.executionId)}…`);
+  try {
+    const result = await requestExecutionLifecycle(action, {
+      client: flight.client,
+      executionId: flight.executionId,
+      signal: flight.controller.signal,
+      isCurrent: current,
+    });
+    if (result.status === 'stale' || !current()) return false;
+    if (result.status === 'unknown') {
+      setExecutionReconciliationState(owner, 'unknown');
+      if (workspace.activeId === owner.id) {
+        const reason = result.observationError?.message || result.commandError?.message
+          || 'the runtime returned no readable reason';
+        addActivityMessage(`${action} status unknown`,
+          `Execution ${shortId(flight.executionId)} could not be authoritatively read after the command: ${reason}. `
+          + 'Automatic reconciliation continues; no success state was assumed.', 'failed');
+        syncExecutionReconciliationChrome(true);
+      }
+      return false;
+    }
+
+    const outcome = result.authoritative;
+    setExecutionReconciliationState(owner, 'known');
+    setExecutionPaused(owner, Boolean(outcome?.paused));
+    if (isTerminalExecution(outcome)) {
+      settleReconciledExecution(owner, flight.executionId, flight.client, flight.generation, outcome, false);
+    }
+    if (workspace.activeId === owner.id) {
+      const commandOutcome = result.command?.outcome || 'transport outcome unavailable';
+      const status = String(outcome?.status || 'active').toLowerCase();
+      const paused = outcome?.paused ? 'paused' : 'not paused';
+      addActivityMessage(action,
+        `${commandOutcome} · authoritative state ${status}, ${paused} · execution ${shortId(flight.executionId)}`,
+        result.commandError ? 'failed' : 'completed');
+      if (result.commandError) addActivityMessage(`${action} request response unavailable`,
+        `${result.commandError.message}. The displayed lifecycle state comes from the authoritative execution read.`,
+        'failed');
+      document.getElementById('activity-summary').textContent =
+        `${action[0].toUpperCase()}${action.slice(1)} · ${status} · execution ${shortId(flight.executionId)}`;
+      document.getElementById('activity-summary').removeAttribute('aria-label');
+    }
+    return true;
+  } finally {
+    releaseExecutionCommand(flight);
+    if (owner.id === workspace.activeId) activeExecutionCommandInFlight = false;
+    refreshCommands();
+  }
 }
 
 function updateSourceSession(owner, status, token = null, { observationUnavailable = false } = {}) {
@@ -11081,6 +11162,7 @@ async function stopActiveSourceSession(owner) {
     }
   })();
   session.stopPromise = stopPromise;
+  if (owner === workspace.active) refreshCommands();
   return stopPromise;
 }
 
@@ -11168,6 +11250,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
       },
       onKnown: outcome => {
         setExecutionReconciliationState(owner, 'known');
+        setExecutionPaused(owner, Boolean(outcome?.paused));
         if (owner.id !== workspace.activeId) return;
         syncExecutionReconciliationChrome(true);
         addActivityMessage('Execution status available',
@@ -11175,6 +11258,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
           + 'Test and Run remain unavailable while it is active.');
       },
       onTerminal: ({ outcome, recoveredFromUnknown }) => {
+        setExecutionPaused(owner, false);
         settleReconciledExecution(owner, executionId, client, generation, outcome, recoveredFromUnknown);
       },
     });
@@ -11198,6 +11282,7 @@ async function preflightUnknownExecution(owner, flight) {
     onNonTerminal: outcome => {
       if (!executionCommandIsCurrent(flight)) return;
       setExecutionReconciliationState(owner, 'known');
+      setExecutionPaused(owner, Boolean(outcome?.paused));
       if (workspace.activeId === owner.id) {
         syncExecutionReconciliationChrome(true);
         addActivityMessage('Execution still active',
@@ -11395,7 +11480,13 @@ function handleRuntimeEvent(event) {
   // is its default state.
   if (isActive) refreshAssistantContext();
 
+  // Events provide the low-latency projection; the reconciliation GET remains authoritative and
+  // will continuously confirm or correct this flag. Binding lookup above fences document/version.
+  if (event.type === 'EXECUTION_PAUSED') setExecutionPaused(target, true);
+  if (event.type === 'EXECUTION_RESUMED') setExecutionPaused(target, false);
+
   if (isTerminal) {
+    setExecutionPaused(target, false);
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
       target.execution.generation, {
@@ -13817,9 +13908,12 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
-  pause: () => graphLifecycleCommand('pause'),
-  stop: () => graphLifecycleCommand('stop'),
-  forceStop: () => graphLifecycleCommand('forceStop'),
+  pause: () => executionLifecycleCommand('pause'),
+  resume: () => executionLifecycleCommand('resume'),
+  cancel: () => executionLifecycleCommand('cancel'),
+  stop: () => stopCurrentSourceSession(),
+  stopDeployment: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.deploymentStop),
+  shutdown: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.shutdown),
   authenticate: () => authenticateRuntime(),
   forgetToken: () => revokeRuntimeAccess(),
   openCredentials: () => credentialsWindow?.open(),
@@ -13830,7 +13924,8 @@ const commandRegistry = createCommandRegistry(createAppCommands({
 
 function commandContext() {
   const history = editHistory.state();
-  const transientRunning = Boolean(activeExecutionId) && !finishedExecutions.has(activeExecutionId);
+  const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
+    && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
   const running = transientRunning || sourceSessionActive;
   const selectedNodes = cy?.nodes(':selected');
@@ -13871,7 +13966,10 @@ function commandContext() {
     canRedo: documentIsEditable(workspace.active) && history.canRedo && !layoutBusy,
     running,
     transientRunning,
+    executionPaused: activeExecutionPaused,
+    executionCommandInFlight: activeExecutionCommandInFlight,
     sourceSessionActive,
+    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise),
     executionUnknown: activeExecutionReconciliation === 'unknown',
     hasToken: hasRuntimeToken,
     leftCollapsed: Boolean(panelLayout.zones.left.collapsed),
@@ -13891,13 +13989,19 @@ function refreshCommands({ menu = true } = {}) {
     const id = control.dataset.commandId;
     const command = commandRegistry.get(id);
     const state = commandRegistry.state(id, context);
+    control.hidden = state.visible === false;
     if ('disabled' in control) control.disabled = !state.enabled;
     control.setAttribute('aria-disabled', String(!state.enabled));
     control.classList.toggle('active', state.checked === true);
     if (command.kind === 'checkbox') control.setAttribute('aria-pressed', String(state.checked === true));
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
     if (control.hasAttribute('data-command-label')) control.textContent = command.label;
-    if (command.help && control.hasAttribute('data-command-label')) control.title = command.help;
+    if (command.help) {
+      control.title = command.help;
+      if (command.group === 'unavailable-lifecycle') {
+        control.setAttribute('aria-label', `${command.label}. ${command.help}`);
+      }
+    }
     const firstShortcut = command.shortcuts?.find(shortcut => (shortcut.scope || 'global') === 'global');
     if (firstShortcut) control.setAttribute('aria-keyshortcuts', commandRegistry.ariaShortcut(firstShortcut));
   });
@@ -13932,7 +14036,8 @@ function menuTrigger(name) {
 function renderApplicationMenu(name) {
   const popup = document.getElementById('application-menu');
   const context = commandContext();
-  const commands = commandRegistry.listPlacement(`menu.${name}`);
+  const commands = commandRegistry.listPlacement(`menu.${name}`)
+    .filter(command => commandRegistry.state(command.id, context).visible !== false);
   let lastGroup = null;
   popup.innerHTML = commands.map(command => {
     const state = commandRegistry.state(command.id, context);
@@ -13945,8 +14050,11 @@ function renderApplicationMenu(name) {
     const shortcut = shortcuts.length ? shortcuts.map(item => commandRegistry.shortcutLabel(item)).join(' / ') : '';
     const ariaShortcut = shortcuts[0] ? ` aria-keyshortcuts="${escapeAttribute(commandRegistry.ariaShortcut(shortcuts[0]))}"` : '';
     const checked = command.kind ? ` aria-checked="${state.checked === true}"` : '';
+    const help = command.help ? ` title="${escapeAttribute(command.help)}"` : '';
+    const unavailableLabel = command.group === 'unavailable-lifecycle' && command.help
+      ? ` aria-label="${escapeAttribute(`${command.label}. ${command.help}`)}"` : '';
     return `${separator}<button type="button" class="application-menu-item" role="${role}"
-      data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}>
+      data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}${help}${unavailableLabel}>
       <span>${escapeHtml(command.label)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
     </button>`;
   }).join('');

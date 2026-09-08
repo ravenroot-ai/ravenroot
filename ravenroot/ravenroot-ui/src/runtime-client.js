@@ -140,6 +140,22 @@ const LOCAL_DEPLOYMENT_STATES = new Set([
   'REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING', 'STOPPED', 'FAILED',
 ]);
 
+const EXECUTION_CONTROL_OUTCOMES = Object.freeze({
+  pause: new Set(['PAUSED', 'ALREADY_PAUSED', 'NOT_ACTIVE']),
+  resume: new Set(['RESUMED', 'NOT_PAUSED', 'NOT_ACTIVE']),
+  cancel: new Set(['CANCELLED', 'ALREADY_CANCELLED', 'ALREADY_COMPLETED']),
+});
+
+function validateExecutionControlResult(value, expectedExecutionId, operation) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !EXECUTION_CONTROL_OUTCOMES[operation]?.has(value.outcome)
+      || value.traversalId !== expectedExecutionId
+      || typeof value.note !== 'string') {
+    throw new Error(`Execution ${operation} response is invalid`);
+  }
+  return value;
+}
+
 export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || typeof value.deploymentId !== 'string' || !value.deploymentId
@@ -434,6 +450,27 @@ export class RavenrootRuntimeClient {
       headers: { Accept: 'application/json' },
       signal,
     });
+  }
+
+  async #controlExecution(executionId, operation, { signal } = {}) {
+    const id = String(executionId || '');
+    if (!id) throw new Error(`Execution ${operation} requires an id`);
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/${operation}`, {
+      method: 'POST', headers: { Accept: 'application/json' }, signal,
+    });
+    return validateExecutionControlResult(result, id, operation);
+  }
+
+  async pauseExecution(executionId, options = {}) {
+    return this.#controlExecution(executionId, 'pause', options);
+  }
+
+  async resumeExecution(executionId, options = {}) {
+    return this.#controlExecution(executionId, 'resume', options);
+  }
+
+  async cancelExecution(executionId, options = {}) {
+    return this.#controlExecution(executionId, 'cancel', options);
   }
 
   /**

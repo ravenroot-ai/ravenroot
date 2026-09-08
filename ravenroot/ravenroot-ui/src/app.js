@@ -265,6 +265,7 @@ import {
   duplicateNode,
   insertEdgeElement,
   insertNodeElement,
+  isDeleteShortcut,
   migrateJoinSemantics,
   moveNodesTo,
   nextModifyState,
@@ -12588,9 +12589,10 @@ function executeGlobalShortcut(event, expectedCommandId = '') {
 // Delete is an editing command for the graph selection, not for whichever non-editable child last
 // received focus. Some legitimate controls own and stop their keydown contract, so a document-level
 // bubbling listener cannot guarantee that a released canvas gesture reaches deletion. Capture only
-// these two keys; every other global shortcut retains its established bubbling/menu behaviour.
+// the platform spellings of the two delete key families; every other global shortcut retains its
+// established bubbling/menu behaviour.
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+  if (!isDeleteShortcut(event)) return;
   if (executeGlobalShortcut(event, 'edit.deleteSelection')) capturedDeleteShortcutEvents.add(event);
 }, true);
 

@@ -163,6 +163,8 @@ describe('Modify mode model operations', () => {
     editable.setAttribute('contenteditable', 'true');
 
     expect(shouldDeleteSelection({ key: 'Delete', target: document.body }, true)).toBe(true);
+    expect(shouldDeleteSelection({ key: 'Del', target: document.body }, true)).toBe(true);
+    expect(shouldDeleteSelection({ key: 'Canc', target: document.body }, true)).toBe(true);
     expect(shouldDeleteSelection({ key: 'Backspace', target: input }, true)).toBe(false);
     expect(shouldDeleteSelection({ key: 'Canc', target: editable }, true)).toBe(false);
     expect(shouldDeleteSelection({ key: 'Delete', target: document.body }, false)).toBe(false);

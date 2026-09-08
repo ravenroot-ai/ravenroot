@@ -55,6 +55,10 @@ describe('application command catalog', () => {
     expect(byId['edit.connect'].isChecked(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled({ ...context, canDuplicateSelectedNode: false })).toBe(false);
+    expect(byId['edit.deleteSelection'].shortcuts).toEqual([
+      expect.objectContaining({ key: 'Delete', keyAliases: ['Del', 'Canc'] }),
+      expect.objectContaining({ key: 'Backspace' }),
+    ]);
     expect(byId['layout.design'].isChecked(context)).toBe(true);
     expect(byId['layout.design'].isChecked({ ...context, hasDocument: false })).toBe(false);
     expect(byId['workspace.grid'].isChecked(context)).toBe(true);

@@ -115,7 +115,7 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'edit.deleteSelection', group: 'author', order: 80,
       placements: ['menu.edit', 'help'], execute: actions.deleteSelection,
       isEnabled: context => authoring(context) && context.hasSelection,
-      shortcuts: [global({ key: 'Delete' }), global({ key: 'Backspace' })],
+      shortcuts: [global({ key: 'Delete', keyAliases: ['Del', 'Canc'] }), global({ key: 'Backspace' })],
     },
     { id: 'edit.groupSelection', group: 'visual-groups', order: 100,
       placements: ['menu.edit', 'help'], execute: actions.groupSelection,

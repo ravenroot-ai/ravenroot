@@ -483,7 +483,7 @@ describe('the per-document runtime event tail', () => {
     expect(Object.keys(record.execution).sort())
       .toEqual([
         'commandFlight', 'events', 'executionId', 'finished', 'generation', 'graphVersion', 'monitoringFlow',
-        'outcomeClaim', 'processInstanceId', 'reconciliationClient', 'reconciliationController',
+        'outcomeClaim', 'paused', 'processInstanceId', 'reconciliationClient', 'reconciliationController',
         'reconciliationState', 'retiredOutcomeClaim',
       ]);
   });

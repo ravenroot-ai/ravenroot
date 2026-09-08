@@ -377,6 +377,49 @@ describe('process-local source session client', () => {
   });
 });
 
+describe('execution lifecycle client', () => {
+  it('uses exact authenticated execution-scoped POST routes without cookies or invented bodies', async () => {
+    const outcomes = ['PAUSED', 'RESUMED', 'CANCELLED'];
+    const fetchImpl = vi.fn(async url => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({
+        outcome: outcomes[fetchImpl.mock.calls.length - 1],
+        traversalId: 'execution/one', note: 'server answer',
+      }),
+    }));
+    const client = new RavenrootRuntimeClient('https://runtime.example/', {
+      fetchImpl, accessToken: 'operator-token',
+    });
+
+    await client.pauseExecution('execution/one');
+    await client.resumeExecution('execution/one');
+    await client.cancelExecution('execution/one');
+
+    expect(fetchImpl.mock.calls.map(([url, request]) => [url, request.method])).toEqual([
+      ['https://runtime.example/v1/executions/execution%2Fone/pause', 'POST'],
+      ['https://runtime.example/v1/executions/execution%2Fone/resume', 'POST'],
+      ['https://runtime.example/v1/executions/execution%2Fone/cancel', 'POST'],
+    ]);
+    for (const [, request] of fetchImpl.mock.calls) {
+      expect(request).toEqual(expect.objectContaining({
+        credentials: 'omit', cache: 'no-store',
+        headers: expect.objectContaining({ Authorization: 'Bearer operator-token' }),
+      }));
+      expect(request).not.toHaveProperty('body');
+    }
+  });
+
+  it('rejects a mismatched execution identity or operation outcome', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ outcome: 'RESUMED', traversalId: 'other', note: 'wrong' }),
+    });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.pauseExecution('execution-a')).rejects.toThrow(/invalid/);
+  });
+});
+
 describe('process-local deployment client', () => {
   const ready = {
     deploymentId: 'deployment-1', state: 'READY', sourceCount: 0,

@@ -81,17 +81,19 @@ const ENGLISH_MESSAGES = Object.freeze({
   'commands.run.play.label': 'Test',
   'commands.run.play.help': 'Test this graph with pass-through execution; node side effects are bypassed',
   'commands.run.start.label': 'Run',
-  // Run always starts this graph as a process-local deployment now (register + start) --
-  // listening for inbound sources when the graph names one, otherwise simply becoming an addressable,
-  // stoppable deployment. Use Stop to end it either way. Test (above) remains the one-shot,
-  // pass-through way to submit a payload and see a result.
-  'commands.run.start.help': 'Start this graph as a process-local deployment (listening for inbound sources when it declares one); use Stop to end it',
+  'commands.run.start.help': 'Execute real node behavior once, or start a process-local source session when this graph declares an inbound source',
   'commands.run.pause.label': 'Pause',
-  'commands.run.pause.help': 'Pause the current graph at a safe node boundary',
+  'commands.run.pause.help': 'Pause this execution after its current node reaches a safe boundary',
+  'commands.run.resume.label': 'Resume',
+  'commands.run.resume.help': 'Resume this paused execution',
+  'commands.run.cancel.label': 'Cancel',
+  'commands.run.cancel.help': 'Cooperatively cancel this execution',
   'commands.run.stop.label': 'Stop',
-  'commands.run.stop.help': 'Cooperatively stop the current graph deployment only',
-  'commands.run.forceStop.label': 'Force stop',
-  'commands.run.forceStop.help': 'Force-kill isolated work for the current graph deployment only',
+  'commands.run.stop.help': 'Stop this document’s process-local source session; closing the document does not stop it',
+  'commands.run.stopDeployment.label': 'Stop Deployment',
+  'commands.run.stopDeployment.help': 'Unavailable: this runtime does not advertise the versioned deployment Stop API',
+  'commands.run.shutdown.label': 'Shutdown Service',
+  'commands.run.shutdown.help': 'Unavailable: this runtime does not advertise the authorized global Shutdown API',
   // These two act on THE COMMAND BAR'S SERVICE TOKEN — the sign-in to the
   // author's own Ravenroot service — and never on a credential a node uses. Their verbs were already
   // accurate and are deliberately unchanged: what was ambiguous was the FIELD's label ("Access

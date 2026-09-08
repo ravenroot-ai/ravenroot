@@ -191,6 +191,23 @@ export function finishPointerEdgeGesture(state) {
   return { outcome: 'cancel', candidateId: null };
 }
 
+// The selection that a pointer press observed is part of its gesture identity. In Editing, a
+// selected node is always a move handle; only an unselected eligible node can begin pointer edge
+// authoring. Keeping this decision pure lets the browser route use the physical press snapshot
+// rather than a later Cytoscape selection update.
+export function pointerNodeGestureIntent({
+  editing = false,
+  navigating = false,
+  connectArmed = false,
+  edgeGestureActive = false,
+  selectedAtPointerStart = false,
+  sourceEligible = false,
+} = {}) {
+  if (!editing || navigating || connectArmed || edgeGestureActive) return 'none';
+  if (selectedAtPointerStart) return 'move';
+  return sourceEligible ? 'connect' : 'none';
+}
+
 function pointerPoint(position = {}) {
   return { x: finiteNumber(position.x), y: finiteNumber(position.y) };
 }

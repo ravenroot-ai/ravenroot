@@ -285,6 +285,7 @@ import {
   edgeGestureSessionOwns,
   finishPointerEdgeGesture,
   nearestEndpoint,
+  pointerNodeGestureIntent,
   updatePointerEdgeGesture,
   validateEdgeConnection,
   validateEdgeId,
@@ -3718,11 +3719,14 @@ function initCy(elements, gd, options = {}) {
     if (e.target === cy) {
       elementSelectionAtPointerStart.delete(e.cy);
     } else {
+      const captured = stageSelectionAtPointerStart.get(e.cy);
+      const capturedMatches = captured?.owner === rendererOwner
+        && captured.rendererToken === (rendererFor(rendererOwner)?.token || null);
       elementSelectionAtPointerStart.set(e.cy, {
         owner: rendererOwner,
         rendererToken: rendererFor(rendererOwner)?.token || null,
         elementId: e.target.id(),
-        selectedIds: e.cy.$(':selected').map(element => element.id()),
+        selectedIds: capturedMatches ? captured.selectedIds : e.cy.$(':selected').map(element => element.id()),
         additive: isAdditiveSelection(e.originalEvent),
       });
     }
@@ -3788,9 +3792,15 @@ function initCy(elements, gd, options = {}) {
   // In Editing, dragging a node draws a new edge; dragging an edge near one of its ends moves that end.
   // Both open the same gesture the keyboard opens, so the rules and the wording cannot diverge.
   cy.on('tapstart', 'node', e => {
-    if (!prepareEdgeGestureOwner(rendererOwner, e.cy)
-        || !modifyEnabled || navigationEnabled || connectArmed || edgeGestureSession
-        || !nodeCanSourceEdge(e.target.selected())) return;
+    const intent = pointerNodeGestureIntent({
+      editing: modifyEnabled,
+      navigating: navigationEnabled,
+      connectArmed,
+      edgeGestureActive: Boolean(edgeGestureSession),
+      selectedAtPointerStart: nodeWasSelectedAtPointerStart(rendererOwner, e.cy, e.target.id()),
+      sourceEligible: nodeCanSourceEdge(e.target.selected()),
+    });
+    if (!prepareEdgeGestureOwner(rendererOwner, e.cy) || intent !== 'connect') return;
     // A press records only a private candidate. Visual authoring starts after the pointer crosses
     // the accessible intent threshold, so a plain click remains selection and never flashes an
     // edge preview or leaves "Connecting…" behind in the live region or inspector.
@@ -10140,7 +10150,15 @@ function captureEdgePointerOrigin(originalEvent) {
     };
     const sourceId = nodeAtRenderedPosition(renderedPosition, targetCy);
     const source = sourceId ? targetCy.getElementById(sourceId) : null;
-    if (sourceId && nodeCanSourceEdge(source.selected())
+    const intent = pointerNodeGestureIntent({
+      editing: modifyEnabled,
+      navigating: navigationEnabled,
+      connectArmed,
+      edgeGestureActive: Boolean(edgeGestureSession),
+      selectedAtPointerStart: nodeWasSelectedAtPointerStart(owner, targetCy, sourceId),
+      sourceEligible: nodeCanSourceEdge(source?.selected()),
+    });
+    if (sourceId && intent === 'connect'
         && startEdgeGesture(owner, beginConnectGesture(graphData, sourceId), {
       announce: false, deferVisuals: true,
     })) {
@@ -10232,7 +10250,18 @@ function captureStagePointerSelection(originalEvent) {
   if (originalEvent.type === 'mousedown' && stageSelectionAtPointerStart.has(owner.cy)) return;
   stageSelectionAtPointerStart.set(owner.cy, {
     hasSelection: owner.cy.$(':selected').nonempty(),
+    owner,
+    rendererToken: rendererFor(owner)?.token || null,
+    selectedIds: owner.cy.$(':selected').map(element => element.id()),
   });
+}
+
+function nodeWasSelectedAtPointerStart(owner, targetCy, nodeId) {
+  const selection = elementSelectionAtPointerStart.get(targetCy)
+    || stageSelectionAtPointerStart.get(targetCy);
+  if (!selection || selection.owner !== owner
+      || selection.rendererToken !== (rendererFor(owner)?.token || null)) return false;
+  return selection.selectedIds?.includes(nodeId) ?? false;
 }
 
 // Cytoscape may stop its synthetic drag stream at a node boundary. The bubbling native event is

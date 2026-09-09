@@ -10999,13 +10999,16 @@ function updateSourceSession(owner, status, token = null,
   // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
   // the recovery states above) carry no deploymentId and must not erase the one the server gave.
   if (typeof status.deploymentId === 'string' && status.deploymentId) {
-    if (session.deploymentId !== status.deploymentId) {
-      session.deploymentId = status.deploymentId;
-      // The projection accumulates across every traversal this deployment produces, instead of
-      // being reset by each one, which is what the per-traversal binding did to a source.
-      owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
-      bindMonitoringRuntimeStateToDeployment(owner.execution.monitoringFlow, status.deploymentId);
-    }
+    session.deploymentId = status.deploymentId;
+    // The projection accumulates across every traversal this deployment produces, instead of being
+    // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
+    // observation rather than only when the id changes: the call is idempotent -- rebinding to the
+    // deployment it already holds preserves the projection -- and doing it unconditionally means the
+    // projection cannot fall out of step with the session it belongs to. Guarding on the session's
+    // own field would have made that agreement rest on a separate fact (that a live session's id is
+    // never reused across a reset), which is true today and is not this function's to rely on.
+    owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
+    bindMonitoringRuntimeStateToDeployment(owner.execution.monitoringFlow, status.deploymentId);
     session.deploymentUnreported = false;
   } else if (fromRuntime && !session.deploymentId && !session.deploymentUnreported) {
     // A server answer that named no deployment. Say it once: the session will still start and the

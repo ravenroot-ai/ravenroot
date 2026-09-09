@@ -171,6 +171,23 @@ describe('what a node colour means when several traversals occupy the graph', ()
     expect(nodeActivitySnapshot(state, 'log')).toMatchObject({ state: 'failed', failures: 1 });
   });
 
+  it('does not let a sibling traversal settling a moment later repaint the failure green', () => {
+    const state = createMonitoringRuntimeState();
+    // Two messages inside one node -- the ordinary case under a source, not a corner. A fails, B
+    // completes, and nothing has entered the node in between.
+    observeNodeActivity(state, nodeEvent('NODE_STARTED', { arrivals: 1, instances: 1 }));
+    observeNodeActivity(state, nodeEvent('NODE_STARTED', { arrivals: 2, instances: 2 }));
+    observeNodeActivity(state, nodeEvent('NODE_FAILED', { arrivals: 1, instances: 1 }));
+    expect(nodeActivitySnapshot(state, 'log').state).toBe('failed');
+
+    observeNodeActivity(state, nodeEvent('NODE_COMPLETED', { arrivals: 0 }));
+    expect(nodeActivitySnapshot(state, 'log')).toMatchObject({ state: 'failed', failures: 1 });
+
+    // A defaulted sibling does not clear it either; only entering the node again does.
+    observeNodeActivity(state, nodeEvent('NODE_DEFAULTED', { arrivals: 0 }));
+    expect(nodeActivitySnapshot(state, 'log').state).toBe('failed');
+  });
+
   it('clears the failure when a new arrival enters, and never clears the cumulative count', () => {
     const state = createMonitoringRuntimeState();
     observeNodeActivity(state, nodeEvent('NODE_STARTED', { arrivals: 1, instances: 1 }));

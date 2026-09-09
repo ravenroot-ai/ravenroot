@@ -18,6 +18,11 @@ const SETTLED_NODE_STATES = Object.freeze({
   NODE_BYPASSED: 'bypassed',
 });
 const OPENING_NODE_EVENTS = Object.freeze(new Set(['NODE_STARTED', 'NODE_RETRY_SCHEDULED']));
+// How specific each settled outcome is. A standing outcome survives a less specific one until the
+// node is entered again; see `observeNodeActivity` for why recency is the wrong rule here.
+const OUTCOME_PRECEDENCE = Object.freeze({
+  completed: 1, bypassed: 2, fallback: 3, failed: 4,
+});
 
 function finiteTime(value, fallback) {
   const time = typeof value === 'number' ? value : Date.parse(value);
@@ -187,15 +192,22 @@ export function edgeFlowSnapshot(state, edgeId, now = Date.now()) {
  * precedence:
  *
  * <ol>
- *   <li><b>failed</b>, when the most recent arrival to settle here failed. A failure is not erased
- *   by a sibling traversal that finishes just after it; it stands until another arrival ENTERS the
- *   node, at which point that arrival's own outcome takes over. On a healthy busy source the next
- *   message clears it within one arrival, and a node that only ever fails stays red.</li>
+ *   <li><b>failed</b>, once an arrival has failed here. A failure is not erased by a sibling
+ *   traversal that finishes just after it -- no settlement clears it, only a new arrival ENTERING
+ *   the node does, and that arrival's own outcome then takes over. On a healthy busy source the
+ *   next message clears it within one arrival, and a node that only ever fails stays red.</li>
  *   <li><b>active</b>, while the node is occupied. Occupancy is {@code inFlightArrivals}, which the
  *   runtime already counts per node across every traversal in the process -- so this is measured,
  *   not inferred from the ordering of two events.</li>
- *   <li>otherwise the outcome of the last arrival to settle, or idle if none has.</li>
+ *   <li>otherwise the last settled outcome, or idle if none has settled.</li>
  * </ol>
+ *
+ * <p>The same precedence resolves the other outcomes: a plain completion never replaces a standing
+ * {@code fallback} or {@code bypassed} either. Those two arrive as their own event AND a completion
+ * for the same arrival, so letting the completion win would erase the one fact worth showing -- the
+ * per-event rule this replaced was careful about exactly that, and this keeps it. The order is
+ * therefore failed, then defaulted or bypassed, then completed: a more specific standing outcome
+ * survives a less specific one until the node is entered again.</p>
  *
  * <p>The colour is therefore a CURRENT statement and can only ever be one. The cumulative one is
  * {@code failures}, which counts every failed arrival at this node for the life of the binding and
@@ -218,12 +230,14 @@ export function observeNodeActivity(state, event, { knownNodeIds = null } = {}) 
   entry.instances = Number(event.activeInstances) || 0;
   entry.arrivals = Number(event.inFlightArrivals) || 0;
   if (settled) {
-    // A defaulted or bypassed visit publishes its own event AND a completion for the same arrival.
-    // The completion must not overwrite the more specific outcome, exactly as the per-event rule
-    // this replaced was careful to do: "it completed" is true of a defaulted node too, and saying
-    // only that loses the one fact worth showing.
-    entry.settled = settled === 'completed' && (entry.settled === 'fallback' || entry.settled === 'bypassed')
-      ? entry.settled : settled;
+    // Precedence, not recency. A failure outranks everything until the node is entered again, which
+    // is the whole point of the rule: a sibling traversal completing a millisecond later must not
+    // repaint the node green. Below it, a plain completion never replaces a standing defaulted or
+    // bypassed outcome, because those publish their own event AND a completion for the SAME arrival
+    // -- "it completed" is true of a defaulted node too, and saying only that loses the one fact
+    // worth showing. `opening` above is what clears the whole standing outcome.
+    const standing = OUTCOME_PRECEDENCE[entry.settled] || 0;
+    if (OUTCOME_PRECEDENCE[settled] > standing) entry.settled = settled;
     entry.opening = false;
     if (settled === 'failed') entry.failures += 1;
   } else {

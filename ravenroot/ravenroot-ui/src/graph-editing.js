@@ -316,7 +316,7 @@ export function isEditableTarget(target) {
 }
 
 export function isDeleteShortcut(event) {
-  return ['Delete', 'Backspace', 'Canc'].includes(event.key);
+  return ['Delete', 'Del', 'Canc', 'Backspace'].includes(event.key);
 }
 
 export function shouldDeleteSelection(event, modifyEnabled) {

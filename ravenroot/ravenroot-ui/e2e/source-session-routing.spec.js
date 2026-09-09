@@ -82,7 +82,7 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
   await expect(page.locator('#source-session-status')).toHaveAttribute('role', 'status');
   await expect(page.locator('#btn-stop')).toBeEnabled();
   await expect(page.locator('#btn-pause')).toBeDisabled();
-  await expect(page.locator('#btn-force-stop')).toBeDisabled();
+  await expect(page.locator('#btn-cancel')).toBeHidden();
 
   expect(calls.sourceCalls.filter(call => call.method === 'POST')).toHaveLength(1);
   expect(calls.sourceCalls[0].body).toContain('<graphml');

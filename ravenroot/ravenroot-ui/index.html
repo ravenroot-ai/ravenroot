@@ -196,11 +196,13 @@
     <button class="btn" id="btn-run" data-command-id="run.start"
             title="Execute real node behavior in a transient operational run">▶ Run</button>
     <button class="btn" id="btn-pause" data-command-id="run.pause"
-            title="Pause the current graph at a safe node boundary">Ⅱ Pause</button>
+            title="Pause this execution after its current node reaches a safe boundary">Ⅱ Pause</button>
+    <button class="btn" id="btn-resume" data-command-id="run.resume" hidden
+            title="Resume this paused execution">▶ Resume</button>
+    <button class="btn danger" id="btn-cancel" data-command-id="run.cancel" hidden
+            title="Cooperatively cancel this execution">✕ Cancel</button>
     <button class="btn danger" id="btn-stop" data-command-id="run.stop"
-            title="Cooperatively stop the current graph only">■ Stop</button>
-    <button class="btn danger" id="btn-force-stop" data-command-id="run.forceStop"
-            title="Force-kill isolated work for the current graph only">✖ Force stop</button>
+            title="Stop this document’s process-local source session">■ Stop</button>
   </div>
   <span id="source-session-status" class="source-session-status" role="status" aria-live="polite" hidden></span>
 </div>

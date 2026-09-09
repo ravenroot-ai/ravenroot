@@ -132,6 +132,9 @@ export function createDocumentRecord({
       // this value is present in both the submission response and every live/durable event.
       processInstanceId: null,
       graphVersion: null,
+      // Authoritative GET /v1/executions/{id} projection. This is deliberately separate from
+      // reconciliationState: transport uncertainty is not evidence that a traversal changed state.
+      paused: false,
       finished: new Set(),
       events: [],
       // Transport could not prove whether the bound execution is still active. This remains
@@ -358,6 +361,7 @@ export function bindExecution(document, executionId, graphVersion = null, reconc
   document.execution.executionId = executionId;
   document.execution.processInstanceId = processInstanceId;
   document.execution.graphVersion = graphVersion;
+  document.execution.paused = false;
   document.execution.reconciliationState = 'known';
   document.execution.reconciliationClient = reconciliationClient;
   if (executionId && executionId !== PENDING_EXECUTION) {
@@ -378,6 +382,7 @@ export function detachExecution(document) {
   document.execution.executionId = null;
   document.execution.processInstanceId = null;
   document.execution.graphVersion = null;
+  document.execution.paused = false;
   document.execution.finished.clear();
   document.execution.reconciliationState = 'known';
   document.execution.reconciliationClient = null;

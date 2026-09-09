@@ -160,6 +160,14 @@ export function createDocumentRecord({
     // from `execution`: starting it creates no traversal, and later inbound events have their own ids.
     sourceSession: {
       sessionId: null,
+      // The long-lived deployment this session's traversals run under, as the server reports it.
+      // This is what runtime events are attributed by while the session listens: the session emits
+      // executions without limit and their ids are never known here, so `execution.executionId`
+      // -- the only binding the editor had -- can never match one of them.
+      deploymentId: null,
+      // Set when the runtime answers a source session without a deployment identity. The view then
+      // has nothing to attribute events by, and says so once rather than staying quietly blank.
+      deploymentUnreported: false,
       state: '',
       sourceCount: 0,
       diagnostic: '',
@@ -291,7 +299,14 @@ export function createWorkspace() {
 // belongs to no open document is dropped rather than painted on whichever graph happens to be in
 // front of the user.
 //
-// Binding is keyed on `executionId` (== traversalId) alone. A traversal that resumes an existing
+// Binding is keyed on `executionId` (== traversalId) FOR A SUBMITTED RUN, and on `deploymentId` for
+// a document watching a long-lived source session. The second rule is not a convenience: a source
+// admits an unbounded series of traversals whose ids the document is never told, so the execution
+// rule alone could only ever drop them, and did -- a listening graph painted nothing, ever, however
+// much traffic it handled. The deployment is the identity that outlives the traversals and the one
+// the session's own status now names, so it is the only thing a document can hold in advance.
+//
+// A traversal that resumes an existing
 // process after a wait gets a NEW traversalId while keeping the same processInstanceId, introducing
 // a second value for the identifier used here. Such an
 // event will not match any `binding.executionId` here and will be silently dropped, even though the
@@ -325,6 +340,22 @@ export function documentForRuntimeEvent(workspace, event) {
     return true;
   });
   if (bound) return bound;
+
+  // Rule two: the document watching the deployment this event belongs to. Checked AFTER the
+  // execution rule so Test and Run keep the binding they were given, and before the pending
+  // fallback so a document that has merely submitted cannot adopt a source's traffic. The
+  // deployment id is per session and per tenant, so it identifies exactly one open document.
+  const deploymentId = typeof event?.deploymentId === 'string' && event.deploymentId
+    ? event.deploymentId : null;
+  if (deploymentId) {
+    // Deliberately not fenced on graphVersion. For a run, the version proves the event belongs to
+    // the snapshot the document submitted; for a session, the deployment id already does, and it
+    // keeps proving it after the author edits the document the session is not running.
+    const listening = workspace.documents.find(
+      doc => doc.sourceSession?.deploymentId === deploymentId,
+    );
+    if (listening) return listening;
+  }
 
   // The pending fallback is a guess, and a guess must not outrank a fact. When an open document
   // holds this execution id, the event belongs to that run — it reached here only because its

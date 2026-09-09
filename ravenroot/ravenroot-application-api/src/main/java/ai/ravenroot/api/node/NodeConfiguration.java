@@ -28,10 +28,25 @@ import java.util.Optional;
  * capability by writing one here.</p>
  *
  * <p>Reserved {@code ravenroot.} properties are refused at ingest and cannot appear in this map.</p>
+ *
+ * <h2>Declared properties only</h2>
+ * <p>{@link #properties()} carries the values of the properties the descriptor <em>declares</em>,
+ * and nothing else. A graph node's stored property map is wider than its configuration: the visual
+ * editor annotates every node it serializes with presentation data ({@code layoutX}, {@code layoutY},
+ * {@code layoutWidth}, {@code layoutHeight}, {@code name}, {@code classification},
+ * {@code description}), the platform owns operative flags such as
+ * {@link ai.ravenroot.api.catalog.NodeBypassProperty}'s {@code execution.bypass}, and any other
+ * unknown key is preserved across a round trip rather than refused. None of that is node
+ * configuration, so none of it is presented here.</p>
+ *
+ * <p>The consequence a behavior may rely on: every key in this map is one its own descriptor named.
+ * A behavior that fails closed on a key it does not recognise is therefore judging its own
+ * configuration, not the document's presentation data — which is the whole point of the filter, and
+ * why the filter belongs to the runtime that builds this view rather than to each behavior.</p>
  * @param nodeId non-blank identifier of the configured graph node
  * @param behavior registered behavior name selected by the graph; it must not be blank
- * @param properties immutable snapshot of graph-supplied values; absent values are represented by an
- *                   empty map
+ * @param properties immutable snapshot of the graph-supplied values for descriptor-declared
+ *                   properties; absent values are represented by an empty map
  */
 public record NodeConfiguration(String nodeId, String behavior, Map<String, Object> properties) {
 

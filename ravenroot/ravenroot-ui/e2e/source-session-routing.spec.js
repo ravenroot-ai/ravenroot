@@ -23,18 +23,60 @@ const sourceGraph = behavior => `<?xml version="1.0" encoding="UTF-8"?>
   </graph>
 </graphml>`;
 
-async function stubRuntime(page, { sourceResponder } = {}) {
+// One SSE frame per admitted message, in the shape the ring publishes: a NEW traversal id every
+// time, and the deployment the session runs under carried on every one of them.
+function sourceEventStream(deploymentId, nodeIds, admissions) {
+  const frames = [];
+  let sequence = 0;
+  for (let admission = 1; admission <= admissions; admission += 1) {
+    const executionId = `00000000-0000-4000-8000-${String(admission).padStart(12, '0')}`;
+    const processInstanceId = `00000000-0000-4000-9000-${String(admission).padStart(12, '0')}`;
+    for (const nodeId of nodeIds) {
+      for (const [type, arrivals] of [['NODE_STARTED', 1], ['NODE_COMPLETED', 0]]) {
+        sequence += 1;
+        frames.push(`id: ${sequence}\nevent: execution\ndata: ${JSON.stringify({
+          sequence, occurredAt: '2026-09-09T10:00:00Z', engineId: 'stub', graphVersion: 'v1',
+          processInstanceId, traversalId: executionId, executionId, deploymentId,
+          type, nodeId, activeInstances: arrivals, inFlightArrivals: arrivals, fallback: false,
+          description: 'stub', publicReason: null, message: null,
+          messageRedacted: false, messageTruncated: false, processingDuration: null,
+        })}\n\n`);
+      }
+    }
+  }
+  return frames.join('');
+}
+
+async function stubRuntime(page, { sourceResponder, sourceTraffic } = {}) {
   const sourceCalls = [];
   const executionCalls = [];
+  // The editor connects its stream at boot, before any session exists, so the frames cannot be
+  // composed up front: their deployment id is the one the browser invents when Run is pressed. The
+  // stream therefore waits for the start request and is composed from it, which is also the order
+  // the real server publishes in.
+  let announceSession = () => {};
+  const startedSession = new Promise(resolve => { announceSession = resolve; });
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json', body: SOURCE_CATALOG,
   }));
-  await page.route('**/v1/events**', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/v1/events**', async route => {
+    if (!sourceTraffic) {
+      await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    const deploymentId = await startedSession;
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: sourceEventStream(deploymentId, sourceTraffic.nodeIds, sourceTraffic.admissions),
+    });
+  });
   await page.route('**/v1/source-sessions**', async route => {
     const request = route.request();
     sourceCalls.push({ method: request.method(), url: request.url(), body: request.postData() || '' });
     const sessionId = new URL(request.url()).searchParams.get('id')
       || decodeURIComponent(new URL(request.url()).pathname.split('/').at(-1));
+    if (request.method() === 'POST') announceSession(sessionId);
     if (sourceResponder) {
       await sourceResponder({ route, request, sessionId, sourceCalls });
       return;
@@ -44,7 +86,8 @@ async function stubRuntime(page, { sourceResponder } = {}) {
     await route.fulfill({
       status: request.method() === 'POST' ? 202 : 200,
       contentType: 'application/json',
-      body: JSON.stringify({ sessionId, state, sourceCount: 1, scope: 'LOCAL_PROCESS', diagnostic: null }),
+      body: JSON.stringify({ sessionId, deploymentId: sessionId, state, sourceCount: 1,
+        scope: 'LOCAL_PROCESS', diagnostic: null }),
     });
   });
   await page.route('**/v1/executions**', async route => {
@@ -359,3 +402,70 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
   releaseObservation();
   await expect(page.locator('#source-session-status')).toHaveText('Listening · 1 local source');
 });
+
+/**
+ * The regression guard for #300, at the browser boundary the defect actually lived on.
+ *
+ * A listening source emits a new traversal per admitted message and the document is told none of
+ * their ids, so the execution-id binding the editor had could only ever drop them: the pill said
+ * LISTENING and the canvas stayed blank for as long as the source ran. The document now matches on
+ * the deployment its session reports, which is the one identity it can hold in advance.
+ */
+test('a listening source paints its nodes from traversals the document was never told about', async ({ page }) => {
+  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 } });
+  await page.goto('/');
+  await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
+
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#source-session-status')).toContainText('Listening · 1 local source');
+
+  const painted = () => page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      deploymentId: document_.sourceSession.deploymentId,
+      boundExecutionId: document_.execution.executionId,
+      source: document_.cy.getElementById('source').data('runtimeState') || 'idle',
+      end: document_.cy.getElementById('end').data('runtimeState') || 'idle',
+      // Distinct traversal ids attributed to this document. The number the defect pinned at zero:
+      // every one of these ids came into existence inside the runtime, after the session started,
+      // and nothing ever told the document about any of them.
+      traversals: new Set((document_.execution.events || [])
+        .map(event => event.executionId).filter(Boolean)).size,
+    };
+  });
+
+  await expect.poll(async () => (await painted()).traversals).toBeGreaterThanOrEqual(6);
+  const report = await painted();
+  expect(report.deploymentId, 'the document holds the deployment, not an execution').toBeTruthy();
+  expect(report.boundExecutionId, 'a listener session binds no single execution id').toBeNull();
+  expect(report.source).toBe('completed');
+  expect(report.end).toBe('completed');
+});
+
+/**
+ * The other half of the same rule: a deployment nobody in this workspace is watching still paints
+ * nothing. The routing rule that dropped a source's own events was written to prevent exactly this,
+ * and widening it must not have cost that.
+ */
+test('another deployment traffic is still dropped rather than painted on whichever graph is open',
+  async ({ page }) => {
+    await stubRuntime(page, { sourceTraffic: { nodeIds: ['source'], admissions: 4 } });
+    await page.route('**/v1/events**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sourceEventStream('a-deployment-this-workspace-never-started', ['source'], 4),
+      });
+    });
+    await page.goto('/');
+    await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
+
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#btn-run').click();
+    await expect(page.locator('#source-session-status')).toContainText('Listening · 1 local source');
+
+    await page.waitForTimeout(1_500);
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().cy
+      .getElementById('source').data('runtimeState') || 'idle')).toBe('idle');
+  });

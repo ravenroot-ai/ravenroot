@@ -15,5 +15,6 @@ The integrator owns host placement and token handling. Only the operator owns re
 
 ## Linked contracts
 
+- [Step-by-step host page](embed-viewer-quickstart.md)
 - [Primary interface](../reference/embed-extension-contracts.md)
 - [Operational or security model](../security/embed-privacy.md)

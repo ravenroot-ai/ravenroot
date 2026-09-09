@@ -150,9 +150,13 @@ public final class BehaviorPropertySchema {
      * <h2>Case, and nothing looser</h2>
      * <p>Equality after case folding, not edit distance. {@code kafka.consume} declares
      * {@code topics}, and a {@code topic} annotation is one edit away from it while being a
-     * perfectly legitimate key that this method must not refuse. Case folding has no such
-     * collisions: two declared names that differ only by case could not coexist in one descriptor
-     * anyway.</p>
+     * perfectly legitimate key that this method must not refuse. Case folding cannot produce that
+     * kind of false positive: it only ever fires on a key some declared name already folds onto.</p>
+     *
+     * <p>It does have one collision of its own. Two declared names differing only by case are not
+     * refused anywhere -- {@code NodeTypeDescriptorValidator} keys its duplicate check on the exact
+     * name -- so a descriptor may declare both, and the loop below must not then mistake either one
+     * for a near-miss of the other. That is what the separate set of exact names is for.</p>
      */
     private static void refuseNearMisses(GraphNode node, List<NodePropertyDescriptor> declared) {
         // Exact names are held separately rather than read back out of the folded map. Two declared

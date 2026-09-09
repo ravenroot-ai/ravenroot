@@ -1207,10 +1207,55 @@ public final class AuthorizedRavenrootApplication {
                     ProtectedResource.unknownOwnership("execution", "missing-execution-id")).allowed();
         }
         String owner = executionOwners.owner(event.executionId());
+        if (owner == null) owner = deploymentOwner(context, event);
         ProtectedResource resource = owner == null
                 ? ProtectedResource.unknownOwnership("execution", event.executionId().toString())
                 : ProtectedResource.owned("execution", event.executionId().toString(), owner);
         return authorization.decide(context, AuthorizationAction.EXECUTION_READ, resource).allowed();
+    }
+
+    /**
+     * Resolves ownership of a traversal <em>this facade never submitted</em>, through the deployment
+     * that produced it.
+     *
+     * <h4>Why the execution registry cannot answer for these</h4>
+     * <p>{@link #executionOwners} is populated by {@link #startAuthorized}, which reserves an id
+     * before it starts a traversal. A long-lived inbound source starts traversals nobody submitted:
+     * each admitted message produces its own id, inside the runtime, at a moment no request is being
+     * served. There is no reservation to make and no caller to make it, so every one of those events
+     * resolved to <em>unknown</em> ownership — which {@link ai.ravenroot.api.security.DefaultAuthorizationService}
+     * denies unconditionally, PLATFORM_ADMIN included. The reference monitor was therefore removing
+     * the entire event history of a graph the caller had started themselves, and doing it silently:
+     * an empty page and an empty stream are what a quiet server looks like too.</p>
+     *
+     * <h4>Why this resolves rather than permits</h4>
+     * <p>It does not admit unknown ownership. It asks the delegate's own registry, which is keyed by
+     * {@code (tenantId, deploymentId)} together, whether <b>the caller's own tenant</b> holds the
+     * deployment the event names. A tenant can only ever be told about a deployment it registered, so
+     * a sibling's deployment is not fetched and excluded — it is a row the lookup never asks for, the
+     * same construction {@link #executionResult} relies on. An event whose deployment this tenant does
+     * not hold stays exactly as unknown as it was, and is denied.</p>
+     *
+     * <h4>Why the event's own tenant is also required</h4>
+     * <p>A deployment id is unique <em>within</em> a tenant, not across the installation: two tenants
+     * may each hold one called {@code orders}. The deployment lookup alone would then resolve a
+     * sibling's event to the caller, because the caller does hold a deployment by that name — a
+     * cross-tenant disclosure reachable by choosing a common id. So the event must also state the
+     * caller's own tenant. {@link ExecutionEvent#tenantId()} is documented as evidence rather than a
+     * filtering authority, and it is used here in the only direction that respects that: it can
+     * narrow this resolution, never widen it. An event that names no tenant is not resolved.</p>
+     *
+     * <h4>Bounds and staleness</h4>
+     * <p>No new cache and therefore no second eviction clock to disagree with the first. The answer
+     * comes from the live registry, so a deployment that has been undeployed stops resolving and its
+     * late events fail closed, which is the direction to fail in.</p>
+     */
+    private String deploymentOwner(RequestContext context, ExecutionEvent event) {
+        String deploymentId = event.deploymentId();
+        if (deploymentId == null || deploymentId.isBlank()) return null;
+        if (event.tenantId() == null || !event.tenantId().equals(context.tenantId())) return null;
+        return delegate.localDeployment(context.tenantId(), deploymentId).isPresent()
+                ? context.tenantId() : null;
     }
 
     private ProtectedResource artifact(String id) {

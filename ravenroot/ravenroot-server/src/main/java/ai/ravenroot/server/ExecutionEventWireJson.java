@@ -57,7 +57,13 @@ public final class ExecutionEventWireJson {
                 + "}";
     }
 
-    /** The byte-compatible process-local projection used by the legacy recent-events endpoint. */
+    /**
+     * The process-local projection used by the legacy recent-events endpoint and embedded in
+     * {@link #live(ExecutionEvent)}.
+     *
+     * <p>Additive only: {@code deploymentId} joined the existing fields and no field was renamed,
+     * retyped or removed, so a reader that already understood this object still does.</p>
+     */
     static String legacyLive(ExecutionEvent event) {
         String description = PublicExecutionDescription.forType(event.type(), event.publicReason());
         RuntimeActivityData.TextProjection message = event.authorMessage();
@@ -68,6 +74,13 @@ public final class ExecutionEventWireJson {
                 + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
                 + ",\"traversalId\":\"" + event.traversalId() + "\""
                 + ",\"executionId\":\"" + event.executionId() + "\""
+                // The identity of the LONG-LIVED thing the traversal belongs to, which is the only
+                // identity a client can hold in advance for a source: a listening session emits
+                // traversals whose ids nobody knows before they exist, so an event that names only
+                // its own traversal cannot be attributed to the graph that started the session.
+                // `null` for a one-shot submission that opened no deployment domain, exactly as
+                // ExecutionEvent#deploymentId documents.
+                + ",\"deploymentId\":" + nullableEscaped(event.deploymentId())
                 + ",\"invocationId\":" + nullableUuid(event.invocationId())
                 + ",\"attemptId\":" + nullableUuid(event.attemptId())
                 + ",\"type\":\"" + event.type() + "\""

@@ -100,8 +100,11 @@ import {
   edgeFlowSnapshot,
   FLOW_PULSE_MS,
   bindMonitoringRuntimeState,
+  bindMonitoringRuntimeStateToDeployment,
   createMonitoringRuntimeState,
+  nodeActivitySnapshot,
   observeEdgeTraversal,
+  observeNodeActivity,
   resetMonitoringRuntimeState,
 } from './monitoring-runtime-state.js';
 import { isPropertyVisible, isPropertyRequiredNow } from './property-condition.js';
@@ -10976,11 +10979,41 @@ async function executionLifecycleCommand(action) {
   }
 }
 
-function updateSourceSession(owner, status, token = null, { observationUnavailable = false } = {}) {
+// `fromRuntime` separates an answer the SERVER gave from one this file synthesized. Only the first
+// can carry a deployment identity, and only the first can prove one is missing: warning on a local
+// STARTING placeholder would report the runtime for something the runtime was never asked.
+function updateSourceSession(owner, status, token = null,
+  { observationUnavailable = false, fromRuntime = false } = {}) {
   if (token && !sourceSessionCommandIsCurrent(owner, token)) return false;
   const session = owner.sourceSession;
   const changed = session.state !== status.state || session.diagnostic !== (status.diagnostic || '')
     || session.observationUnavailable !== observationUnavailable;
+  // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
+  // the recovery states above) carry no deploymentId and must not erase the one the server gave.
+  if (typeof status.deploymentId === 'string' && status.deploymentId) {
+    session.deploymentId = status.deploymentId;
+    // The projection accumulates across every traversal this deployment produces, instead of being
+    // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
+    // observation rather than only when the id changes: the call is idempotent -- rebinding to the
+    // deployment it already holds preserves the projection -- and doing it unconditionally means the
+    // projection cannot fall out of step with the session it belongs to. Guarding on the session's
+    // own field would have made that agreement rest on a separate fact (that a live session's id is
+    // never reused across a reset), which is true today and is not this function's to rely on.
+    owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
+    bindMonitoringRuntimeStateToDeployment(owner.execution.monitoringFlow, status.deploymentId);
+    session.deploymentUnreported = false;
+  } else if (fromRuntime && !session.deploymentId && !session.deploymentUnreported) {
+    // A server answer that named no deployment. Say it once: the session will still start and the
+    // lifecycle pill will still be truthful, but nothing on the canvas can be attributed to it, and
+    // an unexplained blank canvas is exactly the symptom this binding exists to remove.
+    session.deploymentUnreported = true;
+    if (owner === workspace.active) {
+      addActivityMessage('Source activity not attributable',
+        'This runtime reported no deployment identity for the session, so its runtime events cannot '
+        + 'be attributed to this graph. The lifecycle state remains accurate; node activity, '
+        + 'monitoring and log output will stay empty.', 'failed');
+    }
+  }
   session.state = status.state;
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
@@ -11020,7 +11053,7 @@ async function observeSourceSession(owner, token) {
       if (controller.signal.aborted) break;
       const status = await client.sourceSession(sessionId, { signal: controller.signal });
       if (!sourceSessionCommandIsCurrent(owner, token)) break;
-      updateSourceSession(owner, status, token);
+      updateSourceSession(owner, status, token, { fromRuntime: true });
       if (status.state === 'FAILED' || status.state === 'STOPPED') break;
     } catch (error) {
       if (controller.signal.aborted) break;
@@ -11070,7 +11103,7 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
   try {
     const status = await startPromise;
     if (!sourceSessionCommandIsCurrent(owner, token)) return false;
-    updateSourceSession(owner, status, token);
+    updateSourceSession(owner, status, token, { fromRuntime: true });
     if (!session.stopRequested
         && (status.state === 'STARTING' || status.state === 'LISTENING' || status.state === 'DEGRADED')) {
       void observeSourceSession(owner, token);
@@ -11124,7 +11157,9 @@ async function stopActiveSourceSession(owner) {
       session.pollController?.abort();
       const status = await token.client.stopSourceSession(token.sessionId);
       if (!sourceSessionCleanupIsCurrent(owner, token)) return false;
-      if (sourceSessionCommandIsCurrent(owner, token)) updateSourceSession(owner, status, token);
+      if (sourceSessionCommandIsCurrent(owner, token)) {
+        updateSourceSession(owner, status, token, { fromRuntime: true });
+      }
       return status.state === 'STOPPED';
     } catch (error) {
       if (!sourceSessionCleanupIsCurrent(owner, token)) return false;
@@ -11379,6 +11414,11 @@ async function playGraph(mode = 'test') {
   // as required by the confirmation-text contract above.
   if (sourceCount > 0) {
     try {
+      // The canvas is cleared for a listener session exactly as it is for a run. Before this, a
+      // source start left the previous run's colours in place -- and once a session can actually
+      // paint, stale paint is no longer harmless decoration but a claim about traffic that is not
+      // this session's.
+      resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
       await startSourceSession(owner, executionClient, graphMl, sourceCount);
     } catch (error) {
       // startSourceSession normally converts request failures to an honest, fenced lifecycle state.
@@ -11509,41 +11549,93 @@ function handleRuntimeEvent(event) {
     return;
   }
   if (!event.nodeId || !targetCy) return;
-  const node = targetCy.getElementById(event.nodeId);
-  if (!node.length) return;
-
-  let state = node.data('runtimeState') || 'idle';
-  if (event.type === 'NODE_STARTED') state = 'active';
-  if (event.type === 'NODE_DEFAULTED') state = 'fallback';
-  if (event.type === 'NODE_BYPASSED') state = 'bypassed';
-  if (event.type === 'NODE_COMPLETED' && state !== 'fallback' && state !== 'bypassed') state = 'completed';
-  if (event.type === 'NODE_FAILED') state = 'failed';
-  // A retried attempt leaves the node ACTIVE, not failed: the visit has not settled, and the next
-  // attempt's own NODE_STARTED is already on its way. Rendering it as failed and then back to active
-  // would flash a terminal state the traversal never reached.
-  if (event.type === 'NODE_RETRY_SCHEDULED') state = 'active';
+  if (!targetCy.getElementById(event.nodeId).length) return;
+  // What the node shows is decided by the aggregate over every traversal in this view, not by
+  // whichever event arrived last -- see `observeNodeActivity` for the rule and why one is needed.
   // `activeInstances` is the count of LIVE INSTANCES of this node's actor -- 1 for a resident
   // nature however much traffic crosses it, one per concurrent invocation for the default one. It is
   // what the node is rendered by. `inFlightArrivals` is the queue depth and is deliberately kept in a
   // separate field: the two are equal for an ordinary worker node and differ for a resident one, and
-  // rendering the second under the first's name reports the wrong quantity.
-  const instances = Number(event.activeInstances) || 0;
-  const arrivals = Number(event.inFlightArrivals) || 0;
-  node.data('instances', instances);
-  node.data('arrivals', arrivals);
-  node.data('runtimeState', state);
-  node.data('runtimeObserved', true);
-  node.data('lastEventType', event.type);
-  node.data('lastOccurredAt', event.occurredAt || null);
-  node.data('processingDuration', event.processingDuration ?? null);
-  node.data('fallback', Boolean(event.fallback));
-  applyRuntimeVisual(node);
-  updateD3RuntimeNode(target, event.nodeId, instances, state, arrivals, event);
+  // rendering the second under the first's name reports the wrong quantity. Both are carried through
+  // the aggregate unchanged.
+  target.execution.monitoringFlow ||= createMonitoringRuntimeState();
+  if (!observeNodeActivity(target.execution.monitoringFlow, event).changed) return;
+  scheduleRuntimeNodePaint(target, event.nodeId);
+}
+
+// ── Painting is coalesced, per document, to one frame ────────────────────────────────────────────
+//
+// A run emits a handful of node events and painting each one as it arrives cost nothing. A source
+// has no such ceiling: it emits as fast as it admits, and every paint writes Cytoscape styles, runs
+// a 180 ms D3 transition and restarts the force simulation. At that point per-event repainting is
+// not merely wasteful, it is self-defeating -- the browser spends the frame it needed for the next
+// event on re-rendering a state that is already superseded.
+//
+// So events update the aggregate immediately and the canvas is repainted at most once per frame,
+// from that aggregate. Nothing is dropped: a node touched fifty times in one frame is painted once,
+// with the state it actually ended the frame in. The queue holds node ids only, so it is bounded by
+// the size of the document rather than by the volume of the stream.
+const runtimeNodePaintQueues = new WeakMap();
+
+function scheduleFrame(callback) {
+  return typeof globalThis.requestAnimationFrame === 'function'
+    ? globalThis.requestAnimationFrame(callback)
+    : setTimeout(callback, 16);
+}
+
+function scheduleRuntimeNodePaint(owner, nodeId) {
+  let queue = runtimeNodePaintQueues.get(owner);
+  if (!queue) {
+    queue = { nodes: new Set(), scheduled: false };
+    runtimeNodePaintQueues.set(owner, queue);
+  }
+  queue.nodes.add(nodeId);
+  if (queue.scheduled) return;
+  queue.scheduled = true;
+  scheduleFrame(() => {
+    queue.scheduled = false;
+    flushRuntimeNodePaint(owner, queue);
+  });
+}
+
+function flushRuntimeNodePaint(owner, queue) {
+  const pending = [...queue.nodes];
+  queue.nodes.clear();
+  if (!pending.length || workspace.find(owner.id) !== owner) return;
+  const isActive = owner === workspace.active;
+  const ownerCy = isActive ? cy : owner.cy;
+  if (!ownerCy) return;
+  const flow = owner.execution.monitoringFlow;
+  for (const nodeId of pending) {
+    const node = ownerCy.getElementById(nodeId);
+    if (!node.length) continue;
+    const view = nodeActivitySnapshot(flow, nodeId);
+    // A reset between the event and this frame leaves nothing to paint, and painting the frame's
+    // stale aggregate would put a cleared run back on the canvas.
+    if (!view.observed) continue;
+    node.data('instances', view.instances);
+    node.data('arrivals', view.arrivals);
+    node.data('runtimeState', view.state);
+    node.data('runtimeObserved', true);
+    node.data('runtimeFailures', view.failures);
+    node.data('lastEventType', view.lastEventType);
+    node.data('lastOccurredAt', view.lastOccurredAt);
+    node.data('processingDuration', view.processingDuration);
+    node.data('fallback', view.fallback);
+    applyRuntimeVisual(node);
+    updateD3RuntimeNode(owner, nodeId, view.instances, view.state, view.arrivals, {
+      type: view.lastEventType,
+      occurredAt: view.lastOccurredAt,
+      processingDuration: view.processingDuration,
+      fallback: view.fallback,
+    });
+  }
 }
 
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
+  runtimeNodePaintQueues.get(owner)?.nodes.clear();
   if (!targetCy) return;
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
@@ -11554,6 +11646,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     node.data('lastOccurredAt', '');
     node.data('processingDuration', null);
     node.data('fallback', false);
+    node.data('runtimeFailures', 0);
     // `removeStyle` drops the run's inline border and hands the node back to the stylesheet,
     // where `node[?bypassed]` still applies -- the flag is a property of the DOCUMENT, not of the
     // run, so clearing run state must not clear it. The label is rebuilt through the same helper for
@@ -11589,11 +11682,16 @@ function runtimeColor(state) {
  * For an ordinary worker node they are equal and one number is shown -- printing "10 instances · 10 in
  * flight" everywhere would train the eye to ignore a pair that matters precisely when it stops matching.
  */
-function runtimeCountLabel(name, instances, arrivals = 0) {
-  if (!(instances > 0)) return name;
+function runtimeCountLabel(name, instances, arrivals = 0, failures = 0) {
+  // The colour answers "what is this node doing now" and can only answer one question at a time; a
+  // node that failed for one message and then succeeded for the next is green, truthfully. This
+  // number is the other half: every failed arrival since the binding began, never decremented, so a
+  // failure under a busy source leaves a mark instead of a flash the user had to be watching for.
+  const failed = failures > 0 ? `${failures} failed` : '';
+  if (!(instances > 0)) return failed ? `${name} · ${failed}` : name;
   const noun = instances === 1 ? 'instance' : 'instances';
   const queued = arrivals > instances ? ` · ${arrivals} in flight` : '';
-  return `${name} · ${instances} ${noun}${queued}`;
+  return `${name} · ${instances} ${noun}${queued}${failed ? ` · ${failed}` : ''}`;
 }
 
 function runtimeNodeLabel(node) {
@@ -11604,13 +11702,14 @@ function runtimeNodeLabel(node) {
   // The switched-off marker rides on the node's name, so it survives a run painting over the
   // label. A bypassed node can still report instances -- a run that crosses it emits NODE_BYPASSED
   // with a count -- and the two facts belong on the same label, not one replacing the other.
+  const failures = Number(node.data('runtimeFailures')) || 0;
   const name = bypassedNodeName(node.data('name'), node.data('bypassed'));
-  if (!(instances > 0)) return humanTaskNodeLabel(name, attention);
+  if (!(instances > 0) && !(failures > 0)) return humanTaskNodeLabel(name, attention);
   // Same text as the elastic caption, on the line break this renderer uses. Composed against the RAW
   // name and recombined with the display name afterwards, so the `.replace` below keeps operating on
   // the one separator pinned it to: the bypass marker uses the same ` · `, and a first-match
   // replace over the display name would put the line break INSIDE the name instead of after it.
-  const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals)
+  const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals, failures)
     .replace(' · ', '\n').split('\n');
   return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }

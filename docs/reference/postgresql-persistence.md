@@ -35,7 +35,7 @@ both has not decided which it wants.
 
 ### Which replica holds an execution
 
-Every claim on an execution is taken under an identity of the form `<replica>#<incarnation>/<role>`,
+Every claim on an execution is taken under an identity of the form `<replica>:<incarnation>/<role>`,
 and it is what `ownerWorkerId` reports in the process inventory, so an operator reading the inventory
 can name the pod. The replica half comes from `RAVENROOT_WORKER_ID`, defaulting to the host name; in
 Kubernetes, set it from the pod name.

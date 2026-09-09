@@ -86,6 +86,22 @@ public final class ReplicaTopologyStartupCheck {
                             + "'; the shared store has no directory, so unset "
                             + ExecutionStoreConfiguration.DIRECTORY_VARIABLE);
         }
+        if (!shared) {
+            // The mirror of the refusal above, and it fails in the more expensive direction. Those
+            // settings are read by the shared store and by nothing else, so with the selector on the
+            // single-host store they are silently inert: the server starts on a pod-local file while
+            // an operator who configured a database believes their durable state is in it, and points
+            // their backup procedure there. The converse at least leaves the data where the selector
+            // says. Refusing both keeps one rule — the selector and the settings must agree — rather
+            // than a rule and an exception nobody would predict the direction of.
+            String configured = sharedSettingsSetWithoutTheSharedStore(environment);
+            if (configured != null) {
+                return new Refusal("EXECUTION_STORE_SELECTOR_CONFLICT",
+                        configured + " is set while " + ExecutionStoreConfiguration.SELECTOR_VARIABLE
+                                + " does not select '" + ExecutionStoreConfiguration.POSTGRESQL_SELECTOR
+                                + "'; either select the shared store or unset the settings it reads");
+            }
+        }
         int replicas;
         try {
             replicas = ReplicaCount.fromEnvironment(environment);
@@ -156,5 +172,26 @@ public final class ReplicaTopologyStartupCheck {
     private static boolean isSet(Map<String, String> environment, String variable) {
         String raw = environment.get(variable);
         return raw != null && !raw.isBlank();
+    }
+
+    /**
+     * The first shared-store setting an operator configured while selecting a different store.
+     *
+     * <p>Returns the variable's name rather than a boolean so the refusal can say which one was seen.
+     * The value itself is never read: naming a setting is a diagnosis, and a URL or a password in a
+     * startup message is a leak regardless of how the process ends.</p>
+     */
+    private static String sharedSettingsSetWithoutTheSharedStore(Map<String, String> environment) {
+        for (String variable : new String[]{
+                ExecutionStoreConfiguration.URL_VARIABLE,
+                ExecutionStoreConfiguration.USER_VARIABLE,
+                ExecutionStoreConfiguration.PASSWORD_VARIABLE,
+                ExecutionStoreConfiguration.POOL_SIZE_VARIABLE,
+                ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE}) {
+            if (isSet(environment, variable)) {
+                return variable;
+            }
+        }
+        return null;
     }
 }

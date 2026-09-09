@@ -110,8 +110,13 @@ public final class RavenrootServerMain {
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
                 humanTaskPolicy);
-        executionOwnershipConfiguration.requireCompatible(executionStoreOwner.store());
         try (var startupGuard = executionStoreOwner.startupGuard()) {
+        // Inside the guard, not before it. This check can refuse — a lease time-to-live outside what
+        // the composed store publishes — and a refusal raised between opening the store and entering
+        // the guard would leave the store owner unclosed, skipping the checkpoint and the lock release
+        // the guard exists to make unskippable. It has to be here rather than earlier because the
+        // bound it checks against is the store's own, readable only once the store is open.
+        executionOwnershipConfiguration.requireCompatible(executionStoreOwner.store());
         var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
             case "graalvm" -> GraalVmProgramRuntime.fromEnvironment();

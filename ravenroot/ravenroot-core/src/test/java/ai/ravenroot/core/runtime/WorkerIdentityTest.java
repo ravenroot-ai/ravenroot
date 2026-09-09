@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -23,7 +24,7 @@ class WorkerIdentityTest {
     void rendersReplicaIncarnationAndRole() {
         var identity = WorkerIdentity.of("ravenroot-0", WorkerIdentity.Role.RUNTIME);
 
-        assertEquals("ravenroot-0#" + WorkerIdentity.processIncarnation() + "/runtime", identity.value());
+        assertEquals("ravenroot-0:" + WorkerIdentity.processIncarnation() + "/runtime", identity.value());
         assertEquals(identity.value(), identity.toString());
     }
 
@@ -60,7 +61,7 @@ class WorkerIdentityTest {
         var identity = WorkerIdentity.unnamed(WorkerIdentity.Role.RUNTIME);
 
         assertEquals(WorkerIdentity.LOCAL_REPLICA_NAME, identity.replicaName());
-        assertTrue(identity.value().startsWith(WorkerIdentity.LOCAL_REPLICA_NAME + "#"));
+        assertTrue(identity.value().startsWith(WorkerIdentity.LOCAL_REPLICA_NAME + ":"));
     }
 
     @Test
@@ -92,5 +93,26 @@ class WorkerIdentityTest {
         for (String name : new String[] {"ravenroot-7d9f4b8c6d-x2k9p", "worker_01", "db.internal.example"}) {
             assertEquals(name, WorkerIdentity.of(name, WorkerIdentity.Role.RUNTIME).replicaName());
         }
+    }
+
+    /**
+     * The rendered identity survives a URL query value unencoded.
+     *
+     * <p>Pinned because the process inventory accepts this value back as an exact-match filter, and
+     * the character that used to separate the name from the incarnation ends a query and begins a
+     * fragment. A value carrying one arrives truncated to the replica name, matches nothing, and
+     * returns an empty page with a success status — which is the shape of failure an operator is
+     * least likely to notice. This asserts the property rather than the character, so a future
+     * separator has to keep it.</p>
+     */
+    @Test
+    void theRenderedIdentityCarriesNothingAUrlQueryWouldTruncateOrReinterpret() {
+        String rendered = WorkerIdentity.of("pod-1", WorkerIdentity.Role.RUNTIME).value();
+        var uri = java.net.URI.create("https://example.invalid/v1/executions/inventory?ownerWorkerId="
+                + rendered);
+        assertEquals(rendered, uri.getQuery().substring("ownerWorkerId=".length()),
+                "the identity does not survive a query value unencoded, so an operator filtering by "
+                        + "what the inventory showed them would silently filter by something else");
+        assertNull(uri.getFragment(), "the identity opened a fragment: " + rendered);
     }
 }

@@ -93,6 +93,43 @@ class ReplicaTopologyStartupCheckTest {
                 "a refusal reaches a log aggregator and must not print a path");
     }
 
+    /**
+     * The mirror of the location conflict, and the one that fails in the more expensive direction.
+     *
+     * <p>These settings are read by the shared store and by nothing else, so with the selector on the
+     * single-host store they are inert. Without this refusal the server starts on a pod-local file
+     * while an operator who configured a database believes their durable state is in it — and points a
+     * backup procedure at a database that holds nothing.</p>
+     */
+    @Test
+    void sharedSettingsWithoutTheSharedSelectorAreRefused() {
+        var environment = Map.of(
+                ExecutionStoreConfiguration.URL_VARIABLE,
+                "jdbc:postgresql://db.internal:5432/ravenroot",
+                ExecutionStoreConfiguration.PASSWORD_VARIABLE, "hunter2");
+
+        var refusal = ReplicaTopologyStartupCheck.evaluate(environment,
+                ExecutionStoreConfiguration.fromEnvironment(environment));
+
+        assertNotNull(refusal, "a database was configured and silently not used");
+        assertEquals("EXECUTION_STORE_SELECTOR_CONFLICT", refusal.code());
+        assertTrue(refusal.detail().contains(ExecutionStoreConfiguration.URL_VARIABLE),
+                "the refusal must name the setting that was seen: " + refusal.detail());
+        assertFalse(refusal.detail().contains("db.internal"),
+                "a refusal reaches a log aggregator and must not print a URL");
+        assertFalse(refusal.detail().contains("hunter2"),
+                "a refusal must never print a password");
+    }
+
+    @Test
+    void theSameSettingsAreAcceptedOnceTheSharedStoreIsSelected() {
+        var environment = sharedEnvironment(Map.of());
+
+        assertNull(ReplicaTopologyStartupCheck.evaluate(environment,
+                ExecutionStoreConfiguration.fromEnvironment(environment)),
+                "the settings the shared store reads cannot be a conflict for the shared store");
+    }
+
     @Test
     void aSingleHostDirectoryIsNotAConflictForTheSingleHostStore() {
         var environment = Map.of(ExecutionStoreConfiguration.DIRECTORY_VARIABLE, "/srv/ravenroot/store");

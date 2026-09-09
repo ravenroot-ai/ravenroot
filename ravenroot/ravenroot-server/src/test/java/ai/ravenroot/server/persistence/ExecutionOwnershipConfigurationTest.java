@@ -68,7 +68,7 @@ class ExecutionOwnershipConfigurationTest {
         assertNotEquals(runtime.value(), recovery.value(),
                 "the sweep must be a different worker from the runtime it runs beside, or it claims "
                         + "that runtime's live work and keeps its fencing token");
-        assertEquals("ravenroot-2#" + WorkerIdentity.processIncarnation() + "/runtime", runtime.value());
+        assertEquals("ravenroot-2:" + WorkerIdentity.processIncarnation() + "/runtime", runtime.value());
     }
 
     @Test
@@ -80,7 +80,7 @@ class ExecutionOwnershipConfigurationTest {
         // property that matters: whatever was resolved, it is a legal name and the rendered identity
         // still has its three parts.
         assertFalse(identity.replicaName().isBlank());
-        assertEquals(identity.replicaName() + "#" + WorkerIdentity.processIncarnation() + "/runtime",
+        assertEquals(identity.replicaName() + ":" + WorkerIdentity.processIncarnation() + "/runtime",
                 identity.value());
     }
 

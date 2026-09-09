@@ -90,8 +90,10 @@
         <module>ravenroot-persistence-sqlite</module>
         <!--
           The durable multi-host adapter. In the reactor so that its conformance run happens on every
-          full build; NOT a dependency of ravenroot-server or ravenroot-distribution, so it does not
-          ship, and a deployment that wants it adds the module and supplies it a DataSource.
+          full build, and a dependency of ravenroot-server since the composition root learned to select
+          a store, so it ships and a deployment chooses it at startup rather than by rebuilding. The
+          server builds and pools the connections; the adapter is handed a DataSource and never makes
+          one.
         -->
         <module>ravenroot-persistence-postgresql</module>
         <module>ravenroot-pekko</module>

@@ -15,7 +15,7 @@ import java.util.Objects;
  * holds it, and <em>which restart</em> of that replica took it. With one process those questions had
  * one answer and the identifier could afford not to carry it. With several they do not.</p>
  *
- * <p>So the identity is {@code <replica-name>#<incarnation>/<role>}, and each part answers exactly
+ * <p>So the identity is {@code <replica-name>:<incarnation>/<role>}, and each part answers exactly
  * one of those: the replica name says which deployment member, the incarnation says which start of
  * it, and the role says which of that member's two lease-takers. The three separators are reserved
  * characters rather than a formatting choice — see {@link #requireName} — so the rendered value can
@@ -54,10 +54,21 @@ public record WorkerIdentity(String replicaName, String incarnation, Role role) 
      */
     public static final String LOCAL_REPLICA_NAME = "local";
 
-    /** Separates the replica name from the incarnation; reserved in both. */
-    private static final char INCARNATION_SEPARATOR = '#';
+    /**
+     * Separates the replica name from the incarnation; reserved in both.
+     *
+     * <p>A colon rather than a hash, and the reason is transport rather than taste. This value is not
+     * only displayed: the process inventory accepts it back as an exact-match filter, and an operator
+     * filtering by what the inventory just showed them is the workflow that parameter exists for. A
+     * hash ends a URL's query and begins its fragment, so a value carrying one arrives at the server
+     * truncated to the replica name, matches nothing, and returns an empty page with no error at all —
+     * the failure that looks like an answer. A colon is legal unencoded in a query value and is
+     * already outside the character set a replica name may use, so it separates as clearly and
+     * survives the round trip.</p>
+     */
+    private static final char INCARNATION_SEPARATOR = ':';
 
-    /** Separates the incarnation from the role; reserved in both. */
+    /** Separates the incarnation from the role; reserved in both, and legal unencoded in a query. */
     private static final char ROLE_SEPARATOR = '/';
 
     /**
@@ -135,7 +146,7 @@ public record WorkerIdentity(String replicaName, String incarnation, Role role) 
      * The rendered form written to the store and read back from
      * {@code ProcessInventoryEntry.ownerWorkerId()}.
      *
-     * @return {@code <replica-name>#<incarnation>/<role>}.
+     * @return {@code <replica-name>:<incarnation>/<role>}.
      */
     public String value() {
         return replicaName + INCARNATION_SEPARATOR + incarnation + ROLE_SEPARATOR + role.token();

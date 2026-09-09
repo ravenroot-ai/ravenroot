@@ -10,7 +10,10 @@ export default defineConfig({
   // pick that spec up and run it against the wrong server — it has no `/v1/node-types` endpoint at
   // all — failing every `npm run test:e2e` run for a reason that has nothing to do with the suite
   // itself. Run them only through their owning integration harnesses.
-  testIgnore: ['**/plugin-ui/**', '**/human-task-confirmation-real/**'],
+  // `source-session-activity-real` joins them for the same reason: its server is a real JVM this
+  // config never starts, and the stub fixture server has no source session to observe.
+  testIgnore: ['**/plugin-ui/**', '**/human-task-confirmation-real/**',
+    '**/source-session-activity-real/**'],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

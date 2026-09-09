@@ -35,14 +35,22 @@ import java.util.function.Consumer;
  *   <li>{@code detail} — the operator-facing text. The SSE frame carries the author-facing
  *       {@code message}, {@code description} and their redaction and truncation flags instead,
  *       because the two audiences are told different things about the same event.</li>
- *   <li>{@code joinWaitDuration}, {@code nodeCatalogKey}, {@code deploymentId} and
- *       {@code workloadId} — operational correlation an operator needs to attribute a line to a
- *       deployment, a workload and a catalogued node. They are absent from the SSE frame for the
- *       same reason as tenant naming: an author's browser client is not told how the server is
- *       deployed.</li>
+ *   <li>{@code joinWaitDuration}, {@code nodeCatalogKey} and {@code workloadId} — operational
+ *       correlation an operator needs to attribute a line to a workload and a catalogued node. They
+ *       are absent from the SSE frame for the same reason as tenant naming: an author's browser
+ *       client is not told how the server is deployed.</li>
  * </ul>
  *
  * <p>{@code publicReason} is carried by both and is not a divergence.</p>
+ *
+ * <p><b>{@code deploymentId} used to be on this list and no longer is.</b> The argument for keeping
+ * it here was that an author's browser is not told how the server is deployed — sound for the
+ * <em>operational topology</em> the other three describe, and wrong for this one, because a
+ * deployment id is also the only identity an author's own long-lived source session has. Withheld,
+ * it did not conceal a deployment detail: it left the editor unable to attribute the events of a
+ * graph the author had started themselves, so a listening source painted nothing at all. The value
+ * the browser now receives is the id that browser supplied when it started the session, not a
+ * disclosure of anything it did not already know.</p>
  */
 public final class StructuredExecutionLogger implements Consumer<ExecutionEvent> {
     private final PrintStream output;

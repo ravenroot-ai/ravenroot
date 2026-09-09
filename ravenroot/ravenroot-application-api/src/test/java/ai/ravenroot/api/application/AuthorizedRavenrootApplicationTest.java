@@ -850,6 +850,46 @@ class AuthorizedRavenrootApplicationTest {
                         + "FAILED audit disposition -- the command itself did not fail");
     }
 
+    /**
+     * A listening source's own events reach the tenant that started it, and nobody else.
+     *
+     * <p>Nothing reserves an ownership record for these traversals: each admitted message starts its
+     * own, inside the runtime, with an id no caller ever asked for. Resolved through the execution
+     * registry alone they are <em>unknown</em> ownership, which the policy denies unconditionally —
+     * PLATFORM_ADMIN included — so the reference monitor withheld the entire event history of a graph
+     * the caller had started themselves, and an empty stream is what a quiet server looks like too.</p>
+     *
+     * <p>The resolution added for them is a lookup, not a permission: the delegate is asked whether
+     * <b>the caller's own tenant</b> holds the deployment the event names. A sibling tenant and an
+     * unregistered deployment both stay unknown and stay denied.</p>
+     */
+    @Test
+    void aListeningSourcesOwnEventsResolveThroughItsDeploymentAndNoOtherTenantsDo() {
+        var raw = new FakeApplication();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, true);
+        raw.events.add(sourceEvent(1, "tenant-a", "listening-session"));
+        raw.events.add(sourceEvent(2, "tenant-a", "never-registered"));
+        // A sibling's own session, under an id THIS tenant also holds: deployment ids are unique
+        // within a tenant, not across the installation, so the lookup alone would hand it over.
+        raw.events.add(sourceEvent(3, "tenant-b", "listening-session"));
+
+        var owner = context("tenant-a", Role.OPERATOR, "ravenroot.observe");
+        assertEquals(List.of(1L, 2L, 3L), raw.events.stream().map(ExecutionEvent::sequence).toList(),
+                "the delegate publishes every tenant's events; the filter is the facade's");
+        assertEquals(List.of(1L), facade.executionEventsAfter(owner, 0).stream()
+                        .map(ExecutionEvent::sequence).toList(),
+                "only the deployment this tenant actually holds resolves ownership");
+
+        var sibling = context("tenant-b", Role.OPERATOR, "ravenroot.observe");
+        assertTrue(facade.executionEventsAfter(sibling, 0).isEmpty(),
+                "a tenant that holds no such deployment reaches none of these events");
+
+        var platform = context("tenant-c", Role.PLATFORM_ADMIN, "ravenroot.observe");
+        assertTrue(facade.executionEventsAfter(platform, 0).isEmpty(),
+                "unknown ownership still fails closed; this resolves ownership rather than waiving it");
+    }
+
     private static RequestContext context(String tenant, Role role, String scope) {
         return context("alice", tenant, role, scope);
     }
@@ -888,6 +928,14 @@ class AuthorizedRavenrootApplicationTest {
                 executionId, executionId, null, null, ExecutionEventType.NODE_FAILED, "node", 0, false,
                 diagnostic, null, null, null, null, null, 0, "IllegalStateException",
                 RuntimeActivityData.message(diagnostic), null);
+    }
+
+    /** A traversal a long-lived source produced: no caller submitted it, so no id was ever reserved. */
+    private static ExecutionEvent sourceEvent(long sequence, String tenantId, String deploymentId) {
+        UUID traversalId = UUID.randomUUID();
+        return new ExecutionEvent(sequence, Instant.EPOCH, tenantId, "request", "test", "graph",
+                UUID.randomUUID(), traversalId, null, null, ExecutionEventType.NODE_COMPLETED, "log", 0,
+                false, "done", null, null, null, deploymentId, null, 0, "continue", null, null);
     }
 
     private static DurableExecutionEvent durableEvent(long journalOffset, String tenantId) {
@@ -951,10 +999,12 @@ class AuthorizedRavenrootApplicationTest {
                     : List.of();
         }
 
+        /** Only tenant-a, and only for ids it registered: the lookup is keyed by the pair, not the tenant. */
         @Override
         public java.util.Optional<LocalDeploymentStatus> localDeployment(String tenantId, String deploymentId) {
             observedDeploymentTenants.add(tenantId);
             return tenantId.equals("tenant-a")
+                    && (deploymentId.equals("deployment") || deploymentId.equals("listening-session"))
                     ? java.util.Optional.of(LocalDeploymentStatus.of(deploymentId, LocalDeploymentState.READY, 0))
                     : java.util.Optional.empty();
         }

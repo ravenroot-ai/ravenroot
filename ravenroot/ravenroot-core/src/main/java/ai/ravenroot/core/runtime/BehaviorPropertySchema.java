@@ -11,12 +11,14 @@ import ai.ravenroot.core.graph.ReservedGraphProperties;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Validates a graph's behavior properties against the trusted catalog (SEC-09).
@@ -153,12 +155,20 @@ public final class BehaviorPropertySchema {
      * anyway.</p>
      */
     private static void refuseNearMisses(GraphNode node, List<NodePropertyDescriptor> declared) {
+        // Exact names are held separately rather than read back out of the folded map. Two declared
+        // names that fold together would leave only one of them as a value there, and a key spelled
+        // exactly like the shadowed one would then be read as a near-miss of its twin and refused --
+        // a declared property rejected on a correct spelling. No catalog descriptor does this today,
+        // and a descriptor with two identical names is already refused, so the guard is for a
+        // third-party package: the direction of the mistake is what makes it worth the one set.
+        Set<String> exactNames = new HashSet<>();
         Map<String, String> byFoldedName = new LinkedHashMap<>();
         for (NodePropertyDescriptor property : declared) {
+            exactNames.add(property.name());
             byFoldedName.put(property.name().toLowerCase(Locale.ROOT), property.name());
         }
         for (String key : node.properties().keySet()) {
-            if (byFoldedName.containsValue(key)) {
+            if (exactNames.contains(key)) {
                 continue;
             }
             String intended = byFoldedName.get(key.toLowerCase(Locale.ROOT));

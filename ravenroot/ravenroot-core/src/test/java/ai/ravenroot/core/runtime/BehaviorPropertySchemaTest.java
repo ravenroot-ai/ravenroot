@@ -215,6 +215,42 @@ class BehaviorPropertySchemaTest {
     }
 
     @Test
+    void acceptsADeclaredNameEvenWhenAnotherDeclaredNameFoldsOntoIt() {
+        // A descriptor whose two property names differ only by case. No catalog entry does this, and
+        // it takes a third-party package to produce one, but the failure it would cause is the wrong
+        // way round: a property spelled *exactly* as declared being refused as a near-miss of its
+        // twin. Both spellings must be admitted, because the descriptor declares both.
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override
+            public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("folding-probe", "Folding probe", "Test", "", "actor", false,
+                        List.of(NodePropertyDescriptor.optional("region", "Region",
+                                        NodePropertyType.STRING, "", ""),
+                                NodePropertyDescriptor.optional("Region", "Region (legacy)",
+                                        NodePropertyType.STRING, "", "")),
+                        Set.of("test-only"));
+            }
+
+            @Override
+            public NodeHandler create(GraphNode node) {
+                return message -> java.util.concurrent.CompletableFuture.completedFuture(
+                        ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()));
+            }
+        });
+        var folding = new BehaviorPropertySchema(registry);
+
+        for (String declaredName : List.of("region", "Region")) {
+            var graph = new GraphDefinition(List.of(
+                    GraphNode.start("start"),
+                    new GraphNode("probe", NodeKind.BEHAVIOR, "folding-probe", Map.of(declaredName, "eu")),
+                    GraphNode.error("error"), GraphNode.end("end")), List.of(
+                    GraphEdge.to("start", "probe"), GraphEdge.to("probe", "end")));
+
+            assertDoesNotThrow(() -> folding.validate(graph), "refused declared '" + declaredName + "'");
+        }
+    }
+
+    @Test
     void doesNotLookForNearMissesOnBehaviorsTheCatalogDoesNotKnow() {
         // Same boundary as every other rule here: an uncatalogued behavior has no declared names to
         // compare against, so the pass-through path stays exactly as it was.

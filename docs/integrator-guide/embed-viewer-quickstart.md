@@ -27,10 +27,18 @@ Read these before you write anything. Each one fails silently or confusingly if 
    launch URL in a browser tab returns an error document, not a broken viewer. The viewer's own
    bootstrap enforces the same rule a second time from inside the page, refusing to start when
    `window.parent === window`. Neither refusal explains itself, so recognise the shape.
-2. **Both origins must be canonical HTTPS origins.** The viewer's origin and your page's origin are
-   `https://host` or `https://host:port` — scheme, host, optional port, nothing else. No `http`, not
-   even on loopback; no trailing slash, no path, no explicit `:443`, no `*`. A registration carrying
-   anything else is refused when it is created.
+2. **Both origins must be canonical HTTPS origins, and they must differ.** The viewer's origin and
+   your page's origin are `https://host` or `https://host:port` — scheme, host, optional port,
+   nothing else. No `http`, not even on loopback; no trailing slash, no path, no explicit `:443`,
+   no `*`. The two must also be distinct: your page cannot be served from the viewer's own origin.
+
+   **This is checked when the viewer is used, not when the registration is written.** The deployment's
+   own viewer origin is validated at startup, so a bad one stops the server. Your parent origin is
+   not: a registration recording `http://app.example.com`, or `https://app.example.com/` with its
+   trailing slash, or the viewer's origin repeated, is stored happily and then refuses **every**
+   session with `403 EMBED_SESSION_UNAVAILABLE`. Nothing reports the origin as the cause. If a brand
+   new registration never produces a launch, compare its origin string against this rule character by
+   character before you look anywhere else.
 3. **Two of the five endpoints are server-only, by construction.** `/v1/embed/sessions` and
    `/v1/embed/acknowledgements` refuse any request that carries a `Cookie`, an `Origin` header, or
    any `Sec-Fetch-*` header. A browser always sends those, so these calls cannot be made from your
@@ -119,8 +127,15 @@ $ curl -sS -X POST https://graphs.example.com/v1/embed/sessions \
 {"launchUrl":"https://graphs.example.com/v1/embed/launch?ticket=...","expiresAt":"2026-01-01T00:01:00Z"}
 ```
 
-`201` carries the launch. `403` with `EMBED_SESSION_UNAVAILABLE` means the registration is unknown,
-inactive, or revoked; `503` with `EMBED_TEMPORARILY_UNAVAILABLE` means retry later.
+`201` carries the launch. `503` with `EMBED_TEMPORARILY_UNAVAILABLE` means retry later.
+
+`403` with `EMBED_SESSION_UNAVAILABLE` is the one to know, because it is a single code covering
+unrelated causes and it names none of them:
+
+- the registration is unknown, inactive, or revoked; **or**
+- the registration's parent origin is not a canonical HTTPS origin, or is not distinct from the
+  viewer's — see constraint 2. A registration can be written with such an origin, so this failure
+  looks exactly like a revoked or misspelled registration id and is not one.
 
 Deliver only `launchUrl` to the browser. It authorizes a single viewer session for one registered
 graph, and it is not the workload token.
@@ -148,7 +163,22 @@ exchange.
 ## Step 3 — a host server with the two routes
 
 Your page needs two routes of its own: one to mint a launch, one to relay the acknowledgement. This
-is a complete Node implementation with no dependencies; translate it to your stack as you like.
+is a complete Node implementation with no dependencies; translate it to your stack as you like. Save
+it as `host-server.mjs` next to the `host-page.html` of the next step, which it reads and serves.
+
+Your page must be served over HTTPS, so it needs a certificate. In production that is your normal
+certificate; to try this locally, generate a self-signed pair beside those two files and tell your
+browser to accept it:
+
+```console
+$ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -keyout server-key.pem -out server-cert.pem \
+    -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1'
+```
+
+The example listens on `127.0.0.1:8444`, so a local run's parent origin is `https://127.0.0.1:8444`
+and that — not `https://app.example.com` — is the origin to give the operator. It is a canonical
+HTTPS origin like any other; only the registered value has to match what the browser reports.
 
 ```js
 // host-server.mjs — run with: node host-server.mjs
@@ -202,41 +232,48 @@ const readJson = request => new Promise((resolve, reject) => {
 });
 
 createServer(tls, async (request, response) => {
-  // Mint one launch per page load. The workload token stays on this side.
-  if (request.method === 'POST' && request.url === '/embed/launch') {
-    const created = await callRavenroot('/v1/embed/sessions', {
-      registrationId: REGISTRATION_ID,
-    });
-    response.writeHead(created.status === 201 ? 200 : 503,
-      { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    response.end(created.status === 201
-      ? JSON.stringify({ launchUrl: JSON.parse(created.body).launchUrl })
-      : '{"error":"unavailable"}');
-    return;
-  }
+  try {
+    // Mint one launch per page load. The workload token stays on this side.
+    if (request.method === 'POST' && request.url === '/embed/launch') {
+      const created = await callRavenroot('/v1/embed/sessions', {
+        registrationId: REGISTRATION_ID,
+      });
+      response.writeHead(created.status === 201 ? 200 : 503,
+        { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      response.end(created.status === 201
+        ? JSON.stringify({ launchUrl: JSON.parse(created.body).launchUrl })
+        : '{"error":"unavailable"}');
+      return;
+    }
 
-  // Vouch for the channel the viewer announced in its HELLO.
-  if (request.method === 'POST' && request.url === '/embed/acknowledge') {
-    const hello = await readJson(request);
-    const acknowledged = await callRavenroot('/v1/embed/acknowledgements', {
-      registrationId: REGISTRATION_ID,
-      acknowledgementId: hello.acknowledgementId,
-      channelId: hello.channelId,
-      correlationId: hello.correlationId,
-    });
-    response.writeHead(acknowledged.status === 200 ? 200 : 503,
-      { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    response.end(acknowledged.status === 200 ? '{"acknowledged":true}' : '{"error":"unavailable"}');
-    return;
-  }
+    // Vouch for the channel the viewer announced in its HELLO.
+    if (request.method === 'POST' && request.url === '/embed/acknowledge') {
+      const hello = await readJson(request);
+      const acknowledged = await callRavenroot('/v1/embed/acknowledgements', {
+        registrationId: REGISTRATION_ID,
+        acknowledgementId: hello.acknowledgementId,
+        channelId: hello.channelId,
+        correlationId: hello.correlationId,
+      });
+      response.writeHead(acknowledged.status === 200 ? 200 : 503,
+        { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      response.end(acknowledged.status === 200 ? '{"acknowledged":true}' : '{"error":"unavailable"}');
+      return;
+    }
 
-  response.writeHead(200, {
-    'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; "
-      + "style-src 'unsafe-inline'; connect-src 'self'; frame-src " + RAVENROOT,
-  });
-  response.end(page);
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; "
+        + "style-src 'unsafe-inline'; connect-src 'self'; frame-src " + RAVENROOT,
+    });
+    response.end(page);
+  } catch (failure) {
+    // Ravenroot unreachable or a malformed body. Without this the request never answers and the
+    // host page waits forever instead of reporting that no view is available.
+    response.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    response.end('{"error":"unavailable"}');
+  }
 }).listen(8444, '127.0.0.1');
 ```
 
@@ -246,8 +283,8 @@ reached.
 
 ## Step 4 — the host page
 
-This is the whole file. Change `VIEWER_ORIGIN` to your viewer origin and serve it from your
-registered origin.
+This is the whole file. Save it as `host-page.html` beside the server above, change `VIEWER_ORIGIN`
+to your viewer origin, and serve it from your registered origin.
 
 ```html
 <!doctype html>
@@ -393,7 +430,7 @@ frame:
 | `error` | The graph could not be displayed. | The launch, bootstrap, or a response was invalid |
 | `expired` | This viewing session has expired. | The launch or session expired, or access was revoked |
 | `offline` | The graph service is unavailable. | Ravenroot was unreachable or temporarily unavailable |
-| `incompatible` | This graph requires a newer viewer. | The projection is newer than this viewer |
+| `incompatible` | This graph requires a newer viewer. | The projection's contract version is not the one this viewer implements |
 
 **Your page is told that a failure happened, not which one.** The `FAILED` message carries no kind:
 the four kinds above are the reader-facing copy inside the frame, deliberately not a diagnostic
@@ -417,8 +454,10 @@ For symptom-by-symptom diagnosis see
    `data-viewer-state` becomes `ready` with the status text `Graph ready.`
 2. **The launch URL is useless on its own.** Open a fresh launch URL directly in a browser tab. The
    request is not an iframe navigation, so Ravenroot answers `403 EMBED_SESSION_UNAVAILABLE` and no
-   viewer is served at all — the refusal happens before the framing check in the page ever runs.
-3. **A ticket is one-use.** Load the same launch URL a second time. The second attempt is `403`.
+   viewer is served at all — the refusal happens before the framing check in the page ever runs. Note
+   that this refusal comes *before* the ticket is consumed, so it does not prove step 3.
+3. **A ticket is one-use.** Take the launch URL your page actually loaded in its iframe, and open it
+   again. That one was consumed, so the second attempt is `403`.
 4. **Reloading your page still works,** because your server minted a new launch for the new load. If
    reloading fails, you are caching the launch URL somewhere.
 5. **Revocation takes effect immediately.** Ask your operator to revoke the registration. New

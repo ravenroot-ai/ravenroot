@@ -32,7 +32,7 @@ Read these before you write anything. Each one fails silently or confusingly if 
    nothing else. No `http`, not even on loopback; no trailing slash, no path, no explicit `:443`,
    no `*`. The two must also be distinct: your page cannot be served from the viewer's own origin.
 
-   **This is checked when the viewer is used, not when the registration is written.** The deployment's
+   **This is checked when a session is created, not when the registration is written.** The deployment's
    own viewer origin is validated at startup, so a bad one stops the server. Your parent origin is
    not: a registration recording `http://app.example.com`, or `https://app.example.com/` with its
    trailing slash, or the viewer's origin repeated, is stored happily and then refuses **every**
@@ -129,13 +129,21 @@ $ curl -sS -X POST https://graphs.example.com/v1/embed/sessions \
 
 `201` carries the launch. `503` with `EMBED_TEMPORARILY_UNAVAILABLE` means retry later.
 
-`403` with `EMBED_SESSION_UNAVAILABLE` is the one to know, because it is a single code covering
-unrelated causes and it names none of them:
+`403` with `EMBED_SESSION_UNAVAILABLE` is the one to know, because it is a single non-disclosing code
+covering unrelated causes and it names none of them. It tells you that no session is available, never
+why. At least four different mistakes produce it:
 
-- the registration is unknown, inactive, or revoked; **or**
+- the registration id is unknown or has been revoked;
+- **the registration belongs to a different workload.** A registration records an issuer, subject and
+  tenant, and a token that does not match them is refused exactly like a wrong id. If the id is
+  certainly right, suspect the token next;
 - the registration's parent origin is not a canonical HTTPS origin, or is not distinct from the
   viewer's — see constraint 2. A registration can be written with such an origin, so this failure
-  looks exactly like a revoked or misspelled registration id and is not one.
+  looks like a revoked or misspelled id and is not one;
+- your request carried a `Cookie` header. (An `Origin` or `Sec-Fetch-*` header is the other half of
+  constraint 3, but that one is rejected as `400 EMBED_REQUEST_INVALID` instead.)
+
+Because the response cannot tell them apart, work down that list rather than guessing.
 
 Deliver only `launchUrl` to the browser. It authorizes a single viewer session for one registered
 graph, and it is not the workload token.
@@ -238,11 +246,14 @@ createServer(tls, async (request, response) => {
       const created = await callRavenroot('/v1/embed/sessions', {
         registrationId: REGISTRATION_ID,
       });
+      // Parse before writeHead, never inside end(): a throw after the headers are sent cannot be
+      // answered by the catch below, and surfaces as an unhandled rejection instead of a 503.
+      const body = created.status === 201
+        ? JSON.stringify({ launchUrl: JSON.parse(created.body).launchUrl })
+        : '{"error":"unavailable"}';
       response.writeHead(created.status === 201 ? 200 : 503,
         { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      response.end(created.status === 201
-        ? JSON.stringify({ launchUrl: JSON.parse(created.body).launchUrl })
-        : '{"error":"unavailable"}');
+      response.end(body);
       return;
     }
 
@@ -456,8 +467,11 @@ For symptom-by-symptom diagnosis see
    request is not an iframe navigation, so Ravenroot answers `403 EMBED_SESSION_UNAVAILABLE` and no
    viewer is served at all — the refusal happens before the framing check in the page ever runs. Note
    that this refusal comes *before* the ticket is consumed, so it does not prove step 3.
-3. **A ticket is one-use.** Take the launch URL your page actually loaded in its iframe, and open it
-   again. That one was consumed, so the second attempt is `403`.
+3. **A ticket is one-use.** Record the launch URL your page loaded in its iframe, then make the frame
+   load that same URL a second time — temporarily point `viewer.src` at the recorded value instead of
+   minting a fresh one. It must be an iframe navigation again, or you are only repeating step 2 and
+   the `403` proves nothing. Loaded the right way, the second attempt is still `403`, because the
+   first use consumed it.
 4. **Reloading your page still works,** because your server minted a new launch for the new load. If
    reloading fails, you are caching the launch URL somewhere.
 5. **Revocation takes effect immediately.** Ask your operator to revoke the registration. New

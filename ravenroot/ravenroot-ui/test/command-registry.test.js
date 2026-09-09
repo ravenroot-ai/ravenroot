@@ -16,6 +16,19 @@ describe('command registry', () => {
     expect(() => createCommandRegistry([command(), command()])).toThrow(/Duplicate command id/);
   });
 
+  it('describes a command from context and falls back to its static help', () => {
+    const registry = createCommandRegistry([
+      command({ id: 'test.static', help: 'Run the thing' }),
+      command({ id: 'test.dynamic', help: 'Run the thing',
+        describe: context => (context.target ? `Run ${context.target}` : 'Nothing to run') }),
+      command({ id: 'test.silent' }),
+    ]);
+    expect(registry.state('test.static', { target: 'the report' }).description).toBe('Run the thing');
+    expect(registry.state('test.dynamic', { target: 'the report' }).description).toBe('Run the report');
+    expect(registry.state('test.dynamic', {}).description).toBe('Nothing to run');
+    expect(registry.state('test.silent', {}).description).toBeUndefined();
+  });
+
   it('orders placements and centrally gates disabled execution', () => {
     const execute = vi.fn();
     const registry = createCommandRegistry([

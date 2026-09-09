@@ -9380,14 +9380,6 @@ function updateHistoryUi() {
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
   const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
-  const undoButton = document.getElementById('btn-undo');
-  if (undoButton) {
-    undoButton.title = state.canUndo ? `Undo ${state.undoLabel}` : 'Nothing to undo';
-  }
-  const redoButton = document.getElementById('btn-redo');
-  if (redoButton) {
-    redoButton.title = state.canRedo ? `Redo ${state.redoLabel}` : 'Nothing to redo';
-  }
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
     indicator.classList.toggle('dirty', dirty);
@@ -13964,6 +13956,10 @@ function commandContext() {
     workspaceLayoutDefault: workspaceLayoutIsDefault(),
     canUndo: documentIsEditable(workspace.active) && history.canUndo && !layoutBusy,
     canRedo: documentIsEditable(workspace.active) && history.canRedo && !layoutBusy,
+    // Empty when there is no step, which is what makes the history commands describe themselves
+    // as having nothing to reverse.
+    undoLabel: history.canUndo ? history.undoLabel : '',
+    redoLabel: history.canRedo ? history.redoLabel : '',
     running,
     transientRunning,
     executionPaused: activeExecutionPaused,
@@ -13996,8 +13992,13 @@ function refreshCommands({ menu = true } = {}) {
     if (command.kind === 'checkbox') control.setAttribute('aria-pressed', String(state.checked === true));
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
     if (control.hasAttribute('data-command-label')) control.textContent = command.label;
-    if (command.help) {
-      control.title = command.help;
+    // This runs after every edit, undo, redo and save, so whatever it writes here is the last
+    // word: a title applied elsewhere before the refresh does not survive it. Writing the state's
+    // description rather than the static help is what lets the history controls keep naming the
+    // step they would reverse, while every other control still shows its help -- including the
+    // lifecycle controls, which need it here because they carry no `data-command-label`.
+    if (state.description) {
+      control.title = state.description;
       if (command.group === 'unavailable-lifecycle') {
         control.setAttribute('aria-label', `${command.label}. ${command.help}`);
       }
@@ -14050,7 +14051,7 @@ function renderApplicationMenu(name) {
     const shortcut = shortcuts.length ? shortcuts.map(item => commandRegistry.shortcutLabel(item)).join(' / ') : '';
     const ariaShortcut = shortcuts[0] ? ` aria-keyshortcuts="${escapeAttribute(commandRegistry.ariaShortcut(shortcuts[0]))}"` : '';
     const checked = command.kind ? ` aria-checked="${state.checked === true}"` : '';
-    const help = command.help ? ` title="${escapeAttribute(command.help)}"` : '';
+    const help = state.description ? ` title="${escapeAttribute(state.description)}"` : '';
     const unavailableLabel = command.group === 'unavailable-lifecycle' && command.help
       ? ` aria-label="${escapeAttribute(`${command.label}. ${command.help}`)}"` : '';
     return `${separator}<button type="button" class="application-menu-item" role="${role}"

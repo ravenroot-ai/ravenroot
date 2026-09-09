@@ -42,6 +42,11 @@ export function createCommandRegistry(definitions, options = {}) {
       enabled: command.isEnabled ? Boolean(command.isEnabled(context)) : true,
       visible: command.isVisible ? Boolean(command.isVisible(context)) : true,
       checked: command.isChecked ? Boolean(command.isChecked(context)) : undefined,
+      // A command that names the work it would do -- the history controls name the step they
+      // would undo or redo -- describes itself from the current context; every other command
+      // falls back to its static help. Callers read this instead of `help` so the specific
+      // description is what reaches the control on every refresh, not just the first one.
+      description: command.describe ? command.describe(context) : command.help,
     };
   }
 

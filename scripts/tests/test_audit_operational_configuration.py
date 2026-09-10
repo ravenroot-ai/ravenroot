@@ -61,6 +61,33 @@ def classify_non_pending(root: Path) -> None:
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_helm_program_timeout_authority_closes_chart_and_java_evidence(self) -> None:
+        candidates = audit.discover(ROOT)
+        schema = json.loads((ROOT / "deploy/helm/ravenroot/values.schema.json").read_text())
+        resolver = ROOT / "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java"
+        source = resolver.read_text()
+        test_path = ROOT / "scripts/tests/test_program_timeout_helm_contract.sh"
+        authority = {
+            "kind": "helm-program-timeout-authority-v1", "valuesPath": "deploy/helm/ravenroot/values.yaml",
+            "valuePath": "programTimeoutMs", "schemaPath": "deploy/helm/ravenroot/values.schema.json",
+            "schemaPointer": "/properties/programTimeoutMs", "schemaContract": schema["properties"]["programTimeoutMs"],
+            "templatePath": "deploy/helm/ravenroot/templates/deployment.yaml", "environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
+            "testPath": "scripts/tests/test_program_timeout_helm_contract.sh",
+            "testDigest": audit.hashlib.sha256(test_path.read_bytes()).hexdigest(),
+            "candidateIds": sorted({c.id for c in candidates if c.path in {"deploy/helm/ravenroot/values.yaml", "deploy/helm/ravenroot/values.schema.json", "deploy/helm/ravenroot/templates/deployment.yaml", "scripts/tests/test_program_timeout_helm_contract.sh"} and (c.role in {"programTimeoutMs", "RAVENROOT_PROGRAM_TIMEOUT_MS"} or c.path.endswith("test_program_timeout_helm_contract.sh"))}),
+            "resolverPath": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
+            "resolverType": "GraalVmProgramRuntime", "resolverMethod": "fromEnvironment",
+            "resolverDigest": audit.java_method_digest(source, "GraalVmProgramRuntime", "fromEnvironment"),
+            "fingerprintMethod": "compatibilityFingerprint", "fingerprintDigest": audit.java_method_digest(source, "GraalVmProgramRuntime", "compatibilityFingerprint"),
+        }
+        self.assertEqual([], audit.helm_program_timeout_authority_errors(ROOT, authority, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"] = altered["candidateIds"][:-1]
+        self.assertTrue(audit.helm_program_timeout_authority_errors(ROOT, altered, candidates))
+        altered = copy.deepcopy(authority)
+        altered["schemaContract"]["oneOf"][0]["maximum"] = 1
+        self.assertTrue(audit.helm_program_timeout_authority_errors(ROOT, altered, candidates))
+
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
         expected = audit.manifest_pin_attempt_authorities(ROOT, discovered)

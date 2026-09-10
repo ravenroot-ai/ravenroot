@@ -1659,6 +1659,52 @@ def yaml_scalar_at_path(source: str, dotted_path: str) -> str | None:
     return found[0] if len(found) == 1 else None
 
 
+def helm_program_timeout_authority_errors(root: Path, authority: object,
+                                          candidates: tuple[Candidate, ...]) -> list[str]:
+    """Verify the one supported split Helm/Java timeout contract without relaxing Java owners."""
+    required = {"kind", "valuesPath", "valuePath", "schemaPath", "schemaPointer",
+                "schemaContract", "templatePath", "environment", "testPath", "testDigest",
+                "candidateIds", "resolverPath", "resolverType", "resolverMethod",
+                "resolverDigest", "fingerprintMethod", "fingerprintDigest"}
+    if not isinstance(authority, dict) or set(authority) != required \
+            or authority.get("kind") != "helm-program-timeout-authority-v1":
+        return ["Helm program-timeout authority has an unsupported shape"]
+    values_path = "deploy/helm/ravenroot/values.yaml"
+    schema_path = "deploy/helm/ravenroot/values.schema.json"
+    template_path = "deploy/helm/ravenroot/templates/deployment.yaml"
+    resolver_path = "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java"
+    expected = {"valuesPath": values_path, "valuePath": "programTimeoutMs", "schemaPath": schema_path,
+                "schemaPointer": "/properties/programTimeoutMs", "templatePath": template_path,
+                "environment": "RAVENROOT_PROGRAM_TIMEOUT_MS", "testPath": "scripts/tests/test_program_timeout_helm_contract.sh",
+                "resolverPath": resolver_path, "resolverType": "GraalVmProgramRuntime",
+                "resolverMethod": "fromEnvironment", "fingerprintMethod": "compatibilityFingerprint"}
+    if any(authority.get(key) != value for key, value in expected.items()):
+        return ["Helm program-timeout authority paths or symbols have drifted"]
+    schema = json.loads((root / schema_path).read_text(encoding="utf-8"))
+    contract = schema["properties"]["programTimeoutMs"]
+    if authority["schemaContract"] != contract or contract != {"x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS", "oneOf": [{"type": "integer", "minimum": 100, "maximum": 300000}, {"$ref": "#/definitions/graphBlank"}]}:
+        return ["Helm program-timeout schema contract has drifted"]
+    if yaml_scalar_at_path((root / values_path).read_text(encoding="utf-8"), "programTimeoutMs") != "15000":
+        return ["Helm program-timeout default has drifted"]
+    template = (root / template_path).read_text(encoding="utf-8")
+    if template.count('- name: RAVENROOT_PROGRAM_TIMEOUT_MS\n              value: {{ include "ravenroot.graphLimitValue" .Values.programTimeoutMs }}') != 1:
+        return ["Helm program-timeout template binding has drifted"]
+    test = root / str(authority["testPath"])
+    if hashlib.sha256(test.read_bytes()).hexdigest() != authority["testDigest"]:
+        return ["Helm program-timeout test evidence has drifted"]
+    source = (root / resolver_path).read_text(encoding="utf-8")
+    if authority["resolverDigest"] != java_method_digest(source, "GraalVmProgramRuntime", "fromEnvironment") \
+            or authority["fingerprintDigest"] != java_method_digest(source, "GraalVmProgramRuntime", "compatibilityFingerprint") \
+            or 'integerEnvironment(environment, "RAVENROOT_PROGRAM_TIMEOUT_MS", 5_000, 100, 300_000)' not in source \
+            or "Duration.ofMillis(" not in source or "policy.deadline().toMillis()" not in source:
+        return ["Helm program-timeout Java resolver/fingerprint evidence has drifted"]
+    actual = {candidate.id for candidate in candidates if candidate.path in {values_path, schema_path, template_path, str(authority["testPath"])} and (candidate.role in {"programTimeoutMs", "RAVENROOT_PROGRAM_TIMEOUT_MS"} or candidate.path == str(authority["testPath"]))}
+    declared = authority["candidateIds"]
+    if not isinstance(declared, list) or len(declared) != len(set(declared)) or set(declared) != actual:
+        return ["Helm program-timeout candidate coverage is incomplete, duplicate, or foreign"]
+    return []
+
+
 def yaml_default_removal_errors(root: Path, identifier: str, entry: dict[str, object],
                                 removal: dict[str, object],
                                 active_entries: dict[str, dict[str, object]]) -> list[str]:

@@ -22,7 +22,7 @@ class DisabledServerMaintenanceLockIntegrationTest {
     @Test
     void disabledExecutionStoreStillBlocksBothAdministrativeCommandsWhileAuditMayBeLive() {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("store"));
-        var serverConfiguration = new ExecutionStoreConfiguration(false, location);
+        var serverConfiguration = new ExecutionStoreConfiguration.Disabled(location);
         var commandConfiguration = new BackupRestoreConfiguration(temporaryDirectory.resolve("audit"), location);
         var errors = new ByteArrayOutputStream();
         var command = new BackupRestoreCommand(new PrintStream(java.io.OutputStream.nullOutputStream()),

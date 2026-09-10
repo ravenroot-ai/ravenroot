@@ -162,14 +162,28 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     /** Optional durable first-class human-task coordinator. */
     private final ai.ravenroot.core.humantask.HumanTaskService humanTasks;
 
-    /** Identifies this process to the store, so an operator reading leases() can tell who holds one. */
-    private final String workerId = "ravenroot-" + java.util.UUID.randomUUID();
+    /**
+     * Identifies this process to the store, so an operator reading {@code leases()} can tell who
+     * holds one, passed inward from a composition root rather than minted here.
+     *
+     * <p>This and {@link #executionLeaseTtl} used to be field initializers: a
+     * {@code "ravenroot-" + UUID.randomUUID()} worker id and a {@code Duration.ofSeconds(30)} ttl.
+     * Core still has no configuration channel and still must not grow one — {@code ravenroot-server}
+     * reads the environment and hands the decision down, exactly as it does for
+     * {@link #unknownBehaviors} — but a value nothing outside the process can see or set is not the
+     * same thing as a value core owns. An operator reading
+     * {@code ProcessInventoryEntry.ownerWorkerId()} across several replicas needs to know which
+     * member and which restart of it holds a lease, and a random UUID is precisely the identifier
+     * that cannot say. {@link ExecutionOwnership#defaults()} reproduces both former literals, so
+     * every constructor that does not mention ownership behaves exactly as it did.</p>
+     */
+    private final String workerId;
 
     /**
      * How long a traversal's lease runs before it must be renewed. Comfortably longer than a
      * renewal period, and short enough that a crashed worker's instances become recoverable promptly.
      */
-    private final java.time.Duration executionLeaseTtl = java.time.Duration.ofSeconds(30);
+    private final java.time.Duration executionLeaseTtl;
     /**
      * Reads and settles holds that outlived the process that took them, or {@code null} when this
      * deployment composes no store that keeps them.
@@ -543,6 +557,65 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
                                        ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
                                        Duration runnerShutdownStepBound) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionManifestStore, runnerShutdownStepBound,
+                ExecutionOwnership.defaults());
+    }
+
+    /**
+     * Full production composition that also states who this process is to the store.
+     *
+     * <p>Ownership is the last parameter and every other constructor passes
+     * {@link ExecutionOwnership#defaults()}, so an embedder that has not heard of replica names keeps
+     * exactly today's identity shape and today's lease ttl. Composing one is what lets an operator
+     * read a lease holder in a deployment of several replicas and know which member and which restart
+     * of it took the claim.</p>
+     *
+     * @param engine execution engine every traversal is dispatched through.
+     * @param monitor execution monitor that observes traversals.
+     * @param behaviors trusted behavior catalog.
+     * @param artifacts program artifact registry.
+     * @param programRuntime program runtime, or {@code null} when none is composed.
+     * @param identitySource source of process instance identifiers.
+     * @param executionStore durable execution state, or {@code null}.
+     * @param maxActiveDeployments ceiling on concurrently active deployments.
+     * @param unknownBehaviors admission stance for a behavior no catalog entry claims.
+     * @param graphDefinitionStore durable graph definitions, or {@code null} to retain no document.
+     * @param toolApprovals durable tool-approval coordinator, or {@code null}.
+     * @param humanTasks durable human-task coordinator, or {@code null}.
+     * @param graphExecutionLimits operator-owned admission and traversal limits.
+     * @param agentBudgets agent authority budget service, or {@code null}.
+     * @param executionManifestStore durable execution manifests, or {@code null} to record none.
+     * @param runnerShutdownStepBound bound on one graph runner shutdown step.
+     * @param executionOwnership this process's runtime worker identity and lease ttl.
+     */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
+                                       Duration runnerShutdownStepBound,
+                                       ExecutionOwnership executionOwnership) {
+        java.util.Objects.requireNonNull(executionOwnership, "executionOwnership");
+        if (executionOwnership.identity().role() != WorkerIdentity.Role.RUNTIME) {
+            // The application advances traversals it accepted; that is the RUNTIME role by
+            // definition. Handing it the RECOVERY identity would make the recovery sweep and the
+            // runtime one worker to the store, and a sweep that is the same worker as the runtime
+            // stops skipping the runtime's own live leases and keeps their fencing tokens on claim —
+            // see WorkerIdentity for the whole of that mechanism. Refusing here is cheaper than
+            // discovering it as a fencing anomaly under load.
+            throw new IllegalArgumentException("execution ownership must carry the RUNTIME role, got "
+                    + executionOwnership.identity().role());
+        }
+        executionOwnership.requireCompatible(executionStore);
+        this.workerId = executionOwnership.workerId();
+        this.executionLeaseTtl = executionOwnership.leaseTtl();
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.graphDefinitionStore = graphDefinitionStore;
         this.executionManifestStore = executionManifestStore;
@@ -2697,6 +2770,17 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         };
     }
 
+    /**
+     * Projects one session, naming the deployment its traversals belong to.
+     *
+     * <p>{@code sessionId} is also the deployment id, and that is a property of this implementation
+     * rather than a coincidence: {@link #register} keys the local deployment by
+     * {@code LocalDeploymentKey.deploymentId()} — the session id — and hands exactly that value to
+     * {@code registerDeployment} as the hosted executions' deployment id. Every event these
+     * traversals publish therefore carries it in {@link ExecutionEvent#deploymentId()}, which is what
+     * lets a client that was never told any execution id still attribute them to the session it
+     * started. The 3- and 4-argument {@code of} factories say the same thing in the API's own words.</p>
+     */
     private SourceSessionStatus sourceSessionStatus(String sessionId, LocalDeploymentRecord record) {
         DeploymentStatus deployment = deployments.get(record.engineId()).status();
         return switch (deployment.state()) {

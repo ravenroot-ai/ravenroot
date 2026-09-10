@@ -3205,6 +3205,7 @@ public final class RavenrootServer implements AutoCloseable {
                                    ai.ravenroot.api.application.SourceSessionStatus status) throws IOException {
         String diagnostic = status.diagnostic().map(value -> "\"" + escape(value) + "\"").orElse("null");
         json(exchange, statusCode, "{\"sessionId\":\"" + escape(status.sessionId())
+                + "\",\"deploymentId\":\"" + escape(status.deploymentId())
                 + "\",\"state\":\"" + status.state().name()
                 + "\",\"sourceCount\":" + status.sourceCount()
                 + ",\"scope\":\"" + ai.ravenroot.api.application.SourceSessionStatus.SCOPE

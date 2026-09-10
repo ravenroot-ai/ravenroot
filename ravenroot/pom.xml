@@ -90,8 +90,10 @@
         <module>ravenroot-persistence-sqlite</module>
         <!--
           The durable multi-host adapter. In the reactor so that its conformance run happens on every
-          full build; NOT a dependency of ravenroot-server or ravenroot-distribution, so it does not
-          ship, and a deployment that wants it adds the module and supplies it a DataSource.
+          full build, and a dependency of ravenroot-server since the composition root learned to select
+          a store, so it ships and a deployment chooses it at startup rather than by rebuilding. The
+          server builds and pools the connections; the adapter is handed a DataSource and never makes
+          one.
         -->
         <module>ravenroot-persistence-postgresql</module>
         <module>ravenroot-pekko</module>
@@ -173,6 +175,17 @@
         <!-- Same driver artifact ravenroot-extensions/ravenroot-jdbc already pins as a test
              fixture; one property so the two never drift apart. -->
         <postgresql-jdbc.version>42.7.7</postgresql-jdbc.version>
+        <!--
+            Apache 2.0. The connection pool the composition root builds when the shared execution
+            store is selected, and a runtime dependency of ravenroot-server only. It is not a
+            dependency of ravenroot-persistence-postgresql and must not become one: that adapter is
+            handed a DataSource and deliberately owns no pooling, no credentials and no TLS material,
+            so a pool inside it would be publishing operational bounds it does not control.
+
+            Pinned here rather than in the module for the reason every other third-party version is:
+            one property, one reviewed version, no drift between modules that might later name it.
+        -->
+        <hikaricp.version>7.0.2</hikaricp.version>
         <testcontainers.version>1.21.4</testcontainers.version>
         <!-- Pinned for ravenroot-observability-otel only. -->
         <opentelemetry.version>1.65.0</opentelemetry.version>
@@ -248,6 +261,11 @@
                 <groupId>ai.ravenroot</groupId>
                 <artifactId>ravenroot-observability-otel</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.zaxxer</groupId>
+                <artifactId>HikariCP</artifactId>
+                <version>${hikaricp.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.junit</groupId>

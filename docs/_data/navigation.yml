@@ -53,6 +53,8 @@
       url: /integrator-guide/
     - title: Application, HTTP, SSE, and CLI
       url: /integrator-guide/application-http.html
+    - title: Embed the read-only viewer quickstart
+      url: /integrator-guide/embed-viewer-quickstart.html
     - title: Embedded-viewer protocol
       url: /integrator-guide/embed-protocol.html
     - title: Nodes, plugins, and adapters

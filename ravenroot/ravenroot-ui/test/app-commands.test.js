@@ -52,6 +52,13 @@ describe('application command catalog', () => {
     expect(byId['run.play'].isEnabled({ ...context, documentEditable: false })).toBe(true);
     expect(byId['edit.undo'].isEnabled(context)).toBe(true);
     expect(byId['edit.redo'].isEnabled(context)).toBe(false);
+    // The history controls have to name the step they would reverse; a control that only offers
+    // the generic help leaves an assistive-technology user to guess what "Undo" would undo.
+    expect(byId['edit.undo'].describe({ ...context, undoLabel: 'Edit properties on 2 selected nodes' }))
+      .toBe('Undo Edit properties on 2 selected nodes');
+    expect(byId['edit.undo'].describe({ ...context, undoLabel: '' })).toBe('Nothing to undo');
+    expect(byId['edit.redo'].describe({ ...context, redoLabel: 'Connect start' })).toBe('Redo Connect start');
+    expect(byId['edit.redo'].describe({ ...context, redoLabel: '' })).toBe('Nothing to redo');
     expect(byId['edit.connect'].isChecked(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled({ ...context, canDuplicateSelectedNode: false })).toBe(false);

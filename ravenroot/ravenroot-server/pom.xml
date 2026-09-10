@@ -57,6 +57,41 @@
             <artifactId>ravenroot-persistence-sqlite</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!--
+            The shared adapter, so a deployment can select it without rebuilding. It ships alongside
+            the single-host one rather than instead of it: which store runs is a deployment's choice
+            at startup, and a choice the operator cannot express is not a choice.
+        -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-persistence-postgresql</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!--
+            The connection pool for the shared store, and the only module that names it. The adapter
+            deliberately does not pool - it is handed a DataSource - so the pool belongs to the
+            composition root, where the deployment's own sizing is already known.
+        -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
+        <!--
+            The shared-store smoke test opens a server against a real PostgreSQL through the new
+            selection seam. The adapter's own fixture is package-private in its test sources and that
+            module publishes no test jar, so this container is started here rather than that logic
+            being copied.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-pekko</artifactId>

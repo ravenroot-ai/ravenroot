@@ -122,6 +122,13 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
       || !SOURCE_SESSION_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 1
       || value.scope !== 'LOCAL_PROCESS'
+      // Optional rather than required, and the difference is deliberate. A runtime that does not
+      // report the deployment its session runs under cannot have its events attributed to the
+      // graph, but that is a degraded view -- refusing the response outright would turn it into a
+      // failure to start, which is worse and is not what the caller asked about. `updateSourceSession`
+      // says so once in the activity panel instead of leaving the canvas quietly blank.
+      || (value.deploymentId !== null && value.deploymentId !== undefined
+        && (typeof value.deploymentId !== 'string' || !value.deploymentId))
       || (value.diagnostic !== null && value.diagnostic !== undefined
         && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
     throw new Error('Source session response is not a valid process-local status');

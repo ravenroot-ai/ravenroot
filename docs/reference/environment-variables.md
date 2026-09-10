@@ -284,8 +284,16 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 |---|---|
 | `RAVENROOT_AUDIT_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_ENABLED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_PASSWORD` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_POOL_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_URL` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_USER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WORKER_ID` | See the linked contract for exact type, default, and applicability. |
 
 ## Package activation
 

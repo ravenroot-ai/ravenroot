@@ -18,9 +18,16 @@ import ai.ravenroot.api.application.RuntimeActivityData.TextProjection;
  * audit trace joinable without a separate correlation store.</p>
  *
  * <p>Neither field is a filtering authority. {@link AuthorizedRavenrootApplication} decides
- * observability from its own ownership record, which lives inside the reference monitor, rather than
- * from a field on an event produced by the delegate it wraps. These fields are evidence, not access
- * control.</p>
+ * observability from its own ownership record, which lives inside the reference monitor. These
+ * fields are evidence, not access control.</p>
+ *
+ * <p>That reference monitor does read {@code tenantId} and {@link #deploymentId()} in one place —
+ * {@code AuthorizedRavenrootApplication.deploymentOwner}, which resolves ownership of a traversal
+ * nobody submitted — and the distinction survives intact, because both are used <b>only to
+ * narrow</b>. The authority remains the delegate's own {@code (tenantId, deploymentId)}-keyed
+ * registry; these fields can subtract from what it resolves and can never add to it, so an event
+ * that misreported either would hide work rather than disclose somebody else's. See that method for
+ * the argument in full.</p>
  *
  * @param activeInstances <strong>how many runtime instances of this node's actor are alive right now</strong>
  * — the workload the node is carrying <em>as a role</em>, which is the

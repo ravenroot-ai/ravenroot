@@ -69,8 +69,19 @@ class RavenrootServerMainLifecycleTest {
                         + "ExecutionEngines::create)"),
                 "the actual server engine site must use the resolved policy");
         assertTrue(compact.contains("executionStoreOwner.executionManifestStore(), "
-                        + "executionRuntime.applicationRunnerShutdownStepBound())"),
-                "the application site must use its named projection");
+                        + "executionRuntime.applicationRunnerShutdownStepBound(), "
+                        + "executionOwnershipConfiguration.runtimeOwnership())"),
+                "the application site must use its named projection, and must be handed this "
+                        + "replica's own runtime identity rather than letting core mint one");
+        assertTrue(source.indexOf("refuseUnsupportableReplicaTopology(System.getenv(), "
+                        + "executionStoreConfiguration)")
+                        < source.indexOf("ExecutionStoreBootstrap.openOwned("),
+                "an unsupportable replica topology must be refused before a durable store opens");
+        assertTrue(compact.contains("String recoveryWorker = executionOwnershipConfiguration"
+                        + ".recoveryIdentity().value()"),
+                "the recovery sweep must take the recovery role of this replica's identity; sharing "
+                        + "the runtime's would let it claim work its own runtime is advancing and "
+                        + "keep the fencing token under that runtime's recorder");
         assertTrue(compact.contains("executionManifests, "
                         + "executionRuntime.toolApprovalRunnerShutdownStepBound())"),
                 "tool recovery must use its named projection");
@@ -82,7 +93,7 @@ class RavenrootServerMainLifecycleTest {
     @Test
     void pluginRefusalClosesAuditAndCheckpointsStoreBeforeExitStrategyRuns() throws Exception {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("store"));
-        var configuration = new ExecutionStoreConfiguration(true, location);
+        var configuration = new ExecutionStoreConfiguration.SingleHost(location);
         var owner = ExecutionStoreBootstrap.openOwned(configuration, Clock.systemUTC());
         owner.store().forgottenBefore("tenant-a").toCompletableFuture().join();
         var order = new ArrayList<String>();

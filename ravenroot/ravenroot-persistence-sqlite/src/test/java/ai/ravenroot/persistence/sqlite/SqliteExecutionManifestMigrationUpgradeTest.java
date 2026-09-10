@@ -13,6 +13,8 @@ import ai.ravenroot.api.persistence.StoredExecutionManifest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -23,6 +25,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Base64;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -204,6 +207,30 @@ class SqliteExecutionManifestMigrationUpgradeTest {
     }
 
     @Test
+    void overflowingStoredPolicyDurationIsClassifiedAsCorrupted(@TempDir Path directory)
+            throws Exception {
+        Path databaseFile = directory.resolve("corrupt-operational-policy.db");
+        var key = new ExecutionKey("acme", UUID.randomUUID());
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            store.pin(manifest(key, "STANDARD", List.of())).toCompletableFuture().join();
+        }
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databaseFile);
+             var statement = connection.prepareStatement(
+                     "UPDATE execution_manifest SET format_version = 2, operational_policy = ?")) {
+            statement.setString(1, overflowingDurationPolicy());
+            statement.executeUpdate();
+        }
+
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            ExecutionManifestStoreException refused = assertThrows(ExecutionManifestStoreException.class,
+                    () -> unwrap(() -> store.load(key)));
+            assertInstanceOf(ExecutionManifestStoreFailure.Corrupted.class, refused.failure());
+        }
+    }
+
+    @Test
     void aManifestMayNotBeRemovedWhileItsInstanceStillExists(@TempDir Path directory) {
         Path databaseFile = directory.resolve("retention.db");
         var key = new ExecutionKey("acme", UUID.randomUUID());
@@ -282,6 +309,25 @@ class SqliteExecutionManifestMigrationUpgradeTest {
                 new GraphContentId("a".repeat(64)),
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
                 profile, packages, Instant.parse("2026-01-01T00:00:00Z"));
+    }
+
+    private static String overflowingDurationPolicy() throws Exception {
+        var bytes = new ByteArrayOutputStream();
+        try (var out = new DataOutputStream(bytes)) {
+            out.writeInt(1);
+            for (int index = 0; index < 21; index++) out.writeInt(1);
+            for (int index = 0; index < 3; index++) out.writeLong(1);
+            out.writeInt(1);
+            out.writeBoolean(true);
+            out.writeInt(1);
+            out.writeBoolean(true);
+            out.writeLong(1);
+            out.writeLong(1);
+            out.writeLong(Long.MAX_VALUE);
+            out.writeInt(1_000_000_000);
+            out.writeInt(0);
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes.toByteArray());
     }
 
     private static int manifestMigrationVersion() {

@@ -1840,6 +1840,39 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
     """Allow only the candidate-ID fields declared by schema v5."""
     if len(path) == 3 and path[0] == "entries" and path[2] == "id":
         return path[1].isdigit()
+    if len(path) == 4 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "defaultEvidence":
+        return path[3].isdigit()
+    if len(path) == 4 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "schemaEvidence" and path[3] == "candidateId":
+        return True
+    if len(path) == 4 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "bindingAuthority" \
+            and path[3] in {"environmentCandidateId", "propertyCandidateId"}:
+        return True
+    if len(path) == 5 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "bindingAuthority" \
+            and path[3] in {"sourceEnvironmentCandidateIds", "declarationCandidateIds"}:
+        return path[4].isdigit()
+    if len(path) == 5 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "defaultAuthority" and path[3] == "candidateIds":
+        return path[4].isdigit()
+    if len(path) == 8 and path[0] == "entries" and path[1].isdigit() \
+            and path[2:5] == ("defaultAuthority", "constantReferenceAuthority", "hops") \
+            and path[5].isdigit() and path[6] == "candidateIds":
+        return path[7].isdigit()
+    if len(path) == 5 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "coverageEvidence" \
+            and path[3] in {
+                "composeCandidateIds", "helmValueCandidateIds", "helmTemplateCandidateIds",
+                "helmSchemaEnvironmentCandidateIds", "helmSchemaReferenceCandidateIds",
+                "rawKubernetesCandidateIds",
+            }:
+        return path[4].isdigit()
+    if len(path) == 6 and path[0] == "entries" and path[1].isdigit() \
+            and path[2:4] == ("carrierEvidence", "expectedCandidateIds") \
+            and path[4] in {"compose", "deploymentExamples", "helm", "rawKubernetes"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "routeTableAuthorities" \
             and path[2] == "candidateIdsByRole":
         return path[4].isdigit()
@@ -1847,6 +1880,36 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] == "descriptorCandidateIds" and path[3].isdigit() \
             and path[4] == "candidateIds":
         return path[6].isdigit()
+    if len(path) == 6 and path[0] == "graphLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "defaultEvidence":
+        return path[5].isdigit()
+    if len(path) == 5 and path[0] == "graphLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "environmentCandidateId":
+        return True
+    if len(path) == 7 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "defaultAuthority" and path[5] == "candidateIds":
+        return path[6].isdigit()
+    if len(path) == 6 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "bindingAuthority" \
+            and path[5] == "environmentCandidateId":
+        return True
+    if len(path) == 7 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "bindingAuthority" and path[5] == "declarationCandidateIds":
+        return path[6].isdigit()
+    if len(path) == 7 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "carrierEvidence" \
+            and path[4] == "expectedCandidateIds" \
+            and path[5] in {"compose", "deploymentExamples", "helm", "rawKubernetes"}:
+        return path[6].isdigit()
+    if len(path) == 5 and path[0] == "remediationDomains" \
+            and path[1] == "domains" and path[2].isdigit() \
+            and path[3] == "candidateIds":
+        return path[4].isdigit()
     return False
 
 
@@ -1857,26 +1920,106 @@ def immutable_historical_reference(path: tuple[str, ...]) -> bool:
     }
 
 
-def remap_route_table_references(document: dict[str, object], replacements: dict[str, str]) -> None:
+def remap_declared_candidate_references(document: dict[str, object],
+                                        replacements: dict[str, str]) -> None:
+    """Remap only live candidate-ID fields explicitly declared by schema v5."""
+    def remap_list(container: object, field: str) -> None:
+        if isinstance(container, dict) and isinstance(container.get(field), list):
+            container[field][:] = [replacements.get(value, value) for value in container[field]]
+
+    entries = document.get("entries")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            remap_list(entry, "defaultEvidence")
+            binding = entry.get("bindingAuthority")
+            if isinstance(binding, dict):
+                for field in ("environmentCandidateId", "propertyCandidateId"):
+                    if isinstance(binding.get(field), str):
+                        binding[field] = replacements.get(binding[field], binding[field])
+                for field in ("sourceEnvironmentCandidateIds", "declarationCandidateIds"):
+                    remap_list(binding, field)
+            default = entry.get("defaultAuthority")
+            if isinstance(default, dict):
+                remap_list(default, "candidateIds")
+                chain = default.get("constantReferenceAuthority")
+                hops = chain.get("hops") if isinstance(chain, dict) else None
+                if isinstance(hops, list):
+                    for hop in hops:
+                        remap_list(hop, "candidateIds")
+            schema = entry.get("schemaEvidence")
+            if isinstance(schema, dict) and isinstance(schema.get("candidateId"), str):
+                schema["candidateId"] = replacements.get(schema["candidateId"], schema["candidateId"])
+            coverage = entry.get("coverageEvidence")
+            for field in (
+                    "composeCandidateIds", "helmValueCandidateIds", "helmTemplateCandidateIds",
+                    "helmSchemaEnvironmentCandidateIds", "helmSchemaReferenceCandidateIds",
+                    "rawKubernetesCandidateIds"):
+                remap_list(coverage, field)
+            carrier = entry.get("carrierEvidence")
+            expected = carrier.get("expectedCandidateIds") if isinstance(carrier, dict) else None
+            for field in ("compose", "deploymentExamples", "helm", "rawKubernetes"):
+                remap_list(expected, field)
+
     authorities = document.get("routeTableAuthorities")
-    if not isinstance(authorities, dict):
-        return
-    for authority in authorities.values():
-        if not isinstance(authority, dict):
-            continue
-        by_role = authority.get("candidateIdsByRole")
-        if isinstance(by_role, dict):
-            for values in by_role.values():
-                if isinstance(values, list):
-                    values[:] = [replacements.get(value, value) for value in values]
-        descriptors = authority.get("descriptorCandidateIds")
-        if isinstance(descriptors, list):
-            for descriptor in descriptors:
-                candidate_ids = descriptor.get("candidateIds") if isinstance(descriptor, dict) else None
-                if isinstance(candidate_ids, dict):
-                    for values in candidate_ids.values():
-                        if isinstance(values, list):
-                            values[:] = [replacements.get(value, value) for value in values]
+    if isinstance(authorities, dict):
+        for authority in authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            by_role = authority.get("candidateIdsByRole")
+            if isinstance(by_role, dict):
+                for role in ("methods", "path", "summary", "successStatuses"):
+                    remap_list(by_role, role)
+            descriptors = authority.get("descriptorCandidateIds")
+            if isinstance(descriptors, list):
+                for descriptor in descriptors:
+                    candidate_ids = descriptor.get("candidateIds") \
+                        if isinstance(descriptor, dict) else None
+                    if isinstance(candidate_ids, dict):
+                        for role in ("methods", "path", "summary", "successStatuses"):
+                            remap_list(candidate_ids, role)
+
+    graph_authorities = document.get("graphLimitAuthorities")
+    if isinstance(graph_authorities, dict):
+        for authority in graph_authorities.values():
+            settings = authority.get("settings") if isinstance(authority, dict) else None
+            if not isinstance(settings, list):
+                continue
+            for setting in settings:
+                remap_list(setting, "defaultEvidence")
+                if isinstance(setting, dict) and isinstance(setting.get("environmentCandidateId"), str):
+                    setting["environmentCandidateId"] = replacements.get(
+                        setting["environmentCandidateId"], setting["environmentCandidateId"])
+
+    assistant_authorities = document.get("assistantLimitAuthorities")
+    if isinstance(assistant_authorities, dict):
+        for authority in assistant_authorities.values():
+            settings = authority.get("settings") if isinstance(authority, dict) else None
+            if isinstance(settings, list):
+                for setting in settings:
+                    if not isinstance(setting, dict):
+                        continue
+                    binding = setting.get("bindingAuthority")
+                    if isinstance(binding, dict):
+                        if isinstance(binding.get("environmentCandidateId"), str):
+                            binding["environmentCandidateId"] = replacements.get(
+                                binding["environmentCandidateId"], binding["environmentCandidateId"])
+                        remap_list(binding, "declarationCandidateIds")
+                    remap_list(setting.get("defaultAuthority"), "candidateIds")
+            carriers = authority.get("carrierEvidence") if isinstance(authority, dict) else None
+            if isinstance(carriers, dict):
+                for carrier in carriers.values():
+                    expected = carrier.get("expectedCandidateIds") \
+                        if isinstance(carrier, dict) else None
+                    for field in ("compose", "deploymentExamples", "helm", "rawKubernetes"):
+                        remap_list(expected, field)
+
+    domains = document.get("remediationDomains")
+    domain_rows = domains.get("domains") if isinstance(domains, dict) else None
+    if isinstance(domain_rows, list):
+        for domain in domain_rows:
+            remap_list(domain, "candidateIds")
 
 
 def reconciliation_plan_errors(root: Path, document: dict[str, object],
@@ -2073,7 +2216,7 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["schemaVersion"] = SCHEMA_VERSION
     refreshed["reconciliationRequired"] = True
     refreshed["entries"] = merged
-    remap_route_table_references(refreshed, replacements)
+    remap_declared_candidate_references(refreshed, replacements)
     refreshed["routeTableAuthorities"] = {
         ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
     }
@@ -2169,11 +2312,18 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
                 "migrationHistory is not the exact anchored ledger plus the required schema migration")
 
     expected_metadata: dict[str, dict[str, object]] = {}
+    reference_replacements = {
+        str(mapping["fromId"]): str(mapping["toId"]) for mapping in plan["mappings"]
+    }
     for mapping in plan["mappings"]:
         before = str(mapping["fromId"])
         after = str(mapping["toId"])
         target = active.get(after)
-        expected_metadata[after] = candidate_semantic_payload(source_entries[before])
+        payload_holder: dict[str, object] = {
+            "entries": [candidate_semantic_payload(source_entries[before])],
+        }
+        remap_declared_candidate_references(payload_holder, reference_replacements)
+        expected_metadata[after] = payload_holder["entries"][0]
         if target is not None and target.get("identityMigration") != \
                 {"history": plan["id"], "fromId": before}:
             errors.append(f"identity migration {before}->{after} lacks its row-level history link")
@@ -2381,6 +2531,68 @@ def conversion_evidence_errors(identifier: str, entry: dict[str, object],
     )
     if not declared_binding:
         errors.append(f"{identifier}: conversion bindingSymbol does not declare the named binding")
+    return errors
+
+
+def manifest_pin_attempt_conversion_errors(root: Path, identifier: str,
+                                           entry: dict[str, object],
+                                           conversion: dict[str, object]) -> list[str]:
+    """Verify removal of the private adapter limit and addition of the typed server authority."""
+    required = {
+        "kind", "issue", "beforeRevision", "afterRevision", "beforePath", "beforeSymbol",
+        "beforeExpression", "afterPath", "afterOwner", "afterField", "afterExpression",
+        "binding", "bindingSymbol",
+    }
+    if set(conversion) != required or conversion.get("kind") != \
+            "java-manifest-pin-attempts-conversion-v1" or conversion.get("issue") != "#316" \
+            or conversion.get("beforePath") != MANIFEST_PIN_STORE_PATH.as_posix() \
+            or conversion.get("beforeSymbol") != "MAX_PIN_ATTEMPTS" \
+            or conversion.get("afterPath") != MANIFEST_PIN_CONFIGURATION_PATH.as_posix() \
+            or conversion.get("afterOwner") != \
+            f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared" \
+            or conversion.get("afterField") != "manifestPinAttempts" \
+            or conversion.get("binding") != "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS" \
+            or conversion.get("bindingSymbol") != "MANIFEST_PIN_ATTEMPTS_VARIABLE":
+        return [f"{identifier}: manifest pin conversion has incomplete or unsupported provenance"]
+    before_revision = str(conversion["beforeRevision"])
+    after_revision = str(conversion["afterRevision"])
+    if re.fullmatch(r"[0-9a-f]{40}", before_revision) is None \
+            or re.fullmatch(r"[0-9a-f]{40}", after_revision) is None \
+            or not commit_exists(root, before_revision) or not commit_exists(root, after_revision) \
+            or not revision_is_ancestor(root, before_revision, after_revision):
+        return [f"{identifier}: manifest pin conversion revisions do not form a resolvable transition"]
+    before_store = committed_source(root, before_revision, MANIFEST_PIN_STORE_PATH.as_posix())
+    after_store = committed_source(root, after_revision, MANIFEST_PIN_STORE_PATH.as_posix())
+    before_configuration = committed_source(
+        root, before_revision, MANIFEST_PIN_CONFIGURATION_PATH.as_posix())
+    after_configuration = committed_source(
+        root, after_revision, MANIFEST_PIN_CONFIGURATION_PATH.as_posix())
+    if any(source is None for source in (
+            before_store, after_store, before_configuration, after_configuration)):
+        return [f"{identifier}: manifest pin conversion source is not resolvable"]
+    before_expression = normalized(str(conversion["beforeExpression"]))
+    after_expression = normalized(str(conversion["afterExpression"]))
+    before_store_code = normalized(strip_c_comments(before_store))
+    after_store_code = normalized(strip_c_comments(after_store))
+    before_configuration_code = normalized(strip_c_comments(before_configuration))
+    after_configuration_code = normalized(strip_c_comments(after_configuration))
+    errors: list[str] = []
+    if before_expression != "private static final int MAX_PIN_ATTEMPTS = 3;" \
+            or before_store_code.count(before_expression) != 1 \
+            or before_expression in after_store_code:
+        errors.append(f"{identifier}: manifest pin conversion does not identify the removed adapter limit")
+    expected_after = normalized(
+        "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, DEFAULT_MANIFEST_PIN_ATTEMPTS)")
+    if after_expression != expected_after or after_expression in before_configuration_code \
+            or after_configuration_code.count(after_expression) != 1:
+        errors.append(f"{identifier}: manifest pin conversion does not identify the added typed binding")
+    binding = str(conversion["binding"])
+    if re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(before_configuration)) \
+            or not re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(after_configuration)):
+        errors.append(f"{identifier}: manifest pin conversion binding transition has drifted")
+    if entry.get("field") != "manifestPinAttempts" \
+            or entry.get("bindings") != [binding]:
+        errors.append(f"{identifier}: manifest pin conversion metadata disagrees with its authority")
     return errors
 
 
@@ -3203,6 +3415,187 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
     return errors, accounted
 
 
+MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
+MANIFEST_PIN_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
+MANIFEST_PIN_BOOTSTRAP_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
+MANIFEST_PIN_STORE_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/"
+    "PostgresExecutionManifestStore.java")
+
+
+def manifest_pin_attempt_authorities(root: Path,
+                                     discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed nested Shared-setting authority from its exact executable source."""
+    configuration = (root / MANIFEST_PIN_CONFIGURATION_PATH).read_text(encoding="utf-8")
+    bootstrap = (root / MANIFEST_PIN_BOOTSTRAP_PATH).read_text(encoding="utf-8")
+    store = (root / MANIFEST_PIN_STORE_PATH).read_text(encoding="utf-8")
+    if java_record_components(configuration, "Shared") != ("connection", "manifestPinAttempts") \
+            or not exact_import_identity(
+                configuration,
+                "ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore"):
+        return None
+    call = java_constructor_component_call(
+        configuration, "ExecutionStoreConfiguration", "fromEnvironment", "Shared",
+        ("connection", "manifestPinAttempts"), "manifestPinAttempts")
+    expected_call = (
+        "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, "
+        "DEFAULT_MANIFEST_PIN_ATTEMPTS)")
+    if call is None or normalized(call[0]) != normalized(expected_call):
+        return None
+    helper_span = java_method_span(configuration, "ExecutionStoreConfiguration", "positiveInt")
+    expected_helper = """
+        positiveInt(Map<String, String> environment, String variable, int fallback) {
+            String raw = environment.get(variable);
+            if (raw == null || raw.isBlank()) return fallback;
+            try {
+                int value = Integer.parseInt(raw.trim());
+                if (value < 1) throw new NumberFormatException();
+                return value;
+            } catch (NumberFormatException invalid) {
+                throw new IllegalArgumentException(variable + " must be a positive integer");
+            }
+        }
+    """
+    compact_span = java_compact_constructor_span(configuration, "Shared")
+    expected_compact = """
+        Shared {
+            Objects.requireNonNull(connection, "connection");
+            if (manifestPinAttempts < 1) {
+                throw new IllegalArgumentException("manifestPinAttempts must be positive");
+            }
+        }
+    """
+    if java_method_header(configuration, "ExecutionStoreConfiguration", "fromEnvironment") != \
+            "static ExecutionStoreConfiguration fromEnvironment(Map<String, String> environment)" \
+            or java_method_header(configuration, "ExecutionStoreConfiguration", "positiveInt") != \
+            "private static int positiveInt(Map<String, String> environment, String variable, int fallback)" \
+            or helper_span is None or compact_span is None \
+            or normalized(strip_c_comments(configuration[slice(*helper_span)])) != normalized(expected_helper) \
+            or normalized(strip_c_comments(configuration[slice(*compact_span)])) != normalized(expected_compact):
+        return None
+    environment = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"
+    environment_candidates = sorted(
+        candidate.id for candidate in discovered.values()
+        if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
+        and candidate.kind == "environment-binding" and candidate.expression == environment)
+    declaration_candidates = sorted(
+        candidate.id for candidate in discovered.values()
+        if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
+        and candidate.kind == "operational-declaration"
+        and candidate.role == "MANIFEST_PIN_ATTEMPTS_VARIABLE"
+        and candidate.expression == f'"{environment}"')
+    terminal_candidates = sorted(
+        candidate.id for candidate in discovered.values()
+        if candidate.path == MANIFEST_PIN_STORE_PATH.as_posix()
+        and candidate.kind == "fixed-declaration"
+        and candidate.role == "DEFAULT_MAX_PIN_ATTEMPTS" and candidate.expression == "3")
+    terminal = java_static_final_initializer(store, "PostgresExecutionManifestStore",
+                                             "DEFAULT_MAX_PIN_ATTEMPTS")
+    alias = re.findall(
+        r"\bint\s+DEFAULT_MANIFEST_PIN_ATTEMPTS\s*=\s*"
+        r"PostgresExecutionManifestStore\.DEFAULT_MAX_PIN_ATTEMPTS\s*;",
+        strip_c_comments(configuration))
+    if len(environment_candidates) != 1 or len(declaration_candidates) != 1 \
+            or len(terminal_candidates) != 1 or terminal is None \
+            or normalized(terminal[0]) != "3" or len(alias) != 1:
+        return None
+    bootstrap_span = java_method_span(bootstrap, "ExecutionStoreBootstrap", "openShared")
+    bootstrap_code = normalized(strip_c_comments(
+        bootstrap[slice(*bootstrap_span)] if bootstrap_span is not None else ""))
+    expected_bootstrap_call = normalized("""
+        new PostgresExecutionManifestStore(pool.dataSource(), clock,
+            ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
+            configuration.manifestPinAttempts())
+    """)
+    if bootstrap_span is None or bootstrap_code.count(expected_bootstrap_call) != 1:
+        return None
+    tests = (
+        ("typedParsing", Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+                              "persistence/ExecutionStoreConfigurationTest.java"),
+         "ExecutionStoreConfigurationTest", "manifestPinRepairAttemptsAreTypedAndPostgresqlOnly"),
+        ("selectorConflict", Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+                                  "ReplicaTopologyStartupCheckTest.java"),
+         "ReplicaTopologyStartupCheckTest", "manifestPinAttemptsWithoutTheSharedSelectorAreRefused"),
+        ("bootstrapPropagation", Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+                                     "persistence/SharedExecutionStoreBootstrapSmokeTest.java"),
+         "SharedExecutionStoreBootstrapSmokeTest", "theSharedSelectorComposesThreeStoresOverOneRealDatabase"),
+    )
+    test_evidence: list[dict[str, object]] = []
+    for role, path, type_symbol, method in tests:
+        source = (root / path).read_text(encoding="utf-8")
+        digest = java_method_digest(source, type_symbol, method)
+        if digest is None:
+            return None
+        test_evidence.append({
+            "role": role, "path": path.as_posix(), "type": type_symbol,
+            "method": method, "methodDigest": digest,
+        })
+    owner = f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared"
+    binding = {
+        "kind": "java-shared-manifest-pin-attempts-v1",
+        "sourceOwner": owner,
+        "factoryOwner": f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+        "method": "fromEnvironment", "constructorType": "Shared",
+        "component": "manifestPinAttempts", "componentIndex": 1,
+        "helper": "positiveInt", "environmentSymbol": "MANIFEST_PIN_ATTEMPTS_VARIABLE",
+        "environment": environment, "environmentCandidateId": environment_candidates[0],
+        "declarationCandidateIds": declaration_candidates,
+        "callDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
+        "factoryBodyDigest": java_method_digest(
+            configuration, "ExecutionStoreConfiguration", "fromEnvironment"),
+        "helperBodyDigest": java_method_digest(
+            configuration, "ExecutionStoreConfiguration", "positiveInt"),
+        "compactConstructorDigest": java_span_digest(configuration, compact_span),
+        "bootstrapBodyDigest": java_method_digest(bootstrap, "ExecutionStoreBootstrap", "openShared"),
+        "tests": test_evidence,
+    }
+    default = {
+        "kind": "java-interface-alias-static-final-v1", "owner": owner,
+        "instanceSymbol": "DEFAULT_MANIFEST_PIN_ATTEMPTS", "field": "manifestPinAttempts",
+        "sourceExpression": "PostgresExecutionManifestStore.DEFAULT_MAX_PIN_ATTEMPTS",
+        "candidateIds": terminal_candidates,
+        "aliasOwner": f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+        "aliasField": "DEFAULT_MANIFEST_PIN_ATTEMPTS",
+        "terminalOwner": f"{MANIFEST_PIN_STORE_PATH.as_posix()}#PostgresExecutionManifestStore",
+        "terminalField": "DEFAULT_MAX_PIN_ATTEMPTS", "terminalSourceExpression": "3",
+        "evaluatedDefault": {"kind": "integer", "value": 3},
+    }
+    return {"bindingAuthority": binding, "defaultAuthority": default,
+            "candidateIds": sorted(environment_candidates + declaration_candidates + terminal_candidates)}
+
+
+def manifest_pin_attempt_authority_errors(root: Path, setting: str,
+                                          contract: dict[str, object],
+                                          setting_entries: list[dict[str, object]],
+                                          entries: dict[str, dict[str, object]],
+                                          discovered: dict[str, Candidate]) -> list[str]:
+    if setting != MANIFEST_PIN_ATTEMPTS_SETTING:
+        return [f"{setting}: unsupported shared manifest-pin authority"]
+    expected = manifest_pin_attempt_authorities(root, discovered)
+    if expected is None:
+        return [f"{setting}: nested Shared authority source or coverage has drifted"]
+    errors: list[str] = []
+    if contract.get("owner") != \
+            f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared" \
+            or contract.get("field") != "manifestPinAttempts" \
+            or contract.get("bindings") != ["RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"]:
+        errors.append(f"{setting}: typed owner, field, or environment binding has drifted")
+    if contract.get("bindingAuthority") != expected["bindingAuthority"]:
+        errors.append(f"{setting}: nested Shared binding authority has drifted")
+    if contract.get("defaultAuthority") != expected["defaultAuthority"] \
+            or contract.get("defaultEvidence") != expected["defaultAuthority"]["candidateIds"] \
+            or contract.get("default") != "3 attempts":
+        errors.append(f"{setting}: single adapter default authority has drifted")
+    actual_ids = sorted(str(entry["id"]) for entry in setting_entries)
+    if actual_ids != expected["candidateIds"] \
+            or any(entries.get(identifier, {}).get("setting") != setting
+                   for identifier in expected["candidateIds"]):
+        errors.append(f"{setting}: source candidate partition has drifted")
+    return errors
+
+
 def environment_binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
                                          setting_entries: list[dict[str, object]],
                                          entries: dict[str, dict[str, object]],
@@ -3415,6 +3808,11 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
     environment_candidates = [
         entry for entry in setting_entries if entry.get("kind") == "environment-binding"
     ]
+    authority = contract.get("bindingAuthority")
+    if isinstance(authority, dict) \
+            and authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
+        return manifest_pin_attempt_authority_errors(
+            root, setting, contract, setting_entries, entries, discovered)
     if property_candidates:
         return dual_source_binding_authority_errors(
             root, setting, contract, entries, discovered, resolver_authorities,
@@ -3503,6 +3901,9 @@ def default_authority_errors(root: Path, setting: str, contract: dict[str, objec
     property_bound = any(entry.get("setting") == setting and entry.get("kind") == "property-binding"
                          for entry in entries.values())
     binding_authority = contract.get("bindingAuthority")
+    if isinstance(binding_authority, dict) \
+            and binding_authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
+        return []
     environment_bound = isinstance(binding_authority, dict) \
         and binding_authority.get("kind") == "java-environment-constructor-v1"
     authority = contract.get("defaultAuthority")
@@ -5509,6 +5910,12 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if family is None or conversion != family["conversion"]:
                         errors.append(
                             f"{identifier}: converted assistant row must cite its exact family conversion")
+                    continue
+                if setting == MANIFEST_PIN_ATTEMPTS_SETTING \
+                        and isinstance(conversion, dict) \
+                        and conversion.get("kind") == "java-manifest-pin-attempts-conversion-v1":
+                    errors.extend(manifest_pin_attempt_conversion_errors(
+                        root, identifier, entry, conversion))
                     continue
                 required = ("issue", "beforeRevision", "afterRevision", "path", "symbol",
                             "binding", "bindingSymbol", "field", "beforeExpression", "afterExpression")

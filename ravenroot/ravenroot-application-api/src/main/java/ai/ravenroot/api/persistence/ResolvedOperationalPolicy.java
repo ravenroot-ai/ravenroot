@@ -258,6 +258,12 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
     }
 
     private static Duration readDuration(DataInputStream in) throws IOException {
-        return Duration.ofSeconds(in.readLong(), in.readInt());
+        long seconds = in.readLong();
+        int nanos = in.readInt();
+        try {
+            return Duration.ofSeconds(seconds, nanos);
+        } catch (ArithmeticException overflow) {
+            throw new IllegalArgumentException("operational policy duration is out of range", overflow);
+        }
     }
 }

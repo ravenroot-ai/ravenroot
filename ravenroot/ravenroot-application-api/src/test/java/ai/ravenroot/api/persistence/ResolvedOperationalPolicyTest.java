@@ -3,8 +3,11 @@ package ai.ravenroot.api.persistence;
 import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,6 +35,31 @@ class ResolvedOperationalPolicyTest {
         var failure = assertThrows(IllegalArgumentException.class,
                 () -> ResolvedOperationalPolicy.decode("A".repeat(700_000)));
         assertEquals("policy is too large", failure.getMessage());
+    }
+
+    @Test
+    void durationNormalizationOverflowIsRejectedAsMalformedPolicy() throws Exception {
+        var bytes = new ByteArrayOutputStream();
+        try (var out = new DataOutputStream(bytes)) {
+            out.writeInt(1);
+            for (int index = 0; index < 21; index++) out.writeInt(1);
+            for (int index = 0; index < 3; index++) out.writeLong(1);
+            out.writeInt(1);
+            out.writeBoolean(true);
+            out.writeInt(1);
+            out.writeBoolean(true);
+            out.writeLong(1);
+            out.writeLong(1);
+            out.writeLong(Long.MAX_VALUE);
+            out.writeInt(1_000_000_000);
+            out.writeInt(0);
+        }
+        String malformed = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes.toByteArray());
+
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> ResolvedOperationalPolicy.decode(malformed));
+
+        assertEquals("operational policy duration is out of range", failure.getMessage());
     }
 
     private static NodePackageEgressCapacityProfile capacity() {

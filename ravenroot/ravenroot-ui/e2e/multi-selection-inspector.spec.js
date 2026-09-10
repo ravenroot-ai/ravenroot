@@ -105,15 +105,14 @@ async function expectSelectionInspector(page, mode, count = 2) {
 }
 
 async function activeDocumentSnapshot(page) {
-  return page.evaluate(async () => {
+  return page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();
-    const { serializeGraphML } = await import('/e2e-graph-document.js');
     return {
       graph: JSON.stringify(owner.graph),
       nodeMap: JSON.stringify(owner.graph.nodeMap),
       history: owner.history.state(),
       dirty: owner.history.isDirty(),
-      graphml: serializeGraphML(owner.graph),
+      graphml: window.ravenroot.serializeGraphML(owner.graph),
     };
   });
 }

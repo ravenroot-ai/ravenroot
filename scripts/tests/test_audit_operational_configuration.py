@@ -1602,6 +1602,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(28, len(owners))
         self.assertEqual(len(owners), len({item["setting"] for item in owners}))
         self.assertEqual(
+            28,
+            sum(domain["confirmedUnresolvedOperatorSettings"]
+                for domain in document["remediationDomains"]["domains"]),
+        )
+        self.assertEqual(
             "#318",
             next(item["issue"] for item in owners
                  if item["setting"] == "execution.lease-ttl"),
@@ -1629,6 +1634,26 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                          if entry["id"] == "oc-7f698b1972e9090b6f1b")
         self.assertEqual("protocol-or-format-invariant", delimiter["classification"])
         self.assertIn("CR/LF", delimiter["rationale"])
+
+        postgres_defaults = {
+            "postgres.lock-timeout": "5 seconds.",
+            "postgres.statement-timeout": "30 seconds.",
+            "postgres.serialization-retries": "3 retries.",
+            "postgres.max-lease-ttl": "5 minutes.",
+            "postgres.max-payload-bytes": "1,048,576 bytes (1,024 × 1,024).",
+            "postgres.max-clock-skew": "5 seconds.",
+            "postgres.journal-retention": "24 hours.",
+            "postgres.max-inventory-page-size": "100 rows.",
+            "postgres.terminal-retention": "7 days.",
+            "postgres.execution-result-retention": "7 days.",
+        }
+        for setting, expected in postgres_defaults.items():
+            with self.subTest(postgres_default=setting):
+                rows = [entry for entry in document["entries"]
+                        if entry.get("setting") == setting]
+                self.assertTrue(rows)
+                self.assertEqual({expected}, {entry["default"] for entry in rows})
+                self.assertTrue(all(entry.get("sourceFact") for entry in rows))
 
     def test_default_completion_gate_rejects_pending_review(self) -> None:
         errors = audit.check(ROOT)

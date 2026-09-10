@@ -30,6 +30,12 @@ executionRuntime:
   terminalHistoryCapacity: ""
   runnerShutdownStepSeconds: ""
 
+# PostgreSQL execution-manifest repair policy. The chart passes this blank value through so the
+# typed ExecutionStoreConfiguration default remains the only numerical authority. A nonblank
+# value is valid only when the deployment selects the PostgreSQL execution store.
+executionStore:
+  manifestPinAttempts: ""
+
 # Graph admission and execution policy. Empty values are intentional: they are rendered into the
 # pod and resolved by GraphExecutionLimits, which owns the numerical defaults and safety ceilings.
 # Use YAML integers for configured values; the template converts them to environment strings.

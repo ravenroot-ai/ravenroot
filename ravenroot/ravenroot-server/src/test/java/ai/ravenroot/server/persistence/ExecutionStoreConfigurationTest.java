@@ -3,6 +3,7 @@ package ai.ravenroot.server.persistence;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -132,12 +133,33 @@ class ExecutionStoreConfigurationTest {
                 ExecutionStoreConfiguration.fromEnvironment(environment));
         assertEquals(7, shared.manifestPinAttempts());
 
-        for (String invalid : new String[]{"0", "-1", "many"}) {
+        for (String invalid : new String[]{"0", "-1", "many", "2147483648"}) {
             environment.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, invalid);
             var refusal = assertThrows(IllegalArgumentException.class,
                     () -> ExecutionStoreConfiguration.fromEnvironment(environment));
             assertEquals(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE
                     + " must be a positive integer", refusal.getMessage());
+        }
+    }
+
+    @Test
+    void manifestPinRepairAttemptsAreInertWhenBlankAndRefusedForOtherStoreSelections() {
+        var blank = new HashMap<String, String>();
+        blank.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, " \t");
+        assertInstanceOf(ExecutionStoreConfiguration.SingleHost.class,
+                ExecutionStoreConfiguration.fromEnvironment(blank));
+
+        for (Map<String, String> environment : List.of(
+                Map.of(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7"),
+                Map.of(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite",
+                        ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7"),
+                Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, "false",
+                        ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7"))) {
+            var refusal = assertThrows(IllegalArgumentException.class,
+                    () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+            assertEquals(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE + " requires "
+                    + ExecutionStoreConfiguration.SELECTOR_VARIABLE + "="
+                    + ExecutionStoreConfiguration.POSTGRESQL_SELECTOR, refusal.getMessage());
         }
     }
 

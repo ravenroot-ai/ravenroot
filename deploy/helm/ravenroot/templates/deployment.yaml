@@ -56,6 +56,10 @@ spec:
               value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.terminalHistoryCapacity }}
             - name: RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS
               value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.runnerShutdownStepSeconds }}
+            # A blank value is inert for the default SQLite store. PostgreSQL resolves it through
+            # ExecutionStoreConfiguration, whose typed default remains the sole numeric authority.
+            - name: RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS
+              value: {{ include "ravenroot.graphLimitValue" .Values.executionStore.manifestPinAttempts }}
             # Empty graph-limit values select the Java typed defaults at startup. Explicit Helm
             # integers are rendered as quoted environment strings after schema validation.
             - name: RAVENROOT_GRAPHML_MAX_BYTES

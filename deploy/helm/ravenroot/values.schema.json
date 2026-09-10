@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "auth", "executionRuntime", "graph", "assistant", "rateLimit"],
+  "required": ["image", "auth", "executionRuntime", "executionStore", "graph", "assistant", "rateLimit"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "image": {
@@ -46,6 +46,17 @@
         "runnerShutdownStepSeconds": {
           "x-ravenroot-environment": "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS",
           "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 10 }, { "$ref": "#/definitions/graphBlank" }]
+        }
+      }
+    },
+    "executionStore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifestPinAttempts"],
+      "properties": {
+        "manifestPinAttempts": {
+          "x-ravenroot-environment": "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
         }
       }
     },

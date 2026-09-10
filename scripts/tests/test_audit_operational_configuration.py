@@ -1700,10 +1700,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         owners = document["remediationDomains"]["settingOwners"]
-        self.assertEqual(28, len(owners))
+        expected_unresolved_settings = 27
+        self.assertEqual(expected_unresolved_settings, len(owners))
         self.assertEqual(len(owners), len({item["setting"] for item in owners}))
         self.assertEqual(
-            28,
+            expected_unresolved_settings,
             sum(domain["confirmedUnresolvedOperatorSettings"]
                 for domain in document["remediationDomains"]["domains"]),
         )
@@ -1717,7 +1718,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual({"#318"}, {entry["followUp"] for entry in lease_rows})
         unresolved_rows = [entry for entry in document["entries"]
                            if entry.get("authorityStatus") == "unresolved"]
-        self.assertEqual(28, len({entry["setting"] for entry in unresolved_rows}))
+        self.assertEqual(expected_unresolved_settings,
+                         len({entry["setting"] for entry in unresolved_rows}))
         self.assertTrue(all(entry.get("sourceFact") for entry in unresolved_rows))
         self.assertFalse(any(str(entry["default"]).startswith("Current internal source value:")
                              for entry in unresolved_rows))

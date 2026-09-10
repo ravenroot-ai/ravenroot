@@ -25,9 +25,9 @@
       "additionalProperties": false,
       "required": ["issuer", "audience", "jwksUri"],
       "properties": {
-        "issuer": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" },
-        "audience": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" },
-        "jwksUri": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" }
+        "issuer": { "type": "string", "minLength": 1, "not": { "$ref": "#/definitions/graphBlank" } },
+        "audience": { "type": "string", "minLength": 1, "not": { "$ref": "#/definitions/graphBlank" } },
+        "jwksUri": { "type": "string", "minLength": 1, "not": { "$ref": "#/definitions/graphBlank" } }
       }
     },
     "service": {

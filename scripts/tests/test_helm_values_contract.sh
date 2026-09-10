@@ -168,11 +168,14 @@ for invalid in \
 done
 
 for field in issuer audience jwksUri; do
-  if helm_base --set-string "auth.$field=   " >"$TEMP_DIR/invalid.out" 2>&1; then
-    echo "Helm accepted a whitespace-only OIDC value: auth.$field" >&2
-    exit 1
-  fi
+  for blank in "   " "$(printf '\034')" "$(printf '\342\200\203')" "$(printf '\343\200\200')"; do
+    if helm_base --set-string "auth.$field=$blank" >"$TEMP_DIR/invalid.out" 2>&1; then
+      echo "Helm accepted a Java-whitespace-only OIDC value: auth.$field" >&2
+      exit 1
+    fi
+  done
 done
+helm_base --set-string auth.audience='ravenroot-üñîçødë' >"$TEMP_DIR/unicode-audience.yaml"
 
 helm_base --set-string resources.requests.cpu=0.5 --set resources.limits.memory=500m \
   --set persistence.size=0.5Gi --set tmpfs.sizeLimit=0.5Mi >"$TEMP_DIR/fractional.yaml"

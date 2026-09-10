@@ -16,7 +16,7 @@ import json
 import re
 import subprocess
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -27,12 +27,13 @@ ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "scripts" / "operational-configuration-inventory.json"
 REPORT = ROOT / "docs" / "architecture" / "operational-configuration-audit.md"
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
     "operator-configurable",
     "security-ceiling-or-default",
     "protocol-or-format-invariant",
     "published-contract-description",
+    "presentation-text",
     "derived",
     "test-fixture",
 }
@@ -50,6 +51,7 @@ CLASSIFICATION_STATUSES = {
     "security-ceiling-or-default": {"retained", "deferred"},
     "protocol-or-format-invariant": {"retained", "deferred"},
     "published-contract-description": {"retained", "deferred"},
+    "presentation-text": {"retained"},
     "derived": {"retained", "deferred"},
     "test-fixture": {"retained"},
 }
@@ -381,7 +383,8 @@ def surface(relative: Path) -> str | None:
     if text == "compose.yaml" or text.startswith("deploy/"):
         return "deployment"
     if relative.suffix == ".sh":
-        if text.startswith("scripts/tests/") or "/e2e/" in text:
+        if text.startswith("scripts/tests/") or "/e2e/" in text or "/src/test/" in text \
+                or text == "scripts/verify-source-session-editor-activity.sh":
             return "test-fixture"
         return "script"
     # Documented runnable configuration is a deployment surface, not ordinary prose.
@@ -944,7 +947,8 @@ def discover(root: Path) -> tuple[Candidate, ...]:
     return tuple(candidates)
 
 
-def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = False) -> dict[str, object]:
+def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = False,
+                   allow_unreconciled: bool = False) -> dict[str, object]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -960,6 +964,10 @@ def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = Fals
         raise ValueError("inventory retiredEntries must be an array")
     if document.get("schemaVersion") == SCHEMA_VERSION and not isinstance(document.get("evidenceRecords"), dict):
         raise ValueError("inventory evidenceRecords must be an object")
+    if document.get("schemaVersion") == SCHEMA_VERSION \
+            and document.get("reconciliationRequired") is not True \
+            and not allow_unreconciled:
+        raise ValueError("schema v5 inventory requires reconciliationRequired=true")
     if not isinstance(document.get("migrationHistory", []), list):
         raise ValueError("inventory migrationHistory must be an array")
     return document
@@ -1727,6 +1735,610 @@ def yaml_default_removal_errors(root: Path, identifier: str, entry: dict[str, ob
             != normalized(str(removal["replacementDefaultExpression"])):
         errors.append(f"{identifier}: typed replacement default has drifted in afterRevision")
     return errors
+
+
+SOURCE_METADATA_FIELDS = {
+    "id", "path", "line", "symbol", "kind", "role", "expression",
+    "expressionDigest", "evidenceDigest", "surface",
+}
+
+
+def committed_json(root: Path, revision: str, path: str) -> tuple[dict[str, object] | None, bytes | None]:
+    """Load one committed JSON object without accepting an option-shaped locator."""
+    if not historical_source_locator_is_safe(revision, path):
+        return None, None
+    result = subprocess.run(["git", "show", f"{revision}:{path}"], cwd=root,
+                            capture_output=True)
+    if result.returncode != 0:
+        return None, None
+    try:
+        value = json.loads(result.stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, result.stdout
+    return value if isinstance(value, dict) else None, result.stdout
+
+
+def candidate_set_digest(identifiers: Iterable[str]) -> str:
+    payload = "\n".join(sorted(identifiers)) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def reconciliation_target_tree_errors(root: Path, target_revision: str) -> list[str]:
+    """Require the scanned worktree to be exactly the committed reconciliation target."""
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True)
+    if head.returncode != 0 or not revision_is_ancestor(root, target_revision, head.stdout.strip()):
+        return ["reconciliation target revision is not an ancestor of the checked-out HEAD"]
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if status.returncode != 0:
+        return ["reconciliation target worktree status cannot be verified"]
+    allowed = {
+        (root / INVENTORY.relative_to(ROOT)).resolve(),
+        (root / REPORT.relative_to(ROOT)).resolve(),
+    }
+    changed: list[str] = []
+    def is_reconciliation_source(raw: str) -> bool:
+        relative = Path(raw)
+        if relative.as_posix() == "scripts/audit_operational_configuration.py":
+            return True
+        return surface(relative) is not None and (
+            relative.suffix in SOURCE_SUFFIXES or relative.name.startswith("Dockerfile"))
+
+    committed_changes = subprocess.run(
+        ["git", "diff", "--name-only", f"{target_revision}..{head.stdout.strip()}"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if committed_changes.returncode != 0:
+        return ["reconciliation target commit range cannot be verified"]
+    for raw in committed_changes.stdout.splitlines():
+        if (root / raw).resolve() not in allowed and is_reconciliation_source(raw):
+            changed.append(raw)
+    for row in status.stdout.splitlines():
+        raw = row[3:]
+        if " -> " in raw:
+            raw = raw.split(" -> ", 1)[1]
+        path = (root / raw).resolve()
+        if path not in allowed and is_reconciliation_source(raw):
+            changed.append(raw)
+    return (["reconciliation target has uncommitted source changes: " + ", ".join(changed[:5])]
+            if changed else [])
+
+
+def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
+    """Return reviewed metadata that an identity-only migration must preserve exactly."""
+    return {key: value for key, value in entry.items()
+            if key not in SOURCE_METADATA_FIELDS and key not in {"retirement", "identityMigration"}}
+
+
+def catalog_property_key(source: str | None, line: object) -> str | None:
+    if source is None or not isinstance(line, int):
+        return None
+    lines = source.splitlines()
+    if line < 1 or line > len(lines):
+        return None
+    matched = re.match(r"\s*(['\"])([^'\"]+)\1\s*:", lines[line - 1])
+    return matched.group(2) if matched is not None else None
+
+
+def candidate_reference_locations(value: object, identifiers: set[str],
+                                  path: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    found: list[tuple[str, ...]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            found.extend(candidate_reference_locations(child, identifiers, path + (str(key),)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(candidate_reference_locations(child, identifiers, path + (str(index),)))
+    elif isinstance(value, str) and value in identifiers:
+        found.append(path)
+    return found
+
+
+def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
+    """Allow only the candidate-ID fields declared by schema v5."""
+    if len(path) == 3 and path[0] == "entries" and path[2] == "id":
+        return path[1].isdigit()
+    if len(path) == 5 and path[0] == "routeTableAuthorities" \
+            and path[2] == "candidateIdsByRole":
+        return path[4].isdigit()
+    if len(path) == 7 and path[0] == "routeTableAuthorities" \
+            and path[2] == "descriptorCandidateIds" and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[6].isdigit()
+    return False
+
+
+def immutable_historical_reference(path: tuple[str, ...]) -> bool:
+    """Recognize anchored historical candidate references that must never be rewritten."""
+    return bool(path) and path[0] in {
+        "reconciliationHistory", "semanticReviewHistory", "retiredEntries",
+    }
+
+
+def remap_route_table_references(document: dict[str, object], replacements: dict[str, str]) -> None:
+    authorities = document.get("routeTableAuthorities")
+    if not isinstance(authorities, dict):
+        return
+    for authority in authorities.values():
+        if not isinstance(authority, dict):
+            continue
+        by_role = authority.get("candidateIdsByRole")
+        if isinstance(by_role, dict):
+            for values in by_role.values():
+                if isinstance(values, list):
+                    values[:] = [replacements.get(value, value) for value in values]
+        descriptors = authority.get("descriptorCandidateIds")
+        if isinstance(descriptors, list):
+            for descriptor in descriptors:
+                candidate_ids = descriptor.get("candidateIds") if isinstance(descriptor, dict) else None
+                if isinstance(candidate_ids, dict):
+                    for values in candidate_ids.values():
+                        if isinstance(values, list):
+                            values[:] = [replacements.get(value, value) for value in values]
+
+
+def reconciliation_plan_errors(root: Path, document: dict[str, object],
+                               candidates: tuple[Candidate, ...],
+                               plan: dict[str, object]) -> tuple[list[str], dict[str, dict[str, object]]]:
+    """Validate one explicit old-to-current reconciliation before applying it."""
+    errors: list[str] = []
+    required = {
+        "id", "issue", "sourceRevision", "targetRevision", "sourceInventoryPath",
+        "sourceInventoryDigest", "targetCandidateDigest", "mappings", "retirements", "additions",
+    }
+    if set(plan) != required or plan.get("issue") != "#315" \
+            or not isinstance(plan.get("id"), str) or not str(plan["id"]).strip():
+        return ["reconciliation plan has an unsupported or incomplete shape"], {}
+    source_revision = plan["sourceRevision"]
+    target_revision = plan["targetRevision"]
+    source_path = plan["sourceInventoryPath"]
+    if not historical_source_locator_is_safe(source_revision, source_path) \
+            or not isinstance(target_revision, str) \
+            or re.fullmatch(r"[0-9a-f]{40}", target_revision) is None:
+        return ["reconciliation plan has an unsafe source or target locator"], {}
+    source_document, source_bytes = committed_json(root, str(source_revision), str(source_path))
+    if source_document is None or source_bytes is None:
+        return ["reconciliation source inventory is not a resolvable committed JSON object"], {}
+    if hashlib.sha256(source_bytes).hexdigest() != plan["sourceInventoryDigest"]:
+        errors.append("reconciliation source inventory digest has drifted")
+    if not commit_exists(root, str(target_revision)) \
+            or not revision_is_ancestor(root, str(source_revision), str(target_revision)):
+        errors.append("reconciliation target revision is not a resolvable descendant")
+    else:
+        errors.extend(reconciliation_target_tree_errors(root, str(target_revision)))
+    current = {candidate.id: candidate for candidate in candidates}
+    if candidate_set_digest(current) != plan["targetCandidateDigest"]:
+        errors.append("reconciliation target candidate set has drifted")
+    source_entries_raw = source_document.get("entries", [])
+    if not isinstance(source_entries_raw, list):
+        return errors + ["reconciliation source inventory has no entries array"], {}
+    source_entries = {str(entry.get("id")): entry for entry in source_entries_raw
+                      if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+    mappings = plan["mappings"]
+    retirements = plan["retirements"]
+    additions = plan["additions"]
+    if not all(isinstance(value, list) for value in (mappings, retirements, additions)):
+        return errors + ["reconciliation mappings, retirements, and additions must be arrays"], source_entries
+
+    mapping_from: set[str] = set()
+    mapping_to: set[str] = set()
+    before_sources: dict[str, str | None] = {}
+    after_sources: dict[str, str | None] = {}
+    for mapping in mappings:
+        if not isinstance(mapping, dict) or set(mapping) != {
+                "fromId", "toId", "approved", "rationale", "equivalence"}:
+            errors.append("identity migration has an unsupported or incomplete shape")
+            continue
+        before = mapping.get("fromId")
+        after = mapping.get("toId")
+        rationale = mapping.get("rationale")
+        equivalence = mapping.get("equivalence")
+        if mapping.get("approved") is not True or not isinstance(rationale, str) or not rationale.strip():
+            errors.append(f"identity migration {before!r} requires row-level approval and rationale")
+            continue
+        if not isinstance(before, str) or not isinstance(after, str) \
+                or before in mapping_from or after in mapping_to:
+            errors.append(f"identity migration {before!r}->{after!r} is duplicate or invalid")
+            continue
+        mapping_from.add(before)
+        mapping_to.add(after)
+        old = source_entries.get(before)
+        candidate = current.get(after)
+        if old is None or candidate is None or not isinstance(equivalence, dict):
+            errors.append(f"identity migration {before}->{after} has no source-backed endpoints")
+            continue
+        kind = equivalence.get("kind")
+        old_atom = tuple(old.get(field) for field in ("path", "symbol", "kind", "role", "expression"))
+        new_atom = (candidate.path, candidate.symbol, candidate.kind, candidate.role, candidate.expression)
+        if kind == "same-atom-v1":
+            if old_atom != new_atom \
+                    or equivalence.get("beforeEvidenceDigest") != old.get("evidenceDigest") \
+                    or equivalence.get("afterEvidenceDigest") != candidate.evidence_digest:
+                errors.append(f"identity migration {before}->{after} is not the same source atom")
+        elif kind == "catalog-property-v1":
+            if old.get("path") != candidate.path or old.get("path") != \
+                    "ravenroot/ravenroot-ui/src/ui-text.js" or old.get("kind") != candidate.kind:
+                errors.append(f"identity migration {before}->{after} is not one catalog property")
+                continue
+            path = str(old["path"])
+            before_sources.setdefault(path, committed_source(root, str(source_revision), path))
+            after_sources.setdefault(path, committed_source(root, str(target_revision), path))
+            old_key = catalog_property_key(before_sources[path], old.get("line"))
+            new_key = catalog_property_key(after_sources[path], candidate.line)
+            if old_key is None or old_key != new_key or equivalence.get("property") != old_key \
+                    or equivalence.get("beforeExpressionDigest") != old.get("expressionDigest") \
+                    or equivalence.get("afterExpressionDigest") != candidate.expression_digest:
+                errors.append(f"identity migration {before}->{after} lacks exact catalog-key evidence")
+        elif kind == "same-expression-location-v1":
+            required_equivalence = {
+                "kind", "path", "beforeLine", "afterLine",
+                "beforeEvidenceDigest", "afterEvidenceDigest",
+            }
+            if set(equivalence) != required_equivalence \
+                    or old.get("path") != candidate.path \
+                    or old.get("expression") != candidate.expression \
+                    or equivalence.get("path") != candidate.path \
+                    or equivalence.get("beforeLine") != old.get("line") \
+                    or equivalence.get("afterLine") != candidate.line \
+                    or equivalence.get("beforeEvidenceDigest") != old.get("evidenceDigest") \
+                    or equivalence.get("afterEvidenceDigest") != candidate.evidence_digest:
+                errors.append(f"identity migration {before}->{after} lacks exact expression/location evidence")
+        else:
+            errors.append(f"identity migration {before}->{after} uses unsupported equivalence {kind!r}")
+
+    retired_ids: set[str] = set()
+    for retirement in retirements:
+        identifier = retirement.get("id") if isinstance(retirement, dict) else None
+        rationale = retirement.get("rationale") if isinstance(retirement, dict) else None
+        if not isinstance(retirement, dict) or set(retirement) != {"id", "approved", "rationale"} \
+                or retirement.get("approved") is not True or not isinstance(identifier, str) \
+                or not isinstance(rationale, str) or not rationale.strip() or identifier in retired_ids:
+            errors.append(f"retirement {identifier!r} requires unique row-level approval and rationale")
+        else:
+            retired_ids.add(identifier)
+
+    addition_ids: set[str] = set()
+    addition_metadata: dict[str, dict[str, object]] = {}
+    for addition in additions:
+        identifier = addition.get("id") if isinstance(addition, dict) else None
+        metadata = addition.get("metadata") if isinstance(addition, dict) else None
+        if not isinstance(addition, dict) or set(addition) != {"id", "metadata"} \
+                or not isinstance(identifier, str) or identifier in addition_ids \
+                or not isinstance(metadata, dict) or metadata.get("status") == "pending-review" \
+                or metadata.get("classification") not in CLASSIFICATIONS:
+            errors.append(f"new candidate {identifier!r} requires one supported semantic classification")
+        else:
+            addition_ids.add(identifier)
+            addition_metadata[identifier] = metadata
+
+    source_ids = set(source_entries)
+    current_ids = set(current)
+    unchanged = source_ids & current_ids
+    missing = source_ids - current_ids
+    new = current_ids - source_ids
+    if mapping_from & retired_ids or mapping_to & addition_ids:
+        errors.append("migrations and genuine retirements/additions are not disjoint")
+    if mapping_from | retired_ids != missing or mapping_to | addition_ids != new:
+        errors.append(
+            "reconciliation does not exactly partition unchanged, migrated, retired, and added candidates")
+    if mapping_from - missing or mapping_to - new:
+        errors.append("reconciliation attempts an arbitrary remap outside absent/new candidates")
+    if len(unchanged) + len(mapping_from) + len(retired_ids) != len(source_ids) \
+            or len(unchanged) + len(mapping_to) + len(addition_ids) != len(current_ids):
+        errors.append("reconciliation partition counts are inconsistent")
+    return errors, source_entries
+
+
+def apply_reconciliation(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...],
+                         plan: dict[str, object]) -> tuple[dict[str, object] | None, list[str]]:
+    """Apply a fully approved reconciliation without rewriting undeclared JSON references."""
+    errors, source_entries = reconciliation_plan_errors(root, document, candidates, plan)
+    if errors:
+        return None, errors
+    replacements = {str(item["fromId"]): str(item["toId"])
+                    for item in plan["mappings"] if isinstance(item, dict)}
+    source_ids = set(source_entries)
+    unexpected = [path for path in candidate_reference_locations(document, source_ids - {
+        candidate.id for candidate in candidates})
+                  if not allowed_migrated_reference(path)
+                  and not immutable_historical_reference(path)]
+    if unexpected:
+        rendered = ", ".join("/".join(path) for path in unexpected[:5])
+        return None, [f"candidate identity appears in an undeclared reference field: {rendered}"]
+
+    current = {candidate.id: candidate for candidate in candidates}
+    merged: list[dict[str, object]] = []
+    for candidate in candidates:
+        if candidate.id in source_entries:
+            preserved = dict(source_entries[candidate.id])
+        else:
+            old_id = next((before for before, after in replacements.items()
+                           if after == candidate.id), None)
+            if old_id is not None:
+                preserved = dict(source_entries[old_id])
+                preserved["identityMigration"] = {"history": plan["id"], "fromId": old_id}
+            else:
+                addition = next(item for item in plan["additions"]
+                                if isinstance(item, dict) and item.get("id") == candidate.id)
+                preserved = {**candidate.source_fields(), **addition["metadata"]}
+        preserved.pop("evidence", None)
+        preserved.pop("retirement", None)
+        preserved.update(candidate.source_fields())
+        merged.append(preserved)
+
+    refreshed = dict(document)
+    refreshed["schemaVersion"] = SCHEMA_VERSION
+    refreshed["reconciliationRequired"] = True
+    refreshed["entries"] = merged
+    remap_route_table_references(refreshed, replacements)
+    refreshed["routeTableAuthorities"] = {
+        ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
+    }
+    history = list(refreshed.get("reconciliationHistory", []))
+    history.append(plan)
+    refreshed["reconciliationHistory"] = history
+    refreshed.setdefault("semanticReviewHistory", [])
+    refreshed["migrationHistory"] = expected_reconciled_migration_history(
+        document, plan, source_entries)
+    refreshed["retiredEntries"] = expected_reconciled_retired_entries(
+        document, source_entries, plan)
+    refreshed["evidenceRecords"] = {
+        digest: evidence for digest, evidence in sorted({
+            candidate.evidence_digest: candidate.evidence for candidate in candidates
+        }.items())
+    }
+    return refreshed, []
+
+
+def expected_reconciled_retired_entries(source_document: dict[str, object],
+                                        source_entries: dict[str, dict[str, object]],
+                                        plan: dict[str, object]) -> list[object]:
+    """Rebuild the exact append-only retirement ledger for one reconciliation."""
+    retired_history = list(source_document.get("retiredEntries", []))
+    old_evidence = source_document.get("evidenceRecords", {})
+    for approval in plan["retirements"]:
+        archived = dict(source_entries[str(approval["id"])])
+        archived.pop("retirement", None)
+        archived["retirementRationale"] = str(approval["rationale"]).strip()
+        if "evidence" not in archived and isinstance(old_evidence, dict):
+            archived["evidence"] = old_evidence.get(str(archived.get("evidenceDigest")), "")
+        retired_history.append(archived)
+    return retired_history
+
+
+def expected_reconciled_migration_history(source_document: dict[str, object],
+                                          plan: dict[str, object],
+                                          source_entries: dict[str, dict[str, object]]) -> list[object]:
+    """Rebuild the exact append-only schema migration ledger for one reconciliation."""
+    migration_history = list(source_document.get("migrationHistory", []))
+    if source_document.get("schemaVersion") != SCHEMA_VERSION:
+        migration_history.append({
+            "fromSchema": source_document.get("schemaVersion"),
+            "toSchema": SCHEMA_VERSION,
+            "sourceRevision": plan["sourceRevision"],
+            "sourcePath": plan["sourceInventoryPath"],
+            "sourceFileDigest": plan["sourceInventoryDigest"],
+            "candidateCount": len(source_entries),
+            "statusCounts": dict(sorted(Counter(
+                str(entry.get("status")) for entry in source_entries.values()).items())),
+            "rationale": "Schema v5 records explicit source reconciliation, row-level identity migrations, and deterministic follow-up ownership.",
+        })
+    return migration_history
+
+
+def reconciliation_history_errors(root: Path, document: dict[str, object],
+                                  candidates: tuple[Candidate, ...]) -> list[str]:
+    history = document.get("reconciliationHistory")
+    if document.get("reconciliationRequired") is False and not history:
+        return []
+    if not isinstance(history, list) or not history:
+        return ["schema v5 inventory requires reconciliationHistory"]
+    identifiers: set[str] = set()
+    for record in history:
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str) \
+                or record["id"] in identifiers:
+            return ["reconciliationHistory contains an invalid or duplicate record"]
+        identifiers.add(str(record["id"]))
+    plan = history[-1]
+    errors, source_entries = reconciliation_plan_errors(root, document, candidates, plan)
+    if errors:
+        return errors
+    active = {str(entry["id"]): entry for entry in document.get("entries", [])
+              if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+    retired = {str(entry["id"]): entry for entry in document.get("retiredEntries", [])
+               if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+    source_document, _source_bytes = committed_json(
+        root, str(plan["sourceRevision"]), str(plan["sourceInventoryPath"]))
+    source_history = source_document.get("reconciliationHistory", []) \
+        if isinstance(source_document, dict) else []
+    if source_history != history[:-1]:
+        errors.append("reconciliation history is not an append-only chain from the committed source inventory")
+    if isinstance(source_document, dict):
+        expected_retired = expected_reconciled_retired_entries(
+            source_document, source_entries, plan)
+        if document.get("retiredEntries") != expected_retired:
+            errors.append(
+                "retiredEntries is not the exact anchored ledger plus approved reconciliation retirements")
+        expected_migrations = expected_reconciled_migration_history(
+            source_document, plan, source_entries)
+        if document.get("migrationHistory") != expected_migrations:
+            errors.append(
+                "migrationHistory is not the exact anchored ledger plus the required schema migration")
+
+    expected_metadata: dict[str, dict[str, object]] = {}
+    for mapping in plan["mappings"]:
+        before = str(mapping["fromId"])
+        after = str(mapping["toId"])
+        target = active.get(after)
+        expected_metadata[after] = candidate_semantic_payload(source_entries[before])
+        if target is not None and target.get("identityMigration") != \
+                {"history": plan["id"], "fromId": before}:
+            errors.append(f"identity migration {before}->{after} lacks its row-level history link")
+    for approval in plan["retirements"]:
+        identifier = str(approval["id"])
+        archived = retired.get(identifier)
+        if archived is None or archived.get("retirementRationale") != \
+                str(approval["rationale"]).strip():
+            errors.append(f"retirement {identifier} did not retain its approved rationale")
+    for addition in plan["additions"]:
+        identifier = str(addition["id"])
+        expected_metadata[identifier] = dict(addition["metadata"])
+    for identifier in set(source_entries) & set(active):
+        expected_metadata[identifier] = candidate_semantic_payload(source_entries[identifier])
+
+    review_history = document.get("semanticReviewHistory", [])
+    if not isinstance(review_history, list):
+        errors.append("semanticReviewHistory must be an array")
+        review_history = []
+    source_reviews = source_document.get("semanticReviewHistory", []) \
+        if isinstance(source_document, dict) else []
+    if not isinstance(source_reviews, list) or review_history[:len(source_reviews)] != source_reviews:
+        errors.append(
+            "semanticReviewHistory is not an append-only chain from the committed source inventory")
+        source_reviews = []
+    for review in review_history[len(source_reviews):]:
+        required = {"candidateId", "approved", "rationale", "sourceRevision",
+                    "beforeMetadata", "afterMetadata"}
+        identifier = review.get("candidateId") if isinstance(review, dict) else None
+        if not isinstance(review, dict) or set(review) != required or review.get("approved") is not True \
+                or not isinstance(identifier, str) or identifier not in expected_metadata \
+                or not isinstance(review.get("rationale"), str) or not str(review["rationale"]).strip() \
+                or not isinstance(review.get("beforeMetadata"), dict) \
+                or not isinstance(review.get("afterMetadata"), dict) \
+                or not isinstance(review.get("sourceRevision"), str) \
+                or re.fullmatch(r"[0-9a-f]{40}", str(review.get("sourceRevision"))) is None:
+            errors.append(f"semantic review {identifier!r} has an unsupported or incomplete approval")
+            continue
+        committed, _raw = committed_json(root, str(review["sourceRevision"]),
+                                         str(plan["sourceInventoryPath"]))
+        committed_entry = next((item for item in committed.get("entries", [])
+                                if isinstance(item, dict) and item.get("id") == identifier), None) \
+            if isinstance(committed, dict) else None
+        if expected_metadata[identifier] != review["beforeMetadata"] \
+                or committed_entry is None \
+                or candidate_semantic_payload(committed_entry) != review["beforeMetadata"]:
+            errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
+            continue
+        expected_metadata[identifier] = dict(review["afterMetadata"])
+    for identifier, expected in expected_metadata.items():
+        target = active.get(identifier)
+        if target is None or candidate_semantic_payload(target) != expected:
+            errors.append(f"candidate {identifier} has an unapproved semantic metadata change")
+    return errors
+
+
+REMEDIATION_DOMAIN_TITLES = {
+    "#316": "resolved execution manifest",
+    "#317": "Helm configuration contract",
+    "#318": "deployment registry and store connections",
+    "#319": "egress and external I/O",
+    "#320": "program authoring and GitHub operations",
+    "#321": "remaining baseline review and final closure",
+}
+
+
+def remediation_issue_for(entry: dict[str, object],
+                          setting_owners: dict[str, str] | None = None) -> str:
+    """Map only pending or unresolved operator rows to one ordered follow-up domain."""
+    path = str(entry.get("path", "")).lower()
+    symbol = str(entry.get("symbol", "")).lower()
+    role = str(entry.get("role", "")).lower()
+    setting = str(entry.get("setting", "")).lower()
+    if setting_owners is not None and setting in setting_owners:
+        return setting_owners[setting]
+    joined = " ".join((path, symbol, role, setting))
+    if path.startswith("deploy/helm/"):
+        return "#317"
+    if "manifest" in joined or any(token in joined for token in (
+            "graphexecutionlimits", "graphmllimits", "payloadlimits")):
+        return "#316"
+    if "/persistence/" in path or any(token in joined for token in (
+            "deploymentregistry", "storeconnection", "storeconfig", "executionstoreconfiguration")):
+        return "#318"
+    if any(token in joined for token in (
+            "externalio", "egress", "httpclient", "websocket", "webhook", "network", "outbound")):
+        return "#319"
+    if any(token in joined for token in (
+            "github", "authoring", "editor", "program", "app-commands", "graph-editor")):
+        return "#320"
+    return "#321"
+
+
+def build_remediation_domains(entries: Iterable[dict[str, object]]) -> dict[str, object]:
+    population = [entry for entry in entries if entry.get("status") == "pending-review" or (
+        entry.get("classification") == "operator-configurable"
+        and entry.get("status") in {"confirmed-hardcoded", "deferred"})]
+    unresolved = [entry for entry in population
+                  if entry.get("classification") == "operator-configurable"
+                  and entry.get("status") in {"confirmed-hardcoded", "deferred"}
+                  and isinstance(entry.get("setting"), str) and str(entry["setting"]).strip()]
+    setting_owners: dict[str, str] = {}
+    for setting in sorted({str(entry["setting"]) for entry in unresolved}):
+        owners = {str(entry.get("followUp", "")) for entry in unresolved
+                  if entry.get("setting") == setting}
+        if len(owners) != 1 or next(iter(owners)) not in REMEDIATION_DOMAIN_TITLES:
+            raise ValueError(f"unresolved setting {setting} requires one follow-up owner")
+        setting_owners[setting] = next(iter(owners))
+    domains: list[dict[str, object]] = []
+    for issue, title in REMEDIATION_DOMAIN_TITLES.items():
+        assigned = sorted((entry for entry in population
+                           if remediation_issue_for(entry, setting_owners) == issue),
+                          key=lambda item: str(item["id"]))
+        domains.append({
+            "issue": issue,
+            "title": title,
+            "candidateIds": [str(entry["id"]) for entry in assigned],
+            "statusCounts": dict(sorted(Counter(str(entry["status"]) for entry in assigned).items())),
+            "inheritedPendingReview": sum(entry.get("status") == "pending-review" for entry in assigned),
+            "confirmedUnresolvedOperatorSettings": len({str(entry.get("setting")) for entry in assigned
+                if entry.get("classification") == "operator-configurable"
+                and entry.get("status") in {"confirmed-hardcoded", "deferred"}
+                and entry.get("setting")}),
+        })
+    return {
+        "kind": "pending-and-unresolved-operator-domain-map-v1",
+        "candidateDigest": candidate_set_digest(str(entry["id"]) for entry in population),
+        "settingOwners": [
+            {"setting": setting, "issue": issue}
+            for setting, issue in sorted(setting_owners.items())
+        ],
+        "domains": domains,
+    }
+
+
+def remediation_domain_errors(document: dict[str, object]) -> list[str]:
+    if "remediationDomains" not in document:
+        if document.get("reconciliationRequired") is False \
+                and not document.get("reconciliationHistory"):
+            return []
+        return ["inventory requires a remediation domain map"]
+    entries = [entry for entry in document.get("entries", []) if isinstance(entry, dict)]
+    actual = document.get("remediationDomains")
+    if not isinstance(actual, dict) or not isinstance(actual.get("settingOwners"), list):
+        return ["remediation domain map requires setting-level ownership"]
+    ownership_rows = actual["settingOwners"]
+    settings: set[str] = set()
+    for owner in ownership_rows:
+        setting = owner.get("setting") if isinstance(owner, dict) else None
+        issue = owner.get("issue") if isinstance(owner, dict) else None
+        if not isinstance(owner, dict) or set(owner) != {"setting", "issue"} \
+                or not isinstance(setting, str) or not setting.strip() \
+                or issue not in REMEDIATION_DOMAIN_TITLES or setting in settings:
+            return ["remediation domain map has invalid or duplicate setting ownership"]
+        settings.add(setting)
+    try:
+        expected = build_remediation_domains(entries)
+    except ValueError as invalid:
+        return [str(invalid)]
+    if actual != expected:
+        return ["remediation domain map does not exactly partition the pending and unresolved operator population"]
+    candidate_ids = [identifier for domain in expected["domains"]
+                     for identifier in domain["candidateIds"]]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return ["remediation domain map assigns a candidate more than once"]
+    return []
 
 
 def conversion_evidence_errors(identifier: str, entry: dict[str, object],
@@ -3124,6 +3736,8 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
 
 
 ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
+ENVIRONMENT_REFERENCE_AUTHORITY_ID = "environment-reference-generator-v1"
+ENVIRONMENT_REFERENCE_PATH = Path("scripts/publish_environment_reference.py")
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -3141,23 +3755,48 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-68d83961ae8fd9333d39": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-87cc337254d84e793594":
+    "oc-0b67657cac8e5b904054": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-7ab123337eeb18906fc2":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-72d27bee3c7d60226c09": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-af3a93f860fc52c46a00": (
+    "oc-7bab59779a16e10b10d7": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-418656067bc7b4ad0c5c": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-e29595d4bc323f7da368": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8eed875577d7d07c6447": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-68d83961ae8fd9333d39": "/v1/events",
-    "oc-87cc337254d84e793594": "/v1/events",
-    "oc-72d27bee3c7d60226c09": "/v1/events",
-    "oc-af3a93f860fc52c46a00": "/v1/events/recent",
-    "oc-e29595d4bc323f7da368": "/v1/events/recent",
+    "oc-0b67657cac8e5b904054": "/v1/events",
+    "oc-7ab123337eeb18906fc2": "/v1/events",
+    "oc-7bab59779a16e10b10d7": "/v1/events",
+    "oc-418656067bc7b4ad0c5c": "/v1/events/recent",
+    "oc-8eed875577d7d07c6447": "/v1/events/recent",
 }
+
+
+def environment_reference_description_candidate_ids(
+        root: Path, candidates: Iterable[Candidate]) -> set[str]:
+    """Return source-derived atoms that route real production bindings into the reference page."""
+    production_names: set[str] = set()
+    source_root = root / "ravenroot"
+    if source_root.is_dir():
+        for source in sorted(source_root.rglob("src/main/java/**/*.java")):
+            production_names.update(ENVIRONMENT_BINDING.findall(
+                source.read_text(encoding="utf-8")))
+    identifiers: set[str] = set()
+    for candidate in candidates:
+        expression = candidate.expression
+        if len(expression) >= 2 and expression[0] == expression[-1] \
+                and expression[0] in {'"', "'"}:
+            expression = expression[1:-1]
+        if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                and candidate.symbol == "group" \
+                and candidate.kind in {
+                    "binding-default", "environment-binding", "inline-script-operational",
+                } \
+                and expression in production_names:
+            identifiers.add(candidate.id)
+    return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
 ASSISTANT_CONFIGURATION_TEST_PATH = Path(
@@ -3372,6 +4011,70 @@ def route_table_candidate_partitions(source: str) -> tuple[
             "statusValues": status_values, "candidateIds": role_ids,
         })
     return partitions, details, by_id
+
+
+def current_route_table_authority(root: Path) -> dict[str, object]:
+    """Build the exact closed RouteTable authority from current typed sources and runnable tests."""
+    source = (root / ROUTE_TABLE_PATH).read_text(encoding="utf-8")
+    parsed = route_table_candidate_partitions(source)
+    if parsed is None:
+        raise ValueError("cannot derive the current RouteTable positional authority")
+    partitions, details, _candidates = parsed
+    descriptor = (root / ROUTE_DESCRIPTOR_PATH).read_text(encoding="utf-8")
+    generator = (root / OPENAPI_GENERATOR_PATH).read_text(encoding="utf-8")
+    publication = (root / ROUTE_TABLE_TEST_PATH).read_text(encoding="utf-8")
+    stable_test = (root / STABLE_EDGE_TEST_PATH).read_text(encoding="utf-8")
+    wire_test = (root / STABLE_EDGE_WIRE_TEST_PATH).read_text(encoding="utf-8")
+    compact = java_compact_constructor_span(descriptor, "RouteDescriptor")
+    authority = {
+        "kind": "java-route-descriptor-publication-v1",
+        "candidateIdsByRole": partitions,
+        "descriptorCandidateIds": [
+            {"ordinal": item["ordinal"], "path": item["path"],
+             "candidateIds": item["candidateIds"]}
+            for item in details
+        ],
+        "consumerBodyDigests": {
+            "routeDescriptorValidation": java_span_digest(descriptor, compact),
+            "openApiGenerate": java_method_digest(generator, "OpenApiSpecGenerator", "generate"),
+            "openApiPathEntry": java_method_digest(generator, "OpenApiSpecGenerator", "pathEntry"),
+            "openApiOperationEntry": java_method_digest(generator, "OpenApiSpecGenerator", "operationEntry"),
+            "openApiSuccessResponse": java_method_digest(generator, "OpenApiSpecGenerator", "successResponse"),
+        },
+        "publicationTestAuthority": {
+            "testBodyDigest": java_method_digest(
+                publication, "RouteTableSpecServerAgreementTest",
+                "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow"),
+            "checkedInSpecBodyDigest": java_method_digest(
+                publication, "RouteTableSpecServerAgreementTest", "checkedInSpec"),
+        },
+        "boundTestBodyDigests": {
+            "StableEdgeIdContractTest": {
+                method: java_method_digest(stable_test, "StableEdgeIdContractTest", method)
+                for method in (
+                    "acceptsTheExactUtf8BoundWithoutChangingIdentityAndRejectsOneByteMore",
+                    "auxiliaryReserveIsEnforcedAsOneCombinedEscapedByteBudget",
+                )
+            },
+            "StableEdgeIdWireContractTest": {
+                method: java_method_digest(wire_test, "StableEdgeIdWireContractTest", method)
+                for method in (
+                    "worstCaseEscapedMaximumFitsTheCompleteRuntimeClientFrame",
+                    "saturatedLiveAndLogFieldsStillFitWithTheMaximumEscapedIdentity",
+                    "saturatedDurableProjectionAndPayloadStayInsideTheirExplicitBounds",
+                )
+            },
+        },
+        "publishedBoundClauses": {
+            identifier: list(fields) for identifier, fields in ROUTE_BOUND_CANDIDATES.items()
+        },
+    }
+    if any(value is None for value in authority["consumerBodyDigests"].values()) \
+            or any(value is None for value in authority["publicationTestAuthority"].values()) \
+            or any(value is None for methods in authority["boundTestBodyDigests"].values()
+                   for value in methods.values()):
+        raise ValueError("cannot derive complete RouteTable consumer/test evidence")
+    return authority
 
 
 def exact_import_identity(source: str, qualified: str) -> bool:
@@ -3865,9 +4568,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54}
+    expected_counts = {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54}
     if len(details) != 53 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 53/508 positional shape")
+        errors.append("RouteTable authority no longer has the reviewed 53/515 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):
@@ -4719,6 +5422,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         entries[identifier] = entry
 
     discovered = {candidate.id: candidate for candidate in candidates}
+    environment_reference_descriptions = environment_reference_description_candidate_ids(
+        root, candidates)
     assistant_authorities = document.get("assistantLimitAuthorities")
     assistant_settings = {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}
     assistant_family = assistant_limit_family_index(assistant_authorities)
@@ -4756,14 +5461,17 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append(f"{identifier}: test-fixture surface must remain a retained test-fixture")
         if classification == "test-fixture" and candidate.surface != "test-fixture":
             errors.append(f"{identifier}: only a test-fixture surface may use the test-fixture classification")
-        if classification == "published-contract-description" and (
-                candidate.path != ROUTE_TABLE_PATH.as_posix()
-                or entry.get("retainedAuthority") != ROUTE_TABLE_AUTHORITY_ID):
-            errors.append(
-                f"{identifier}: published-contract-description requires the closed RouteTable authority")
+        if classification == "published-contract-description":
+            route_publication = candidate.path == ROUTE_TABLE_PATH.as_posix() \
+                and entry.get("retainedAuthority") == ROUTE_TABLE_AUTHORITY_ID
+            environment_publication = identifier in environment_reference_descriptions \
+                and entry.get("retainedAuthority") == ENVIRONMENT_REFERENCE_AUTHORITY_ID
+            if not route_publication and not environment_publication:
+                errors.append(
+                    f"{identifier}: published-contract-description requires a closed publication authority")
         if classification == "operator-configurable" and status != "pending-review":
-            for field in ("setting", "owner", "field", "default", "validation", "scope", "pinning",
-                          "coverage"):
+            unresolved_authority = entry.get("authorityStatus") == "unresolved"
+            for field in ("setting", "default", "validation", "scope", "pinning", "coverage"):
                 if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
                     errors.append(f"{identifier}: reviewed operator setting requires {field}")
             bindings = entry.get("bindings")
@@ -4775,11 +5483,23 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     not isinstance(evidence_id, str) or not evidence_id.strip()
                     for evidence_id in default_evidence):
                 errors.append(f"{identifier}: reviewed operator setting requires defaultEvidence candidate ids")
-            owner = str(entry.get("owner", ""))
-            if current_source_owner(root, owner) is None:
-                errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
-            elif not current_source_field(root, owner, str(entry.get("field", ""))):
-                errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
+            if unresolved_authority:
+                if status != "deferred":
+                    errors.append(f"{identifier}: unresolved configuration authority must remain deferred")
+                for field in ("prospectiveOwner", "unresolvedEvidence"):
+                    if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
+                        errors.append(f"{identifier}: unresolved configuration authority requires {field}")
+                if "owner" in entry or "field" in entry:
+                    errors.append(f"{identifier}: unresolved configuration authority must not claim an owner or field")
+            else:
+                for field in ("owner", "field"):
+                    if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
+                        errors.append(f"{identifier}: reviewed operator setting requires {field}")
+                owner = str(entry.get("owner", ""))
+                if current_source_owner(root, owner) is None:
+                    errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
+                elif not current_source_field(root, owner, str(entry.get("field", ""))):
+                    errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
             if status == "converted":
                 conversion = entry.get("conversion")
                 setting = str(entry.get("setting", ""))
@@ -4892,13 +5612,18 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append(f"inventory migration source counts mismatch: {source_revision}:{source_path}")
 
     authorities: dict[str, tuple[str, tuple[object, ...]]] = {}
-    authority_fields = ("owner", "field", "default", "validation", "scope", "pinning", "coverage")
+    unresolved_groups: dict[str, list[dict[str, object]]] = defaultdict(list)
+    authority_fields = ("authorityStatus", "owner", "field", "prospectiveOwner",
+                        "unresolvedEvidence", "default", "validation", "scope", "pinning", "coverage")
     for identifier, entry in entries.items():
         if entry.get("classification") != "operator-configurable" or entry.get("status") == "pending-review":
             continue
         owner = str(entry.get("owner", "")).strip()
         setting = str(entry.get("setting", "")).strip()
         if not setting:
+            continue
+        if entry.get("authorityStatus") == "unresolved":
+            unresolved_groups[setting].append(entry)
             continue
         metadata = tuple(entry.get(field) for field in authority_fields) + (
             tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
@@ -4916,6 +5641,37 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             )
         else:
             authorities[setting] = (identifier, metadata)
+
+    for setting, setting_entries in unresolved_groups.items():
+        expected_ids = {str(entry["id"]) for entry in setting_entries}
+        expected_bindings = {str(entry["expression"]) for entry in setting_entries
+                             if entry.get("kind") == "environment-binding"}
+        common_fields = (
+            "authorityStatus", "prospectiveOwner", "unresolvedEvidence", "default",
+            "validation", "scope", "pinning", "coverage", "followUp", "rationale",
+        )
+        first = setting_entries[0]
+        common_metadata = tuple(first.get(field) for field in common_fields) + (
+            tuple(first.get("bindings", [])), tuple(first.get("defaultEvidence", [])),
+        )
+        for entry in setting_entries:
+            metadata = tuple(entry.get(field) for field in common_fields) + (
+                tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
+            )
+            if metadata != common_metadata:
+                errors.append(
+                    f"inconsistent unresolved configuration metadata for {setting}: "
+                    f"{first['id']} and {entry['id']}")
+            if len(setting_entries) > 1 and (
+                    not isinstance(entry.get("sourceFact"), str)
+                    or not str(entry["sourceFact"]).strip()):
+                errors.append(f"{entry['id']}: multi-row unresolved setting requires a sourceFact")
+            if set(entry.get("defaultEvidence", [])) != expected_ids:
+                errors.append(
+                    f"{entry['id']}: unresolved {setting} defaultEvidence must equal its exact setting rows")
+            if set(entry.get("bindings", [])) != expected_bindings:
+                errors.append(
+                    f"{entry['id']}: unresolved {setting} bindings must equal its exact environment evidence")
 
     resolver_authorities = document.get("resolverAuthorities")
     if resolver_authorities is not None:
@@ -4937,6 +5693,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         setting_ids = {str(entry["id"]) for entry in setting_entries}
         representative = entries[authorities[setting][0]]
         representatives[setting] = representative
+        if representative.get("authorityStatus") == "unresolved":
+            continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
             evidenced_bindings = {str(entry.get("expression")) for entry in setting_entries
@@ -4965,6 +5723,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if evidence_id not in setting_ids:
                         errors.append(f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
     errors.extend(environment_resolver_group_errors(root, representatives, resolver_authorities))
+    errors.extend(reconciliation_history_errors(root, document, candidates))
+    errors.extend(remediation_domain_errors(document))
     return errors
 
 
@@ -4990,6 +5750,8 @@ def render_report(document: dict[str, object]) -> str:
     assert isinstance(retired, list)
     migrations = document.get("migrationHistory", [])
     assert isinstance(migrations, list)
+    reconciliations = document.get("reconciliationHistory", [])
+    assert isinstance(reconciliations, list)
     duplicate_settings = {str(entry["setting"]) for entry in retired if isinstance(entry, dict)
                           and entry.get("status") == "duplicate-removed" and entry.get("setting")}
     duplicates = len(duplicate_settings)
@@ -5036,39 +5798,81 @@ def render_report(document: dict[str, object]) -> str:
         f"| Retained security ceilings or defaults | {classifications['security-ceiling-or-default']} |",
         f"| Retained protocol or format invariants | {classifications['protocol-or-format-invariant']} |",
         f"| Retained published contract descriptions | {retained_classifications['published-contract-description']} |",
+        f"| Retained presentation text | {retained_classifications['presentation-text']} |",
         f"| Retained derived values | {classifications['derived']} |",
         f"| Test fixtures | {classifications['test-fixture']} |",
         f"| Intentionally deferred | {deferred} |", "",
         f"Retired source candidates preserved in inventory history: {len(retired)}.", "",
         f"Checked inventory-schema migrations: {len(migrations)}. Validation requires the recorded source",
         "revision to be present locally; CI must fetch that history before enabling this gate.", "",
+        f"Checked source reconciliations: {len(reconciliations)}.", "",
         "Surface counts are derived from the same inventory:", "",
     ]
     lines.extend(f"- `{name}`: {count}" for name, count in sorted(surfaces.items()))
+    if reconciliations:
+        latest = reconciliations[-1]
+        mappings = latest.get("mappings", [])
+        retirements = latest.get("retirements", [])
+        additions = latest.get("additions", [])
+        source_count = len(typed) - len(additions) + len(retirements)
+        unchanged = source_count - len(mappings) - len(retirements)
+        lines.extend(("", "## Latest reconciliation", "",
+                      "The current inventory was reconciled from a committed source inventory. Every changed",
+                      "identity and retirement has its own approved record in the machine-readable inventory.", "",
+                      "| Partition | Count |", "|---|---:|",
+                      f"| Source inventory candidates | {source_count} |",
+                      f"| Unchanged identities | {unchanged} |",
+                      f"| Approved identity migrations | {len(mappings)} |",
+                      f"| Approved retirements | {len(retirements)} |",
+                      f"| Semantically classified additions | {len(additions)} |",
+                      f"| Current candidates | {len(typed)} |"))
+    domain_map = document.get("remediationDomains", {})
+    domains = domain_map.get("domains", []) if isinstance(domain_map, dict) else []
+    lines.extend(("", "## Follow-up domain ownership", "",
+                  "This map covers inherited pending review and confirmed unresolved operator settings only.",
+                  "Retained invariants, fixtures, descriptions, and presentation text are outside remediation ownership.", "",
+                  "| Issue | Domain | Candidates | Inherited pending review | Confirmed unresolved settings |",
+                  "|---|---|---:|---:|---:|"))
+    for domain in domains:
+        lines.append(f"| {domain['issue']} | {domain['title']} | {len(domain['candidateIds'])} | "
+                     f"{domain['inheritedPendingReview']} | {domain['confirmedUnresolvedOperatorSettings']} |")
     lines.extend(("", "## Operator settings", "",
         "Every reviewed operator setting must name one typed owner, bindings, default, validation,",
                   "scope, pinning policy, and deployment/reference coverage. Pending candidates do not appear",
                   "in this table.", "",
-                  "| Setting | State | Owner | Field | Bindings | Default | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|"))
+                  "| Setting | State | Owner | Field | Bindings | Default | Source facts | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|---|"))
     if operator_entries:
         canonical: dict[str, list[dict[str, object]]] = {}
         for entry in operator_entries:
             canonical.setdefault(str(entry["setting"]), []).append(entry)
         for setting, setting_entries in sorted(canonical.items()):
+            setting_entries.sort(key=lambda item: str(item["id"]))
             entry = setting_entries[0]
             item_states = {str(item["status"]) for item in setting_entries}
             states = "converted" if "converted" in item_states else ", ".join(sorted(item_states))
             bindings = ", ".join(f"`{value}`" for value in entry.get("bindings", []))
-            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {validation} | {scope} | {pinning} | {coverage} |".format(
-                setting=setting, status=states, owner=entry.get("owner", ""),
-                field=entry.get("field", ""),
-                bindings=bindings or "none", default=entry.get("default", ""), validation=entry.get("validation", ""),
+            unresolved = entry.get("authorityStatus") == "unresolved"
+            owner = entry.get("prospectiveOwner", "") if unresolved else entry.get("owner", "")
+            field = "unresolved" if unresolved else entry.get("field", "")
+            source_facts = "<br>".join(
+                f"`{item['id']}`: {str(item.get('sourceFact', item.get('expression', ''))).replace('|', '&#124;')}"
+                for item in setting_entries
+            )
+            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {source_facts} | {validation} | {scope} | {pinning} | {coverage} |".format(
+                setting=setting, status=states, owner=owner,
+                field=field,
+                bindings=bindings or "none", default=entry.get("default", ""),
+                source_facts=source_facts,
+                validation=entry.get("validation", ""),
                 scope=entry.get("scope", ""), pinning=entry.get("pinning", ""),
                 coverage=entry.get("coverage", "")))
     else:
-        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |")
+        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
-    deferred_entries = [entry for entry in typed if entry.get("status") == "deferred"]
+    deferred_entries = sorted(
+        (entry for entry in typed if entry.get("status") == "deferred"),
+        key=lambda item: (str(item["path"]), int(item["line"]), str(item["id"])),
+    )
     if deferred_entries:
         for entry in deferred_entries:
             lines.append(f"| `{entry['path']}:{entry['line']}` | {entry.get('followUp', 'missing')} | {entry['rationale']} |")
@@ -5101,16 +5905,47 @@ def render_report(document: dict[str, object]) -> str:
 
 
 def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
-                      *, accept_retired_pending: bool = False) -> tuple[list[str], dict[str, int]]:
+                      *, accept_retired_pending: bool = False,
+                      reconciliation_plan: dict[str, object] | None = None) -> tuple[list[str], dict[str, int]]:
     """Refresh source metadata without discarding a semantic review decision.
 
-    A changed expression has a new stable ID. Pending entries may be retired only through the
-    explicit command flag; a reviewed entry additionally needs an in-inventory ``retirement``
-    object with ``approved: true`` and a nonblank rationale. Every retired row stays in history.
+    A changed expression has a new stable ID. Every retired entry needs an in-inventory
+    ``retirement`` object with ``approved: true`` and a nonblank row-specific rationale. The
+    command flag records intent only; it never supplies approval evidence. Every retired row stays
+    in history.
     """
-    document = load_inventory(inventory_path, allow_previous_schema=True)
+    document = load_inventory(
+        inventory_path, allow_previous_schema=True, allow_unreconciled=True)
     raw_entries = document["entries"]
     assert isinstance(raw_entries, list)
+    candidates = discover(root)
+    if reconciliation_plan is not None:
+        refreshed, plan_errors = apply_reconciliation(root, document, candidates, reconciliation_plan)
+        summary = {
+            "added": len(reconciliation_plan.get("additions", [])),
+            "retired": len(reconciliation_plan.get("retirements", [])),
+            "migrated": len(reconciliation_plan.get("mappings", [])),
+            "preserved": len(raw_entries) - len(reconciliation_plan.get("retirements", [])),
+        }
+        if plan_errors or refreshed is None:
+            return plan_errors, summary
+        refreshed["remediationDomains"] = build_remediation_domains(
+            entry for entry in refreshed["entries"] if isinstance(entry, dict))
+        validation_errors = inventory_errors(root, refreshed, candidates)
+        if validation_errors:
+            return validation_errors, summary
+        inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
+        report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
+        inventory_temporary.write_text(
+            json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        report_temporary.write_text(render_report(refreshed), encoding="utf-8")
+        inventory_temporary.replace(inventory_path)
+        report_temporary.replace(report_path)
+        return [], summary
+    if document.get("reconciliationRequired") is not False:
+        return ["source identity changes require an explicit reconciliation plan"], {
+            "added": 0, "retired": 0, "preserved": len(raw_entries),
+        }
     migrating_schema = document.get("schemaVersion") != SCHEMA_VERSION
     migration_record: dict[str, object] | None = None
     if migrating_schema:
@@ -5131,15 +5966,12 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
             "rationale": "Candidate identity schema changed; pending and mechanical fixture rows were reissued without claiming semantic review.",
         }
     old = {str(entry["id"]): entry for entry in raw_entries if isinstance(entry, dict) and "id" in entry}
-    candidates = discover(root)
     discovered = {candidate.id: candidate for candidate in candidates}
     removed = [entry for identifier, entry in old.items() if identifier not in discovered]
     errors: list[str] = []
     for entry in removed:
         identifier = str(entry["id"])
         if entry.get("classification") == "test-fixture" and entry.get("status") == "retained":
-            continue
-        if entry.get("status") == "pending-review" and accept_retired_pending:
             continue
         retirement = entry.get("retirement")
         approved = isinstance(retirement, dict) and retirement.get("approved") is True \
@@ -5149,7 +5981,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
         if entry.get("status") == "pending-review":
             errors.append(
                 f"refresh would retire pending candidate {identifier} {entry.get('path')}:{entry.get('line')}; "
-                "review the diff and rerun with --accept-retired-pending"
+                "add retirement.approved=true and a row-specific retirement.rationale to that exact entry"
             )
         else:
             errors.append(
@@ -5190,7 +6022,8 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
             rationale = (f"Candidate identity retired during inventory schema v{SCHEMA_VERSION} migration."
                          if migrating_schema else "Mechanically classified test-fixture candidate retired after source refresh.")
         elif entry.get("status") == "pending-review":
-            rationale = "Pending candidate retired after an explicitly accepted source refresh."
+            assert isinstance(retirement, dict)
+            rationale = str(retirement["rationale"]).strip()
         else:
             assert isinstance(retirement, dict)
             rationale = str(retirement["rationale"]).strip()
@@ -5203,6 +6036,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
 
     refreshed = dict(document)
     refreshed["schemaVersion"] = SCHEMA_VERSION
+    refreshed["reconciliationRequired"] = False
     refreshed["entries"] = merged
     refreshed["retiredEntries"] = retired_history
     migration_history = list(document.get("migrationHistory", []))
@@ -5235,6 +6069,7 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
     candidates = discover(root)
     document = {
         "schemaVersion": SCHEMA_VERSION,
+        "reconciliationRequired": False,
         "description": "Machine-reviewed fixed operational candidates; counts and report are generated.",
         "entries": [candidate.inventory_entry() for candidate in candidates],
         "evidenceRecords": {
@@ -5250,9 +6085,9 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
 
 
 def check(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
-          *, require_complete: bool = True) -> list[str]:
+          *, require_complete: bool = True, allow_unreconciled: bool = False) -> list[str]:
     try:
-        document = load_inventory(inventory_path)
+        document = load_inventory(inventory_path, allow_unreconciled=allow_unreconciled)
     except ValueError as invalid:
         return [str(invalid)]
     candidates = discover(root)
@@ -5291,9 +6126,13 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--bootstrap", action="store_true", help="create the initial inventory and report")
     parser.add_argument("--accept-retired-pending", action="store_true",
                         help="with --refresh-inventory, explicitly archive removed pending entries")
+    parser.add_argument("--reconciliation-plan", type=Path,
+                        help="with --refresh-inventory, apply an explicit reviewed reconciliation JSON")
     args = parser.parse_args(argv)
     if args.accept_retired_pending and not args.refresh_inventory:
         parser.error("--accept-retired-pending requires --refresh-inventory")
+    if args.reconciliation_plan is not None and not args.refresh_inventory:
+        parser.error("--reconciliation-plan requires --refresh-inventory")
     root = args.root.resolve()
     inventory = root / "scripts" / INVENTORY.name
     report = root / "docs" / "architecture" / REPORT.name
@@ -5303,8 +6142,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Bootstrapped {len(discover(root))} operational candidates.")
             return 0
         if args.refresh_inventory:
+            reconciliation_plan = None
+            if args.reconciliation_plan is not None:
+                loaded_plan = json.loads(args.reconciliation_plan.read_text(encoding="utf-8"))
+                if not isinstance(loaded_plan, dict):
+                    raise ValueError("reconciliation plan must be a JSON object")
+                reconciliation_plan = loaded_plan
             errors, summary = refresh_inventory(
                 root, inventory, report, accept_retired_pending=args.accept_retired_pending,
+                reconciliation_plan=reconciliation_plan,
             )
             if errors:
                 for error in errors:

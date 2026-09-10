@@ -79,10 +79,12 @@ Commands:
                     declared bench endpoints the three egress settings without which the node fails
                     when reached (item H35), prints them, and never touches an environment value
                     already present.
-  verify-supervisor Verifies only the sandbox supervisor — that it is executable, answers the
-                    capability probe, and that compose.yaml names the same container path in both
-                    the variable and the mount. Exits non-zero when it is unusable. This is the
-                    assertion continuous integration runs; `setup` and `check` run the same one.
+  verify-supervisor Verifies only the sandbox supervisor: that the checkout carries its executable
+                    bit, that it answers the capability probe, and that compose.yaml names the same
+                    container path in both the variable and the mount. Exits non-zero when any of
+                    the three fails. This is what continuous integration runs, and unlike `setup`
+                    and `check` it never repairs the executable bit — a check that repairs a fault
+                    cannot report it.
   help              This text.
 
 Setup options:
@@ -431,6 +433,15 @@ cmd_verify_supervisor() {
   # and the two compose.yaml greps, because a second copy of an assertion is how the assertion and
   # the thing it guards drift apart.
   step "Sandbox supervisor"
+  # One difference from `setup` and `check`: they repair a missing executable bit, because for a
+  # developer it is the single fault that presents as "not configured" rather than as itself.
+  # Continuous integration must not repair it. A file committed at mode 100644 would be fixed on the
+  # runner, pass, and still reach the bind mount non-executable, so every validate would return 501
+  # for a checkout CI called clean. A check that repairs a fault cannot report it.
+  if [ -f "$SUPERVISOR_FILE" ] && [ ! -x "$SUPERVISOR_FILE" ]; then
+    warn "$SUPERVISOR_FILE is not executable in the checkout: the tracked mode must be 100755."
+    exit 1
+  fi
   provision_supervisor || exit 1
 }
 

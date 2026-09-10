@@ -8,11 +8,16 @@ import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.deployment.lifecycle.DeploymentLifecycleTarget;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry.ObservedKind;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -91,6 +96,9 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
             """;
 
     private static final int CAPACITY = 256;
+
+    @TempDir
+    Path directory;
 
     // --------------------------------------------------------------------- the deterministic half
 
@@ -234,6 +242,96 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
         }
     }
 
+    /**
+     * The interleaving the racing test below reaches only by chance, entered deliberately: an arrival
+     * assigned the closing generation whose recorder is still opening when the barrier runs.
+     *
+     * <p>That arrival was never handed to the runner, so there is no traversal for the barrier to end;
+     * the offer refuses it when it resumes, and the refusal is the whole of its assignment. The barrier
+     * must not also report it as ended. It used to, because {@link GraphRunner#cancelTraversal} answers
+     * {@code true} for any identifier it has not refused before -- deliberately, leaving "was anything
+     * running" to its caller -- so one arrival was counted on both sides: refused to its caller and
+     * ended by the barrier (issue 314).</p>
+     */
+    @Test
+    void anArrivalTheBarrierClosedBeforeItWasDispatchedIsRefusedAndNotEnded() throws Exception {
+        var gate = new CompletableFuture<NodeResult>();
+        var settled = new AtomicInteger();
+        try (var engine = new JoinTestEngine();
+             var durable = new SqliteExecutionStore(directory.resolve("barrier.db"), Clock.systemUTC())) {
+            var store = new SuspendFirstWriteExecutionStore(durable);
+            DefaultGraphDeployment deployment = deployment(engine, gate, settled, store);
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            try {
+                CompletableFuture<IngressDisposition> held = CompletableFuture.supplyAsync(
+                        () -> deployment.ingress().offer(IDENTITY, IngressTarget.start(), "held"));
+                assertTrue(store.awaitFirstWrite(Duration.ofSeconds(10)),
+                        "the arrival must be parked between its admission and its dispatch");
+
+                deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(0, deployment.endedByLastBarrier(),
+                        "nothing had been dispatched, so the barrier has nothing to end");
+
+                store.releaseFirstWrite();
+                assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED, held.get(10, TimeUnit.SECONDS),
+                        "an arrival whose generation closed before dispatch is refused, not dispatched");
+                assertTrue(store.firstWriteWasHeldOpen());
+                assertEquals(0, deployment.endedByLastBarrier(),
+                        "the refused arrival is on the closing side once, as a refusal");
+                awaitInFlight(deployment, 0);
+
+                assertEquals(IngressDisposition.ACCEPTED,
+                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "after"));
+                gate.complete(NodeResult.continueWith("released"));
+                awaitInFlight(deployment, 0);
+                assertEquals(1, settled.get(), "only the arrival admitted at the opened generation completes");
+            } finally {
+                store.releaseFirstWrite();
+                gate.complete(NodeResult.continueWith("cleanup"));
+                deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    /**
+     * The refusal above belongs to the barrier that closed the arrival's generation, not to whether
+     * that barrier still governs when the arrival resumes. A pause and resume after the barrier adopt
+     * a new generation and stand the barrier down; the arrival it closed must stay closed rather than
+     * be dispatched as work carrying a generation the barrier already ended.
+     */
+    @Test
+    void anArrivalTheBarrierClosedStaysClosedAfterAdmissionMovesOn() throws Exception {
+        var gate = new CompletableFuture<NodeResult>();
+        var settled = new AtomicInteger();
+        try (var engine = new JoinTestEngine();
+             var durable = new SqliteExecutionStore(directory.resolve("barrier.db"), Clock.systemUTC())) {
+            var store = new SuspendFirstWriteExecutionStore(durable);
+            DefaultGraphDeployment deployment = deployment(engine, gate, settled, store);
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            try {
+                CompletableFuture<IngressDisposition> held = CompletableFuture.supplyAsync(
+                        () -> deployment.ingress().offer(IDENTITY, IngressTarget.start(), "held"));
+                assertTrue(store.awaitFirstWrite(Duration.ofSeconds(10)),
+                        "the arrival must be parked between its admission and its dispatch");
+
+                deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                deployment.closeAdmission(3).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                deployment.openAdmission(4).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+                store.releaseFirstWrite();
+                assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED, held.get(10, TimeUnit.SECONDS),
+                        "a barrier that closed this arrival's generation is not reopened by a later resume");
+                assertTrue(store.firstWriteWasHeldOpen());
+                awaitInFlight(deployment, 0);
+                assertEquals(0, settled.get());
+            } finally {
+                store.releaseFirstWrite();
+                gate.complete(NodeResult.continueWith("cleanup"));
+                deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------- the racing half
 
     /**
@@ -243,9 +341,10 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
      * <p>Offers run continuously from several threads while {@code barrier} is in flight, so arrivals
      * land on both sides of it and in the window between the snapshot and the cancellations. Every
      * accepted one is then accounted for exactly once. A refusal is an assignment too and is counted
-     * separately: an arrival whose generation the barrier closed while its durable-commit window was
-     * open is refused rather than dispatched, which is the closing side answering, not a unit going
-     * missing.</p>
+     * separately: an arrival whose generation the barrier closed while it was still awaiting dispatch
+     * is refused rather than dispatched, which is the closing side answering, not a unit going
+     * missing -- and not a unit the barrier ended, which is why {@code refused} is never part of the
+     * identity below.</p>
      */
     @Test
     void everyArrivalRacingABarrierIsAccountedForExactlyOnce() throws Exception {
@@ -353,12 +452,34 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
         return deployment(engine, gate, settled, entered, completed, ignored -> { });
     }
 
+    /**
+     * @param store an execution store, so the volatile offer opens a recorder between its admission and
+     *              its dispatch -- the one window a test can hold open deliberately.
+     */
+    private static DefaultGraphDeployment deployment(JoinTestEngine engine,
+                                                     CompletableFuture<NodeResult> gate,
+                                                     AtomicInteger settled,
+                                                     ExecutionStore store) {
+        return deployment(engine, gate, settled, new ConcurrentHashMap<>(), ConcurrentHashMap.newKeySet(),
+                ignored -> { }, store);
+    }
+
     private static DefaultGraphDeployment deployment(JoinTestEngine engine,
                                                      CompletableFuture<NodeResult> gate,
                                                      AtomicInteger settled,
                                                      ConcurrentHashMap<UUID, String> entered,
                                                      Set<UUID> completed,
                                                      Consumer<String> onWorkEntry) {
+        return deployment(engine, gate, settled, entered, completed, onWorkEntry, null);
+    }
+
+    private static DefaultGraphDeployment deployment(JoinTestEngine engine,
+                                                     CompletableFuture<NodeResult> gate,
+                                                     AtomicInteger settled,
+                                                     ConcurrentHashMap<UUID, String> entered,
+                                                     Set<UUID> completed,
+                                                     Consumer<String> onWorkEntry,
+                                                     ExecutionStore store) {
         var behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
                 // One shared gate for every traversal: releasing it releases all of them at once, so a
                 // unit the barrier ended and a unit it admitted are distinguished by the barrier alone
@@ -376,7 +497,8 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
                 });
         return new DefaultGraphDeployment(DeploymentId.of("barrier-" + java.util.UUID.randomUUID()),
                 engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                GRAPH.getBytes(StandardCharsets.UTF_8), CAPACITY);
+                GRAPH.getBytes(StandardCharsets.UTF_8), CAPACITY, store,
+                DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
     }
 
     /** Waits for the port's own in-flight evidence to reach {@code expected}. */

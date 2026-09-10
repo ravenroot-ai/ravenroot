@@ -49,10 +49,13 @@ import java.util.Objects;
  */
 public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphContentId graphContentId,
                                 GraphDefinitionIdentity graphIdentity, ResolvedRuntimeProfile runtime,
-                                List<PinnedNodePackage> nodePackages, Instant pinnedAt) {
+                                List<PinnedNodePackage> nodePackages, Instant pinnedAt,
+                                ResolvedOperationalPolicy operationalPolicy) {
 
-    /** The layout this build writes. A stored manifest may carry an older one; see the store port. */
-    public static final int CURRENT_FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION_1 = 1;
+    public static final int FORMAT_VERSION_2 = 2;
+    /** The layout this build writes. */
+    public static final int CURRENT_FORMAT_VERSION = FORMAT_VERSION_2;
 
     /**
      * The largest number of node packages one manifest may pin.
@@ -65,8 +68,8 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
 
     /** Rejects a manifest that could not stably identify what an execution was admitted against. */
     public ExecutionManifest {
-        if (formatVersion <= 0) {
-            throw new IllegalArgumentException("formatVersion must be positive");
+        if (formatVersion != FORMAT_VERSION_1 && formatVersion != FORMAT_VERSION_2) {
+            throw new IllegalArgumentException("unsupported execution manifest format version");
         }
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(graphContentId, "graphContentId");
@@ -89,6 +92,25 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
             }
         }
         nodePackages = List.copyOf(sorted);
+        if (formatVersion == FORMAT_VERSION_1 && operationalPolicy != null) {
+            throw new IllegalArgumentException("format version 1 cannot carry operational policy");
+        }
+        if (formatVersion == FORMAT_VERSION_2) {
+            Objects.requireNonNull(operationalPolicy, "operationalPolicy");
+            if (!operationalPolicy.nodePackages().stream().map(
+                    ResolvedOperationalPolicy.PackageCapacity::packageId).toList()
+                    .equals(nodePackages.stream().map(PinnedNodePackage::packageId).toList())) {
+                throw new IllegalArgumentException(
+                        "operational package capacities must match pinned node packages");
+            }
+        }
+    }
+
+    /** Source-compatible constructor for the persisted v1 layout. */
+    public ExecutionManifest(int formatVersion, ExecutionKey key, GraphContentId graphContentId,
+                             GraphDefinitionIdentity graphIdentity, ResolvedRuntimeProfile runtime,
+                             List<PinnedNodePackage> nodePackages, Instant pinnedAt) {
+        this(formatVersion, key, graphContentId, graphIdentity, runtime, nodePackages, pinnedAt, null);
     }
 
     /**

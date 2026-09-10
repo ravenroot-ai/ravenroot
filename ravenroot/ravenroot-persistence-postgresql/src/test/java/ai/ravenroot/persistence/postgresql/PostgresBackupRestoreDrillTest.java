@@ -1048,7 +1048,7 @@ class PostgresBackupRestoreDrillTest {
                                               List<PinnedNodePackage> packages) {
         var profile = new ResolvedRuntimeProfile(1, 1, "STRICT", "pass-through", "1".repeat(64),
                 "2".repeat(64), "3".repeat(64), "4".repeat(64));
-        return new ExecutionManifest(ExecutionManifest.CURRENT_FORMAT_VERSION, key, contentId,
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1, key, contentId,
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID,
                         contentId.value()),
                 profile, packages, clock.instant());

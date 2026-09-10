@@ -239,30 +239,6 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         this.manifests = manifests;
     }
 
-    /**
-     * Refuses to rebuild a graph for an execution this runtime cannot reproduce.
-     *
-     * <p>Called from {@code prepare} and from nowhere else, so it is not possible to rebuild this
-     * executor's graph without passing through it — a later call site would have to obtain a
-     * {@code Prepared} to do anything, and obtaining one verifies. It runs before the definition is
-     * loaded and before any lease or runner exists, so a refusal costs nothing and claims nothing. Both refusals are typed: an absent, unreadable or
-     * digest-mismatched manifest arrives as
-     * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}, and a runtime that
-     * resolves something different arrives as
-     * {@link ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException} naming each differing
-     * dimension. Either way the work is not dispatched, not acknowledged and not lost: the recovery
-     * loop leaves it claimable, which is what fail-closed means on this path.</p>
-     *
-     * <p>{@link ai.ravenroot.api.application.ExecutionPolicy#STANDARD} is the policy compared
-     * against because it is the policy this executor actually rebuilds the runner under. An execution
-     * accepted under a different one is therefore refused here rather than silently resumed as a
-     * standard run — which is the behaviour a pin exists to produce.</p>
-     */
-    private void verifyManifest(ai.ravenroot.api.persistence.ExecutionKey key) {
-        if (manifests != null) {
-            manifests.verify(key, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
-        }
-    }
 
     @Override
     public boolean supports(DurableToolApproval approval) {
@@ -360,7 +336,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             GraphRunner runner;
             try {
                 runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                        runnerShutdownStepBound, executionLimits);
+                        runnerShutdownStepBound, prepared.executionLimits(), prepared.operationalPolicy());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
                 setupFailure = cleanup(setupFailure, manager::close);
@@ -541,11 +517,14 @@ public final class PinnedGraphToolApprovalContinuationExecutor
 
     private Prepared prepare(ai.ravenroot.api.persistence.ExecutionKey key, String tenantId,
                              String pin, String nodeId) {
-        verifyManifest(key);
+        var parsingPolicy = manifests == null ? null : manifests.graphPolicyForParsing(
+                key, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+        var pinnedLimits = parsingPolicy == null ? executionLimits
+                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(parsingPolicy);
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(
                 tenantId, new GraphContentId(pin))).toCompletableFuture().join();
         GraphManager manager = GraphManager.readGraphMl(
-                new ByteArrayInputStream(stored.canonical().bytes()), executionLimits.graphMl());
+                new ByteArrayInputStream(stored.canonical().bytes()), pinnedLimits.graphMl());
         try {
             GraphVersionSnapshot snapshot = GraphVersionSnapshot.create(
                     new GraphVersionKey(stored.identity().graphId(), stored.identity().versionId()),
@@ -553,7 +532,11 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             var action = behaviors.createToolCallContinuation(manager.definition().node(nodeId))
                     .orElseThrow(() -> new IllegalStateException(
                             "trusted continuation action is unavailable"));
-            return new Prepared(manager, snapshot, action);
+            var policy = manifests == null ? null : manifests.resolvePolicy(key,
+                    ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
+                    manager.definition().nodes().stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
+                            .filter(java.util.Objects::nonNull).toList());
+            return new Prepared(manager, snapshot, action, pinnedLimits, policy);
         } catch (RuntimeException failure) {
             manager.close();
             throw failure;
@@ -561,7 +544,9 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     }
 
     private record Prepared(GraphManager manager, GraphVersionSnapshot snapshot,
-                            ai.ravenroot.api.node.ToolCallContinuationAction action) { }
+                            ai.ravenroot.api.node.ToolCallContinuationAction action,
+                            ai.ravenroot.core.runtime.GraphExecutionLimits executionLimits,
+                            ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) { }
 
     private static ToolCallContinuationInput.Decision decision(ToolApprovalStatus status) {
         return switch (status) {

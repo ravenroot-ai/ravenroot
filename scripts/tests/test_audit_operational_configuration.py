@@ -61,6 +61,107 @@ def classify_non_pending(root: Path) -> None:
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
+        discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
+        expected = audit.manifest_pin_attempt_authorities(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        contract = {
+            "owner": f"{audit.MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared",
+            "field": "manifestPinAttempts",
+            "bindings": ["RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"],
+            "default": "3 attempts",
+            "defaultEvidence": expected["defaultAuthority"]["candidateIds"],
+            "bindingAuthority": expected["bindingAuthority"],
+            "defaultAuthority": expected["defaultAuthority"],
+        }
+        entries = {
+            identifier: {"id": identifier, "setting": audit.MANIFEST_PIN_ATTEMPTS_SETTING}
+            for identifier in expected["candidateIds"]
+        }
+        self.assertEqual([], audit.manifest_pin_attempt_authority_errors(
+            ROOT, audit.MANIFEST_PIN_ATTEMPTS_SETTING, contract,
+            list(entries.values()), entries, discovered))
+
+        mutations = (
+            ("field", "anotherField"),
+            ("bindingAuthority.environmentSymbol", "ANOTHER_VARIABLE"),
+            ("defaultAuthority.terminalField", "ANOTHER_DEFAULT"),
+        )
+        for field, value in mutations:
+            altered = copy.deepcopy(contract)
+            target = altered
+            parts = field.split(".")
+            for part in parts[:-1]:
+                target = target[part]
+            target[parts[-1]] = value
+            self.assertTrue(audit.manifest_pin_attempt_authority_errors(
+                ROOT, audit.MANIFEST_PIN_ATTEMPTS_SETTING, altered,
+                list(entries.values()), entries, discovered), field)
+
+    def test_inventory_routes_manifest_pin_setting_through_its_closed_authority(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.manifest_pin_attempt_authorities(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        authority_metadata = {
+            "status": "already-centralized", "classification": "operator-configurable",
+            "setting": audit.MANIFEST_PIN_ATTEMPTS_SETTING,
+            "owner": f"{audit.MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared",
+            "field": "manifestPinAttempts",
+            "bindings": ["RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"],
+            "default": "3 attempts", "defaultEvidence": expected["defaultAuthority"]["candidateIds"],
+            "bindingAuthority": expected["bindingAuthority"],
+            "defaultAuthority": expected["defaultAuthority"],
+            "validation": "A positive whole number of lost-race repair attempts.",
+            "scope": "Each PostgreSQL execution-manifest store instance.",
+            "pinning": "Read when the shared store is composed.",
+            "coverage": "Typed parsing, selector conflict, and adapter propagation are source-backed.",
+            "rationale": "The typed server setting controls PostgreSQL manifest pin repair attempts.",
+        }
+        entries = []
+        for candidate in candidates:
+            entry = candidate.inventory_entry()
+            if candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture",
+                             rationale="Executable audit fixture.")
+            if candidate.id in expected["candidateIds"]:
+                entry.update(copy.deepcopy(authority_metadata))
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in candidates
+            },
+            "routeTableAuthorities": {
+                audit.ROUTE_TABLE_AUTHORITY_ID: audit.current_route_table_authority(ROOT),
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        baseline = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error for error in baseline), baseline)
+
+        mutations = (
+            ("bindingAuthority", "environmentSymbol", "ANOTHER_VARIABLE", "binding authority"),
+            ("defaultAuthority", "terminalField", "ANOTHER_DEFAULT", "default authority"),
+        )
+        for section, field, value, expected_error in mutations:
+            altered = copy.deepcopy(document)
+            for entry in altered["entries"]:
+                if entry.get("setting") == audit.MANIFEST_PIN_ATTEMPTS_SETTING:
+                    entry[section][field] = value
+            errors = audit.inventory_errors(ROOT, altered, candidates)
+            self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
+                                and expected_error in error for error in errors), errors)
+
+        incomplete = copy.deepcopy(document)
+        terminal = expected["defaultAuthority"]["candidateIds"][0]
+        next(entry for entry in incomplete["entries"] if entry["id"] == terminal).pop("setting")
+        errors = audit.inventory_errors(ROOT, incomplete, candidates)
+        self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
+                            and "partition" in error for error in errors), errors)
+
     def route_table_authority_fixture(self, root: Path):
         paths = (
             audit.ROUTE_TABLE_PATH, audit.ROUTE_DESCRIPTOR_PATH, audit.OPENAPI_GENERATOR_PATH,
@@ -1599,10 +1700,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         owners = document["remediationDomains"]["settingOwners"]
-        self.assertEqual(28, len(owners))
+        expected_unresolved_settings = 27
+        self.assertEqual(expected_unresolved_settings, len(owners))
         self.assertEqual(len(owners), len({item["setting"] for item in owners}))
         self.assertEqual(
-            28,
+            expected_unresolved_settings,
             sum(domain["confirmedUnresolvedOperatorSettings"]
                 for domain in document["remediationDomains"]["domains"]),
         )
@@ -1616,7 +1718,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual({"#318"}, {entry["followUp"] for entry in lease_rows})
         unresolved_rows = [entry for entry in document["entries"]
                            if entry.get("authorityStatus") == "unresolved"]
-        self.assertEqual(28, len({entry["setting"] for entry in unresolved_rows}))
+        self.assertEqual(expected_unresolved_settings,
+                         len({entry["setting"] for entry in unresolved_rows}))
         self.assertTrue(all(entry.get("sourceFact") for entry in unresolved_rows))
         self.assertFalse(any(str(entry["default"]).startswith("Current internal source value:")
                              for entry in unresolved_rows))
@@ -3877,6 +3980,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "surface": "java", "status": "retained",
                 "classification": "protocol-or-format-invariant",
                 "rationale": "Stable protocol token.",
+                "defaultEvidence": ["oc-old"],
             }
             source_document = {
                 "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
@@ -3912,7 +4016,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 audit.hashlib.sha256(b"new evidence").hexdigest(), "java",
             )
             plan = {
-                "id": "synthetic-reconciliation", "issue": "#315",
+                "id": "synthetic-reconciliation", "issue": "#316",
                 "sourceRevision": revision, "targetRevision": revision,
                 "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
                 "sourceInventoryDigest": audit.hashlib.sha256(source_raw).hexdigest(),
@@ -3930,6 +4034,27 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             }
             self.assertEqual([], audit.reconciliation_plan_errors(
                 root, source_document, (candidate,), plan)[0])
+
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                remapped, remap_errors = audit.apply_reconciliation(
+                    root, source_document, (candidate,), plan)
+            self.assertEqual([], remap_errors)
+            self.assertIsNotNone(remapped)
+            self.assertEqual(["oc-new"], remapped["entries"][0]["defaultEvidence"])
+            self.assertEqual("oc-old", remapped["reconciliationHistory"][0]["additions"][0]["id"],
+                             "anchored history must never be rewritten")
+
+            malformed_issue = copy.deepcopy(plan)
+            malformed_issue["issue"] = "316"
+            self.assertTrue(any("unsupported or incomplete shape" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), malformed_issue)[0]))
+            for invalid_issue in (True, " #316", "#316 "):
+                malformed_issue = copy.deepcopy(plan)
+                malformed_issue["issue"] = invalid_issue
+                self.assertTrue(any("unsupported or incomplete shape" in error for error in
+                                    audit.reconciliation_plan_errors(
+                                        root, source_document, (candidate,), malformed_issue)[0]))
 
             partial = copy.deepcopy(plan)
             partial["mappings"] = []

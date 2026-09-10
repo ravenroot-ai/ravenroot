@@ -5,6 +5,8 @@ import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.NodeMessage;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.graph.GraphNode;
@@ -19,6 +21,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -31,6 +34,7 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
     private final OutboundHttpPolicy outboundPolicy;
     private final CredentialResolver credentials;
     private final ToolPolicy toolPolicy;
+    private final java.util.function.Function<NodeMessage, ResolvedOperationalPolicy> operationalPolicies;
     // Built through EgressHttpClients so the two controls that are easy to lose --
     // no redirect and no proxy -- are stated in one place and pinned by a test. See that class for
     // why the previous absence of a proxy was not a control.
@@ -38,9 +42,17 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
 
     HttpRequestNodeBehaviorFactory(OutboundHttpPolicy outboundPolicy, CredentialResolver credentials,
                                    ToolPolicy toolPolicy) {
+        this(outboundPolicy, credentials, toolPolicy, null);
+    }
+
+    HttpRequestNodeBehaviorFactory(OutboundHttpPolicy outboundPolicy, CredentialResolver credentials,
+                                   ToolPolicy toolPolicy,
+                                   java.util.function.Function<NodeMessage, ResolvedOperationalPolicy>
+                                           operationalPolicies) {
         this.outboundPolicy = outboundPolicy;
         this.credentials = credentials;
         this.toolPolicy = toolPolicy;
+        this.operationalPolicies = operationalPolicies;
     }
 
     @Override
@@ -111,11 +123,15 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
         Map<String, String> headers = headers(node);
 
         return message -> {
+            ResolvedOperationalPolicy.BuiltInHttpCapacity capacity = capacityFor(message);
             URI uri = URI.create(NodeProperties.render(urlTemplate, message, node));
             outboundPolicy.requireAllowed(uri);
             ToolAuthorization.requireAllowed(toolPolicy, message, "http.request",
                     Map.of("host", uri.getHost(), "method", method));
-            var builder = HttpRequest.newBuilder(uri).timeout(outboundPolicy.timeout(timeoutMs));
+            Duration requestedTimeout = Duration.ofMillis(Math.max(1, timeoutMs));
+            Duration effectiveTimeout = requestedTimeout.compareTo(capacity.maximumTimeout()) > 0
+                    ? capacity.maximumTimeout() : requestedTimeout;
+            var builder = HttpRequest.newBuilder(uri).timeout(effectiveTimeout);
             headers.forEach(builder::header);
             if (!credentialRef.isEmpty()) {
                 // KNOWN GAP (SEC-07, deliberately out of scope and escalated separately).
@@ -143,19 +159,33 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
             byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
             // The request half of the volume gate. Checked on the rendered bytes,
             // because the template is small and the payload it interpolates need not be.
-            outboundPolicy.requireRequestWithinLimit(bodyBytes);
+            if (bodyBytes.length > capacity.maximumRequestBytes()) {
+                throw new SecurityException("Outbound request body of " + bodyBytes.length
+                        + " bytes exceeds the limit of " + capacity.maximumRequestBytes() + " bytes");
+            }
             HttpRequest.BodyPublisher publisher = body.isEmpty() && Set.of("GET", "DELETE").contains(method)
                     ? HttpRequest.BodyPublishers.noBody()
                     : HttpRequest.BodyPublishers.ofByteArray(bodyBytes);
             HttpRequest request = builder.method(method, publisher).build();
             // Bounded, not BodyHandlers.ofString, which reads without a ceiling.
             return client.sendAsync(request, BoundedBodyHandlers.ofString(
-                            outboundPolicy.maximumResponseBytes(), StandardCharsets.UTF_8))
+                            capacity.maximumResponseBytes(), StandardCharsets.UTF_8))
                     .thenApply(response -> new NodeResult(response.statusCode() >= 200 && response.statusCode() < 300
                             ? successOutcome : failureOutcome, response.body(),
                             NodeProperties.attributes(message, "http.status", response.statusCode(),
                                     "http.uri", uri.toString())));
         };
+    }
+
+    private ResolvedOperationalPolicy.BuiltInHttpCapacity capacityFor(NodeMessage message) {
+        if (operationalPolicies == null) {
+            return new ResolvedOperationalPolicy.BuiltInHttpCapacity(
+                    outboundPolicy.maximumRequestBytes(), outboundPolicy.maximumResponseBytes(),
+                    outboundPolicy.maximumTimeout());
+        }
+        return operationalPolicies.apply(message).builtInHttp().orElseThrow(() ->
+                new ai.ravenroot.api.node.service.NodePackageServiceException(
+                        ai.ravenroot.api.node.service.NodePackageServiceException.Reason.SERVICE_UNAVAILABLE));
     }
 
     private static Map<String, String> headers(GraphNode node) {

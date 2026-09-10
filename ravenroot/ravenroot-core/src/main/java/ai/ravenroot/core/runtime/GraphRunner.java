@@ -252,6 +252,8 @@ public final class GraphRunner implements AutoCloseable {
 
     /** Fixed at composition: a graph cannot promote itself from Test to production behavior. */
     private final ExecutionPolicy executionPolicy;
+    /** Immutable v2 policy copied into every node delivery, or null for unmanifested legacy runs. */
+    private final ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy;
 
     /** Nodes that can receive a non-passthrough command under this runner's fixed policy. */
     private final Set<String> operationallyReachableNodes;
@@ -558,6 +560,28 @@ public final class GraphRunner implements AutoCloseable {
                 executionLimits);
     }
 
+    /** One-shot runner using the values just pinned in a v2 manifest. */
+    public GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                       ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                       UnknownBehaviorPolicy unknownBehaviors, ExecutionPolicy executionPolicy,
+                       GraphExecutionLimits executionLimits,
+                       ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(),
+                DEFAULT_SHUTDOWN_BOUND, unknownBehaviors, null, null, executionPolicy,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits, null, operationalPolicy);
+    }
+
+    /** One-shot runner with explicit shutdown and manifest-restored operational values. */
+    public GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                       ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                       Duration shutdownBound, UnknownBehaviorPolicy unknownBehaviors,
+                       ExecutionPolicy executionPolicy, GraphExecutionLimits executionLimits,
+                       ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(),
+                shutdownBound, unknownBehaviors, null, null, executionPolicy,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits, null, operationalPolicy);
+    }
+
     /**
      * Composes a runner over an explicit {@link JoinStore}.
      *
@@ -715,6 +739,18 @@ public final class GraphRunner implements AutoCloseable {
                 NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits);
     }
 
+    /** Pinned recovery runner with restored v2 values. */
+    public GraphRunner(GraphManager graphManager, GraphVersionSnapshot snapshot, ExecutionEngine engine,
+                       BehaviorRegistry behaviors, ExecutionMonitor monitor,
+                       ExecutionIdentitySource identitySource, Duration shutdownBound,
+                       GraphExecutionLimits executionLimits,
+                       ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
+                UnknownBehaviorPolicy.passThrough(), null,
+                java.util.Objects.requireNonNull(snapshot, "snapshot"), ExecutionPolicy.STANDARD,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits, null, operationalPolicy);
+    }
+
     /**
      * Composes a pinned Human Task continuation after {@code completedHumanTaskNode} has already
      * durably completed. The exact node is not re-admitted against today's authoring policy and is
@@ -743,6 +779,19 @@ public final class GraphRunner implements AutoCloseable {
                 java.util.Objects.requireNonNull(snapshot, "snapshot"), ExecutionPolicy.STANDARD,
                 NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits,
                 requireCompletedHumanTaskNode(completedHumanTaskNode));
+    }
+
+    /** Human Task continuation with manifest-restored operational values. */
+    public GraphRunner(GraphManager graphManager, GraphVersionSnapshot snapshot, ExecutionEngine engine,
+                       BehaviorRegistry behaviors, ExecutionMonitor monitor,
+                       ExecutionIdentitySource identitySource, Duration shutdownBound,
+                       GraphExecutionLimits executionLimits, String completedHumanTaskNode,
+                       ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
+                UnknownBehaviorPolicy.passThrough(), null,
+                java.util.Objects.requireNonNull(snapshot, "snapshot"), ExecutionPolicy.STANDARD,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits,
+                requireCompletedHumanTaskNode(completedHumanTaskNode), operationalPolicy);
     }
 
     private GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
@@ -774,10 +823,23 @@ public final class GraphRunner implements AutoCloseable {
                        GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy,
                        Runnable timeoutRelinquishedObserver, GraphExecutionLimits executionLimits,
                        String completedHumanTaskNode) {
+        this(graphManager, engine, behaviors, monitor, identitySource, joinStore, clock, shutdownBound,
+                unknownBehaviors, domain, snapshot, executionPolicy, timeoutRelinquishedObserver,
+                executionLimits, completedHumanTaskNode, null);
+    }
+
+    private GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                       ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                       JoinStore joinStore, Clock clock, Duration shutdownBound,
+                       UnknownBehaviorPolicy unknownBehaviors, ExecutionDomain domain,
+                       GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy,
+                       Runnable timeoutRelinquishedObserver, GraphExecutionLimits executionLimits,
+                       String completedHumanTaskNode,
+                       ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.executionPolicy = java.util.Objects.requireNonNull(executionPolicy, "executionPolicy");
         this.executionLimits = java.util.Objects.requireNonNull(executionLimits, "executionLimits");
-        this.runnerActorCapacity = new RunnerActorCapacity(executionLimits.maxLiveActorsPerTraversal());
+        this.runnerActorCapacity = new RunnerActorCapacity();
         // Read the manager exactly once, here, and never again. Everything below routes through the
         // materialised definition, so no later mutation of the manager can reach a run in flight.
         GraphDefinition submitted = graphManager.definition();
@@ -786,6 +848,8 @@ public final class GraphRunner implements AutoCloseable {
                 : requireDescribes(snapshot, submitted);
         this.graph = pinned.definition();
         this.behaviors = java.util.Objects.requireNonNull(behaviors, "behaviors");
+        this.operationalPolicy = operationalPolicy == null
+                ? this.behaviors.unpinnedOperationalPolicy(this.executionLimits) : operationalPolicy;
         this.completedHumanTaskNode = validateCompletedHumanTaskNode(this.graph, completedHumanTaskNode);
         validateAdmittedCommands(this.graph, this.behaviors, executionPolicy);
         this.operationallyReachableNodes = operationallyReachableNodes(this.graph, executionPolicy);
@@ -987,20 +1051,58 @@ public final class GraphRunner implements AutoCloseable {
                                                          UUID traversalId, Object payload, String graphVersion,
                                                          String deploymentId, String workloadId,
                                                          ExecutionRecorder recorder) {
+        return execute(security, processInstanceId, traversalId, payload, graphVersion, deploymentId,
+                workloadId, recorder, operationalPolicy);
+    }
+
+    /** Runs a shared deployment runner with policy resolved for this exact execution. */
+    public CompletionStage<GraphExecutionResult> execute(SecurityContext security, UUID processInstanceId,
+                                                         UUID traversalId, Object payload, String graphVersion,
+                                                         String deploymentId, String workloadId,
+                                                         ExecutionRecorder recorder,
+                                                         ai.ravenroot.api.persistence.ResolvedOperationalPolicy
+                                                                 executionOperationalPolicy) {
+        GraphExecutionLimits executionGraphLimits = executionOperationalPolicy == null
+                ? executionLimits
+                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                        executionOperationalPolicy);
+        return execute(security, processInstanceId, traversalId, payload, graphVersion, deploymentId,
+                workloadId, recorder, executionOperationalPolicy, executionGraphLimits);
+    }
+
+    /** Runs a shared deployment runner with both policy families resolved for this exact execution. */
+    public CompletionStage<GraphExecutionResult> execute(SecurityContext security, UUID processInstanceId,
+                                                         UUID traversalId, Object payload, String graphVersion,
+                                                         String deploymentId, String workloadId,
+                                                         ExecutionRecorder recorder,
+                                                         ai.ravenroot.api.persistence.ResolvedOperationalPolicy
+                                                                 executionOperationalPolicy,
+                                                         GraphExecutionLimits executionGraphLimits) {
         java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(executionGraphLimits, "executionGraphLimits");
         if (processInstanceId == null) throw new IllegalArgumentException("processInstanceId cannot be null");
         if (traversalId == null) throw new IllegalArgumentException("traversalId cannot be null");
+        new GraphComplexityAdmission(behaviors, executionGraphLimits).validate(graph);
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion, processInstanceId,
                 traversalId, nodeCatalogKeys, deploymentId, workloadId);
         GraphNode start = graph.start();
-        var budget = new ExecutionBudget(executionLimits, runnerActorCapacity);
-        ExecutionBudget.Hop rootHop = budget.reserveRoot(measureDelivery(payload, Map.of()));
+        var budget = new ExecutionBudget(executionGraphLimits, runnerActorCapacity);
+        ExecutionBudget.Hop rootHop = budget.reserveRoot(
+                measureDelivery(payload, Map.of(), executionGraphLimits));
         var state = new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
-                recorder, identity, identitySource, clock, budget);
+                recorder, identity, identitySource, clock, executionGraphLimits, budget);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock,
                 timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
             throw new IllegalStateException("Traversal " + traversalId + " is already running on this runner");
+        }
+        try {
+            behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
+                    security.tenantId(), processInstanceId), traversalId, executionOperationalPolicy);
+        } catch (RuntimeException refused) {
+            coordinators.remove(traversalId, coordinator);
+            rootHop.close();
+            throw refused;
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         monitor.executionStarted(identity);
@@ -1130,13 +1232,21 @@ public final class GraphRunner implements AutoCloseable {
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
         var state = new ExecutionState(processInstanceId, traversalId, node.id(),
                 new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
-                recorder.storedState(), budget);
+                recorder.storedState(), executionLimits, budget);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
                 joinSpecs, clock, timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
             resumedHop.close();
             return CompletableFuture.failedFuture(
                     new IllegalStateException("Traversal is already running on this runner"));
+        }
+        try {
+            behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
+                    security.tenantId(), processInstanceId), traversalId, operationalPolicy);
+        } catch (RuntimeException refused) {
+            coordinators.remove(traversalId, coordinator);
+            resumedHop.close();
+            return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         state.reentryStarted();
@@ -1186,7 +1296,8 @@ public final class GraphRunner implements AutoCloseable {
                     if (next.isEmpty() && !"continue".equals(result.outcome())) {
                         next = graph.nextEdges(node.id(), "continue");
                     }
-                    return dispatchSuccessors(next, node, result, measure(result), delivered, completedEventId,
+                    return dispatchSuccessors(next, node, result, measure(result, state.limits), delivered,
+                            completedEventId,
                             state, identity, coordinator, IterationContext.EMPTY);
                 }).thenCompose(next -> next.thenApply(ignored -> continued.effectSucceeded())))
                 .handle((succeeded, failure) -> {
@@ -1262,13 +1373,21 @@ public final class GraphRunner implements AutoCloseable {
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
         var state = new ExecutionState(processInstanceId, traversalId, node.id(),
                 new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
-                recorder.storedState(), budget);
+                recorder.storedState(), executionLimits, budget);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
                 joinSpecs, clock, timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
             resumedHop.close();
             return CompletableFuture.failedFuture(
                     new IllegalStateException("Traversal is already running on this runner"));
+        }
+        try {
+            behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
+                    security.tenantId(), processInstanceId), traversalId, operationalPolicy);
+        } catch (RuntimeException refused) {
+            coordinators.remove(traversalId, coordinator);
+            resumedHop.close();
+            return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         state.reentryStarted();
@@ -1293,8 +1412,8 @@ public final class GraphRunner implements AutoCloseable {
             next = graph.nextEdges(node.id(), "continue");
         }
         resumedHop.close();
-        long deliveredBytes = responseLimits == null ? measure(result)
-                : measureHumanTaskResult(result, responseLimits);
+        long deliveredBytes = responseLimits == null ? measure(result, state.limits)
+                : measureHumanTaskResult(result, responseLimits, state.limits);
         return dispatchSuccessors(next, node, result, deliveredBytes, delivered, completedEventId,
                 state, identity, coordinator, IterationContext.EMPTY)
                 .handle((ignored, failure) -> {
@@ -1403,13 +1522,22 @@ public final class GraphRunner implements AutoCloseable {
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
         var state = new ExecutionState(processInstanceId, traversalId, held.ingressNodeId(),
-                new BranchLiveness(held.ingressNodeId()), recorder, identity, identitySource, clock, stored, budget);
+                new BranchLiveness(held.ingressNodeId()), recorder, identity, identitySource, clock,
+                stored, executionLimits, budget);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
                 joinSpecs, clock, timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
             resumedHop.close();
             return CompletableFuture.failedFuture(
                     new IllegalStateException("Traversal is already running on this runner"));
+        }
+        try {
+            behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
+                    security.tenantId(), processInstanceId), traversalId, operationalPolicy);
+        } catch (RuntimeException refused) {
+            coordinators.remove(traversalId, coordinator);
+            resumedHop.close();
+            return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         monitor.executionStarted(identity);
@@ -1491,7 +1619,8 @@ public final class GraphRunner implements AutoCloseable {
         traversalAdmission.release(traversalId);
         CompletionStage<Void> joins = coordinator.terminate().exceptionally(ignored -> null);
         CompletionStage<Void> actors = releaseTraversalInstances(traversalId);
-        return CompletableFuture.allOf(joins.toCompletableFuture(), actors.toCompletableFuture());
+        return CompletableFuture.allOf(joins.toCompletableFuture(), actors.toCompletableFuture())
+                .whenComplete((ignored, failure) -> behaviors.releaseOperationalPolicy(traversalId));
     }
 
     /** Exact trusted counters captured while the supplied invocation is live. */
@@ -2454,7 +2583,7 @@ public final class GraphRunner implements AutoCloseable {
         var admissionKey = new TraversalAdmissionRegistry.Key(identity.security().tenantId(),
                 identity.deploymentId(), identity.graphVersion(), identity.traversalId(), node.id());
         return traversalAdmission.acquire(admissionKey, definition.maxConcurrency(),
-                        executionLimits.maxLiveActorsPerTraversal(), executionLimits.maxQueuedAdmissionsPerNode())
+                        state.limits.maxLiveActorsPerTraversal(), state.limits.maxQueuedAdmissionsPerNode())
                 .thenCompose(lease -> runAdmitted(node, payload, attributes, parentInvocationIds, command,
                         causedBy, state, identity, coordinator, iteration, definition, lease, hop)
                         .whenComplete((ignored, error) -> lease.close()))
@@ -2666,7 +2795,7 @@ public final class GraphRunner implements AutoCloseable {
                             try {
                                 committed = state.retryScheduled(invocationId, attemptId, nextAttempt,
                                         startedEventId, !parentInvocationIds.isEmpty(),
-                                        measureDelivery(payload, attributes));
+                                        measureDelivery(payload, attributes, state.limits));
                             } catch (GraphExecutionLimitException refused) {
                                 state.nodeFailed(invocationId, attemptId, startedEventId);
                                 monitor.nodeFailed(identity, node.id(), invocationId, attemptId, refused,
@@ -2729,7 +2858,7 @@ public final class GraphRunner implements AutoCloseable {
                         routedAttributes.keySet().removeIf(SyntheticProvenance::isProvenanceKey);
                         NodeResult routed = new NodeResult(GraphEdge.DEFAULT_OUTCOME, failurePayload,
                                 routedAttributes);
-                        return NodeOutcome.failedRouted(routed, failureRoute, measure(routed));
+                        return NodeOutcome.failedRouted(routed, failureRoute, measure(routed, state.limits));
                     }
                     // Two bypasses, one flag: the traversal imposed one (sticky command / test mode),
                     // or the author switched this single node off. Everything downstream of
@@ -2748,7 +2877,7 @@ public final class GraphRunner implements AutoCloseable {
                     long routedBytes;
                     try {
                         routed = markSyntheticProvenance(node, delivered, result);
-                        routedBytes = measure(routed);
+                        routedBytes = measure(routed, state.limits);
                     } catch (RuntimeException rejectedOutput) {
                         state.nodeFailed(invocationId, attemptId, startedEventId);
                         monitor.nodeFailed(identity, node.id(), invocationId, attemptId, rejectedOutput,
@@ -3028,8 +3157,8 @@ public final class GraphRunner implements AutoCloseable {
                     // Creating one here would leak it, because the traversal that would have removed
                     // it has already ended. See TraversalAdmissionRegistry.reacquire.
                     return traversalAdmission.reacquire(admissionKey, definition.maxConcurrency(),
-                                    executionLimits.maxLiveActorsPerTraversal(),
-                                    executionLimits.maxQueuedAdmissionsPerNode())
+                                    state.limits.maxLiveActorsPerTraversal(),
+                                    state.limits.maxQueuedAdmissionsPerNode())
                             .thenCompose(lease -> {
                                 // The RUNNING commit is the gate, and its refusal is read rather than
                                 // anticipated. Asking `terminated()` first and then committing was two
@@ -3353,40 +3482,41 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /** Validates one routed value and returns the bytes charged to amplification accounting. */
-    private long measure(NodeResult result) {
+    private long measure(NodeResult result, GraphExecutionLimits limits) {
         java.util.Objects.requireNonNull(result, "node result");
-        return measureDelivery(result.payload(), result.attributes());
+        return measureDelivery(result.payload(), result.attributes(), limits);
     }
 
-    private long measureDelivery(Object payload, Map<String, Object> attributes) {
+    private long measureDelivery(Object payload, Map<String, Object> attributes, GraphExecutionLimits limits) {
         try {
-            return Math.addExact(measure(payload), measure(attributes));
+            return Math.addExact(measure(payload, limits), measure(attributes, limits));
         } catch (ArithmeticException overflow) {
             throw new GraphExecutionLimitException(GraphExecutionLimitException.Reason.PAYLOAD_BYTES,
-                    Long.MAX_VALUE, executionLimits.maxCumulativePayloadBytes());
+                    Long.MAX_VALUE, limits.maxCumulativePayloadBytes());
         }
     }
 
     private long measureHumanTaskResult(NodeResult result,
-                                        ai.ravenroot.api.payload.PayloadLimits responseLimits) {
+                                        ai.ravenroot.api.payload.PayloadLimits responseLimits,
+                                        GraphExecutionLimits limits) {
         if (!(result.payload() instanceof Map<?, ?> body) || !body.containsKey("response")) {
-            return measure(result);
+            return measure(result, limits);
         }
         var metadata = new LinkedHashMap<Object, Object>(body);
         Object response = metadata.remove("response");
         try {
             long responseBytes = responseLimits.enforceAndMeasure(response);
-            long metadataBytes = executionLimits.payload().enforceAndMeasure(metadata);
-            long attributesBytes = executionLimits.payload().enforceAndMeasure(result.attributes());
+            long metadataBytes = limits.payload().enforceAndMeasure(metadata);
+            long attributesBytes = limits.payload().enforceAndMeasure(result.attributes());
             return Math.addExact(responseBytes, Math.addExact(metadataBytes, attributesBytes));
         } catch (ArithmeticException overflow) {
             throw new GraphExecutionLimitException(GraphExecutionLimitException.Reason.PAYLOAD_BYTES,
-                    Long.MAX_VALUE, executionLimits.maxCumulativePayloadBytes());
+                    Long.MAX_VALUE, limits.maxCumulativePayloadBytes());
         }
     }
 
-    private long measure(Object value) {
-        return executionLimits.payload().enforceAndMeasure(value);
+    private long measure(Object value, GraphExecutionLimits limits) {
+        return limits.payload().enforceAndMeasure(value);
     }
 
     /**
@@ -4741,6 +4871,7 @@ public final class GraphRunner implements AutoCloseable {
         private final ExecutionMonitor.ExecutionIdentity identity;
         private final ExecutionIdentitySource identitySource;
         private final Clock clock;
+        private final GraphExecutionLimits limits;
         private final ExecutionBudget budget;
         /**
          * The traversal-accepted event, minted with the traversal and published with the first batch
@@ -5000,13 +5131,14 @@ public final class GraphRunner implements AutoCloseable {
                                BranchLiveness liveness, ExecutionRecorder recorder,
                                ExecutionMonitor.ExecutionIdentity identity,
                                ExecutionIdentitySource identitySource, Clock clock,
-                               ExecutionBudget budget) {
+                               GraphExecutionLimits limits, ExecutionBudget budget) {
             this.traversalId = traversalId;
             this.recorder = recorder;
             this.liveness = liveness;
             this.identity = identity;
             this.identitySource = identitySource;
             this.clock = clock;
+            this.limits = java.util.Objects.requireNonNull(limits, "limits");
             this.budget = java.util.Objects.requireNonNull(budget, "budget");
             this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
             lifecycle = new ProcessInstance(processInstanceId, ProcessInstanceStatus.ACCEPTED, Map.of())
@@ -5019,13 +5151,15 @@ public final class GraphRunner implements AutoCloseable {
                                BranchLiveness liveness, ExecutionRecorder recorder,
                                ExecutionMonitor.ExecutionIdentity identity,
                                ExecutionIdentitySource identitySource, Clock clock,
-                               ProcessInstance storedLifecycle, ExecutionBudget budget) {
+                               ProcessInstance storedLifecycle, GraphExecutionLimits limits,
+                               ExecutionBudget budget) {
             this.traversalId = traversalId;
             this.recorder = recorder;
             this.liveness = liveness;
             this.identity = identity;
             this.identitySource = identitySource;
             this.clock = clock;
+            this.limits = java.util.Objects.requireNonNull(limits, "limits");
             this.budget = java.util.Objects.requireNonNull(budget, "budget");
             this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
             this.lifecycle = java.util.Objects.requireNonNull(storedLifecycle, "storedLifecycle");

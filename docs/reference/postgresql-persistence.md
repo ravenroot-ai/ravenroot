@@ -26,6 +26,7 @@ exists to prevent.
 | `RAVENROOT_EXECUTION_STORE_PASSWORD` | unset | Never logged, never trimmed, and never rendered by any diagnostic. |
 | `RAVENROOT_EXECUTION_STORE_POOL_SIZE` | `10` | Connections this replica may hold. See the pool sizing section. |
 | `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | `10000` | How long a caller waits for a connection. Must stay below the statement timeout, so that waiting for a connection is distinguishable from waiting on a lock. |
+| `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | `3` | Positive number of attempts used to repair a write-once manifest pin that loses a race with concurrent removal. PostgreSQL only. |
 | `RAVENROOT_WORKER_ID` | the host name | The replica half of the identity every lease is taken under. |
 | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | `30` | How long a replica's claim on an execution outlives its last renewal. Bounded by what the store publishes and required to exceed the clock-skew budget. |
 
@@ -133,6 +134,13 @@ concurrent start into a failure.
 Transactions that PostgreSQL aborts with a serialization failure or a deadlock are retried inside the
 adapter, a bounded number of times, and then reported as unavailability. A retry is safe because a
 retried transaction re-reads the state it decides on.
+
+Execution-manifest pinning has a separate lost-race bound. If a concurrent reclamation removes the
+row after the pinning transaction loses its insert race, the adapter retries the write-once decision
+up to `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` times. This value does not control transaction
+serialization retries, node attempts, or recovery delivery attempts. It applies only when
+`RAVENROOT_EXECUTION_STORE=postgresql`; setting it with another store selector refuses startup rather
+than being ignored.
 
 ## Schema migration
 

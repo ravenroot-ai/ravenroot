@@ -1,11 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "auth", "executionRuntime", "executionStore", "graph", "assistant", "rateLimit"],
+  "additionalProperties": false,
+  "required": ["replicaCount", "image", "service", "auth", "engine", "executionRuntime", "executionStore", "graph", "humanTask", "assistant", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
+    "programTimeoutMs": {
+      "x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
+      "oneOf": [{ "type": "integer", "minimum": 100, "maximum": 300000 }, { "$ref": "#/definitions/graphBlank" }]
+    },
     "image": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["repository", "tag", "digest", "pullPolicy"],
       "properties": {
         "repository": { "type": "string", "minLength": 1 },
@@ -16,13 +22,24 @@
     },
     "auth": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["issuer", "audience", "jwksUri"],
       "properties": {
-        "issuer": { "type": "string", "minLength": 1 },
-        "audience": { "type": "string", "minLength": 1 },
-        "jwksUri": { "type": "string", "minLength": 1 }
+        "issuer": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" },
+        "audience": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" },
+        "jwksUri": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" }
       }
     },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "port"],
+      "properties": {
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "engine": { "type": "string", "enum": ["pekko"] },
     "executionRuntime": {
       "type": "object",
       "additionalProperties": false,
@@ -368,19 +385,116 @@
     },
     "persistence": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["accessModes", "size", "storageClass"],
       "properties": {
         "accessModes": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
           "items": { "type": "string", "enum": ["ReadWriteOnce"] }
         },
-        "size": { "type": "string", "minLength": 1 },
+        "size": { "$ref": "#/definitions/kubernetesPositiveQuantity" },
         "storageClass": { "type": "string" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": { "$ref": "#/definitions/resourceRequirements" },
+        "limits": { "$ref": "#/definitions/resourceRequirements" }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runAsNonRoot", "fsGroup", "fsGroupChangePolicy", "seccompProfile"],
+      "properties": {
+        "runAsNonRoot": { "type": "boolean" },
+        "fsGroup": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "fsGroupChangePolicy": { "type": "string", "enum": ["Always", "OnRootMismatch"] },
+        "seccompProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "type": "string", "enum": ["RuntimeDefault"] }
+          }
+        }
+      }
+    },
+    "securityContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowPrivilegeEscalation", "readOnlyRootFilesystem", "capabilities", "runAsUser", "runAsGroup"],
+      "properties": {
+        "allowPrivilegeEscalation": { "type": "boolean" },
+        "readOnlyRootFilesystem": { "type": "boolean" },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["drop"],
+          "properties": {
+            "drop": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "enum": ["ALL"] }
+            }
+          }
+        },
+        "runAsUser": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "runAsGroup": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["readiness", "liveness"],
+      "properties": {
+        "readiness": { "$ref": "#/definitions/httpProbeTiming" },
+        "liveness": { "$ref": "#/definitions/httpProbeTiming" }
+      }
+    },
+    "tmpfs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sizeLimit"],
+      "properties": {
+        "sizeLimit": { "$ref": "#/definitions/kubernetesPositiveQuantity" }
       }
     }
   },
   "definitions": {
+    "kubernetesNonNegativeQuantity": {
+      "type": "string",
+      "pattern": "^\\+?(?:(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+    },
+    "kubernetesPositiveQuantity": {
+      "type": "string",
+      "pattern": "^\\+?(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+    },
+    "resourceRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory"],
+      "properties": {
+        "cpu": { "$ref": "#/definitions/kubernetesNonNegativeQuantity" },
+        "memory": { "$ref": "#/definitions/kubernetesNonNegativeQuantity" }
+      }
+    },
+    "httpProbeTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["initialDelaySeconds", "periodSeconds"],
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "periodSeconds": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+      }
+    },
     "graphBlank": { "type": "string", "pattern": "^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000]*$" },
     "humanTaskBlank": { "type": "string", "pattern": "^[\u0009-\u000D\u001C-\u0020\u00A0\u1680\u2000-\u200A\u2028-\u2029\u202F\u205F\u3000]*$" },
     "positiveInt64MiB": {

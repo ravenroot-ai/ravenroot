@@ -211,6 +211,13 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_ARTIFACT_DUAL_CONTROL` | strict Boolean `false` | `true` requires a second approval authority |
 | `RAVENROOT_ARTIFACT_PROVENANCE` | `refusing` | `unverified` is an explicit unsafe-development opt-out; other values refuse |
 
+The Java baseline for `RAVENROOT_PROGRAM_TIMEOUT_MS` is `5000` ms. The Helm chart deliberately sets
+`programTimeoutMs: 15000` as its F30 cold-start bridge, while Compose uses a `30000` ms local-development
+profile. Helm validates configured integers from `100` through `300000`; an explicit blank Helm overlay
+delegates to the Java baseline. The program deadline participates in the execution compatibility
+fingerprint, so retain `15000` explicitly when work must keep the Helm profile rather than assuming a
+changed deadline can resume it.
+
 Allowed hosts and allowed agent tools are operator allowlists. Empty or absent privileged configuration does not expand access.
 
 ## Agent authority and budgets

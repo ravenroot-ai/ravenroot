@@ -118,7 +118,10 @@ def job_blocks(contents: str) -> dict[str, str]:
     """Return top-level job blocks without adding a YAML dependency to repository tooling."""
     jobs_marker = contents.index("\njobs:\n") + len("\njobs:\n")
     body = contents[jobs_marker:]
-    matches = list(re.finditer(r"(?m)^  ([a-z0-9-]+):\n", body))
+    # GitHub accepts `_` and uppercase in a job id. Matching less than GitHub does would let a
+    # job exist that this gate cannot see, and an unobservable job is how the gate goes green
+    # over work that never ran.
+    matches = list(re.finditer(r"(?m)^  ([A-Za-z0-9_-]+):\n", body))
     return {
         match.group(1): body[
             match.start() : matches[index + 1].start() if index + 1 < len(matches) else None
@@ -138,7 +141,7 @@ def declared_needs(block: str) -> set[str]:
         if line == "    needs:":
             needs: set[str] = set()
             for candidate in lines[index + 1 :]:
-                match = re.fullmatch(r"      - ([a-z0-9-]+)", candidate)
+                match = re.fullmatch(r"      - ([A-Za-z0-9_-]+)", candidate)
                 if not match:
                     break
                 needs.add(match.group(1))

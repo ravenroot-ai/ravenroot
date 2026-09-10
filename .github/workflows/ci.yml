@@ -269,6 +269,12 @@ jobs:
           python3 scripts/check_argline.py
       - name: Validate the Compose definition
         run: docker compose --file compose.yaml config --quiet
+      # `docker compose config` proves the file parses, not that it is wired correctly. The sandbox
+      # supervisor is three facts across two files, and a broken one leaves every validate returning
+      # 501 with a Compose file that is still perfectly valid. `fast-support-build` carried this
+      # assertion through `./dev.sh setup`; it moves here rather than disappearing with that job.
+      - name: Verify the sandbox supervisor wiring
+        run: ./dev.sh verify-supervisor
       - name: Check whitespace
         run: git diff --check HEAD^
 

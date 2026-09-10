@@ -6,6 +6,7 @@ import unittest
 
 from scripts.ci_required import (
     CLASSIFICATION_JOB,
+    job_blocks,
     E2E_SHARDS,
     GATED_JOBS,
     GATE_JOB,
@@ -161,11 +162,41 @@ class VerifyWorkflowTest(unittest.TestCase):
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("shard" in problem for problem in verify_workflow(broken)))
 
+    def test_a_job_id_github_accepts_but_the_parser_misses_is_refused(self) -> None:
+        """An unobservable job is the same defect as a skipped one: the gate goes green over nothing.
+
+        GitHub allows `_` and uppercase in a job identifier. A parser matching less than GitHub does
+        would let such a job be added to `ci.yml`, stay out of the gate's `needs`, and fail while
+        `ci-required` reported success.
+        """
+        for job_id in ("full_new_check", "fullNewCheck"):
+            with self.subTest(job_id=job_id):
+                broken = self.contents + (
+                    f"\n  {job_id}:\n"
+                    f"    name: {job_id}\n"
+                    "    runs-on: ubuntu-24.04\n"
+                    "    steps:\n"
+                    "      - run: exit 1\n"
+                )
+                problems = verify_workflow(broken)
+                self.assertTrue(
+                    any(job_id in problem for problem in problems),
+                    f"{job_id} is invisible to the gate: {problems}",
+                )
+
+    def test_the_supervisor_wiring_is_asserted_by_a_job_the_full_tier_requires(self) -> None:
+        """`fast-support-build` carried this through `./dev.sh setup`; it had to move, not vanish."""
+        block = job_blocks(self.contents)["full-source-policy"]
+        self.assertIn("./dev.sh verify-supervisor", block)
+        self.assertIn("full-source-policy", REQUIRED_BY_TIER["full"])
+
     def test_the_fast_tier_is_gone_rather_than_unreachable(self) -> None:
+        """The jobs and the tier are gone. Naming a retired job in a comment is not a survival."""
         self.assertNotIn("'fast'", self.contents)
-        self.assertNotIn("fast-product-build", self.contents)
-        self.assertNotIn("fast-support-build", self.contents)
-        self.assertNotIn("fast-tooling-contracts", self.contents)
+        defined = set(job_blocks(self.contents))
+        for job in ("fast-product-build", "fast-support-build", "fast-tooling-contracts"):
+            with self.subTest(job=job):
+                self.assertNotIn(job, defined)
 
     def test_every_gated_job_belongs_to_exactly_one_class(self) -> None:
         self.assertEqual(set(POLICY_JOBS) & set(PRODUCT_JOBS), set())

@@ -160,10 +160,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
             self.assertEqual(53, len(details))
             self.assertEqual(
-                {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54},
+                {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(508, len(entries))
+            self.assertEqual(515, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -193,7 +193,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     self.assertTrue(any("exact candidate-specific authorities" in error
                                         for error in errors), errors)
             wrong_subset = copy.deepcopy(authority)
-            wrong_subset["publishedBoundClauses"]["oc-68d83961ae8fd9333d39"] = [
+            wrong_subset["publishedBoundClauses"][next(iter(audit.ROUTE_BOUND_CANDIDATES))] = [
                 "StableEdgeId.MAX_UTF8_BYTES", "StableEdgeId.SSE_FRAME_MAX_BYTES",
             ]
             errors = self.route_table_errors(root, wrong_subset, entries, candidates)
@@ -616,8 +616,29 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 retainedAuthority=audit.ROUTE_TABLE_AUTHORITY_ID,
             )
             errors = audit.inventory_errors(root, document, audit.discover(root))
-            self.assertTrue(any("published-contract-description requires the closed RouteTable authority"
+            self.assertTrue(any("published-contract-description requires a closed publication authority"
                                 in error for error in errors), errors)
+
+    def test_environment_reference_publication_authority_has_source_derived_membership(self) -> None:
+        candidates = audit.discover(ROOT)
+        eligible = audit.environment_reference_description_candidate_ids(ROOT, candidates)
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        authorized = {entry["id"] for entry in document["entries"]
+                      if entry.get("retainedAuthority") ==
+                      audit.ENVIRONMENT_REFERENCE_AUTHORITY_ID}
+        self.assertEqual(authorized, authorized & eligible)
+
+        arbitrary = next(entry for entry in document["entries"]
+                         if entry.get("path") == audit.ENVIRONMENT_REFERENCE_PATH.as_posix()
+                         and entry["id"] not in eligible)
+        arbitrary.update(
+            status="retained", classification="published-contract-description",
+            rationale="Arbitrary text in the generator is not a published environment row.",
+            retainedAuthority=audit.ENVIRONMENT_REFERENCE_AUTHORITY_ID,
+        )
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        self.assertTrue(any("published-contract-description requires a closed publication authority"
+                            in error for error in errors), errors)
 
     def assistant_limit_authority_fixture(self, root: Path):
         paths = (
@@ -835,6 +856,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         selected = tuple(candidate for candidate in candidates.values() if candidate.id in entries)
         return ({
             "schemaVersion": audit.SCHEMA_VERSION,
+            "reconciliationRequired": False,
             "entries": [copy.deepcopy(entries[identifier]) for identifier in sorted(entries)],
             "retiredEntries": [], "migrationHistory": [],
             "evidenceRecords": {
@@ -1574,6 +1596,71 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         errors = audit.check(ROOT, require_complete=False)
         self.assertEqual([], errors, "\n".join(errors[:20]))
 
+    def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        owners = document["remediationDomains"]["settingOwners"]
+        self.assertEqual(28, len(owners))
+        self.assertEqual(len(owners), len({item["setting"] for item in owners}))
+        self.assertEqual(
+            28,
+            sum(domain["confirmedUnresolvedOperatorSettings"]
+                for domain in document["remediationDomains"]["domains"]),
+        )
+        self.assertEqual(
+            "#318",
+            next(item["issue"] for item in owners
+                 if item["setting"] == "execution.lease-ttl"),
+        )
+        lease_rows = [entry for entry in document["entries"]
+                      if entry.get("setting") == "execution.lease-ttl"]
+        self.assertEqual({"#318"}, {entry["followUp"] for entry in lease_rows})
+        unresolved_rows = [entry for entry in document["entries"]
+                           if entry.get("authorityStatus") == "unresolved"]
+        self.assertEqual(28, len({entry["setting"] for entry in unresolved_rows}))
+        self.assertTrue(all(entry.get("sourceFact") for entry in unresolved_rows))
+        self.assertFalse(any(str(entry["default"]).startswith("Current internal source value:")
+                             for entry in unresolved_rows))
+
+        missing = copy.deepcopy(document)
+        del missing["remediationDomains"]
+        self.assertTrue(any("requires a remediation domain map" in error
+                            for error in audit.remediation_domain_errors(missing)))
+        duplicate = copy.deepcopy(document)
+        duplicate["remediationDomains"]["settingOwners"].append(
+            copy.deepcopy(duplicate["remediationDomains"]["settingOwners"][0]))
+        self.assertTrue(any("duplicate setting ownership" in error
+                            for error in audit.remediation_domain_errors(duplicate)))
+        split = copy.deepcopy(document)
+        next(entry for entry in split["entries"]
+             if entry.get("setting") == "execution.lease-ttl")["followUp"] = "#321"
+        self.assertTrue(any("requires one follow-up owner" in error
+                            for error in audit.remediation_domain_errors(split)))
+
+        delimiter = next(entry for entry in document["entries"]
+                         if entry["id"] == "oc-7f698b1972e9090b6f1b")
+        self.assertEqual("protocol-or-format-invariant", delimiter["classification"])
+        self.assertIn("CR/LF", delimiter["rationale"])
+
+        postgres_defaults = {
+            "postgres.lock-timeout": "5 seconds.",
+            "postgres.statement-timeout": "30 seconds.",
+            "postgres.serialization-retries": "3 retries.",
+            "postgres.max-lease-ttl": "5 minutes.",
+            "postgres.max-payload-bytes": "1,048,576 bytes (1,024 × 1,024).",
+            "postgres.max-clock-skew": "5 seconds.",
+            "postgres.journal-retention": "24 hours.",
+            "postgres.max-inventory-page-size": "100 rows.",
+            "postgres.terminal-retention": "7 days.",
+            "postgres.execution-result-retention": "7 days.",
+        }
+        for setting, expected in postgres_defaults.items():
+            with self.subTest(postgres_default=setting):
+                rows = [entry for entry in document["entries"]
+                        if entry.get("setting") == setting]
+                self.assertTrue(rows)
+                self.assertEqual({expected}, {entry["default"] for entry in rows})
+                self.assertTrue(all(entry.get("sourceFact") for entry in rows))
+
     def test_default_completion_gate_rejects_pending_review(self) -> None:
         errors = audit.check(ROOT)
         self.assertTrue(any("audit is incomplete" in error and "pending-review" in error
@@ -1593,7 +1680,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             (root / "docs/architecture/operational-configuration-audit.md").write_text(
                 audit.render_report(document), encoding="utf-8")
             errors = audit.check(root, inventory,
-                                 root / "docs/architecture/operational-configuration-audit.md")
+                                 root / "docs/architecture/operational-configuration-audit.md",
+                                 allow_unreconciled=True)
         self.assertTrue(any("audit is incomplete" in error and "1 deferred" in error
                             for error in errors), errors)
 
@@ -2045,6 +2133,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def graph_limit_inventory_document(self, authorities, entries, candidates):
         return {
             "schemaVersion": audit.SCHEMA_VERSION,
+            "reconciliationRequired": False,
             "entries": [copy.deepcopy(entries[identifier]) for identifier in sorted(entries)],
             "retiredEntries": [], "migrationHistory": [],
             "evidenceRecords": {
@@ -2300,7 +2389,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 341 |",
+                "| Retained published contract descriptions | 348 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -2308,7 +2397,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 340 |",
+                "| Retained published contract descriptions | 347 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -2324,7 +2413,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "}\n", "  static final int WORKER_CAPACITY = 37;\n}\n"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("unclassified operational candidate" in error and "WORKER_CAPACITY" in error
                             for error in errors), errors)
 
@@ -2336,7 +2425,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "}\n", "  Object value() { return java.time.Duration.ofSeconds(37); }\n}\n"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("unclassified operational candidate" in error and "ofSeconds(37)" in error
                             for error in errors), errors)
 
@@ -2439,7 +2528,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                          if candidate.role == "timeunit-get")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
             source.write_text(source.read_text(encoding="utf-8").replace(
                 "future.get(37,", "future.get(38,"), encoding="utf-8")
             second = next(candidate for candidate in audit.discover(root)
@@ -2457,7 +2546,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "WAIT_TIMEOUT=${RAVENROOT_WAIT_TIMEOUT:-37}\nsleep 37\n", encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("service.sh" in error and "RAVENROOT_WAIT_TIMEOUT" in error
                             for error in errors), errors)
 
@@ -2468,7 +2557,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "FROM scratch\nUSER 12345:12345\nEXPOSE 31337\n", encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("container-directive" in error and "12345" in error for error in errors), errors)
         self.assertTrue(any("container-directive" in error and "31337" in error for error in errors), errors)
 
@@ -2480,7 +2569,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "}\n", "  Object value() { return new RetryPolicy(7); }\n}\n"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("inline-operational-call" in error and "7" in error for error in errors), errors)
 
     def test_environment_binding_is_discovered_without_default_or_operational_name(self) -> None:
@@ -2492,7 +2581,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("environment-binding" in error and "RAVENROOT_RUNTIME_INSTANCE" in error
                             for error in errors), errors)
 
@@ -2517,7 +2606,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             source.write_text(source.read_text(encoding="utf-8").replace("1 << 4", "1 + 4"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("unclassified operational candidate" in error for error in errors), errors)
         self.assertTrue(any("stale inventory entry" in error for error in errors), errors)
 
@@ -2540,7 +2629,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root = Path(location)
             classify_non_pending(root)
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
-                                 root / "docs/architecture/operational-configuration-audit.md")
+                                 root / "docs/architecture/operational-configuration-audit.md",
+                                 allow_unreconciled=True)
             document = json.loads((root / "scripts/operational-configuration-inventory.json")
                                   .read_text(encoding="utf-8"))
         self.assertEqual([], errors)
@@ -2712,7 +2802,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
             report = root / "docs/architecture/operational-configuration-audit.md"
             report.write_text(audit.render_report(document), encoding="utf-8")
-            errors = audit.check(root, inventory, report)
+            errors = audit.check(root, inventory, report, allow_unreconciled=True)
         self.assertTrue(any("confirmed-hardcoded" in error for error in errors), errors)
 
     def test_converted_setting_requires_resolvable_source_revisions(self) -> None:
@@ -2758,6 +2848,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_migration_history_rejects_unsafe_revision_or_source_path_before_git(self) -> None:
         base = {
             "schemaVersion": audit.SCHEMA_VERSION,
+            "reconciliationRequired": False,
             "entries": [],
             "retiredEntries": [],
             "evidenceRecords": {},
@@ -2880,6 +2971,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ).stdout.strip()
             document = {
                 "schemaVersion": audit.SCHEMA_VERSION,
+                "reconciliationRequired": False,
                 "entries": [],
                 "retiredEntries": [],
                 "evidenceRecords": {},
@@ -3723,8 +3815,17 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             refused, plan = audit.refresh_inventory(
                 root, inventory, root / "docs/architecture/operational-configuration-audit.md",
             )
-            self.assertTrue(any("--accept-retired-pending" in error for error in refused), refused)
+            self.assertTrue(any("retirement.approved=true" in error for error in refused), refused)
             self.assertGreaterEqual(plan["added"], 1)
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            current_ids = {candidate.id for candidate in audit.discover(root)}
+            for entry in document["entries"]:
+                if entry["id"] not in current_ids:
+                    entry["retirement"] = {
+                        "approved": True,
+                        "rationale": f"Reviewed source replacement for {entry['id']}.",
+                    }
+            inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
             accepted, summary = audit.refresh_inventory(
                 root, inventory, root / "docs/architecture/operational-configuration-audit.md",
                 accept_retired_pending=True,
@@ -3734,6 +3835,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(plan["added"], summary["added"])
         self.assertEqual(plan["retired"], summary["retired"])
         self.assertEqual(summary["retired"], len(document["retiredEntries"]))
+        self.assertTrue(all(entry["retirementRationale"].startswith("Reviewed source replacement")
+                            for entry in document["retiredEntries"]))
 
     def test_refresh_requires_per_entry_rationale_before_retiring_reviewed_candidate(self) -> None:
         with synthetic_repository() as location:
@@ -3760,6 +3863,257 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(1, summary["retired"])
         self.assertEqual("Wire version advanced by reviewed protocol change.",
                          refreshed["retiredEntries"][0]["retirementRationale"])
+
+    def test_reconciliation_requires_complete_approved_source_backed_partitions(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            inventory.parent.mkdir(parents=True)
+            old_entry = {
+                "id": "oc-old", "path": "runtime/Policy.java", "line": 1,
+                "symbol": "Policy", "kind": "fixed-declaration", "role": "TOKEN",
+                "expression": '"v1"', "expressionDigest": audit.hashlib.sha256(b'"v1"').hexdigest(),
+                "evidenceDigest": audit.hashlib.sha256(b"old evidence").hexdigest(),
+                "surface": "java", "status": "retained",
+                "classification": "protocol-or-format-invariant",
+                "rationale": "Stable protocol token.",
+            }
+            source_document = {
+                "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+                "entries": [old_entry],
+                "retiredEntries": [{
+                    "id": "oc-legacy-retired", "retirementRationale": "Earlier approved removal.",
+                }],
+                "migrationHistory": [{
+                    "fromSchema": 3, "toSchema": 4, "sourceRevision": "a" * 40,
+                    "sourcePath": "scripts/operational-configuration-inventory.json",
+                    "sourceFileDigest": "b" * 64, "candidateCount": 1,
+                    "statusCounts": {"retained": 1}, "rationale": "Earlier schema migration.",
+                }],
+                "reconciliationHistory": [{
+                    "id": "earlier-reconciliation",
+                    "additions": [{"id": "oc-old"}],
+                }],
+                "evidenceRecords": {old_entry["evidenceDigest"]: "old evidence"},
+            }
+            inventory.write_text(json.dumps(source_document, indent=2) + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "scripts/operational-configuration-inventory.json"],
+                           cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "source inventory"],
+                           cwd=root, check=True)
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            source_raw = inventory.read_bytes()
+            candidate = audit.Candidate(
+                "oc-new", "runtime/Policy.java", 2, "Policy", "fixed-declaration", "TOKEN",
+                '"v1"', audit.hashlib.sha256(b'"v1"').hexdigest(), "new evidence",
+                audit.hashlib.sha256(b"new evidence").hexdigest(), "java",
+            )
+            plan = {
+                "id": "synthetic-reconciliation", "issue": "#315",
+                "sourceRevision": revision, "targetRevision": revision,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": audit.hashlib.sha256(source_raw).hexdigest(),
+                "targetCandidateDigest": audit.candidate_set_digest([candidate.id]),
+                "mappings": [{
+                    "fromId": "oc-old", "toId": "oc-new", "approved": True,
+                    "rationale": "The same source atom moved.",
+                    "equivalence": {
+                        "kind": "same-atom-v1",
+                        "beforeEvidenceDigest": old_entry["evidenceDigest"],
+                        "afterEvidenceDigest": candidate.evidence_digest,
+                    },
+                }],
+                "retirements": [], "additions": [],
+            }
+            self.assertEqual([], audit.reconciliation_plan_errors(
+                root, source_document, (candidate,), plan)[0])
+
+            partial = copy.deepcopy(plan)
+            partial["mappings"] = []
+            self.assertTrue(any("partition" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), partial)[0]))
+
+            refused = copy.deepcopy(plan)
+            refused["mappings"][0]["approved"] = False
+            self.assertTrue(any("row-level approval" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), refused)[0]))
+
+            arbitrary = copy.deepcopy(plan)
+            arbitrary["mappings"][0]["equivalence"]["beforeEvidenceDigest"] = "0" * 64
+            self.assertTrue(any("same source atom" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), arbitrary)[0]))
+
+            referenced = copy.deepcopy(source_document)
+            referenced["description"] = "oc-old"
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                _ignored, reference_errors = audit.apply_reconciliation(
+                    root, referenced, (candidate,), plan)
+            self.assertTrue(any("undeclared reference field" in error
+                                for error in reference_errors), reference_errors)
+
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                refreshed, errors = audit.apply_reconciliation(
+                    root, source_document, (candidate,), plan)
+            self.assertEqual([], errors)
+            self.assertIsNotNone(refreshed)
+            assert refreshed is not None
+            self.assertIs(refreshed["reconciliationRequired"], True)
+            active = refreshed["entries"][0]
+            self.assertEqual("Stable protocol token.", active["rationale"])
+            self.assertEqual({"history": plan["id"], "fromId": "oc-old"},
+                             active["identityMigration"])
+            self.assertEqual([], audit.reconciliation_history_errors(
+                root, refreshed, (candidate,)))
+
+            tampered = copy.deepcopy(refreshed)
+            tampered["reconciliationHistory"].insert(0, {"id": "forged-prior-record"})
+            self.assertTrue(any("append-only chain" in error for error in
+                                audit.reconciliation_history_errors(root, tampered, (candidate,))))
+
+            missing_retirement = copy.deepcopy(refreshed)
+            missing_retirement["retiredEntries"] = []
+            self.assertTrue(any("retiredEntries is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, missing_retirement, (candidate,))))
+
+            tampered_retirement = copy.deepcopy(refreshed)
+            tampered_retirement["retiredEntries"][0]["retirementRationale"] = "Changed later."
+            self.assertTrue(any("retiredEntries is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, tampered_retirement, (candidate,))))
+
+            missing_migration = copy.deepcopy(refreshed)
+            missing_migration["migrationHistory"] = []
+            self.assertTrue(any("migrationHistory is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, missing_migration, (candidate,))))
+
+            tampered_migration = copy.deepcopy(refreshed)
+            tampered_migration["migrationHistory"][0]["rationale"] = "Changed later."
+            self.assertTrue(any("migrationHistory is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, tampered_migration, (candidate,))))
+
+            inventory.write_text(json.dumps(refreshed, indent=2) + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "scripts/operational-configuration-inventory.json"],
+                           cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "reconciled inventory"],
+                           cwd=root, check=True)
+            review_revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                             capture_output=True, text=True).stdout.strip()
+            reviewed = copy.deepcopy(refreshed)
+            before_metadata = audit.candidate_semantic_payload(reviewed["entries"][0])
+            after_metadata = copy.deepcopy(before_metadata)
+            after_metadata["rationale"] = "Approved later semantic evidence."
+            reviewed["entries"][0]["rationale"] = after_metadata["rationale"]
+            reviewed["semanticReviewHistory"] = [{
+                "candidateId": "oc-new", "approved": True,
+                "rationale": "Later review approved stronger evidence.",
+                "sourceRevision": review_revision,
+                "beforeMetadata": before_metadata, "afterMetadata": after_metadata,
+            }]
+            self.assertEqual([], audit.reconciliation_history_errors(
+                root, reviewed, (candidate,)))
+
+    def test_unresolved_operator_authority_stays_deferred_and_exact(self) -> None:
+        candidate = audit.Candidate(
+            "oc-unresolved", "runtime/Policy.java", 1, "Policy", "fixed-declaration",
+            "MAX_RETRIES", "3", audit.hashlib.sha256(b"3").hexdigest(),
+            "static final int MAX_RETRIES = 3;",
+            audit.hashlib.sha256(b"static final int MAX_RETRIES = 3;").hexdigest(), "java",
+        )
+        binding = audit.Candidate(
+            "oc-unresolved-binding", "runtime/Policy.java", 2, "Policy",
+            "environment-binding", "RAVENROOT_MAX_RETRIES", "RAVENROOT_MAX_RETRIES",
+            audit.hashlib.sha256(b"RAVENROOT_MAX_RETRIES").hexdigest(),
+            'String name = "RAVENROOT_MAX_RETRIES";',
+            audit.hashlib.sha256(b'String name = "RAVENROOT_MAX_RETRIES";').hexdigest(), "java",
+        )
+        shared = {
+            "status": "deferred", "classification": "operator-configurable",
+            "setting": "runtime.max-retries", "authorityStatus": "unresolved",
+            "prospectiveOwner": "runtime/Policy.java#Policy",
+            "unresolvedEvidence": "The literal exists without an operator binding.",
+            "bindings": ["RAVENROOT_MAX_RETRIES"],
+            "default": "3 attempts; RAVENROOT_MAX_RETRIES is the proposed binding.",
+            "defaultEvidence": [candidate.id, binding.id],
+            "validation": "No operator validation contract.",
+            "scope": "Runtime scope unresolved.", "pinning": "Pinning unresolved.",
+            "coverage": "Deployment coverage unresolved.", "followUp": "#318",
+            "rationale": "Operational retry policy lacks a complete authority.",
+        }
+        entry = {
+            **candidate.source_fields(), "status": "deferred",
+            **shared, "sourceFact": "Shipped default: 3 attempts.",
+        }
+        binding_entry = {
+            **binding.source_fields(), **shared,
+            "sourceFact": "Proposed environment binding: RAVENROOT_MAX_RETRIES.",
+        }
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": [entry, binding_entry], "retiredEntries": [], "migrationHistory": [],
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence,
+                binding.evidence_digest: binding.evidence,
+            },
+        }
+        def errors(value):
+            with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+                return audit.inventory_errors(ROOT, value, (candidate, binding))
+
+        self.assertEqual([], errors(document))
+        self.assertIn("in progress", audit.render_report(document))
+        self.assertEqual(
+            audit.render_report(document),
+            audit.render_report({**document, "entries": list(reversed(document["entries"]))}),
+        )
+        report = audit.render_report(document)
+        self.assertIn("Shipped default: 3 attempts.", report)
+        self.assertIn("Proposed environment binding: RAVENROOT_MAX_RETRIES.", report)
+
+        resolved = copy.deepcopy(document)
+        for item in resolved["entries"]:
+            item["status"] = "already-centralized"
+        self.assertTrue(any("must remain deferred" in error for error in
+                            errors(resolved)))
+
+        incomplete = copy.deepcopy(document)
+        incomplete["entries"][0]["defaultEvidence"] = ["oc-other"]
+        self.assertTrue(any("inconsistent unresolved configuration metadata" in error
+                            or "must equal its exact setting rows" in error for error in
+                            errors(incomplete)))
+
+        inconsistent = copy.deepcopy(document)
+        inconsistent["entries"][1]["default"] = "RAVENROOT_MAX_RETRIES"
+        self.assertTrue(any("inconsistent unresolved configuration metadata" in error
+                            for error in errors(inconsistent)))
+
+    def test_public_check_rejects_disabled_reconciliation_history(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            report = root / "docs/architecture/operational-configuration-audit.md"
+            inventory.parent.mkdir(parents=True)
+            report.parent.mkdir(parents=True)
+            document = {
+                "schemaVersion": audit.SCHEMA_VERSION,
+                "reconciliationRequired": False,
+                "reconciliationHistory": [],
+                "entries": [], "retiredEntries": [], "migrationHistory": [],
+                "evidenceRecords": {},
+            }
+            inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+            report.write_text(audit.render_report(document), encoding="utf-8")
+            errors = audit.check(root, inventory, report, require_complete=False)
+        self.assertTrue(any("requires reconciliationRequired=true" in error for error in errors), errors)
 
     def test_yaml_duplicate_default_removal_is_tied_to_exact_path_and_typed_default(self) -> None:
         with synthetic_repository() as location:

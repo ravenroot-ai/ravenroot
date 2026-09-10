@@ -101,7 +101,7 @@ class PostgresExecutionManifestStoreConcurrencyTest {
         List<PinnedNodePackage> packages = List.of(
                 new PinnedNodePackage("package-a", "a".repeat(64)),
                 new PinnedNodePackage("package-b", "b".repeat(64)));
-        return new ExecutionManifest(ExecutionManifest.CURRENT_FORMAT_VERSION, key,
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1, key,
                 new GraphContentId("c".repeat(64)),
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "c".repeat(64)),
                 profile, packages, EPOCH);

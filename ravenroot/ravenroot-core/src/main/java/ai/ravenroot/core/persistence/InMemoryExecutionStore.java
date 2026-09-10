@@ -1124,10 +1124,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return recordExecutionResult(result, maxPayloadBytes);
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
         return complete(() -> {
             requireCapability(StoreCapability.EXECUTION_RESULTS);
             Objects.requireNonNull(result, "result");
-            requireResultPayloadWithinLimit(result);
+            requireResultPayloadWithinLimit(result, resolvedMaximumPayloadBytes);
             DurableExecutionResult candidate = result.withRetainedUntil(
                     plusClamped(result.endedAt(), executionResultRetention));
             var lookup = new ResultKey(result.key().tenantId(), result.traversalId());
@@ -1229,11 +1235,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
-    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result, int maximumPayloadBytes) {
+        if (maximumPayloadBytes < 1) throw new IllegalArgumentException("maximumPayloadBytes must be positive");
         ExecutionResultPayload payload = result.payload();
-        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maxPayloadBytes) {
+        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maximumPayloadBytes) {
             throw new ExecutionStoreException(
-                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maxPayloadBytes));
+                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maximumPayloadBytes));
         }
         if (payload.state() == ResultPayloadState.EXPIRED) {
             throw new ExecutionStoreException(ExecutionStoreFailure.invalid(

@@ -13,6 +13,8 @@ import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.persistence.ResolvedRuntimeProfile;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.persistence.Retryability;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
@@ -186,6 +188,24 @@ public abstract class ExecutionManifestStoreContract {
         assertEquals(manifest.digest(), pinned.digest());
         assertEquals(EPOCH, pinned.committedAt());
         assertEquals(pinned.manifest(), await(store().load(key)).manifest());
+    }
+
+    @Test
+    final void aVersionTwoOperationalPolicySurvivesPinLoadAndReopen() {
+        ExecutionKey key = key(DEFAULT_TENANT);
+        PinnedNodePackage nodePackage = PinnedNodePackage.of("alpha.nodes", "1", "node-sdk-1");
+        ResolvedOperationalPolicy policy = operationalPolicy("alpha.nodes");
+        var profile = new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through",
+                "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
+        ExecutionManifest manifest = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_2, key,
+                new GraphContentId("a".repeat(64)),
+                new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
+                profile, List.of(nodePackage), EPOCH, policy);
+
+        await(store().pin(manifest));
+        assertEquals(policy, await(store().load(key)).manifest().operationalPolicy());
+        assumeCapability(StoreCapability.DURABLE);
+        assertEquals(manifest, await(reopen().load(key)).manifest());
     }
 
     @Test
@@ -494,11 +514,22 @@ public abstract class ExecutionManifestStoreContract {
                                               List<PinnedNodePackage> packages) {
         var profile = new ResolvedRuntimeProfile(1, 1, policy, "pass-through",
                 "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
-        return new ExecutionManifest(ExecutionManifest.CURRENT_FORMAT_VERSION, key,
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1, key,
                 new GraphContentId(contentSeed.repeat(64)),
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID,
                         contentSeed.repeat(64)),
                 profile, packages, EPOCH);
+    }
+
+    private static ResolvedOperationalPolicy operationalPolicy(String packageId) {
+        var graph = new ResolvedOperationalPolicy.GraphLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        var capacity = NodePackageEgressCapacityProfile.bounded(1, 2, 3, 4, 5, 5, 6,
+                java.time.Duration.ofSeconds(7), java.time.Duration.ofSeconds(8),
+                java.time.Duration.ofSeconds(7));
+        return new ResolvedOperationalPolicy(graph,
+                new ResolvedOperationalPolicy.ResultLimits(true, 10),
+                List.of(new ResolvedOperationalPolicy.PackageCapacity(packageId, capacity)));
     }
 
     private static ExecutionManifestStoreFailure failureOf(Runnable operation) {

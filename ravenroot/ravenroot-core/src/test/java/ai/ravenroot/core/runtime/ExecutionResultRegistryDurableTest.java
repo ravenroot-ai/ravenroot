@@ -42,7 +42,11 @@ class ExecutionResultRegistryDurableTest {
     private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
 
     private static InMemoryExecutionStore store(MutableClock clock) {
-        return new InMemoryExecutionStore(clock, Duration.ofMinutes(5), 1024 * 1024,
+        return store(clock, 1024 * 1024);
+    }
+
+    private static InMemoryExecutionStore store(MutableClock clock, int maximumPayloadBytes) {
+        return new InMemoryExecutionStore(clock, Duration.ofMinutes(5), maximumPayloadBytes,
                 Duration.ofSeconds(5), Duration.ofHours(1), Duration.ofHours(2), Duration.ofHours(1));
     }
 
@@ -119,6 +123,22 @@ class ExecutionResultRegistryDurableTest {
                     registry.lookup(new ExecutionResultRegistry.Key(TENANT, traversalId)));
             assertEquals(ResultPayloadState.WITHHELD, withheld.payloadState());
             assertEquals(ProcessInstanceStatus.COMPLETED, withheld.status());
+        }
+    }
+
+    @Test
+    void pinnedResultCapacityCanExceedTheStoreCurrentDefault() {
+        var clock = new MutableClock(START);
+        try (var store = store(clock, 8)) {
+            UUID traversalId = UUID.randomUUID();
+            ExecutionKey key = createInstance(store, traversalId);
+            DurableExecutionResult result = completed(key, traversalId, "retained-under-pin", 128);
+
+            DurableExecutionResults.of(store).record(result, 128);
+
+            DurableExecutionResult reloaded = store.loadExecutionResult(TENANT, traversalId)
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals(ResultPayloadState.RETAINED, reloaded.payload().state());
         }
     }
 

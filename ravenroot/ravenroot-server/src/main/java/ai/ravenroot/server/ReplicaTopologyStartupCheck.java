@@ -187,7 +187,8 @@ public final class ReplicaTopologyStartupCheck {
                 ExecutionStoreConfiguration.USER_VARIABLE,
                 ExecutionStoreConfiguration.PASSWORD_VARIABLE,
                 ExecutionStoreConfiguration.POOL_SIZE_VARIABLE,
-                ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE}) {
+                ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE,
+                ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE}) {
             if (isSet(environment, variable)) {
                 return variable;
             }

@@ -7,6 +7,9 @@ import ai.ravenroot.api.catalog.NodeCatalogSource;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
+import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.publication.PublicationAuditSink;
 import ai.ravenroot.api.publication.PublicationPolicyResolver;
 import ai.ravenroot.core.graph.GraphNode;
@@ -19,6 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Explicit behavior composition; no reflection and no dependency-injection container. */
 public final class BehaviorRegistry {
+    private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
+            "log", "delay", "human-task", "template", "json-parse", "cel-transform",
+            "cel-decision", "json-path", "boundary-guard");
     private final Map<String, NodeBehaviorFactory> factories = new ConcurrentHashMap<>();
     /**
      * The published catalog entry per behavior name, with runtime nature resolved once at
@@ -45,6 +51,12 @@ public final class BehaviorRegistry {
      * not the individual behavior.</p>
      */
     private final Map<String, PinnedNodePackage> nodePackageIdentities = new ConcurrentHashMap<>();
+    private final Map<String, RegisteredNodePackageBinding> nodePackageBindings = new ConcurrentHashMap<>();
+    private final Map<String, String> behaviorPackageIds = new ConcurrentHashMap<>();
+    private final Map<java.util.UUID, ActiveOperationalPolicy> activeOperationalPolicies =
+            new ConcurrentHashMap<>();
+    private java.util.Optional<ResolvedOperationalPolicy.BuiltInHttpCapacity> builtInHttpCapacity =
+            java.util.Optional.empty();
 
     public static BehaviorRegistry standard() {
         return standard(BehaviorEnvironment.safeDefaults());
@@ -81,8 +93,12 @@ public final class BehaviorRegistry {
                                             ai.ravenroot.core.humantask.HumanTaskService humanTasks,
                                             ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         var registry = new BehaviorRegistry();
+        ai.ravenroot.core.security.OutboundHttpPolicy http = environment.outboundHttpPolicy();
+        registry.builtInHttpCapacity = java.util.Optional.of(
+                new ResolvedOperationalPolicy.BuiltInHttpCapacity(http.maximumRequestBytes(),
+                        http.maximumResponseBytes(), http.maximumTimeout()));
         StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit,
-                        humanTasks, humanTaskPolicy)
+                        humanTasks, humanTaskPolicy, registry::operationalPolicyFor)
                 .forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
         return registry;
     }
@@ -135,12 +151,15 @@ public final class BehaviorRegistry {
     }
 
     BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId,
-                                            PinnedNodePackage pinned) {
+                                            PinnedNodePackage pinned,
+                                            java.util.Optional<NodePackageEgressCapacityProfile> capacity) {
         registerFactory(factory, NodeCatalogSource.bundle(packageId));
         // Recorded after the registration succeeds, so a refused behavior never leaves an identity
         // claiming a package contributed something it did not. The identity itself was built during
         // planning, so nothing about it can fail here.
         nodePackageIdentities.put(packageId, pinned);
+        nodePackageBindings.put(packageId, new RegisteredNodePackageBinding(pinned, capacity));
+        behaviorPackageIds.put(factory.descriptor().behavior(), packageId);
         return this;
     }
 
@@ -329,6 +348,129 @@ public final class BehaviorRegistry {
      */
     public List<PinnedNodePackage> nodePackageIdentities() {
         return nodePackageIdentities.values().stream().sorted().toList();
+    }
+
+    /** Returns the installed binding for one package identity. */
+    public java.util.Optional<RegisteredNodePackageBinding> nodePackageBinding(String packageId) {
+        return java.util.Optional.ofNullable(nodePackageBindings.get(packageId));
+    }
+
+    /**
+     * Resolves only packages referenced by the accepted graph. Built-ins and legacy application
+     * handlers have no package identity and therefore contribute no entry.
+     */
+    public List<RegisteredNodePackageBinding> nodePackageBindingsFor(
+            java.util.Collection<String> behaviorNames) {
+        var packageIds = new java.util.TreeSet<String>();
+        for (String behavior : behaviorNames) {
+            String packageId = behaviorPackageIds.get(behavior);
+            if (packageId != null) packageIds.add(packageId);
+        }
+        return packageIds.stream().map(nodePackageBindings::get).toList();
+    }
+
+    /**
+     * Whether trusted registration facts prove that every named behavior lacks managed egress.
+     * Core and unknown pass-through behaviors have no package service. An SDK package is safe only
+     * when its declared capacity explicitly says it has no managed egress; legacy application
+     * handlers remain unknown because they may have captured arbitrary services.
+     */
+    public boolean provesNoManagedEgress(java.util.Collection<String> behaviorNames) {
+        for (String behavior : java.util.Objects.requireNonNull(behaviorNames, "behaviorNames")) {
+            String packageId = behaviorPackageIds.get(behavior);
+            if (packageId != null) {
+                RegisteredNodePackageBinding binding = nodePackageBindings.get(packageId);
+                if (binding == null || binding.capacity().isEmpty()
+                        || binding.capacity().orElseThrow().limits().isPresent()) return false;
+                continue;
+            }
+            NodeCatalogSource source = catalogSources.get(behavior);
+            if (source != null && (source.origin() != NodeCatalogSource.Origin.CORE
+                    || !LEGACY_CORE_WITHOUT_EXTERNAL_IO.contains(behavior))) return false;
+        }
+        return true;
+    }
+
+    /** Returns the core HTTP capacity only when the accepted graph uses that behavior. */
+    public java.util.Optional<ResolvedOperationalPolicy.BuiltInHttpCapacity> builtInHttpCapacityFor(
+            java.util.Collection<String> behaviorNames) {
+        java.util.Objects.requireNonNull(behaviorNames, "behaviorNames");
+        return behaviorNames.contains("http-request") ? builtInHttpCapacity : java.util.Optional.empty();
+    }
+
+    /**
+     * Captures startup capacities for the explicit no-manifest embedding path. This value is bound
+     * to a traversal exactly like a manifest policy, so a missing or released binding still refuses.
+     */
+    ResolvedOperationalPolicy unpinnedOperationalPolicy(GraphExecutionLimits limits) {
+        java.util.Objects.requireNonNull(limits, "limits");
+        var packages = nodePackageBindings.values().stream()
+                .filter(binding -> binding.capacity().isPresent())
+                .map(binding -> new ResolvedOperationalPolicy.PackageCapacity(
+                        binding.identity().packageId(), binding.capacity().orElseThrow()))
+                .toList();
+        ai.ravenroot.core.graph.GraphMlLimits graphMl = limits.graphMl();
+        ai.ravenroot.api.payload.PayloadLimits payload = limits.payload();
+        var graph = new ResolvedOperationalPolicy.GraphLimits(
+                graphMl.maxBytes(), graphMl.maxNodes(), graphMl.maxEdges(), graphMl.maxProperties(),
+                graphMl.maxDepth(), graphMl.maxStringLength(), graphMl.maxKeys(), graphMl.maxElements(),
+                graphMl.maxAttributes(), graphMl.maxNamespaceDeclarations(), payload.maxEncodedBytes(),
+                payload.maxDepth(), payload.maxCollectionSize(), payload.maxValueCount(),
+                payload.maxTextLength(), payload.maxKeyLength(), limits.maxFanOut(),
+                limits.maxResidentActors(), limits.maxLiveActorsPerTraversal(),
+                limits.maxInFlightHopsPerTraversal(), limits.maxQueuedAdmissionsPerNode(),
+                limits.maxTraversalSteps(), limits.maxAmplifiedDeliveries(),
+                limits.maxCumulativePayloadBytes(), limits.maxRecoveryDeliveriesPerAttempt());
+        return new ResolvedOperationalPolicy(graph,
+                new ResolvedOperationalPolicy.ResultLimits(false, payload.maxEncodedBytes()),
+                builtInHttpCapacity, packages);
+    }
+
+    /** Binds core-resolved policy to one live traversal before its first node dispatch. */
+    void bindOperationalPolicy(ExecutionKey key, java.util.UUID traversalId,
+                               ResolvedOperationalPolicy policy) {
+        java.util.Objects.requireNonNull(key, "key");
+        java.util.Objects.requireNonNull(traversalId, "traversalId");
+        ActiveOperationalPolicy candidate = new ActiveOperationalPolicy(key, policy);
+        ActiveOperationalPolicy existing = activeOperationalPolicies.putIfAbsent(traversalId, candidate);
+        if (existing != null && !existing.equals(candidate)) {
+            throw new IllegalStateException("traversal operational policy is already bound");
+        }
+    }
+
+    /** Releases the active traversal binding after all node instances have stopped. */
+    void releaseOperationalPolicy(java.util.UUID traversalId) {
+        activeOperationalPolicies.remove(java.util.Objects.requireNonNull(traversalId, "traversalId"));
+    }
+
+    /**
+     * Resolves policy from core-retained execution state. The message supplies identity only and is
+     * never itself an authority for capacity values.
+     */
+    ResolvedOperationalPolicy operationalPolicyFor(ai.ravenroot.api.execution.NodeMessage message) {
+        java.util.Objects.requireNonNull(message, "message");
+        ActiveOperationalPolicy active = activeOperationalPolicies.get(message.traversalId());
+        ExecutionKey delivered = new ExecutionKey(message.tenantId(), message.processInstanceId());
+        if (active == null || !active.key().equals(delivered)) {
+            throw new ai.ravenroot.api.node.service.NodePackageServiceException(
+                    ai.ravenroot.api.node.service.NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
+        if (active.policy() == null) {
+            throw new ai.ravenroot.api.node.service.NodePackageServiceException(
+                    ai.ravenroot.api.node.service.NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
+        return active.policy();
+    }
+
+    private record ActiveOperationalPolicy(ExecutionKey key, ResolvedOperationalPolicy policy) { }
+
+    /** Immutable package identity paired with its quantitative service declaration. */
+    public record RegisteredNodePackageBinding(PinnedNodePackage identity,
+                                               java.util.Optional<NodePackageEgressCapacityProfile> capacity) {
+        public RegisteredNodePackageBinding {
+            java.util.Objects.requireNonNull(identity, "identity");
+            java.util.Objects.requireNonNull(capacity, "capacity");
+        }
     }
 
     private record LegacyNodeBehaviorFactory(String name, NodeHandler handler) implements NodeBehaviorFactory {

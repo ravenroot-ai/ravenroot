@@ -4,8 +4,10 @@ import ai.ravenroot.api.application.ExecutionPolicy;
 import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionManifestDifference;
+import ai.ravenroot.api.persistence.ExecutionManifest;
 import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
+import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionManifestResolverEnginePolicyTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-01-02T03:04:05Z"), ZoneOffset.UTC);
@@ -36,6 +39,20 @@ class ExecutionManifestResolverEnginePolicyTest {
             GraphContentId.of("engine policy manifest".getBytes(StandardCharsets.UTF_8));
     private static final String INVALID_MESSAGE =
             "Execution engine compatibility fingerprint must be empty or lowercase SHA-256 hexadecimal";
+
+    @Test
+    void coreHttpCapacityIsPinnedOnlyWhenTheAcceptedGraphUsesCoreHttp() {
+        ExecutionManifestResolver resolver = resolver(
+                engine("adapter", "a".repeat(64), new AtomicInteger()));
+        var key = new ExecutionKey("tenant-a", UUID.randomUUID());
+
+        assertTrue(resolver.manifestFor(key, CONTENT,
+                GraphDefinitionIdentity.forSubmission(CONTENT), ExecutionPolicy.STANDARD,
+                CLOCK.instant(), List.of("http-request")).operationalPolicy().builtInHttp().isPresent());
+        assertTrue(resolver.manifestFor(new ExecutionKey("tenant-a", UUID.randomUUID()), CONTENT,
+                GraphDefinitionIdentity.forSubmission(CONTENT), ExecutionPolicy.STANDARD,
+                CLOCK.instant(), List.of("log")).operationalPolicy().builtInHttp().isEmpty());
+    }
 
     @Test
     void legacyAdapterDigestsStayByteForByteStableAndFingerprintIsReadOnce() {
@@ -101,6 +118,51 @@ class ExecutionManifestResolverEnginePolicyTest {
         assertEquals(accepted, store.load(key).toCompletableFuture().join());
         assertEquals(1, acceptedReads.get());
         assertEquals(1, changedReads.get());
+    }
+
+    @Test
+    void legacyPolicyIsRestoredOnlyWhenNewDimensionsAreProvablyUnused() {
+        ExecutionManifestResolver safe = resolver(engine("adapter", "a".repeat(64), new AtomicInteger()));
+        ExecutionManifest safeV2 = manifest(safe);
+        ExecutionManifest safeV1 = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1,
+                safeV2.key(), safeV2.graphContentId(), safeV2.graphIdentity(), safeV2.runtime(),
+                safe.nodePackages(), safeV2.pinnedAt());
+
+        assertFalse(safe.resolvePolicy(safeV1, ExecutionPolicy.STANDARD,
+                List.of("unknown-pass-through")).results().durable());
+        assertEquals(ExecutionManifestResolutionException.Reason.LEGACY_OPERATIONAL_POLICY_UNAVAILABLE,
+                assertThrows(ExecutionManifestResolutionException.class,
+                        () -> safe.resolvePolicy(safeV1, ExecutionPolicy.STANDARD,
+                                List.of("http-request"))).reason());
+
+        var customBehaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
+                .register("application-handler", message ->
+                        java.util.concurrent.CompletableFuture.completedFuture(
+                                ai.ravenroot.api.execution.NodeResult.continueWith(message.payload())));
+        var custom = ExecutionManifestResolver.from(
+                engine("adapter", "a".repeat(64), new AtomicInteger()), Set.of(), customBehaviors,
+                UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null);
+        ExecutionManifest customV2 = manifest(custom);
+        ExecutionManifest customV1 = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1,
+                customV2.key(), customV2.graphContentId(), customV2.graphIdentity(), customV2.runtime(),
+                custom.nodePackages(), customV2.pinnedAt());
+        assertEquals(ExecutionManifestResolutionException.Reason.LEGACY_OPERATIONAL_POLICY_UNAVAILABLE,
+                assertThrows(ExecutionManifestResolutionException.class,
+                () -> custom.resolvePolicy(customV1, ExecutionPolicy.STANDARD,
+                        List.of("application-handler"))).reason());
+
+        var results = ExecutionManifestResolver.complete(
+                engine("adapter", "a".repeat(64), new AtomicInteger()),
+                Set.of(StoreCapability.EXECUTION_RESULTS), 4096,
+                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null);
+        ExecutionManifest resultsV2 = manifest(results);
+        ExecutionManifest resultsV1 = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1,
+                resultsV2.key(), resultsV2.graphContentId(), resultsV2.graphIdentity(), resultsV2.runtime(),
+                results.nodePackages(), resultsV2.pinnedAt());
+        assertEquals(ExecutionManifestResolutionException.Reason.LEGACY_OPERATIONAL_POLICY_UNAVAILABLE,
+                assertThrows(ExecutionManifestResolutionException.class,
+                        () -> results.resolvePolicy(resultsV1, ExecutionPolicy.STANDARD, List.of())).reason());
     }
 
     private static ai.ravenroot.api.persistence.ExecutionManifest manifest(ExecutionManifestResolver resolver) {

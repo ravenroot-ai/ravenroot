@@ -1936,7 +1936,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         var contentId = new ai.ravenroot.api.persistence.GraphContentId(graphVersion);
         executionManifests.pin(key, contentId,
                 ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(contentId),
-                ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+                ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
+                manager.definition().nodes().stream()
+                        .map(ai.ravenroot.core.graph.GraphNode::behavior)
+                        .filter(java.util.Objects::nonNull).toList());
     }
 
     /**
@@ -1985,6 +1988,12 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             ExecutionRecorder recorder) {
         ai.ravenroot.api.persistence.ExecutionKey key = new ai.ravenroot.api.persistence.ExecutionKey(
                 security.tenantId(), processInstanceId);
+        var executionOperationalPolicy = executionManifests == null ? null
+                : executionManifests.resolvePolicy(key,
+                        ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
+                        manager.definition().nodes().stream()
+                                .map(ai.ravenroot.core.graph.GraphNode::behavior)
+                                .filter(java.util.Objects::nonNull).toList());
         AutoCloseable budgetBinding = null;
         AutoCloseable humanTaskBinding = null;
         try {
@@ -1994,7 +2003,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     ? null : humanTasks.bindLive(key, recorder, activeRunner::continuationBudget);
             CompletionStage<GraphExecutionResult> execution = activeRunner.execute(security,
                     processInstanceId, traversalId, payload, graphVersion, executionContextDeploymentId,
-                    traversalId.toString(), recorder);
+                    traversalId.toString(), recorder, executionOperationalPolicy,
+                    executionOperationalPolicy == null ? graphExecutionLimits
+                            : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                                    executionOperationalPolicy));
             AutoCloseable finalBudgetBinding = budgetBinding;
             AutoCloseable finalHumanTaskBinding = humanTaskBinding;
             return execution.whenComplete((result, failure) -> {

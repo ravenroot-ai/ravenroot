@@ -119,6 +119,26 @@ class ExecutionStoreConfigurationTest {
                         ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql",
                         ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db:5432/ravenroot")));
         assertEquals("jdbc:postgresql://db:5432/ravenroot", shared.connection().url());
+        assertEquals(3, shared.manifestPinAttempts());
+    }
+
+    @Test
+    void manifestPinRepairAttemptsAreTypedAndPostgresqlOnly() {
+        var environment = new HashMap<String, String>();
+        environment.put(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql");
+        environment.put(ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot");
+        environment.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7");
+        var shared = assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromEnvironment(environment));
+        assertEquals(7, shared.manifestPinAttempts());
+
+        for (String invalid : new String[]{"0", "-1", "many"}) {
+            environment.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, invalid);
+            var refusal = assertThrows(IllegalArgumentException.class,
+                    () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+            assertEquals(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE
+                    + " must be a positive integer", refusal.getMessage());
+        }
     }
 
     @Test

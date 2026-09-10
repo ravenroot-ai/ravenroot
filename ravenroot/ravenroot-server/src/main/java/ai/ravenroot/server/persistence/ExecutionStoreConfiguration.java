@@ -1,6 +1,7 @@
 package ai.ravenroot.server.persistence;
 
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
+import ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore;
 
 import java.nio.file.Path;
 import java.util.Locale;
@@ -72,6 +73,11 @@ public sealed interface ExecutionStoreConfiguration {
     /** How long a caller waits for a pooled connection before the operation is reported unavailable. */
     String POOL_TIMEOUT_VARIABLE = "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS";
 
+    /** Lost-race repair attempts for write-once PostgreSQL execution manifests. */
+    String MANIFEST_PIN_ATTEMPTS_VARIABLE = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS";
+
+    int DEFAULT_MANIFEST_PIN_ATTEMPTS = PostgresExecutionManifestStore.DEFAULT_MAX_PIN_ATTEMPTS;
+
     /** The selector value naming the single-host store; also the value assumed when unset. */
     String SQLITE_SELECTOR = "sqlite";
 
@@ -108,9 +114,17 @@ public sealed interface ExecutionStoreConfiguration {
      *
      * @param connection everything needed to build a pool against that database.
      */
-    record Shared(SharedStoreConnection connection) implements ExecutionStoreConfiguration {
+    record Shared(SharedStoreConnection connection, int manifestPinAttempts)
+            implements ExecutionStoreConfiguration {
         public Shared {
             Objects.requireNonNull(connection, "connection");
+            if (manifestPinAttempts < 1) {
+                throw new IllegalArgumentException("manifestPinAttempts must be positive");
+            }
+        }
+
+        public Shared(SharedStoreConnection connection) {
+            this(connection, DEFAULT_MANIFEST_PIN_ATTEMPTS);
         }
     }
 
@@ -143,7 +157,9 @@ public sealed interface ExecutionStoreConfiguration {
         }
         return switch (selector) {
             case SQLITE_SELECTOR -> new SingleHost(singleHostLocation(environment));
-            case POSTGRESQL_SELECTOR -> new Shared(SharedStoreConnection.fromEnvironment(environment));
+            case POSTGRESQL_SELECTOR -> new Shared(SharedStoreConnection.fromEnvironment(environment),
+                    positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE,
+                            DEFAULT_MANIFEST_PIN_ATTEMPTS));
             // Unreachable: selectorIn rejects everything else. Present because the switch is over a
             // String and a future third selector must fail here rather than fall through to null.
             default -> throw new IllegalArgumentException(SELECTOR_VARIABLE + " is not supported");
@@ -207,5 +223,17 @@ public sealed interface ExecutionStoreConfiguration {
             default -> throw new IllegalArgumentException(ENABLED_VARIABLE
                     + " must be 'true', 'false', 'off', '0', or 'no'");
         };
+    }
+
+    private static int positiveInt(Map<String, String> environment, String variable, int fallback) {
+        String raw = environment.get(variable);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) throw new NumberFormatException();
+            return value;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException(variable + " must be a positive integer");
+        }
     }
 }

@@ -10,12 +10,15 @@ report are the source of the issue's counts.
 from __future__ import annotations
 
 import argparse
+import ast
 from bisect import bisect_right
 import hashlib
+import io
 import json
 import re
 import subprocess
 import sys
+import tokenize
 from collections import Counter
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -33,6 +36,7 @@ CLASSIFICATIONS = {
     "security-ceiling-or-default",
     "protocol-or-format-invariant",
     "published-contract-description",
+    "presentation-text",
     "derived",
     "test-fixture",
 }
@@ -50,6 +54,7 @@ CLASSIFICATION_STATUSES = {
     "security-ceiling-or-default": {"retained", "deferred"},
     "protocol-or-format-invariant": {"retained", "deferred"},
     "published-contract-description": {"retained", "deferred"},
+    "presentation-text": {"retained", "deferred"},
     "derived": {"retained", "deferred"},
     "test-fixture": {"retained"},
 }
@@ -61,6 +66,202 @@ TESTKIT_MODULES = {
 }
 EXCLUDED_PARTS = {"target", "node_modules", "dist", ".git"}
 SOURCE_SUFFIXES = {".java", ".js", ".mjs", ".ts", ".py", ".sh", ".yaml", ".yml", ".json"}
+
+VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID = "audited-verification-script-fixtures-v1"
+VERIFICATION_SCRIPT_FIXTURE_REVISION = "63661709c127bdc206857343382d3a1d4d47274a"
+VERIFICATION_SCRIPT_FIXTURES = {
+    "scripts/measure-e2e-stability.sh": (
+        "e2e-stability-measurement", "ed25097ed031b3fb048d563cf47f03481768f5e716afb0890a3e14fc35a6f8a8", 57,
+        {"binding-default": 1, "environment-binding": 4, "inline-script-operational": 41, "script-default": 11}),
+    "scripts/verify-empty-plugins-parity-ci.sh": (
+        "published-image-empty-plugin-parity", "ecc85e4b1efbe50d63c0f878aaa4dae701ed5361f83a879cb54655444f2d700d", 49,
+        {"inline-script-operational": 36, "script-default": 13}),
+    "scripts/verify-empty-plugins-parity.py": (
+        "image-filesystem-comparator", "564e3e3ac7108646c460eef817951421fda0ef46a9706782b06398ff723b5ccd", 29,
+        {"inline-script-operational": 28, "script-default": 1}),
+    "scripts/verify-empty-plugins-parity.sh": (
+        "local-image-empty-plugin-parity", "72001195f773a80f9fcf1142035dc3d7e6a1786359cfd714b935e55670a30446", 30,
+        {"inline-script-operational": 22, "script-default": 8}),
+    "scripts/verify-extension-pack-consumer.sh": (
+        "extension-pack-consumer-contract", "b0d2f47f494c5c11daad85ddf66699451dcf2dd070aa327c10e3864b00b82f18", 16,
+        {"inline-script-operational": 9, "script-default": 7}),
+    "scripts/verify-mail-imap-consumer-container.sh": (
+        "mail-consumer-container-contract", "e747acddda06b1816f9c99e129d71cbdaa29e327875a5d5816de90f04c01168a", 27,
+        {"binding-default": 2, "environment-binding": 5, "inline-script-operational": 11, "script-default": 9}),
+    "scripts/verify-mail-imap-mutations-container.sh": (
+        "mail-mutation-container-contract", "cb833155dc8c083add03904afdf10ab572b537a1236f541efc342c27a946f11a", 24,
+        {"binding-default": 3, "environment-binding": 3, "inline-script-operational": 10, "script-default": 8}),
+    "scripts/verify-plugin-activation-on-compose.sh": (
+        "compose-plugin-activation", "97ffc49f1f58c4adc39ed89fbc4677cf45c84a9ae48de6d5352391541cc50089", 89,
+        {"binding-default": 8, "environment-binding": 11, "inline-script-operational": 46, "script-default": 24}),
+    "scripts/verify-plugin-activation-on-image.sh": (
+        "published-image-plugin-activation", "9edfe04b31f7a3883dd8d769c1a47650ee688c00b35131fdc0d7734e516d5a47", 85,
+        {"binding-default": 2, "environment-binding": 6, "inline-script-operational": 52, "script-default": 25}),
+    "scripts/verify-plugin-palette-ui.sh": (
+        "plugin-palette-integration", "b1bfa6e192e3aeae5ade4fb2d438769b9b05ece18ce7c550bfcfb25d71abfa55", 46,
+        {"binding-default": 2, "environment-binding": 10, "inline-script-operational": 18, "script-default": 16}),
+    "scripts/verify-plugins-dir-confinement.sh": (
+        "plugin-build-context-confinement", "0869b6787ce7588535086f71ab7e214b2340c5ef29b2980a5baf1342c38eb965", 61,
+        {"environment-binding": 5, "inline-script-operational": 45, "script-default": 11}),
+}
+VERIFICATION_SCRIPT_INBOUND_GUARDS = ("dev.sh", "service.sh", "plugin.sh")
+VERIFICATION_SCRIPT_CALLERS = (
+    {
+        "caller": ".github/workflows/ci.yml",
+        "callee": "scripts/verify-extension-pack-consumer.sh",
+        "invocation": "run: ./scripts/verify-extension-pack-consumer.sh",
+    },
+    {
+        "caller": "scripts/verify-empty-plugins-parity-ci.sh",
+        "callee": "scripts/verify-empty-plugins-parity.py",
+        "invocation": 'python3 "$PROJECT_DIR/scripts/verify-empty-plugins-parity.py" '
+                      '"$BASELINE_IMAGE" "$CANDIDATE_IMAGE"',
+    },
+    {
+        "caller": "scripts/verify-empty-plugins-parity.sh",
+        "callee": "scripts/verify-empty-plugins-parity.py",
+        "invocation": 'python3 "$PROJECT_DIR/scripts/verify-empty-plugins-parity.py" '
+                      '"$BASELINE_IMAGE" "$CANDIDATE_IMAGE"',
+    },
+)
+VERIFICATION_SCRIPT_SHEBANGS = {
+    path: ("#!/usr/bin/env python3" if path.endswith(".py")
+           else "#!/usr/bin/env bash" if path == "scripts/verify-extension-pack-consumer.sh"
+           else "#!/usr/bin/env sh")
+    for path in VERIFICATION_SCRIPT_FIXTURES
+}
+
+UI_TEXT_FAMILY_ID = "ui-text-english-catalog-v1"
+UI_TEXT_CATALOG_PATH = Path("ravenroot/ravenroot-ui/src/ui-text.js")
+UI_TEXT_TEST_PATH = Path("ravenroot/ravenroot-ui/test/ui-text.test.js")
+UI_TEXT_APP_COMMANDS_PATH = Path("ravenroot/ravenroot-ui/src/app-commands.js")
+UI_TEXT_APP_PATH = Path("ravenroot/ravenroot-ui/src/app.js")
+UI_TEXT_REVIEWED_REVISION = "63661709c127bdc206857343382d3a1d4d47274a"
+UI_TEXT_CATALOG_SHA256 = "d10e9a1544beaa7b70f77e661d8588cc298d7f9788766f127757a6f34dfc8b8a"
+UI_TEXT_TEST_SHA256 = "e6ca57f84c2e06ec6f2bec86d233e33532e885b41b2ecd176b10d3f53d659b6e"
+UI_TEXT_LOCALIZE_DIGEST = "112ebafda98ef66415e7d4560b8f396bc3f65449835f1d1f303e96c22c52a383"
+UI_TEXT_APP_SINK_DIGEST = "4c8e22f34d9f70a82e7fbdf21f56b3f5d12b220d55fb00b739987e13afe7e76e"
+UI_TEXT_SCHEMA_V1_INVENTORY_REVISION = "fcd928ebb7786ea1cf1cf4f7080a7b18a1a48047"
+UI_TEXT_SCHEMA_V1_SOURCE_SHA256 = "72bfb30b905f67ae5fc70a17eaae67e3663ec99ebd25a6bcd373b0cee5cc596b"
+UI_TEXT_SCHEMA_V1_IDS = (
+    "oc-12f6a427111d040bd4aa", "oc-8416e8b851cce3329b1d",
+)
+UI_TEXT_SCHEMA_V4_SOURCE_NEW_IDS = frozenset({
+    "oc-ce9850da7630d6ea1749", "oc-2b32b53ea0f7822612ca",
+    "oc-9e874d946f8a79b73530", "oc-5873f014f9ea8d7d9d03",
+    "oc-49d55d48af24d04c9b73", "oc-47f34f542bba68d1c400",
+    "oc-81ef8e3dfab6a0643768", "oc-63fe3715fe8bd63180a3",
+    "oc-9df1108c1a74357909a7", "oc-a19936bc2054e0f6bd62",
+    "oc-146806df89282eb9ca15", "oc-a1986315a895c02bddc9",
+    "oc-c95227fa97e491b36828", "oc-673cf3bf45ae267157f3",
+    "oc-93998a417671476b45c5", "oc-9caa334287f5b6915ecd",
+})
+UI_TEXT_PRESENTATION_IDS = frozenset({
+    'oc-0778a2efb5d8708bd646', 'oc-088e92c26628d0adad80', 'oc-0a5f0ed674086ddb2a03', 'oc-0dae250cd9621cd2f078',
+    'oc-0e9d49471b4d33ec20d7', 'oc-10409c736ba775d117a0', 'oc-127aadfd00e04a9bdcac', 'oc-143b93a3f6be93b7aacb',
+    'oc-146806df89282eb9ca15', 'oc-1693e1104b56860c24ef', 'oc-16f0bc5f5c9a5f64ddf0', 'oc-19db1ca6030468cd33f6',
+    'oc-1d1c293f4d3812952dbf', 'oc-1ec5bfe7ddda0f9a9531', 'oc-1f3aaec970ae4353deca', 'oc-1f991e30871b8144c15e',
+    'oc-2088e23ec2b5c82b6975', 'oc-211965fa170d58817599', 'oc-212b2d5da98d5df3839c', 'oc-2297ef2d047fc75b4736',
+    'oc-232a016775345ef87eb2', 'oc-235f0ab166fbbd80eaa7', 'oc-23e1114860fab3b06c71', 'oc-27e517a8445bc7e0cc28',
+    'oc-283c1ba9a7afb4762cf0', 'oc-2bbfe90cc60fb23c76c5', 'oc-2ce85f3c6c0e2590d72f', 'oc-2efc3c45ea011522ecfd',
+    'oc-303da9331161cc07ddb9', 'oc-3a57c578367bbbc78c57', 'oc-3a71146ce353adc1a9ba', 'oc-3edeaf0885840907d21a',
+    'oc-3fc94ec398ef106d9d2e', 'oc-426862d0e196dec85172', 'oc-42fdd72bb206e94e335e', 'oc-4305f020c62737a57720',
+    'oc-432a6d4d782319f505d1', 'oc-48ec2c553a9c3e7c49de', 'oc-49d55d48af24d04c9b73', 'oc-4b34227edda242ed157a',
+    'oc-4b76a1a6918a24c3877b', 'oc-5178a796c0c9daf841a0', 'oc-52935e1fa959a61f471d', 'oc-55f7e1b896ef59bd38f2',
+    'oc-5863b2a659fd37fb755c', 'oc-58af37ce7a00624298ea', 'oc-597724da5399e10c9c7e', 'oc-5a6bc3be4e7a3ce3b34e',
+    'oc-5b7f8bca15ac34d37862', 'oc-5f4abc94973ef462fa68', 'oc-60a324066a93967bba51', 'oc-61fc921b9f38867524ae',
+    'oc-62ccc8e18216706c04f8', 'oc-65aefc7e777e43aa8475', 'oc-67cd9e297cf2e4b680c4', 'oc-68b6b526715d964be7df',
+    'oc-6f786cadeadfd97b615b', 'oc-701fa31babbcf1b48f14', 'oc-70ab8d1dfe2cb6fe5495', 'oc-712f6659e1b53ab5c778',
+    'oc-7675415b516f25739652', 'oc-76c9f37f7260c3bc8076', 'oc-7aecc4290a9fc48e0047', 'oc-7b76376ff1c391e4a1c1',
+    'oc-7d92117979cc5a7b7fd8', 'oc-7ebd8a5ba39c7361a118', 'oc-81ef8e3dfab6a0643768', 'oc-879323805ad6d69cd14b',
+    'oc-8afc9cd3bd60f8ded5c5', 'oc-8c8b815d2d931fbbacc1', 'oc-91919c995435b5aaa778', 'oc-93998a417671476b45c5',
+    'oc-9ab27d08765248606f12', 'oc-9df1108c1a74357909a7', 'oc-9e874d946f8a79b73530', 'oc-9eb3772523d4450f467a',
+    'oc-9f4b7258ae0ce244e93b', 'oc-a2579b787ff2a311e439', 'oc-a2a0f0fe291dcf77cefe', 'oc-a3c5e7d725c88040f40f',
+    'oc-a523251b537aa0a53cb4', 'oc-a7077ac961ac25158d03', 'oc-a7f91b5723cf67680859', 'oc-a82bd81f37cb13a3e9eb',
+    'oc-a86eda883f318b1380ea', 'oc-aa5f3a4c71c18690b7fd', 'oc-ac067908bede1dd7c4b5', 'oc-ad11fc25502ea196a213',
+    'oc-ae8e6aaa6ef3373dfa9f', 'oc-af1c179aef54ee007b2d', 'oc-b1f7edb0fc1f89c183fe', 'oc-b391c81ac924ce8e2295',
+    'oc-b4b04ab74cfd9a6e8374', 'oc-b5b8b9e035b2600b45a2', 'oc-b6640abc9d839a5c6319', 'oc-b6fc2ed2012e23320746',
+    'oc-b78e88a1559c230c86e1', 'oc-b799a34f94130eb1fa7c', 'oc-b86291021cc115415aba', 'oc-b8c2bfd8436182c15aaf',
+    'oc-b96f5a3985aedbd36aa3', 'oc-b9844bc4e4043cd4b6c4', 'oc-bda7bf14f5950239b56b', 'oc-c0136d34409eef3f6e0d',
+    'oc-c05079581e5b29f71da0', 'oc-c09da8cc019889050507', 'oc-c37d6e29dba8200551ce', 'oc-c95227fa97e491b36828',
+    'oc-cb043b104b2707e47644', 'oc-ce9850da7630d6ea1749', 'oc-ceb56bb8d0887eed9073', 'oc-cf0d7b941854e4f878d1',
+    'oc-d9157b3995aae94daeb2', 'oc-d997450675c193f636e1', 'oc-d9b6131ac8e2483dbbbb', 'oc-db2479072f9565cb19f6',
+    'oc-dd3b747538e5570b2233', 'oc-ddc8a544bcd72ccc924b', 'oc-e0d31122bd3ba3add911', 'oc-e15b90401e0ce341e155',
+    'oc-e171acb561ac8095f611', 'oc-e3868604b019ff1f5a58', 'oc-e61c49c08dc65aedae1f', 'oc-e737206f8ae5bd630310',
+    'oc-e74d16a7c8d7a2f0168c', 'oc-e96659fe19c3c6f2c9fd', 'oc-ec0561175c8ad3838d43', 'oc-ec7ffd01fffec8a969f1',
+    'oc-f19f409192b0f2be984b', 'oc-f556019b3bec8d89b2d4', 'oc-f732c40605a558ae4536', 'oc-fb0baa9094fc554d2954',
+    'oc-ff76b70c5fd54fe72608',
+})
+UI_TEXT_LOCALE_IDS = frozenset({
+    "oc-e992a480aea3ee3919a4", "oc-f29c51f16adaa75b7f33",
+})
+UI_TEXT_PRESENTATION_RATIONALE = (
+    "Canonical user-facing English copy is owned by the closed UI text catalog and is available "
+    "through its verified locale fallback and renderer seams."
+)
+UI_TEXT_PROTOCOL_RATIONALE = (
+    "Stable UI catalog lookup key or locale fallback atom is part of the closed text lookup format."
+)
+
+GITHUB_SCHEMA_FAMILY_ID = "github-versioned-action-payload-schemas-v1"
+GITHUB_SCHEMA_REVIEWED_REVISION = "681568e938aa59f8480e1fd28ed5fa87555559be"
+GITHUB_SCHEMA_PARTITION_SHA256 = "005495754796cae214b88e5556056c18bd0190da626df245945e93c8173b1564"
+GITHUB_SCHEMA_PATHS = {
+    "ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/project-transition.v1.schema.json":
+        ("fd25ae8677ee22eda0d49fa7ce401f06b9da34b1e0cdf9ddc71ede77113f81d9", 172,
+         {"configuration-scalar": 170, "schema-reference-binding": 2}),
+    "ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json":
+        ("d9a669ccffd113fa8f840745448645dbd9028ab8ea470b4cac48c4816c75578d", 166,
+         {"configuration-scalar": 163, "schema-reference-binding": 3}),
+    "ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json":
+        ("5c23145d4bf1505a75b7cd959e7f11312eebdba76aea4099734362ee3a8e2cd6", 166,
+         {"configuration-scalar": 163, "schema-reference-binding": 3}),
+    "ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json":
+        ("33bbf245382b749e5770a6e4c11f0c31595eab13790c34480453cb948bc556f8", 132,
+         {"configuration-scalar": 130, "schema-reference-binding": 2}),
+}
+GITHUB_SCHEMA_INDEX_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schema-index.json")
+GITHUB_SCHEMA_INDEX_SHA256 = "d548dba5a4a97fda0a1134bc39c1697c4ce8f023e71f114d5c1a4a6c017cd291"
+GITHUB_SCHEMA_TEST_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubBoundaryTest.java")
+GITHUB_SCHEMA_TEST_SHA256 = "ffbdc521fb732859de3b394f4b482bdf9f29c03dd647aeba5e69169a8aa5037b"
+GITHUB_SECURITY_OWNER_SYMBOLS = {
+    "oc-03a7f22eb6ac51c6b6fc": "GithubWorkflowWatchBehavior.Input.parse",
+    "oc-1a236d34af58b3524646": "ProjectTransitionBehavior.Input.parse",
+    "oc-56ce39b5be04561eba93": "ProjectTransitionBehavior.Input.parse",
+    "oc-6d58112a5a4d5fb914c3": "ProjectTransitionBehavior.Input.parse",
+    "oc-7151deed6e0817d4dec6": "ProjectTransitionBehavior.TransitionComment.parse",
+    "oc-7c0f5f9063a71a2cc545": "ReleasePrepareBehavior.Input.parse",
+    "oc-88dba22febfba716b8e0": "GithubAppReviewBehavior.Input.parse",
+    "oc-89f463cfd891b43aea0e": "ProjectTransitionBehavior.Input.parse",
+    "oc-d6ee8b5d15f088cea90b": "GithubAppReviewBehavior.Input.text",
+}
+GITHUB_SECURITY_GUARD_METHODS = {
+    "GithubAppReviewBehavior.Input.parse": (
+        "ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubAppReviewBehavior.java",
+        "Input", "parse", "ccd3391eaf0d85954424e0fbb03303b849adbbed13780ea7578adf5a0e417194"),
+    "GithubAppReviewBehavior.Input.text": (
+        "ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubAppReviewBehavior.java",
+        "Input", "text", "20597dbdb419cdcd03edf6849b67d267ba856e2756003c582fa86ed083ac0d7b"),
+    "GithubWorkflowWatchBehavior.Input.parse": (
+        "ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubWorkflowWatchBehavior.java",
+        "Input", "parse", "663abb9a3159631272d3945bce96f4709eaebff7987a3ec7214c622045a58760"),
+    "ProjectTransitionBehavior.Input.parse": (
+        "ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ProjectTransitionBehavior.java",
+        "Input", "parse", "20ae2776072f99a09f9349537def92e26fa26ab84dd87351fa4ac00a83374d33"),
+    "ProjectTransitionBehavior.TransitionComment.parse": (
+        "ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ProjectTransitionBehavior.java",
+        "TransitionComment", "parse", "f26cbfc631acaa6d5a98c0c40d821b42e8bad7cccebd57b7a529265e21e1e4f2"),
+    "ReleasePrepareBehavior.Input.parse": (
+        "ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ReleasePrepareBehavior.java",
+        "Input", "parse", "15e9f25986417c4aa326b6a277623f5c4a514f176cbf11c4fdfe375177ab6980"),
+}
+
+VERIFICATION_SCRIPT_FIXTURE_RATIONALE = (
+    "Fixed value belongs to an explicitly audited runnable verification fixture and cannot be "
+    "reached from the three production launcher scripts."
+)
 
 OPERATIONAL_WORD = re.compile(
     r"(?i)(timeout|deadline|interval|poll|retry|attempt|capacity|queue|limit|max|min|retention|ttl|"
@@ -362,6 +563,101 @@ def tracked_files(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(Path(item) for item in listing if item and (root / item).is_file()))
 
 
+def tracked_git_mode(root: Path, relative: Path) -> str | None:
+    listing = subprocess.run(
+        ["git", "ls-files", "-s", "--", relative.as_posix()], cwd=root,
+        capture_output=True, text=True,
+    )
+    if listing.returncode != 0:
+        return None
+    match = re.fullmatch(r"([0-9]{6}) [0-9a-f]+ [0-9]+\t[^\n]+\n?", listing.stdout)
+    return match.group(1) if match else None
+
+
+def verification_script_inbound_errors(root: Path) -> list[str]:
+    """Check the three reviewed live call edges and reject every other literal inbound edge."""
+    errors: list[str] = []
+    allowed = {(str(item["caller"]), str(item["callee"])): str(item["invocation"])
+               for item in VERIFICATION_SCRIPT_CALLERS}
+    seen: Counter[tuple[str, str]] = Counter()
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True,
+    ).stdout.decode("utf-8").split("\0")
+    ignored = {
+        "scripts/audit_operational_configuration.py",
+        "scripts/tests/test_audit_operational_configuration.py",
+        "scripts/operational-configuration-inventory.json",
+        "docs/architecture/operational-configuration-audit.md",
+    }
+    text_suffixes = SOURCE_SUFFIXES | {".xml"}
+    for name in sorted(item for item in listing if item):
+        relative = Path(name)
+        if name in ignored or name.startswith("docs/") \
+                or (relative.suffix not in text_suffixes
+                    and relative.name not in {"Dockerfile", "Dockerfile.ci", "package.json"}):
+            continue
+        target = root / relative
+        if not target.is_file() or target.is_symlink():
+            continue
+        source = target.read_text(encoding="utf-8", errors="strict")
+        if relative.suffix in {".java", ".js", ".mjs", ".ts"}:
+            executable = strip_c_comments(source)
+        elif relative.suffix == ".py":
+            try:
+                tree = ast.parse(source)
+                docstrings = {
+                    (node.body[0].lineno, node.body[0].end_lineno)
+                    for node in ast.walk(tree)
+                    if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                         ast.AsyncFunctionDef))
+                    and node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)
+                }
+                tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+                executable = " ".join(
+                    token.string for token in tokens
+                    if token.type != tokenize.COMMENT
+                    and not (token.type == tokenize.STRING
+                             and any(first <= token.start[0] <= last
+                                     for first, last in docstrings))
+                )
+            except (SyntaxError, tokenize.TokenError):
+                errors.append(f"unsupported Python caller syntax while scanning: {name}")
+                continue
+        else:
+            executable = "\n".join(
+                line for line in source.splitlines() if not line.lstrip().startswith("#"))
+        for callee in VERIFICATION_SCRIPT_FIXTURES:
+            basename = Path(callee).name
+            if basename not in executable and callee not in executable:
+                continue
+            if relative.suffix in {".java", ".js", ".mjs", ".ts"} and not re.search(
+                    rf"(?:new\s+ProcessBuilder|Runtime\.getRuntime\(\)\.exec|"
+                    rf"\b(?:spawn|spawnSync|exec|execFile|fork)\s*)\([^;]*"
+                    rf"{re.escape(basename)}", executable, re.DOTALL):
+                # Literal guidance and assertion text are not process-launch edges.
+                continue
+            edge = (name, callee)
+            invocation = allowed.get(edge)
+            if invocation is None:
+                # References inside the classified script itself describe its own usage and are
+                # not inbound. Calls between listed scripts remain directional and must be listed.
+                if name == callee:
+                    continue
+                errors.append(f"unreviewed executable caller of verification fixture: {name} -> {callee}")
+                continue
+            live_lines = [line.strip() for line in executable.splitlines()
+                          if basename in line or callee in line]
+            if live_lines.count(invocation) != 1 or len(live_lines) != 1:
+                errors.append(f"reviewed verification-script invocation has drifted: {name} -> {callee}")
+            else:
+                seen[edge] += 1
+    if seen != Counter({edge: 1 for edge in allowed}):
+        errors.append("verification-script caller closure lost one of its three exact live edges")
+    return errors
+
+
 def surface(relative: Path) -> str | None:
     parts = relative.parts
     text = relative.as_posix()
@@ -378,6 +674,8 @@ def surface(relative: Path) -> str | None:
         return None
     if relative.name in {"Dockerfile", "Dockerfile.ci"}:
         return "deployment"
+    if text in VERIFICATION_SCRIPT_FIXTURES:
+        return "test-fixture"
     if text == "compose.yaml" or text.startswith("deploy/"):
         return "deployment"
     if relative.suffix == ".sh":
@@ -505,6 +803,30 @@ def strip_c_comments_and_literals(text: str) -> str:
             out.append(char)
         index += 1
     return "".join(out)
+
+
+def javascript_static_imports(source: str) -> tuple[str, ...] | None:
+    """Read the leading static-import block accepted by the bounded UI proof."""
+    code = strip_c_comments(source)
+    imports: list[str] = []
+    position = 0
+    while True:
+        while position < len(code) and code[position].isspace():
+            position += 1
+        if not re.match(r"import\b", code[position:]):
+            return tuple(imports)
+        terminator = code.find(";", position)
+        if terminator < 0:
+            return None
+        statement = code[position:terminator + 1]
+        if not re.fullmatch(
+                r"import\s+(?:[A-Za-z_$][\w$]*\s+from\s+|\*\s+as\s+"
+                r"[A-Za-z_$][\w$]*\s+from\s+|\{.*?\}\s+from\s+)"
+                r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')\s*;",
+                statement, re.DOTALL):
+            return None
+        imports.append(normalized(statement))
+        position = terminator + 1
 
 
 def java_type_span(source: str, symbol: str) -> tuple[int, int] | None:
@@ -831,6 +1153,22 @@ def json_pointer(document: object, reference: str) -> object:
         else:
             raise ValueError("JSON Pointer target is absent")
     return value
+
+
+def strict_json_document(text: str) -> object:
+    """Parse JSON while rejecting duplicate object members."""
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON member: {key}")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(text, object_pairs_hook=unique_object)
+    except json.JSONDecodeError as invalid:
+        raise ValueError("invalid JSON") from invalid
 
 
 def resolved_json_schema_value(document: object, value: object,
@@ -5428,6 +5766,460 @@ def authority_consolidation_errors(document: dict[str, object]) -> list[str]:
     return errors
 
 
+def github_schema_authority_from_source(
+        root: Path, candidates: Iterable[Candidate]) -> dict[str, object] | None:
+    """Build the closed four-blob GitHub v1 payload-schema authority."""
+    by_path = {path: [] for path in GITHUB_SCHEMA_PATHS}
+    for candidate in candidates:
+        if candidate.path in by_path:
+            by_path[candidate.path].append(candidate)
+    files: list[dict[str, object]] = []
+    reference_count = 0
+    for path, (source_digest, count, kind_counts) in sorted(GITHUB_SCHEMA_PATHS.items()):
+        source = (root / path).read_text(encoding="utf-8")
+        if hashlib.sha256(source.encode("utf-8")).hexdigest() != source_digest:
+            return None
+        try:
+            document = strict_json_document(source)
+        except ValueError:
+            return None
+        if not isinstance(document, dict):
+            return None
+        current = sorted(by_path[path], key=lambda candidate: candidate.id)
+        current_kinds = dict(sorted(Counter(candidate.kind for candidate in current).items()))
+        references = [candidate for candidate in current
+                      if candidate.kind == "schema-reference-binding"]
+        if len(current) != count or current_kinds != kind_counts \
+                or any(not candidate.expression.startswith("#/")
+                       or json.loads(candidate.evidence).get("resolutionError") is not None
+                       for candidate in references):
+            return None
+        reference_count += len(references)
+        files.append({
+            "path": path, "sourceSha256": source_digest, "candidateCount": count,
+            "candidateIds": [candidate.id for candidate in current], "kindCounts": kind_counts,
+        })
+    all_ids = {candidate.id for path in by_path for candidate in by_path[path]}
+    security_ids = set(GITHUB_SECURITY_OWNER_SYMBOLS)
+    if len(all_ids) != 636 or reference_count != 10 or not security_ids <= all_ids:
+        return None
+
+    index_source = (root / GITHUB_SCHEMA_INDEX_PATH).read_text(encoding="utf-8")
+    try:
+        index = strict_json_document(index_source)
+    except ValueError:
+        return None
+    if hashlib.sha256(index_source.encode("utf-8")).hexdigest() != GITHUB_SCHEMA_INDEX_SHA256 \
+            or not isinstance(index, dict) or index.get("version") != "ravenroot.github.schemas.v1" \
+            or index.get("mediaType") != "application/schema+json":
+        return None
+
+    method_proof: dict[str, str] = {}
+    for role, (path, type_name, method, digest) in GITHUB_SECURITY_GUARD_METHODS.items():
+        source = (root / path).read_text(encoding="utf-8")
+        if java_method_digest(source, type_name, method) != digest:
+            return None
+        method_proof[role] = digest
+    test_source = (root / GITHUB_SCHEMA_TEST_PATH).read_text(encoding="utf-8")
+    test_method = "versionedSchemasAreDiscoverableForExactlyTheFiveBehaviors"
+    if hashlib.sha256(test_source.encode("utf-8")).hexdigest() != GITHUB_SCHEMA_TEST_SHA256 \
+            or "@Disabled" in strip_c_comments(test_source) \
+            or "@Test void " + test_method + "() throws Exception" not in test_source \
+            or not java_test_type_is_directly_runnable(test_source, "GithubBoundaryTest"):
+        return None
+    return {
+        "kind": "github-versioned-payload-schema-family-v1",
+        "sourceRevision": GITHUB_SCHEMA_REVIEWED_REVISION,
+        "files": files,
+        "candidateIdsByClassification": {
+            "protocol-or-format-invariant": sorted(all_ids - security_ids),
+            "security-ceiling-or-default": sorted(security_ids),
+        },
+        "candidatePartitionSha256": GITHUB_SCHEMA_PARTITION_SHA256,
+        "schemaIndexSha256": GITHUB_SCHEMA_INDEX_SHA256,
+        "securityOwnerSymbols": dict(sorted(GITHUB_SECURITY_OWNER_SYMBOLS.items())),
+        "javaGuardMethodDigests": dict(sorted(method_proof.items())),
+        "testSourceSha256": GITHUB_SCHEMA_TEST_SHA256,
+        "semanticRetirementCredit": 0,
+        "duplicateAuthorityCredit": 0,
+    }
+
+
+def github_schema_partition_digest(entries: dict[str, dict[str, object]],
+                                   identifiers: set[str]) -> str:
+    reviewed = sorted((identifier, entries.get(identifier, {}).get("classification"),
+                       entries.get(identifier, {}).get("rationale"))
+                      for identifier in identifiers)
+    payload = json.dumps(reviewed, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def github_schema_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    family_candidates = tuple(candidate for candidate in discovered.values()
+                              if candidate.path in GITHUB_SCHEMA_PATHS)
+    if not family_candidates:
+        return [] if authorities is None else ["GitHub schema authority exists without its blobs"]
+    expected = github_schema_authority_from_source(root, family_candidates)
+    if expected is None:
+        return ["GitHub schema source, publication, Java guard, or runnable test proof has drifted"]
+    if not isinstance(authorities, dict) or set(authorities) != {GITHUB_SCHEMA_FAMILY_ID} \
+            or authorities.get(GITHUB_SCHEMA_FAMILY_ID) != expected:
+        return ["GitHub schemas require the exact checker-owned 636-row authority"]
+    expected_ids = {candidate.id for candidate in family_candidates}
+    errors: list[str] = []
+    for identifier in expected_ids:
+        expected_classification = ("security-ceiling-or-default"
+                                   if identifier in GITHUB_SECURITY_OWNER_SYMBOLS
+                                   else "protocol-or-format-invariant")
+        entry = entries.get(identifier, {})
+        if entry.get("status") != "retained" \
+                or entry.get("classification") != expected_classification \
+                or entry.get("retainedAuthority") != GITHUB_SCHEMA_FAMILY_ID:
+            errors.append(f"{identifier}: GitHub schema row lost its exact retained authority")
+    claimed = {identifier for identifier, entry in entries.items()
+               if entry.get("retainedAuthority") == GITHUB_SCHEMA_FAMILY_ID}
+    if claimed != expected_ids:
+        errors.append("GitHub schema authority has missing or extra claimed rows")
+    if github_schema_partition_digest(entries, expected_ids) != GITHUB_SCHEMA_PARTITION_SHA256:
+        errors.append("GitHub schema classification/rationale partition has drifted")
+    return errors
+
+
+def ui_text_catalog_pairs(source: str) -> tuple[tuple[str, str], ...] | None:
+    """Parse the one accepted frozen English catalog into exact key/value roles."""
+    tables = list(re.finditer(
+        r"const\s+ENGLISH_MESSAGES\s*=\s*Object\.freeze\s*\(\s*\{"
+        r"(?P<body>.*?)\}\s*\)\s*;", strip_c_comments(source), re.DOTALL,
+    ))
+    if len(tables) != 1:
+        return None
+    quoted = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
+    pair = re.compile(rf"\s*(?P<key>{quoted})\s*:\s*(?P<value>{quoted})\s*,", re.DOTALL)
+    body = tables[0].group("body")
+    pairs: list[tuple[str, str]] = []
+    position = 0
+    while position < len(body):
+        match = pair.match(body, position)
+        if match is None:
+            return tuple(pairs) if not body[position:].strip() else None
+        pairs.append((match.group("key"), match.group("value")))
+        position = match.end()
+    return tuple(pairs)
+
+
+def ui_text_pair_change_summary(before: str, after: str) -> dict[str, object] | None:
+    """Compare catalog pairs by key so scanner-wide lexical churn cannot imply retirements."""
+    before_pairs = ui_text_catalog_pairs(before)
+    after_pairs = ui_text_catalog_pairs(after)
+    if before_pairs is None or after_pairs is None:
+        return None
+    before_map = dict(before_pairs)
+    after_map = dict(after_pairs)
+    if len(before_map) != len(before_pairs) or len(after_map) != len(after_pairs):
+        return None
+    shared = set(before_map) & set(after_map)
+    unchanged = sorted(key for key in shared if before_map[key] == after_map[key])
+    changed = sorted(key for key in shared if before_map[key] != after_map[key])
+    added = sorted(set(after_map) - set(before_map))
+    removed = sorted(set(before_map) - set(after_map))
+    return {
+        "comparisonKeyRole": "catalog-key",
+        "comparisonValueRole": "presentation-text",
+        "unchangedPairs": [{"key": key, "value": after_map[key]} for key in unchanged],
+        "changedPairs": [{
+            "key": key, "beforeValue": before_map[key], "afterValue": after_map[key],
+        } for key in changed],
+        "addedPairs": [{"key": key, "value": after_map[key]} for key in added],
+        "removedPairs": [{"key": key, "value": before_map[key]} for key in removed],
+    }
+
+
+def ui_text_atomic_rekey_record(root: Path, current_ids: set[str]) -> dict[str, object] | None:
+    """Bind the two pending schema-v1 statements to reviewed source-pair history."""
+    inventory_source = committed_source(
+        root, UI_TEXT_SCHEMA_V1_INVENTORY_REVISION,
+        "scripts/operational-configuration-inventory.json",
+    )
+    old_catalog_source = committed_source(
+        root, UI_TEXT_SCHEMA_V1_INVENTORY_REVISION, UI_TEXT_CATALOG_PATH.as_posix(),
+    )
+    if inventory_source is None or old_catalog_source is None \
+            or hashlib.sha256(old_catalog_source.encode("utf-8")).hexdigest() \
+            != UI_TEXT_SCHEMA_V1_SOURCE_SHA256:
+        return None
+    try:
+        document = json.loads(inventory_source)
+    except json.JSONDecodeError:
+        return None
+    old_rows = [entry for entry in document.get("entries", [])
+                if isinstance(entry, dict)
+                and entry.get("path") == UI_TEXT_CATALOG_PATH.as_posix()]
+    if sorted(str(entry.get("id")) for entry in old_rows) != sorted(UI_TEXT_SCHEMA_V1_IDS) \
+            or any(entry.get("status") != "pending-review"
+                   or entry.get("classification") is not None for entry in old_rows):
+        return None
+    current_source = (root / UI_TEXT_CATALOG_PATH).read_text(encoding="utf-8")
+    pair_history = ui_text_pair_change_summary(old_catalog_source, current_source)
+    if pair_history is None or len(pair_history["unchangedPairs"]) != 125 \
+            or pair_history["changedPairs"] or len(pair_history["addedPairs"]) != 8 \
+            or pair_history["removedPairs"] \
+            or len(UI_TEXT_SCHEMA_V4_SOURCE_NEW_IDS) != 16 \
+            or not UI_TEXT_SCHEMA_V4_SOURCE_NEW_IDS <= current_ids \
+            or not UI_TEXT_LOCALE_IDS <= current_ids:
+        return None
+    lexical_rekeys = current_ids - UI_TEXT_SCHEMA_V4_SOURCE_NEW_IDS - UI_TEXT_LOCALE_IDS
+    if len(lexical_rekeys) != 250 or len(current_ids) != 268:
+        return None
+    return {
+        "kind": "schema-v1-statements-to-v4-atomic-family-v1",
+        "beforeInventoryRevision": UI_TEXT_SCHEMA_V1_INVENTORY_REVISION,
+        "beforePrecursors": [
+            {
+                "id": entry["id"],
+                "kind": entry["kind"],
+                "expressionDigest": entry["expressionDigest"],
+            }
+            for entry in sorted(old_rows, key=lambda item: str(item["id"]))
+        ],
+        "afterCandidateIds": sorted(current_ids),
+        "sourceComparison": {
+            "beforeSourceSha256": UI_TEXT_SCHEMA_V1_SOURCE_SHA256,
+            "catalogPairHistory": pair_history,
+            "sourceNewCandidateIds": sorted(UI_TEXT_SCHEMA_V4_SOURCE_NEW_IDS),
+            "sourceLexicallyRekeyedCandidateIds": sorted(lexical_rekeys),
+            "sourceStableCandidateIds": sorted(UI_TEXT_LOCALE_IDS),
+        },
+        "semanticRetirementCredit": 0,
+        "duplicateAuthorityCredit": 0,
+    }
+
+
+def ui_text_catalog_authority_from_source(
+        root: Path, candidates: Iterable[Candidate]) -> dict[str, object] | None:
+    """Return the reviewed 268-position catalog authority when all bounded seams match."""
+    source = (root / UI_TEXT_CATALOG_PATH).read_text(encoding="utf-8")
+    if hashlib.sha256(source.encode("utf-8")).hexdigest() != UI_TEXT_CATALOG_SHA256:
+        return None
+    code = strip_c_comments(source)
+    tables = list(re.finditer(
+        r"const\s+ENGLISH_MESSAGES\s*=\s*Object\.freeze\s*\(\s*\{(?P<body>.*?)\}\s*\)\s*;",
+        code, re.DOTALL,
+    ))
+    if len(tables) != 1:
+        return None
+    quoted = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
+    pair = re.compile(rf"\s*(?P<key>{quoted})\s*:\s*(?P<value>{quoted})\s*,", re.DOTALL)
+    body = tables[0].group("body")
+    keys: list[str] = []
+    position = 0
+    while position < len(body):
+        match = pair.match(body, position)
+        if match is None:
+            if body[position:].strip():
+                return None
+            break
+        keys.append(match.group("key"))
+        position = match.end()
+    masked = strip_c_comments_and_literals(source)
+    if len(keys) != 133 or len(set(keys)) != 133 \
+            or re.search(r"\b(?:const|let|var|class|function)\s+Object\b|\bObject\s*=", masked) \
+            or normalized("export const UI_TEXT_CATALOGS = Object.freeze({ en: ENGLISH_MESSAGES });") \
+            not in normalized(code):
+        return None
+    required_lookup = (
+        "Object.hasOwn(ENGLISH_MESSAGES, key)", "String(locale || 'en').replaceAll('_', '-')",
+        "Intl.getCanonicalLocales(input)", "normalized.split('-')[0]",
+        "new Set([normalized, language, 'en'])", "Object.hasOwn(params, name)",
+        "template.replace(/\\{([A-Za-z][A-Za-z0-9_]*)\\}/g",
+        "Object.fromEntries(Object.entries(catalogs)", "{ ...UI_TEXT_CATALOGS, ...supplied }",
+        "{ ...ENGLISH_MESSAGES, ...(supplied.en || {}) }",
+        "candidates.map(candidate => available[candidate]).find",
+    )
+    if any(clause not in source for clause in required_lookup):
+        return None
+
+    current = {candidate.id: candidate for candidate in candidates
+               if candidate.path == UI_TEXT_CATALOG_PATH.as_posix()}
+    current_ids = set(current)
+    protocol_ids = current_ids - UI_TEXT_PRESENTATION_IDS
+    if len(current_ids) != 268 or not UI_TEXT_PRESENTATION_IDS <= current_ids \
+            or len(protocol_ids) != 135 or not UI_TEXT_LOCALE_IDS <= protocol_ids:
+        return None
+
+    commands = (root / UI_TEXT_APP_COMMANDS_PATH).read_text(encoding="utf-8")
+    command_imports = javascript_static_imports(commands)
+    commands_code = normalized(strip_c_comments_and_literals(commands))
+    if command_imports is None or command_imports.count(normalized(
+            "import { hasUiText, uiText } from './ui-text.js';")) != 1 \
+            or commands_code.count(normalized(
+                "].map(command => localizeCommand(command, t));")) != 1 \
+            or commands_code.count(normalized(
+                "export function createAppCommands(actions, { t = uiText } = {})")) != 1:
+        return None
+    start = commands.find("function localizeCommand(command, t) {")
+    end = commands.find("\n}\n", start)
+    if start < 0 or end < 0:
+        return None
+    localize_digest = hashlib.sha256(normalized(strip_c_comments(
+        commands[start:end + 2])).encode("utf-8")).hexdigest()
+    app = (root / UI_TEXT_APP_PATH).read_text(encoding="utf-8")
+    app_without_comments = strip_c_comments(app)
+    app_imports = javascript_static_imports(app)
+    if app_imports is None or app_imports.count(normalized(
+            "import { uiText } from './ui-text.js';")) != 1 \
+            or app_imports.count(normalized(
+                "import { createAppCommands, createNodeActionCatalog } "
+                "from './app-commands.js';")) != 1 \
+            or len(re.findall(
+                r"(?m)^const commandRegistry = "
+                r"createCommandRegistry\(createAppCommands\(\{$",
+                app_without_comments)) != 1:
+        return None
+    sinks = [line.strip() for line in app.splitlines()
+             if "uiText(" in line and not line.lstrip().startswith("//")]
+    sink_digest = hashlib.sha256("\n".join(sinks).encode("utf-8")).hexdigest()
+    test_source = (root / UI_TEXT_TEST_PATH).read_text(encoding="utf-8")
+    if localize_digest != UI_TEXT_LOCALIZE_DIGEST or sink_digest != UI_TEXT_APP_SINK_DIGEST \
+            or len(sinks) != 26 \
+            or hashlib.sha256(test_source.encode("utf-8")).hexdigest() != UI_TEXT_TEST_SHA256 \
+            or "import { describe, expect, it } from 'vitest';" not in test_source \
+            or len(re.findall(r"(?m)^\s*it\('", test_source)) != 4 \
+            or re.search(r"\b(?:describe|it)\.(?:skip|todo)\s*\(", test_source):
+        return None
+    atomic_rekey = ui_text_atomic_rekey_record(root, current_ids)
+    if atomic_rekey is None:
+        return None
+    return {
+        "kind": "javascript-frozen-presentation-catalog-v1",
+        "sourceRevision": UI_TEXT_REVIEWED_REVISION,
+        "sourcePath": UI_TEXT_CATALOG_PATH.as_posix(),
+        "sourceSha256": UI_TEXT_CATALOG_SHA256,
+        "candidateIdsByClassification": {
+            "presentation-text": sorted(UI_TEXT_PRESENTATION_IDS),
+            "protocol-or-format-invariant": sorted(protocol_ids),
+        },
+        "catalogPairCount": 133,
+        "consumerProof": {
+            "localizeCommandDigest": UI_TEXT_LOCALIZE_DIGEST,
+            "appSinkDigest": UI_TEXT_APP_SINK_DIGEST,
+            "testSourceSha256": UI_TEXT_TEST_SHA256,
+            "appUiTextImport": "import { uiText } from './ui-text.js';",
+            "appCommandBinding": "createCommandRegistry(createAppCommands({",
+            "localizedCommandMap": "].map(command => localizeCommand(command, t));",
+        },
+        "atomicRekey": atomic_rekey,
+        "semanticRetirementCredit": 0,
+        "duplicateAuthorityCredit": 0,
+    }
+
+
+def ui_text_catalog_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    family_candidates = tuple(candidate for candidate in discovered.values()
+                              if candidate.path == UI_TEXT_CATALOG_PATH.as_posix())
+    if not family_candidates:
+        return [] if authorities is None else ["UI text authority exists without its catalog"]
+    expected = ui_text_catalog_authority_from_source(root, family_candidates)
+    if expected is None:
+        return ["UI text catalog, consumer, or runnable test proof has drifted"]
+    if not isinstance(authorities, dict) or set(authorities) != {UI_TEXT_FAMILY_ID} \
+            or authorities.get(UI_TEXT_FAMILY_ID) != expected:
+        return ["UI text catalog requires the exact checker-owned 268-row authority"]
+    errors: list[str] = []
+    expected_ids = {candidate.id for candidate in family_candidates}
+    for identifier in expected_ids:
+        presentation = identifier in UI_TEXT_PRESENTATION_IDS
+        classification = "presentation-text" if presentation else "protocol-or-format-invariant"
+        rationale = UI_TEXT_PRESENTATION_RATIONALE if presentation else UI_TEXT_PROTOCOL_RATIONALE
+        entry = entries.get(identifier, {})
+        if entry.get("status") != "retained" or entry.get("classification") != classification \
+                or entry.get("retainedAuthority") != UI_TEXT_FAMILY_ID \
+                or entry.get("rationale") != rationale:
+            errors.append(f"{identifier}: UI text row lost its exact catalog authority")
+    claimed = {identifier for identifier, entry in entries.items()
+               if entry.get("retainedAuthority") == UI_TEXT_FAMILY_ID}
+    if claimed != expected_ids:
+        errors.append("UI text catalog authority has missing or extra claimed rows")
+    return errors
+
+
+def verification_script_fixture_authority_from_source(
+        root: Path, candidates: Iterable[Candidate]) -> dict[str, object] | None:
+    """Build the closed 513-row fixture mapping only from the reviewed eleven scripts."""
+    by_path: dict[str, list[Candidate]] = {
+        path: [] for path in VERIFICATION_SCRIPT_FIXTURES
+    }
+    for candidate in candidates:
+        if candidate.path in by_path:
+            by_path[candidate.path].append(candidate)
+    files: list[dict[str, object]] = []
+    for path, (purpose, source_digest, count, kind_counts) in sorted(
+            VERIFICATION_SCRIPT_FIXTURES.items()):
+        target = root / path
+        if not target.is_file() or target.is_symlink() \
+                or tracked_git_mode(root, Path(path)) != "100755" \
+                or target.read_text(encoding="utf-8").splitlines()[0] != \
+                VERIFICATION_SCRIPT_SHEBANGS[path] \
+                or hashlib.sha256(target.read_bytes()).hexdigest() != source_digest:
+            return None
+        current = sorted(by_path[path], key=lambda candidate: candidate.id)
+        if len(current) != count or dict(sorted(Counter(
+                candidate.kind for candidate in current).items())) != kind_counts:
+            return None
+        files.append({
+            "path": path,
+            "purpose": purpose,
+            "sourceSha256": source_digest,
+            "candidateCount": count,
+            "candidateIds": [candidate.id for candidate in current],
+            "kindCounts": kind_counts,
+            "gitMode": "100755",
+            "shebang": VERIFICATION_SCRIPT_SHEBANGS[path],
+        })
+    return {
+        "kind": "explicit-verification-script-fixture-family-v1",
+        "sourceRevision": VERIFICATION_SCRIPT_FIXTURE_REVISION,
+        "files": files,
+        "inboundGuards": list(VERIFICATION_SCRIPT_INBOUND_GUARDS),
+        "allowedExecutableCallers": [dict(item) for item in VERIFICATION_SCRIPT_CALLERS],
+    }
+
+
+def verification_script_fixture_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    family_candidates = tuple(candidate for candidate in discovered.values()
+                              if candidate.path in VERIFICATION_SCRIPT_FIXTURES)
+    if not family_candidates:
+        return [] if authorities is None else [
+            "verification-script fixture authority exists without reviewed scripts"]
+    expected = verification_script_fixture_authority_from_source(root, family_candidates)
+    if expected is None:
+        return ["verification-script fixture source or candidate partition has drifted"]
+    if not isinstance(authorities, dict) or set(authorities) != {
+            VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID} \
+            or authorities.get(VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID) != expected:
+        return ["verification-script fixtures require the exact checker-owned 513-row authority"]
+    errors: list[str] = []
+    expected_ids = {candidate.id for candidate in family_candidates}
+    for identifier in expected_ids:
+        entry = entries.get(identifier, {})
+        if entry.get("status") != "retained" or entry.get("classification") != "test-fixture" \
+                or entry.get("retainedAuthority") != VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID \
+                or entry.get("rationale") != VERIFICATION_SCRIPT_FIXTURE_RATIONALE:
+            errors.append(
+                f"{identifier}: verification-script fixture row lost its exact retained authority")
+    claimed = {identifier for identifier, entry in entries.items()
+               if entry.get("retainedAuthority") == VERIFICATION_SCRIPT_FIXTURE_FAMILY_ID}
+    if claimed != expected_ids:
+        errors.append("verification-script fixture authority has missing or extra claimed rows")
+    errors.extend(verification_script_inbound_errors(root))
+    return errors
+
+
 def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...]) -> list[str]:
     errors: list[str] = []
     migration_history = document.get("migrationHistory", [])
@@ -5505,6 +6297,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 or entry.get("retainedAuthority") != ROUTE_TABLE_AUTHORITY_ID):
             errors.append(
                 f"{identifier}: published-contract-description requires the closed RouteTable authority")
+        if classification == "presentation-text" and (
+                candidate.path != UI_TEXT_CATALOG_PATH.as_posix()
+                or entry.get("retainedAuthority") != UI_TEXT_FAMILY_ID):
+            errors.append(f"{identifier}: presentation-text requires the closed UI text authority")
         if classification == "operator-configurable" and status != "pending-review":
             for field in ("setting", "owner", "field", "default", "validation", "scope", "pinning",
                           "coverage"):
@@ -5681,6 +6477,15 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(execution_runtime_authority_errors(
         root, document.get("executionRuntimeAuthorities"), entries, discovered,
     ))
+    errors.extend(ui_text_catalog_authority_errors(
+        root, document.get("uiTextAuthorities"), entries, discovered,
+    ))
+    errors.extend(github_schema_authority_errors(
+        root, document.get("githubSchemaAuthorities"), entries, discovered,
+    ))
+    errors.extend(verification_script_fixture_authority_errors(
+        root, document.get("verificationScriptFixtureAuthorities"), entries, discovered,
+    ))
     errors.extend(authority_consolidation_errors(document))
 
     tracked_paths = set(tracked_files(root))
@@ -5804,6 +6609,7 @@ def render_report(document: dict[str, object]) -> str:
         f"| Retained security ceilings or defaults | {classifications['security-ceiling-or-default']} |",
         f"| Retained protocol or format invariants | {classifications['protocol-or-format-invariant']} |",
         f"| Retained published contract descriptions | {retained_classifications['published-contract-description']} |",
+        f"| Retained presentation text | {retained_classifications['presentation-text']} |",
         f"| Retained derived values | {classifications['derived']} |",
         f"| Test fixtures | {classifications['test-fixture']} |",
         f"| Intentionally deferred | {deferred} |", "",

@@ -60,6 +60,19 @@ public record ResolvedRuntimeProfile(int graphSchemaVersion, int definitionForma
     /** Domain tag callers use when deriving {@link #programRuntimeDigest()}. */
     public static final String PROGRAM_RUNTIME_DOMAIN = "ravenroot.execution-manifest.program-runtime.v1";
 
+    /** V2 domain for an engine component; v1 remains frozen under {@link #ENGINE_DOMAIN}. */
+    public static final String ENGINE_DOMAIN_V2 = "ravenroot.execution-manifest.engine.v2";
+
+    /** V2 domain for store capabilities and the actual result projection capacity. */
+    public static final String STORE_DOMAIN_V2 = "ravenroot.execution-manifest.store.v2";
+
+    /** V2 domain for graph limits and managed node-package quantitative capacities. */
+    public static final String LIMITS_DOMAIN_V2 = "ravenroot.execution-manifest.limits.v2";
+
+    /** V2 domain for the program runtime component. */
+    public static final String PROGRAM_RUNTIME_DOMAIN_V2 =
+            "ravenroot.execution-manifest.program-runtime.v2";
+
     /** Rejects a profile whose fields are not closed values a manifest may safely carry. */
     public ResolvedRuntimeProfile {
         if (graphSchemaVersion <= 0) {

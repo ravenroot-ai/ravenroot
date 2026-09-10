@@ -189,6 +189,34 @@ public abstract class ExecutionManifestStoreContract {
     }
 
     @Test
+    final void bothLegacyAndCurrentManifestFormatsReadBackExactly() {
+        ExecutionKey legacyKey = key(DEFAULT_TENANT);
+        ExecutionKey currentKey = key(DEFAULT_TENANT);
+        ExecutionManifest legacy = manifest(ExecutionManifest.LEGACY_FORMAT_VERSION,
+                legacyKey, "a", "STANDARD", List.of());
+        ExecutionManifest current = manifest(ExecutionManifest.CURRENT_FORMAT_VERSION,
+                currentKey, "b", "STANDARD", List.of());
+
+        await(store().pin(legacy));
+        await(store().pin(current));
+
+        assertEquals(legacy, await(store().load(legacyKey)).manifest());
+        assertEquals(current, await(store().load(currentKey)).manifest());
+        assertNotEquals(await(store().load(legacyKey)).digest(), await(store().load(currentKey)).digest());
+    }
+
+    @Test
+    final void anUnsupportedFormatIsClassifiedBeforeAnythingIsPinned() {
+        ExecutionKey key = key(DEFAULT_TENANT);
+        ExecutionManifest unsupported = manifest(ExecutionManifest.CURRENT_FORMAT_VERSION + 1,
+                key, "a", "STANDARD", List.of());
+
+        assertInstanceOf(ExecutionManifestStoreFailure.InvalidRequest.class,
+                failureOf(() -> await(store().pin(unsupported))));
+        assertFalse(await(store().contains(key)));
+    }
+
+    @Test
     final void nodePackagesSurviveTheRoundTripSortedAndComplete() {
         ExecutionKey key = key(DEFAULT_TENANT);
         List<PinnedNodePackage> packages = List.of(
@@ -492,9 +520,15 @@ public abstract class ExecutionManifestStoreContract {
 
     private static ExecutionManifest manifest(ExecutionKey key, String contentSeed, String policy,
                                               List<PinnedNodePackage> packages) {
+        return manifest(ExecutionManifest.CURRENT_FORMAT_VERSION, key, contentSeed, policy, packages);
+    }
+
+    private static ExecutionManifest manifest(int formatVersion, ExecutionKey key,
+                                              String contentSeed, String policy,
+                                              List<PinnedNodePackage> packages) {
         var profile = new ResolvedRuntimeProfile(1, 1, policy, "pass-through",
                 "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
-        return new ExecutionManifest(ExecutionManifest.CURRENT_FORMAT_VERSION, key,
+        return new ExecutionManifest(formatVersion, key,
                 new GraphContentId(contentSeed.repeat(64)),
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID,
                         contentSeed.repeat(64)),

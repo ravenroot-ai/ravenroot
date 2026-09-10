@@ -111,7 +111,7 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
                 throw failure(new ExecutionManifestStoreFailure.InvalidRequest("manifest cannot be null"));
             }
             ExecutionKey key = manifest.key();
-            ExecutionManifestDigest digest = manifest.digest();
+            ExecutionManifestDigest digest = digestForPin(manifest);
             try {
                 return transactions.inTransaction(connection ->
                         upsertManifest(connection, manifest, digest, key));
@@ -357,7 +357,13 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
                 }
             }
         }
-        ExecutionManifestDigest observed = manifest.digest();
+        ExecutionManifestDigest observed;
+        try {
+            observed = manifest.digest();
+        } catch (IllegalArgumentException unsupported) {
+            throw new SqlFailure(new ExecutionManifestStoreFailure.Corrupted(key,
+                    "unsupported execution manifest format version"));
+        }
         if (!observed.value().equals(recordedDigest)) {
             throw new SqlFailure(new ExecutionManifestStoreFailure.DigestMismatch(key, observed.value()));
         }
@@ -499,6 +505,15 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
     private static void requireKey(ExecutionKey key) {
         if (key == null) {
             throw failure(new ExecutionManifestStoreFailure.InvalidRequest("key cannot be null"));
+        }
+    }
+
+    private static ExecutionManifestDigest digestForPin(ExecutionManifest manifest) {
+        try {
+            return manifest.digest();
+        } catch (IllegalArgumentException unsupported) {
+            throw failure(new ExecutionManifestStoreFailure.InvalidRequest(
+                    "unsupported execution manifest format version"));
         }
     }
 

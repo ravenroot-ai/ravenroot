@@ -77,7 +77,7 @@ public final class InMemoryExecutionManifestStore implements ExecutionManifestSt
             if (manifest == null) {
                 throw failure(new ExecutionManifestStoreFailure.InvalidRequest("manifest cannot be null"));
             }
-            var digest = manifest.digest();
+            var digest = digestForPin(manifest);
             synchronized (monitor) {
                 StoredExecutionManifest existing = manifests.get(manifest.key());
                 if (existing != null) {
@@ -104,7 +104,7 @@ public final class InMemoryExecutionManifestStore implements ExecutionManifestSt
                 if (stored == null) {
                     throw failure(new ExecutionManifestStoreFailure.NotFound(key));
                 }
-                var observed = stored.manifest().digest();
+                var observed = digestForRead(stored.manifest(), key);
                 if (!observed.equals(stored.digest())) {
                     throw failure(new ExecutionManifestStoreFailure.DigestMismatch(key, observed.value()));
                 }
@@ -167,6 +167,26 @@ public final class InMemoryExecutionManifestStore implements ExecutionManifestSt
     private static void requireKey(ExecutionKey key) {
         if (key == null) {
             throw failure(new ExecutionManifestStoreFailure.InvalidRequest("key cannot be null"));
+        }
+    }
+
+    private static ai.ravenroot.api.persistence.ExecutionManifestDigest digestForPin(
+            ExecutionManifest manifest) {
+        try {
+            return manifest.digest();
+        } catch (IllegalArgumentException unsupported) {
+            throw failure(new ExecutionManifestStoreFailure.InvalidRequest(
+                    "unsupported execution manifest format version"));
+        }
+    }
+
+    private static ai.ravenroot.api.persistence.ExecutionManifestDigest digestForRead(
+            ExecutionManifest manifest, ExecutionKey key) {
+        try {
+            return manifest.digest();
+        } catch (IllegalArgumentException unsupported) {
+            throw failure(new ExecutionManifestStoreFailure.Corrupted(key,
+                    "unsupported execution manifest format version"));
         }
     }
 

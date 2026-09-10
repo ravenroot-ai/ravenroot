@@ -157,7 +157,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                 throw failure(new ExecutionManifestStoreFailure.InvalidRequest("manifest cannot be null"));
             }
             ExecutionKey key = manifest.key();
-            ExecutionManifestDigest digest = manifest.digest();
+            ExecutionManifestDigest digest = digestForPin(manifest);
             return inWriteTransaction(key, () -> {
                 Existing existing = readDigest(key);
                 if (existing != null) {
@@ -331,7 +331,13 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                 }
             }
         }
-        ExecutionManifestDigest observed = manifest.digest();
+        ExecutionManifestDigest observed;
+        try {
+            observed = manifest.digest();
+        } catch (IllegalArgumentException unsupported) {
+            throw failure(new ExecutionManifestStoreFailure.Corrupted(key,
+                    "unsupported execution manifest format version"));
+        }
         if (!observed.value().equals(recordedDigest)) {
             throw failure(new ExecutionManifestStoreFailure.DigestMismatch(key, observed.value()));
         }
@@ -544,6 +550,15 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
     private static void requireKey(ExecutionKey key) {
         if (key == null) {
             throw failure(new ExecutionManifestStoreFailure.InvalidRequest("key cannot be null"));
+        }
+    }
+
+    private static ExecutionManifestDigest digestForPin(ExecutionManifest manifest) {
+        try {
+            return manifest.digest();
+        } catch (IllegalArgumentException unsupported) {
+            throw failure(new ExecutionManifestStoreFailure.InvalidRequest(
+                    "unsupported execution manifest format version"));
         }
     }
 

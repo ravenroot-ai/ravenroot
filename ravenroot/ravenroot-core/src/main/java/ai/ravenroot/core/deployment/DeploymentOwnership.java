@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
@@ -86,8 +88,16 @@ final class DeploymentOwnership {
     /** Whether this process holds a lease it can still safely act under. */
     boolean holds(Record record) {
         Lease lease = record.lease();
-        return lease != null && lease.owner().equals(ownerId)
-                && lease.expiresAt().isAfter(clock.instant().plus(registry.limits().maxClockSkew()));
+        if (lease == null || !lease.owner().equals(ownerId)) return false;
+        Instant trustThreshold;
+        try {
+            trustThreshold = clock.instant().plus(registry.limits().maxClockSkew());
+        } catch (DateTimeException | ArithmeticException unrepresentable) {
+            // This threshold is used only to decide whether to attempt reacquisition. Refusing to
+            // trust any representable lease is conservative and does not persist a saturated value.
+            trustThreshold = Instant.MAX;
+        }
+        return lease.expiresAt().isAfter(trustThreshold);
     }
 
     /**

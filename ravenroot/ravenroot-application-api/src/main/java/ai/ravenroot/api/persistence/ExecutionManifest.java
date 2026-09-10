@@ -51,8 +51,17 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
                                 GraphDefinitionIdentity graphIdentity, ResolvedRuntimeProfile runtime,
                                 List<PinnedNodePackage> nodePackages, Instant pinnedAt) {
 
-    /** The layout this build writes. A stored manifest may carry an older one; see the store port. */
-    public static final int CURRENT_FORMAT_VERSION = 1;
+    /** The original layout, retained for exact reads and explicitly requested legacy composition. */
+    public static final int FORMAT_VERSION_1 = 1;
+
+    /** The complete layout with result and package-capacity semantics. */
+    public static final int FORMAT_VERSION_2 = 2;
+
+    /** Compatibility name for callers explicitly requesting the original layout. */
+    public static final int LEGACY_FORMAT_VERSION = FORMAT_VERSION_1;
+
+    /** The layout complete compositions write. A stored manifest may carry v1; see the store port. */
+    public static final int CURRENT_FORMAT_VERSION = FORMAT_VERSION_2;
 
     /**
      * The largest number of node packages one manifest may pin.

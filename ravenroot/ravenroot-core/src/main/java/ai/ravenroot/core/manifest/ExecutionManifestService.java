@@ -86,6 +86,14 @@ public final class ExecutionManifestService {
     }
 
     /**
+     * Refuses a new admission before it creates local state or performs a durable write when this
+     * complete resolver cannot describe every selected package.
+     */
+    public void requireAdmissionReady() {
+        resolver.requireAdmissionReady();
+    }
+
+    /**
      * Reads one execution's manifest, verifies its integrity, and compares it against this runtime.
      *
      * <p>Integrity is the store's answer and arrives as a classified
@@ -101,9 +109,7 @@ public final class ExecutionManifestService {
     public StoredExecutionManifest verify(ExecutionKey key, ExecutionPolicy policy) {
         StoredExecutionManifest stored = await(store.load(key));
         ExecutionManifest pinned = stored.manifest();
-        ExecutionManifest current = resolver.manifestFor(pinned.key(), pinned.graphContentId(),
-                pinned.graphIdentity(), policy, pinned.pinnedAt());
-        ExecutionManifestCompatibility report = ExecutionManifestCompatibility.compare(pinned, current);
+        ExecutionManifestCompatibility report = resolver.compare(pinned, policy);
         if (!report.compatible()) {
             throw new ExecutionManifestIncompatibleException(key, report);
         }
@@ -137,9 +143,7 @@ public final class ExecutionManifestService {
      */
     public ExecutionManifestCompatibility describe(StoredExecutionManifest stored, ExecutionPolicy policy) {
         ExecutionManifest pinned = Objects.requireNonNull(stored, "stored").manifest();
-        ExecutionManifest current = resolver.manifestFor(pinned.key(), pinned.graphContentId(),
-                pinned.graphIdentity(), policy, pinned.pinnedAt());
-        return ExecutionManifestCompatibility.compare(pinned, current);
+        return resolver.compare(pinned, policy);
     }
 
     /**

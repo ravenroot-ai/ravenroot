@@ -3,6 +3,7 @@ package ai.ravenroot.persistence.sqlite;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryDefaults;
 import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 
@@ -18,6 +19,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -102,9 +104,6 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     private static final int SQLITE_NOTADB = 26;
 
     private static final String CURSOR_VERSION = "rr1";
-    private static final Duration DEFAULT_COMMAND_RETENTION = Duration.ofDays(7);
-    private static final Limits LIMITS = new Limits(100, Duration.ofMinutes(5), Duration.ofSeconds(5));
-
     private enum Action { CREATE, APPEND, COMMAND, OBSERVE, FAIL, TOMBSTONE, ACQUIRE, RENEW, RELEASE }
 
     private final SqliteStoreLocation location;
@@ -112,13 +111,15 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     private final Clock clock;
     private final DeploymentIdSource ids;
     private final Duration commandRetention;
+    private final Limits limits;
+    private final int busyTimeoutMillis;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Connection connection;
 
     /**
      * Opens the registry over an existing execution-store database file, minting deployment ids as
-     * random UUIDs and retaining ledger rows for {@link #DEFAULT_COMMAND_RETENTION}.
+     * random UUIDs and retaining ledger rows for the durable default retention.
      *
      * @param databaseFile the execution store database this adapter shares.
      * @param clock time authority for every instant this registry records or evaluates expiry against.
@@ -129,14 +130,14 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     /**
      * Opens the registry with an explicit id source, retaining ledger rows for
-     * {@link #DEFAULT_COMMAND_RETENTION}.
+     * the durable default retention.
      *
      * @param databaseFile the execution store database this adapter shares.
      * @param clock time authority for every instant this registry records or evaluates expiry against.
      * @param ids server-side seam that mints a stable identity for each newly created deployment.
      */
     public SqliteDeploymentRegistry(Path databaseFile, Clock clock, DeploymentIdSource ids) {
-        this(databaseFile, clock, ids, DEFAULT_COMMAND_RETENTION);
+        this(databaseFile, clock, ids, DeploymentRegistryDefaults.durableCommandRetention());
     }
 
     /**
@@ -166,6 +167,25 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
      */
     public SqliteDeploymentRegistry(SqliteStoreLocation location, Clock clock, DeploymentIdSource ids,
                                     Duration commandRetention) {
+        this(location, clock, ids, commandRetention, DeploymentRegistryDefaults.durableLimits(),
+                SqliteStoreConfig.defaults());
+    }
+
+    /**
+     * Opens the registry with explicit registry policy and SQLite connection settings.
+     *
+     * @param location the execution store database this adapter shares.
+     * @param clock time authority for every instant this registry records or evaluates expiry against.
+     * @param ids server-side seam that mints a stable identity for each newly created deployment.
+     * @param commandRetention how long a command row survives before explicit purge may remove it.
+     * @param limits published deployment page, lease, and clock-skew limits.
+     * @param config SQLite connection settings; only its busy timeout applies to this registry.
+     */
+    public SqliteDeploymentRegistry(SqliteStoreLocation location, Clock clock, DeploymentIdSource ids,
+                                    Duration commandRetention, Limits limits,
+                                    SqliteStoreConfig config) {
+        Objects.requireNonNull(config, "config");
+        int configuredBusyTimeoutMillis = busyTimeoutMillis(config.busyTimeout());
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -175,6 +195,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
             throw new IllegalArgumentException("commandRetention must be positive");
         }
         this.commandRetention = commandRetention;
+        this.limits = Objects.requireNonNull(limits, "limits");
+        this.busyTimeoutMillis = configuredBusyTimeoutMillis;
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-deployment-registry-"
                     + this.databaseFile.getFileName());
@@ -191,7 +213,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     @Override
     public Limits limits() {
-        return LIMITS;
+        return limits;
     }
 
     @Override
@@ -208,6 +230,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 if (content.createdAt().isAfter(now)) {
                     throw invalid("createdAt is in the future");
                 }
+                Instant commandExpiresAt = commandExpiry(now);
                 DeploymentId id = Objects.requireNonNull(ids.mint(command.tenantId()), "minted deploymentId");
                 String deploymentId = id.value();
                 if (deploymentExists(command.tenantId(), deploymentId)) {
@@ -220,7 +243,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 insertDeploymentRow(command.tenantId(), deploymentId, now);
                 insertVersionRow(command.tenantId(), deploymentId, 1, content);
                 insertLedgerEntry(command.tenantId(), deploymentId, Action.CREATE, command.key(),
-                        command.digest(), result, now, now.plus(commandRetention));
+                        command.digest(), result, now, commandExpiresAt);
                 return result;
             });
         });
@@ -423,7 +446,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     @Override
     public CompletionStage<Page> list(String tenantId, String cursor, int limit) {
         return async(() -> inReadTransaction(() -> {
-            if (tenantId == null || tenantId.isBlank() || limit < 1 || limit > LIMITS.maximumPageSize()) {
+            if (tenantId == null || tenantId.isBlank() || limit < 1
+                    || limit > limits.maximumPageSize()) {
                 throw invalid("limit or tenant");
             }
             String after = decodeCursor(tenantId, cursor);
@@ -477,8 +501,9 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 if (current.lease() != null && current.lease().expiresAt().isAfter(now)) {
                     throw failure(new FailureReason.Conflict());
                 }
+                Instant expiresAt = leaseExpiry(now, ttl);
                 long newFence = aggregate.fence() + 1;
-                Lease lease = new Lease(tenant, current.deploymentId(), owner, newFence, now, now.plus(ttl));
+                Lease lease = new Lease(tenant, current.deploymentId(), owner, newFence, now, expiresAt);
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(), lease,
                         current.failure(), current.tombstone(), current.createdAt(), now);
@@ -505,8 +530,9 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 expect(aggregate, command);
                 ttl(ttl);
                 Record current = aggregate.record();
+                Instant expiresAt = leaseExpiry(now, ttl);
                 Lease renewed = new Lease(tenant, current.deploymentId(), lease.owner(), lease.fence(),
-                        lease.acquiredAt(), now.plus(ttl));
+                        lease.acquiredAt(), expiresAt);
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(),
                         renewed, current.failure(), current.tombstone(), current.createdAt(), now);
@@ -660,7 +686,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     }
 
     private void ttl(Duration value) {
-        if (value == null || value.isNegative() || value.isZero() || value.compareTo(LIMITS.maximumLeaseTtl()) > 0) {
+        if (value == null || value.isNegative() || value.isZero()
+                || value.compareTo(limits.maximumLeaseTtl()) > 0) {
             throw invalid("ttl");
         }
     }
@@ -674,9 +701,10 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     private Record persist(Aggregate next, Action action, String key, String digest, Instant now)
             throws SQLException {
+        Instant commandExpiresAt = commandExpiry(now);
         saveAggregate(next);
         insertLedgerEntry(next.record().tenantId(), next.record().deploymentId().value(), action, key, digest,
-                next.record(), now, now.plus(commandRetention));
+                next.record(), now, commandExpiresAt);
         return next.record();
     }
 
@@ -1151,7 +1179,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 throw invalid("the database at " + databaseFile + " refused write-ahead logging and "
                         + "reported '" + journalMode + "'");
             }
-            statement.execute("PRAGMA busy_timeout=" + SqliteStoreConfig.defaults().busyTimeout().toMillis());
+            statement.execute("PRAGMA busy_timeout=" + busyTimeoutMillis);
             statement.execute("PRAGMA foreign_keys=ON");
             SqliteSchema.migrate(opened, clock);
             return opened;
@@ -1238,6 +1266,38 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     private Instant now() {
         return clock.instant();
+    }
+
+    private Instant commandExpiry(Instant now) {
+        return expiry(now, commandRetention, "command retention expiry");
+    }
+
+    private static Instant leaseExpiry(Instant now, Duration ttl) {
+        return expiry(now, ttl, "lease expiry");
+    }
+
+    private static Instant expiry(Instant now, Duration duration, String contract) {
+        try {
+            return now.plus(duration);
+        } catch (DateTimeException | ArithmeticException unrepresentable) {
+            throw invalid(contract + " is outside the supported instant range");
+        }
+    }
+
+    private static int busyTimeoutMillis(Duration timeout) {
+        Objects.requireNonNull(timeout, "busyTimeout");
+        try {
+            long millis = timeout.toMillis();
+            if (timeout.isNegative() || millis > Integer.MAX_VALUE
+                    || !Duration.ofMillis(millis).equals(timeout)) {
+                throw new IllegalArgumentException(
+                        "busyTimeout must be a whole number of milliseconds in range 0..2147483647");
+            }
+            return Math.toIntExact(millis);
+        } catch (ArithmeticException unrepresentable) {
+            throw new IllegalArgumentException(
+                    "busyTimeout must be a whole number of milliseconds in range 0..2147483647");
+        }
     }
 
     private static RegistryException invalid(String message) {

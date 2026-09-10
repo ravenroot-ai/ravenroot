@@ -1282,6 +1282,10 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var manager = document.manager();
         GraphRunner runner;
         try {
+            var manifests = executionManifests();
+            if (manifests != null) {
+                manifests.requireAdmissionReady();
+            }
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
                     runnerShutdownStepBound, unknownBehaviors, policy, graphExecutionLimits);
         } catch (RuntimeException error) {
@@ -1926,9 +1930,10 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         if (existing != null) {
             return existing;
         }
-        var resolver = ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
+        var resolver = ai.ravenroot.core.manifest.ExecutionManifestResolver.complete(engine,
                 executionStore == null ? java.util.Set.of() : executionStore.capabilities(),
-                behaviors, unknownBehaviors, graphExecutionLimits, programRuntime);
+                durableResults != null, maxExecutionResultPayloadBytes, behaviors,
+                unknownBehaviors, graphExecutionLimits, programRuntime);
         var created = new ai.ravenroot.core.manifest.ExecutionManifestService(
                 executionManifestStore, resolver, java.time.Clock.systemUTC());
         return executionManifests.compareAndSet(null, created) ? created : executionManifests.get();

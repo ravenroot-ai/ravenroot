@@ -3,6 +3,7 @@ package ai.ravenroot.core.deployment.registry;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryDefaults;
 import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 import ai.ravenroot.api.persistence.RevisionExpectation;
@@ -10,6 +11,7 @@ import ai.ravenroot.api.persistence.RevisionExpectation;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -35,17 +37,24 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
     // it allows is zero. Publishing a comfortable-looking non-zero value would let a caller calibrate
     // against a tolerance that does not exist here and then carry that calibration to a durable
     // adapter where it does, which is exactly the class of error the published bound exists to stop.
-    private final Limits limits = new Limits(100, Duration.ofMinutes(5), Duration.ZERO);
+    private final Limits limits;
     private final Map<Key, Entry> entries = new HashMap<>();
     private final Map<CreateLedgerKey, Recorded> createLedger = new HashMap<>();
 
     public InMemoryDeploymentRegistry(Clock clock) {
-        this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()));
+        this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()),
+                DeploymentRegistryDefaults.inProcessLimits());
     }
 
     public InMemoryDeploymentRegistry(Clock clock, DeploymentIdSource ids) {
+        this(clock, ids, DeploymentRegistryDefaults.inProcessLimits());
+    }
+
+    /** Opens the ephemeral adapter with explicit published admission limits. */
+    public InMemoryDeploymentRegistry(Clock clock, DeploymentIdSource ids, Limits limits) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
+        this.limits = Objects.requireNonNull(limits, "limits");
     }
 
     @Override public Limits limits() { return limits; }
@@ -185,8 +194,10 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             expect(entry, command);
             Instant current = now();
             if (entry.lease != null && entry.lease.expiresAt().isAfter(current)) throw failure(new FailureReason.Conflict());
+            Instant expiresAt = leaseExpiry(current, ttl);
             entry.fence++;
-            entry.lease = new Lease(entry.tenant, entry.latest.deploymentId(), owner, entry.fence, current, current.plus(ttl));
+            entry.lease = new Lease(entry.tenant, entry.latest.deploymentId(), owner, entry.fence,
+                    current, expiresAt);
             Record result = entry.advance(current);
             entry.ledger.put(key, new Recorded(command.digest(), result));
             return result;
@@ -197,9 +208,11 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
     public synchronized CompletionStage<Record> renew(Lease lease, Duration ttl, Command command) {
         return leaseMutate(Action.RENEW, lease, command, entry -> {
             ttl(ttl);
+            Instant current = now();
+            Instant expiresAt = leaseExpiry(current, ttl);
             entry.lease = new Lease(entry.tenant, entry.latest.deploymentId(), lease.owner(), lease.fence(),
-                    lease.acquiredAt(), now().plus(ttl));
-            return entry.advance(now());
+                    lease.acquiredAt(), expiresAt);
+            return entry.advance(current);
         });
     }
 
@@ -301,6 +314,14 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
     private void ttl(Duration value) {
         if (value == null || value.isNegative() || value.isZero() || value.compareTo(limits.maximumLeaseTtl()) > 0)
             throw invalid("ttl");
+    }
+
+    private static Instant leaseExpiry(Instant now, Duration ttl) {
+        try {
+            return now.plus(ttl);
+        } catch (DateTimeException | ArithmeticException unrepresentable) {
+            throw invalid("lease expiry is outside the supported instant range");
+        }
     }
 
     private String encodeCursor(String tenant, String lastId) {

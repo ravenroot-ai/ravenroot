@@ -3,6 +3,7 @@ package ai.ravenroot.persistence.postgresql;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryDefaults;
 import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 
@@ -16,6 +17,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -152,7 +154,6 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      */
     private static final String CURSOR_VERSION = "rr1";
 
-    private static final Duration DEFAULT_COMMAND_RETENTION = Duration.ofDays(7);
 
     /**
      * The bounds this registry publishes, chosen to equal the single-host adapter's so that a
@@ -171,7 +172,6 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      * deployment listing page is not an inventory page, so reading them from the store config would
      * make an adopter widening one silently move the other.</p>
      */
-    private static final Limits LIMITS = new Limits(100, Duration.ofMinutes(5), Duration.ofSeconds(5));
 
     /**
      * The ledger slot a command key is recorded under.
@@ -213,6 +213,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
     private final Clock clock;
     private final DeploymentIdSource ids;
     private final Duration commandRetention;
+    private final Limits limits;
     private final Transactions transactions;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -236,7 +237,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      * @param ids server-side seam that mints a stable identity for each newly created deployment.
      */
     public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids) {
-        this(dataSource, clock, ids, DEFAULT_COMMAND_RETENTION);
+        this(dataSource, clock, ids, DeploymentRegistryDefaults.durableCommandRetention());
     }
 
     /**
@@ -291,6 +292,23 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      */
     public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
                                       Duration commandRetention, PostgresStoreConfig config) {
+        this(dataSource, clock, ids, commandRetention, config,
+                DeploymentRegistryDefaults.durableLimits());
+    }
+
+    /**
+     * Opens the registry with explicit contention settings and deployment-registry limits.
+     *
+     * @param dataSource the database this registry shares with the deployment's other stores.
+     * @param clock time authority for every instant this registry records or evaluates expiry against.
+     * @param ids server-side seam that mints a stable identity for each newly created deployment.
+     * @param commandRetention how long a command row survives before explicit purge may remove it.
+     * @param config lock timeout, statement timeout, and serialization retry settings.
+     * @param limits published deployment page, lease, and clock-skew limits.
+     */
+    public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
+                                      Duration commandRetention, PostgresStoreConfig config,
+                                      Limits limits) {
         Objects.requireNonNull(dataSource, "dataSource");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
@@ -300,6 +318,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
             throw new IllegalArgumentException("commandRetention must be positive");
         }
         this.commandRetention = commandRetention;
+        this.limits = Objects.requireNonNull(limits, "limits");
         this.transactions = new Transactions(dataSource, config, CommitBoundary.NONE);
         // Named and daemon so a thread dump says which registry is blocked and a forgotten close cannot
         // hold the JVM open. Unbounded because the DataSource is the real bound: a task that cannot get
@@ -324,7 +343,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     @Override
     public Limits limits() {
-        return LIMITS;
+        return limits;
     }
 
     // ---------------------------------------------------------------- mutations
@@ -387,6 +406,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
         if (content.createdAt().isAfter(now)) {
             throw invalid("createdAt is in the future");
         }
+        Instant commandExpiresAt = commandExpiry(now);
         DeploymentId id = Objects.requireNonNull(ids.mint(command.tenantId()), "minted deploymentId");
         Desired desired = new Desired(DesiredKind.STOPPED, null, null, 0);
         Observation observed = new Observation(ObservedKind.COLD, null, 0, now);
@@ -395,7 +415,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
         insertDeploymentRow(connection, command.tenantId(), id.value(), now);
         insertVersionRow(connection, command.tenantId(), id.value(), 1, content);
         insertLedgerEntry(connection, command.tenantId(), id.value(), Action.CREATE, command.key(),
-                command.digest(), result, now, now.plus(commandRetention));
+                command.digest(), result, now, commandExpiresAt);
         return result;
     }
 
@@ -611,9 +631,10 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 if (current.lease() != null && current.lease().expiresAt().isAfter(now)) {
                     throw failure(new FailureReason.Conflict());
                 }
+                Instant expiresAt = leaseExpiry(now, ttl);
                 long newFence = aggregate.fence() + 1;
                 Lease lease = new Lease(tenant, current.deploymentId(), owner, newFence, now,
-                        now.plus(ttl));
+                        expiresAt);
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), lease, current.failure(),
@@ -648,8 +669,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record current = aggregate.record();
                 // Extends the window without rotating the token: rotating it would fence out the very
                 // holder being renewed.
+                Instant expiresAt = leaseExpiry(now, ttl);
                 Lease renewed = new Lease(tenant, current.deploymentId(), lease.owner(), lease.fence(),
-                        lease.acquiredAt(), now.plus(ttl));
+                        lease.acquiredAt(), expiresAt);
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), renewed, current.failure(),
@@ -760,7 +782,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
     @Override
     public CompletionStage<Page> list(String tenantId, String cursor, int limit) {
         return async(() -> {
-            if (tenantId == null || tenantId.isBlank() || limit < 1 || limit > LIMITS.maximumPageSize()) {
+            if (tenantId == null || tenantId.isBlank() || limit < 1
+                    || limit > limits.maximumPageSize()) {
                 throw invalid("limit or tenant");
             }
             String after = decodeCursor(tenantId, cursor);
@@ -915,7 +938,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     private void ttl(Duration value) {
         if (value == null || value.isNegative() || value.isZero()
-                || value.compareTo(LIMITS.maximumLeaseTtl()) > 0) {
+                || value.compareTo(limits.maximumLeaseTtl()) > 0) {
             throw invalid("ttl");
         }
     }
@@ -929,9 +952,10 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     private Record persist(Connection connection, Aggregate loaded, Aggregate next, Action action,
                            String key, String digest, Instant now) throws SQLException {
+        Instant commandExpiresAt = commandExpiry(now);
         saveAggregate(connection, loaded.record().revision(), next);
         insertLedgerEntry(connection, next.record().tenantId(), next.record().deploymentId().value(),
-                action, key, digest, next.record(), now, now.plus(commandRetention));
+                action, key, digest, next.record(), now, commandExpiresAt);
         return next.record();
     }
 
@@ -1494,6 +1518,22 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     private Instant now() {
         return clock.instant();
+    }
+
+    private Instant commandExpiry(Instant now) {
+        return expiry(now, commandRetention, "command retention expiry");
+    }
+
+    private static Instant leaseExpiry(Instant now, Duration ttl) {
+        return expiry(now, ttl, "lease expiry");
+    }
+
+    private static Instant expiry(Instant now, Duration duration, String contract) {
+        try {
+            return now.plus(duration);
+        } catch (DateTimeException | ArithmeticException unrepresentable) {
+            throw invalid(contract + " is outside the supported instant range");
+        }
     }
 
     private static RegistryException invalid(String message) {

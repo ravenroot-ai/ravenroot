@@ -2,6 +2,8 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionPolicy;
 import ai.ravenroot.api.application.ExecutionSubmission;
+import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionManifest;
 import ai.ravenroot.api.persistence.ExecutionManifestDifference;
@@ -10,11 +12,15 @@ import ai.ravenroot.api.persistence.ExecutionManifestStoreException;
 import ai.ravenroot.api.persistence.ExecutionManifestStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionManifestReferences;
 import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.GraphContentId;
+import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphDefinitionReferences;
 import ai.ravenroot.api.persistence.GraphDefinitionStore;
+import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
 import ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException;
+import ai.ravenroot.core.manifest.ExecutionManifestResolutionException;
 import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
@@ -25,13 +31,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -149,6 +160,90 @@ class DefaultRavenrootApplicationExecutionManifestTest {
                         .toCompletableFuture().join().size(),
                 "and nothing holds a lease on an instance that does not exist");
         application.close();
+    }
+
+    @Test
+    void anUnknownPackageCapacityRefusesBeforeAnyAdmissionEffect() {
+        AtomicInteger identities = new AtomicInteger();
+        AtomicInteger executionWrites = new AtomicInteger();
+        AtomicInteger definitionWrites = new AtomicInteger();
+        AtomicInteger manifestWrites = new AtomicInteger();
+        BehaviorRegistry registry = registryWithUnknownPackageCapacity();
+        ExecutionStore executions = forwarding(ExecutionStore.class, new InMemoryExecutionStore(),
+                "apply", executionWrites);
+        GraphDefinitionStore definitions = forwarding(GraphDefinitionStore.class,
+                new InMemoryGraphDefinitionStore(Clock.systemUTC()), "put", definitionWrites);
+        ExecutionManifestStore manifests = forwarding(ExecutionManifestStore.class,
+                new InMemoryExecutionManifestStore(Clock.systemUTC()), "pin", manifestWrites);
+        var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                new ExecutionMonitor(), registry,
+                new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                kind -> { identities.incrementAndGet(); return UUID.randomUUID(); }, executions, 0,
+                UnknownBehaviorPolicy.passThrough(), definitions, null, null,
+                GraphExecutionLimits.DEFAULTS, null, manifests);
+
+        ExecutionManifestResolutionException refused = assertThrows(
+                ExecutionManifestResolutionException.class,
+                () -> application.startGraphMl(TestIdentities.TENANT_A, UUID.randomUUID(),
+                        new ByteArrayInputStream(graphBytes()), "payload"));
+
+        assertEquals(ExecutionManifestResolutionException.Reason.CAPACITY_PROFILE_UNAVAILABLE,
+                refused.reason());
+        assertEquals(0, identities.get(), "no process or traversal identity was allocated");
+        assertEquals(0, executionWrites.get(), "no process batch was applied");
+        assertEquals(0, definitionWrites.get(), "no graph definition was stored");
+        assertEquals(0, manifestWrites.get(), "no incomplete manifest was pinned");
+        application.close();
+    }
+
+    @Test
+    void anUnknownPackageCapacityDoesNotBlockANonManifestRuntime() {
+        var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                new ExecutionMonitor(), registryWithUnknownPackageCapacity(),
+                new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                new InMemoryExecutionStore(), 0, UnknownBehaviorPolicy.passThrough(),
+                new InMemoryGraphDefinitionStore(Clock.systemUTC()), null, null,
+                GraphExecutionLimits.DEFAULTS, null, null);
+
+        UUID executionId = UUID.randomUUID();
+        ExecutionSubmission submission = application.startGraphMl(TestIdentities.TENANT_A,
+                executionId, new ByteArrayInputStream(graphBytes()), "payload");
+
+        assertEquals(executionId, submission.traversalId());
+        application.close();
+    }
+
+    @Test
+    void theManifestPinsTheActualDurableResultAccessorAndEffectiveProjectionCap() {
+        StoredExecutionManifest pinned;
+        var accepting = applicationWith(resultCapacities(1_001, 101),
+                new InMemoryGraphDefinitionStore(Clock.systemUTC()),
+                new InMemoryExecutionManifestStore(Clock.systemUTC()), GraphExecutionLimits.DEFAULTS);
+        var key = new ExecutionKey(TestIdentities.TENANT_A.tenantId(), UUID.randomUUID());
+        var content = new GraphContentId("a".repeat(64));
+        pinned = accepting.executionManifests().pin(key, content,
+                GraphDefinitionIdentity.forSubmission(content), ExecutionPolicy.STANDARD);
+        accepting.close();
+
+        var sameEffectiveCap = applicationWith(resultCapacities(2_002, 101),
+                new InMemoryGraphDefinitionStore(Clock.systemUTC()),
+                new InMemoryExecutionManifestStore(Clock.systemUTC()), GraphExecutionLimits.DEFAULTS);
+        assertTrue(sameEffectiveCap.executionManifests()
+                .describe(pinned, ExecutionPolicy.STANDARD).compatible(),
+                "changing only the generic payload accessor must not change the result profile");
+        sameEffectiveCap.close();
+
+        var changedResultCap = applicationWith(resultCapacities(1_001, 102),
+                new InMemoryGraphDefinitionStore(Clock.systemUTC()),
+                new InMemoryExecutionManifestStore(Clock.systemUTC()), GraphExecutionLimits.DEFAULTS);
+        var report = changedResultCap.executionManifests()
+                .describe(pinned, ExecutionPolicy.STANDARD);
+        assertEquals(List.of(ExecutionManifestDifference.Dimension.EXECUTION_STORE),
+                report.dimensions());
+        changedResultCap.close();
     }
 
     private static ai.ravenroot.api.application.ExecutionIdentitySource fixedIdentities(UUID instance) {
@@ -273,6 +368,62 @@ class DefaultRavenrootApplicationExecutionManifestTest {
                 new ai.ravenroot.core.programming.DisabledProgramRuntime(),
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), executions, 0,
                 UnknownBehaviorPolicy.passThrough(), definitions, null, null, limits, null, manifests);
+    }
+
+    private static BehaviorRegistry registryWithUnknownPackageCapacity() {
+        BehaviorRegistry registry = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+        String packageId = "test.unknown-capacity";
+        registry.registerPackageFactory(new NodeBehaviorFactory() {
+            @Override
+            public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("unused-unknown-capacity", "Unused", "Test", "",
+                        "actor", false, List.of(), Set.of());
+            }
+
+            @Override
+            public NodeHandler create(ai.ravenroot.core.graph.GraphNode node) {
+                return message -> CompletableFuture.completedFuture(
+                        NodeResult.continueWith(message.payload()));
+            }
+        }, packageId, new BehaviorRegistry.RegisteredNodePackageBinding(
+                PinnedNodePackage.of(packageId, "1.0", ai.ravenroot.api.node.NodeSdk.CONTRACT),
+                Optional.empty()));
+        return registry;
+    }
+
+    private static ExecutionStore resultCapacities(int genericPayloadBytes, int resultPayloadBytes) {
+        ExecutionStore delegate = new InMemoryExecutionStore();
+        return (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                new Class<?>[] {ExecutionStore.class}, (proxy, method, arguments) -> {
+                    if (method.getName().equals("maxPayloadBytes")) {
+                        return genericPayloadBytes;
+                    }
+                    if (method.getName().equals("maxExecutionResultPayloadBytes")) {
+                        return resultPayloadBytes;
+                    }
+                    return invoke(delegate, method, arguments);
+                });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T forwarding(Class<T> type, T delegate, String countedMethod,
+                                    AtomicInteger counter) {
+        return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
+                (proxy, method, arguments) -> {
+                    if (method.getName().equals(countedMethod)) {
+                        counter.incrementAndGet();
+                    }
+                    return invoke(delegate, method, arguments);
+                });
+    }
+
+    private static Object invoke(Object delegate, java.lang.reflect.Method method, Object[] arguments)
+            throws Throwable {
+        try {
+            return method.invoke(delegate, arguments);
+        } catch (InvocationTargetException wrapped) {
+            throw wrapped.getCause();
+        }
     }
 
     private static byte[] graphBytes() {

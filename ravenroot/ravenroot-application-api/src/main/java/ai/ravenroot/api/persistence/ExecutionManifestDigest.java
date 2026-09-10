@@ -32,7 +32,8 @@ import java.util.Objects;
 public record ExecutionManifestDigest(String value) {
 
     /** Domain tag for a whole manifest, so this digest can never collide with another SHA-256 use. */
-    private static final String MANIFEST_DOMAIN = "ravenroot.execution-manifest.v1";
+    private static final String MANIFEST_DOMAIN_V1 = "ravenroot.execution-manifest.v1";
+    private static final String MANIFEST_DOMAIN_V2 = "ravenroot.execution-manifest.v2";
 
     /** Rejects an address that is not a lowercase hexadecimal SHA-256 digest. */
     public ExecutionManifestDigest {
@@ -50,6 +51,11 @@ public record ExecutionManifestDigest(String value) {
      */
     public static ExecutionManifestDigest of(ExecutionManifest manifest) {
         Objects.requireNonNull(manifest, "manifest");
+        String domain = switch (manifest.formatVersion()) {
+            case ExecutionManifest.FORMAT_VERSION_1 -> MANIFEST_DOMAIN_V1;
+            case ExecutionManifest.FORMAT_VERSION_2 -> MANIFEST_DOMAIN_V2;
+            default -> throw new IllegalArgumentException("unsupported execution manifest format version");
+        };
         var parts = new java.util.ArrayList<String>();
         parts.add(Integer.toString(manifest.formatVersion()));
         parts.add(manifest.key().tenantId());
@@ -71,7 +77,7 @@ public record ExecutionManifestDigest(String value) {
             parts.add(pinned.packageId());
             parts.add(pinned.identityDigest());
         }
-        return new ExecutionManifestDigest(component(MANIFEST_DOMAIN, parts));
+        return new ExecutionManifestDigest(component(domain, parts));
     }
 
     /**

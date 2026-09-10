@@ -122,6 +122,30 @@ class SqliteExecutionManifestMigrationUpgradeTest {
     }
 
     @Test
+    void aStoredFutureFormatIsAClassifiedCorruptRead(@TempDir Path directory) throws Exception {
+        Path databaseFile = directory.resolve("future-format.db");
+        var key = new ExecutionKey("acme", UUID.randomUUID());
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            store.pin(manifest(key, "STANDARD", List.of())).toCompletableFuture().join();
+        }
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databaseFile);
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE execution_manifest SET format_version = "
+                    + (ExecutionManifest.CURRENT_FORMAT_VERSION + 1));
+        }
+
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            ExecutionManifestStoreException failure = assertThrows(ExecutionManifestStoreException.class,
+                    () -> unwrap(() -> store.load(key)));
+            var corrupted = assertInstanceOf(ExecutionManifestStoreFailure.Corrupted.class,
+                    failure.failure());
+            assertEquals("unsupported execution manifest format version", corrupted.reason());
+        }
+    }
+
+    @Test
     void anExecutionThatPredatesTheMigrationHasNoManifestAndIsNotBackfilled(@TempDir Path directory)
             throws Exception {
         Path databaseFile = directory.resolve("pre-existing.db");

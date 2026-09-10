@@ -3912,7 +3912,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 audit.hashlib.sha256(b"new evidence").hexdigest(), "java",
             )
             plan = {
-                "id": "synthetic-reconciliation", "issue": "#315",
+                "id": "synthetic-reconciliation", "issue": "#316",
                 "sourceRevision": revision, "targetRevision": revision,
                 "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
                 "sourceInventoryDigest": audit.hashlib.sha256(source_raw).hexdigest(),
@@ -3930,6 +3930,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             }
             self.assertEqual([], audit.reconciliation_plan_errors(
                 root, source_document, (candidate,), plan)[0])
+
+            malformed_issue = copy.deepcopy(plan)
+            malformed_issue["issue"] = "316"
+            self.assertTrue(any("unsupported or incomplete shape" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), malformed_issue)[0]))
+            for invalid_issue in (True, " #316", "#316 "):
+                malformed_issue = copy.deepcopy(plan)
+                malformed_issue["issue"] = invalid_issue
+                self.assertTrue(any("unsupported or incomplete shape" in error for error in
+                                    audit.reconciliation_plan_errors(
+                                        root, source_document, (candidate,), malformed_issue)[0]))
 
             partial = copy.deepcopy(plan)
             partial["mappings"] = []

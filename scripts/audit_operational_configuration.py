@@ -1888,7 +1888,8 @@ def reconciliation_plan_errors(root: Path, document: dict[str, object],
         "id", "issue", "sourceRevision", "targetRevision", "sourceInventoryPath",
         "sourceInventoryDigest", "targetCandidateDigest", "mappings", "retirements", "additions",
     }
-    if set(plan) != required or plan.get("issue") != "#315" \
+    if set(plan) != required or not isinstance(plan.get("issue"), str) \
+            or re.fullmatch(r"#[1-9][0-9]*", str(plan["issue"])) is None \
             or not isinstance(plan.get("id"), str) or not str(plan["id"]).strip():
         return ["reconciliation plan has an unsupported or incomplete shape"], {}
     source_revision = plan["sourceRevision"]

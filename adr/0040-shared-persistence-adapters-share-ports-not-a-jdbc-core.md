@@ -88,10 +88,17 @@ requirement of a multi-host deployment rather than a recommendation, and no conf
 for it.
 
 **The first such module is the PostgreSQL adapter**, `ravenroot-persistence-postgresql`. It is in the
-reactor so its conformance run happens on every full build, and it is deliberately not a dependency of
-the server or the distribution: a deployment that wants it adds the module and supplies it a
-`DataSource` that a composition root has already built. No credential, URL or certificate is visible
-to, or storable by, adapter code.
+reactor so its conformance run happens on every full build, and it is handed a `DataSource` that a
+composition root has already built. No credential, URL or certificate is visible to, or storable by,
+adapter code.
+
+*Amended after acceptance, because the record said otherwise and the record was consulted:* when this
+decision was taken the adapter was deliberately not a dependency of the server or the distribution, and
+a deployment that wanted it added the module itself. The composition root has since learned to select a
+store, so the adapter and its driver now ship and a deployment chooses one at startup rather than by
+rebuilding. Nothing about the decision above changes — the adapter still receives its connections
+rather than making them — but a reader deciding whether the driver is on the classpath must not be told
+that it is not.
 
 ## Consequences
 
@@ -110,10 +117,10 @@ transaction may or may not have been applied; retrying is unavailable, because a
 transaction is a duplicate. The port already has the vocabulary for this, and this adapter is the first
 that reaches it in practice rather than in principle.
 
-Composition remains adapter-typed. The server's persistence configuration names a single-host store
-location today, so selecting an adapter is a change to that composition root and is delivered
-separately from the adapter itself. Until it lands, the module is usable by a deployment that composes
-its own stores, and by tests.
+Composition was adapter-typed when this was written: the server's persistence configuration named a
+single-host store location, so selecting an adapter was a change to that composition root, delivered
+separately from the adapter itself. That delivery has since landed, and the configuration is now a
+choice between the stores rather than a name for one of them.
 
 There is no capability that says "coordinates across hosts". `CROSS_PROCESS_LEASE` is declared by the
 single-host adapter for one host, and the conformance suite can only demonstrate that two store

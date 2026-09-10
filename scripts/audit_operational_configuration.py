@@ -2071,10 +2071,42 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     history.append(plan)
     refreshed["reconciliationHistory"] = history
     refreshed.setdefault("semanticReviewHistory", [])
-    if document.get("schemaVersion") != SCHEMA_VERSION:
-        migration_history = list(refreshed.get("migrationHistory", []))
+    refreshed["migrationHistory"] = expected_reconciled_migration_history(
+        document, plan, source_entries)
+    refreshed["retiredEntries"] = expected_reconciled_retired_entries(
+        document, source_entries, plan)
+    refreshed["evidenceRecords"] = {
+        digest: evidence for digest, evidence in sorted({
+            candidate.evidence_digest: candidate.evidence for candidate in candidates
+        }.items())
+    }
+    return refreshed, []
+
+
+def expected_reconciled_retired_entries(source_document: dict[str, object],
+                                        source_entries: dict[str, dict[str, object]],
+                                        plan: dict[str, object]) -> list[object]:
+    """Rebuild the exact append-only retirement ledger for one reconciliation."""
+    retired_history = list(source_document.get("retiredEntries", []))
+    old_evidence = source_document.get("evidenceRecords", {})
+    for approval in plan["retirements"]:
+        archived = dict(source_entries[str(approval["id"])])
+        archived.pop("retirement", None)
+        archived["retirementRationale"] = str(approval["rationale"]).strip()
+        if "evidence" not in archived and isinstance(old_evidence, dict):
+            archived["evidence"] = old_evidence.get(str(archived.get("evidenceDigest")), "")
+        retired_history.append(archived)
+    return retired_history
+
+
+def expected_reconciled_migration_history(source_document: dict[str, object],
+                                          plan: dict[str, object],
+                                          source_entries: dict[str, dict[str, object]]) -> list[object]:
+    """Rebuild the exact append-only schema migration ledger for one reconciliation."""
+    migration_history = list(source_document.get("migrationHistory", []))
+    if source_document.get("schemaVersion") != SCHEMA_VERSION:
         migration_history.append({
-            "fromSchema": document.get("schemaVersion"),
+            "fromSchema": source_document.get("schemaVersion"),
             "toSchema": SCHEMA_VERSION,
             "sourceRevision": plan["sourceRevision"],
             "sourcePath": plan["sourceInventoryPath"],
@@ -2084,23 +2116,7 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
                 str(entry.get("status")) for entry in source_entries.values()).items())),
             "rationale": "Schema v5 records explicit source reconciliation, row-level identity migrations, and deterministic follow-up ownership.",
         })
-        refreshed["migrationHistory"] = migration_history
-    retired_history = list(refreshed.get("retiredEntries", []))
-    for approval in plan["retirements"]:
-        archived = dict(source_entries[str(approval["id"])])
-        archived.pop("retirement", None)
-        archived["retirementRationale"] = str(approval["rationale"]).strip()
-        old_evidence = document.get("evidenceRecords", {})
-        if "evidence" not in archived and isinstance(old_evidence, dict):
-            archived["evidence"] = old_evidence.get(str(archived.get("evidenceDigest")), "")
-        retired_history.append(archived)
-    refreshed["retiredEntries"] = retired_history
-    refreshed["evidenceRecords"] = {
-        digest: evidence for digest, evidence in sorted({
-            candidate.evidence_digest: candidate.evidence for candidate in candidates
-        }.items())
-    }
-    return refreshed, []
+    return migration_history
 
 
 def reconciliation_history_errors(root: Path, document: dict[str, object],
@@ -2130,6 +2146,17 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         if isinstance(source_document, dict) else []
     if source_history != history[:-1]:
         errors.append("reconciliation history is not an append-only chain from the committed source inventory")
+    if isinstance(source_document, dict):
+        expected_retired = expected_reconciled_retired_entries(
+            source_document, source_entries, plan)
+        if document.get("retiredEntries") != expected_retired:
+            errors.append(
+                "retiredEntries is not the exact anchored ledger plus approved reconciliation retirements")
+        expected_migrations = expected_reconciled_migration_history(
+            source_document, plan, source_entries)
+        if document.get("migrationHistory") != expected_migrations:
+            errors.append(
+                "migrationHistory is not the exact anchored ledger plus the required schema migration")
 
     expected_metadata: dict[str, dict[str, object]] = {}
     for mapping in plan["mappings"]:
@@ -2156,7 +2183,13 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
     if not isinstance(review_history, list):
         errors.append("semanticReviewHistory must be an array")
         review_history = []
-    for review in review_history:
+    source_reviews = source_document.get("semanticReviewHistory", []) \
+        if isinstance(source_document, dict) else []
+    if not isinstance(source_reviews, list) or review_history[:len(source_reviews)] != source_reviews:
+        errors.append(
+            "semanticReviewHistory is not an append-only chain from the committed source inventory")
+        source_reviews = []
+    for review in review_history[len(source_reviews):]:
         required = {"candidateId", "approved", "rationale", "sourceRevision",
                     "beforeMetadata", "afterMetadata"}
         identifier = review.get("candidateId") if isinstance(review, dict) else None
@@ -2197,12 +2230,15 @@ REMEDIATION_DOMAIN_TITLES = {
 }
 
 
-def remediation_issue_for(entry: dict[str, object]) -> str:
+def remediation_issue_for(entry: dict[str, object],
+                          setting_owners: dict[str, str] | None = None) -> str:
     """Map only pending or unresolved operator rows to one ordered follow-up domain."""
     path = str(entry.get("path", "")).lower()
     symbol = str(entry.get("symbol", "")).lower()
     role = str(entry.get("role", "")).lower()
     setting = str(entry.get("setting", "")).lower()
+    if setting_owners is not None and setting in setting_owners:
+        return setting_owners[setting]
     joined = " ".join((path, symbol, role, setting))
     if path.startswith("deploy/helm/"):
         return "#317"
@@ -2225,9 +2261,21 @@ def build_remediation_domains(entries: Iterable[dict[str, object]]) -> dict[str,
     population = [entry for entry in entries if entry.get("status") == "pending-review" or (
         entry.get("classification") == "operator-configurable"
         and entry.get("status") in {"confirmed-hardcoded", "deferred"})]
+    unresolved = [entry for entry in population
+                  if entry.get("classification") == "operator-configurable"
+                  and entry.get("status") in {"confirmed-hardcoded", "deferred"}
+                  and isinstance(entry.get("setting"), str) and str(entry["setting"]).strip()]
+    setting_owners: dict[str, str] = {}
+    for setting in sorted({str(entry["setting"]) for entry in unresolved}):
+        owners = {str(entry.get("followUp", "")) for entry in unresolved
+                  if entry.get("setting") == setting}
+        if len(owners) != 1 or next(iter(owners)) not in REMEDIATION_DOMAIN_TITLES:
+            raise ValueError(f"unresolved setting {setting} requires one follow-up owner")
+        setting_owners[setting] = next(iter(owners))
     domains: list[dict[str, object]] = []
     for issue, title in REMEDIATION_DOMAIN_TITLES.items():
-        assigned = sorted((entry for entry in population if remediation_issue_for(entry) == issue),
+        assigned = sorted((entry for entry in population
+                           if remediation_issue_for(entry, setting_owners) == issue),
                           key=lambda item: str(item["id"]))
         domains.append({
             "issue": issue,
@@ -2243,16 +2291,38 @@ def build_remediation_domains(entries: Iterable[dict[str, object]]) -> dict[str,
     return {
         "kind": "pending-and-unresolved-operator-domain-map-v1",
         "candidateDigest": candidate_set_digest(str(entry["id"]) for entry in population),
+        "settingOwners": [
+            {"setting": setting, "issue": issue}
+            for setting, issue in sorted(setting_owners.items())
+        ],
         "domains": domains,
     }
 
 
 def remediation_domain_errors(document: dict[str, object]) -> list[str]:
     if "remediationDomains" not in document:
-        return []
+        if document.get("reconciliationRequired") is False \
+                and not document.get("reconciliationHistory"):
+            return []
+        return ["inventory requires a remediation domain map"]
     entries = [entry for entry in document.get("entries", []) if isinstance(entry, dict)]
-    expected = build_remediation_domains(entries)
     actual = document.get("remediationDomains")
+    if not isinstance(actual, dict) or not isinstance(actual.get("settingOwners"), list):
+        return ["remediation domain map requires setting-level ownership"]
+    ownership_rows = actual["settingOwners"]
+    settings: set[str] = set()
+    for owner in ownership_rows:
+        setting = owner.get("setting") if isinstance(owner, dict) else None
+        issue = owner.get("issue") if isinstance(owner, dict) else None
+        if not isinstance(owner, dict) or set(owner) != {"setting", "issue"} \
+                or not isinstance(setting, str) or not setting.strip() \
+                or issue not in REMEDIATION_DOMAIN_TITLES or setting in settings:
+            return ["remediation domain map has invalid or duplicate setting ownership"]
+        settings.add(setting)
+    try:
+        expected = build_remediation_domains(entries)
+    except ValueError as invalid:
+        return [str(invalid)]
     if actual != expected:
         return ["remediation domain map does not exactly partition the pending and unresolved operator population"]
     candidate_ids = [identifier for domain in expected["domains"]
@@ -3657,6 +3727,8 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
 
 
 ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
+ENVIRONMENT_REFERENCE_AUTHORITY_ID = "environment-reference-generator-v1"
+ENVIRONMENT_REFERENCE_PATH = Path("scripts/publish_environment_reference.py")
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -3691,6 +3763,31 @@ ROUTE_BOUND_PATHS = {
     "oc-418656067bc7b4ad0c5c": "/v1/events/recent",
     "oc-8eed875577d7d07c6447": "/v1/events/recent",
 }
+
+
+def environment_reference_description_candidate_ids(
+        root: Path, candidates: Iterable[Candidate]) -> set[str]:
+    """Return source-derived atoms that route real production bindings into the reference page."""
+    production_names: set[str] = set()
+    source_root = root / "ravenroot"
+    if source_root.is_dir():
+        for source in sorted(source_root.rglob("src/main/java/**/*.java")):
+            production_names.update(ENVIRONMENT_BINDING.findall(
+                source.read_text(encoding="utf-8")))
+    identifiers: set[str] = set()
+    for candidate in candidates:
+        expression = candidate.expression
+        if len(expression) >= 2 and expression[0] == expression[-1] \
+                and expression[0] in {'"', "'"}:
+            expression = expression[1:-1]
+        if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                and candidate.symbol == "group" \
+                and candidate.kind in {
+                    "binding-default", "environment-binding", "inline-script-operational",
+                } \
+                and expression in production_names:
+            identifiers.add(candidate.id)
+    return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
 ASSISTANT_CONFIGURATION_TEST_PATH = Path(
@@ -5316,6 +5413,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         entries[identifier] = entry
 
     discovered = {candidate.id: candidate for candidate in candidates}
+    environment_reference_descriptions = environment_reference_description_candidate_ids(
+        root, candidates)
     assistant_authorities = document.get("assistantLimitAuthorities")
     assistant_settings = {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}
     assistant_family = assistant_limit_family_index(assistant_authorities)
@@ -5356,8 +5455,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if classification == "published-contract-description":
             route_publication = candidate.path == ROUTE_TABLE_PATH.as_posix() \
                 and entry.get("retainedAuthority") == ROUTE_TABLE_AUTHORITY_ID
-            environment_publication = candidate.path == "scripts/publish_environment_reference.py" \
-                and entry.get("retainedAuthority") == "environment-reference-generator-v1"
+            environment_publication = identifier in environment_reference_descriptions \
+                and entry.get("retainedAuthority") == ENVIRONMENT_REFERENCE_AUTHORITY_ID
             if not route_publication and not environment_publication:
                 errors.append(
                     f"{identifier}: published-contract-description requires a closed publication authority")
@@ -5538,7 +5637,26 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         expected_ids = {str(entry["id"]) for entry in setting_entries}
         expected_bindings = {str(entry["expression"]) for entry in setting_entries
                              if entry.get("kind") == "environment-binding"}
+        common_fields = (
+            "authorityStatus", "prospectiveOwner", "unresolvedEvidence", "default",
+            "validation", "scope", "pinning", "coverage", "followUp", "rationale",
+        )
+        first = setting_entries[0]
+        common_metadata = tuple(first.get(field) for field in common_fields) + (
+            tuple(first.get("bindings", [])), tuple(first.get("defaultEvidence", [])),
+        )
         for entry in setting_entries:
+            metadata = tuple(entry.get(field) for field in common_fields) + (
+                tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
+            )
+            if metadata != common_metadata:
+                errors.append(
+                    f"inconsistent unresolved configuration metadata for {setting}: "
+                    f"{first['id']} and {entry['id']}")
+            if len(setting_entries) > 1 and (
+                    not isinstance(entry.get("sourceFact"), str)
+                    or not str(entry["sourceFact"]).strip()):
+                errors.append(f"{entry['id']}: multi-row unresolved setting requires a sourceFact")
             if set(entry.get("defaultEvidence", [])) != expected_ids:
                 errors.append(
                     f"{entry['id']}: unresolved {setting} defaultEvidence must equal its exact setting rows")
@@ -5713,26 +5831,39 @@ def render_report(document: dict[str, object]) -> str:
         "Every reviewed operator setting must name one typed owner, bindings, default, validation,",
                   "scope, pinning policy, and deployment/reference coverage. Pending candidates do not appear",
                   "in this table.", "",
-                  "| Setting | State | Owner | Field | Bindings | Default | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|"))
+                  "| Setting | State | Owner | Field | Bindings | Default | Source facts | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|---|"))
     if operator_entries:
         canonical: dict[str, list[dict[str, object]]] = {}
         for entry in operator_entries:
             canonical.setdefault(str(entry["setting"]), []).append(entry)
         for setting, setting_entries in sorted(canonical.items()):
+            setting_entries.sort(key=lambda item: str(item["id"]))
             entry = setting_entries[0]
             item_states = {str(item["status"]) for item in setting_entries}
             states = "converted" if "converted" in item_states else ", ".join(sorted(item_states))
             bindings = ", ".join(f"`{value}`" for value in entry.get("bindings", []))
-            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {validation} | {scope} | {pinning} | {coverage} |".format(
-                setting=setting, status=states, owner=entry.get("owner", ""),
-                field=entry.get("field", ""),
-                bindings=bindings or "none", default=entry.get("default", ""), validation=entry.get("validation", ""),
+            unresolved = entry.get("authorityStatus") == "unresolved"
+            owner = entry.get("prospectiveOwner", "") if unresolved else entry.get("owner", "")
+            field = "unresolved" if unresolved else entry.get("field", "")
+            source_facts = "<br>".join(
+                f"`{item['id']}`: {str(item.get('sourceFact', item.get('expression', ''))).replace('|', '&#124;')}"
+                for item in setting_entries
+            )
+            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {source_facts} | {validation} | {scope} | {pinning} | {coverage} |".format(
+                setting=setting, status=states, owner=owner,
+                field=field,
+                bindings=bindings or "none", default=entry.get("default", ""),
+                source_facts=source_facts,
+                validation=entry.get("validation", ""),
                 scope=entry.get("scope", ""), pinning=entry.get("pinning", ""),
                 coverage=entry.get("coverage", "")))
     else:
-        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |")
+        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
-    deferred_entries = [entry for entry in typed if entry.get("status") == "deferred"]
+    deferred_entries = sorted(
+        (entry for entry in typed if entry.get("status") == "deferred"),
+        key=lambda item: (str(item["path"]), int(item["line"]), str(item["id"])),
+    )
     if deferred_entries:
         for entry in deferred_entries:
             lines.append(f"| `{entry['path']}:{entry['line']}` | {entry.get('followUp', 'missing')} | {entry['rationale']} |")

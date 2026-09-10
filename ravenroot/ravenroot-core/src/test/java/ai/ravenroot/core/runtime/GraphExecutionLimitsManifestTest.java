@@ -1,6 +1,7 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionManifestDifference;
 import ai.ravenroot.api.persistence.GraphContentId;
@@ -8,7 +9,12 @@ import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException;
 import ai.ravenroot.core.manifest.ExecutionManifestResolver;
 import ai.ravenroot.core.manifest.ExecutionManifestService;
+import ai.ravenroot.core.graph.GraphDefinition;
+import ai.ravenroot.core.graph.GraphEdge;
+import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -34,9 +40,47 @@ class GraphExecutionLimitsManifestTest {
     private static final GraphContentId CONTENT =
             GraphContentId.of("canonical graph".getBytes(StandardCharsets.UTF_8));
 
+    @Test
+    void sharedRunnerUsesEachProcessPinnedGraphBudget() {
+        GraphExecutionLimits startup = GraphExecutionLimits.fromEnvironment(
+                Map.of(GraphExecutionLimits.MAX_PAYLOAD_TEXT_LENGTH_VARIABLE, "32"));
+        GraphExecutionLimits narrower = GraphExecutionLimits.fromEnvironment(
+                Map.of(GraphExecutionLimits.MAX_PAYLOAD_TEXT_LENGTH_VARIABLE, "16"));
+        GraphExecutionLimits wider = GraphExecutionLimits.fromEnvironment(
+                Map.of(GraphExecutionLimits.MAX_PAYLOAD_TEXT_LENGTH_VARIABLE, "256"));
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "end")));
+        var engine = new SameThreadExecutionEngine();
+        var registry = new BehaviorRegistry();
+        var highKey = new ExecutionKey("tenant-a", UUID.randomUUID());
+        var lowKey = new ExecutionKey("tenant-a", UUID.randomUUID());
+        var highPolicy = resolver(wider).manifestFor(highKey, CONTENT,
+                GraphDefinitionIdentity.forSubmission(CONTENT), ExecutionPolicy.STANDARD, CLOCK.instant())
+                .operationalPolicy();
+        var lowPolicy = resolver(narrower).manifestFor(lowKey, CONTENT,
+                GraphDefinitionIdentity.forSubmission(CONTENT), ExecutionPolicy.STANDARD, CLOCK.instant())
+                .operationalPolicy();
+
+        try (var runner = new GraphRunner(GraphManager.from(graph), engine, registry,
+                new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                UnknownBehaviorPolicy.passThrough(), ExecutionPolicy.STANDARD, startup)) {
+            String widePayload = "x".repeat(64);
+            assertEquals(widePayload, runner.execute(TestIdentities.TENANT_A, highKey.processInstanceId(),
+                    UUID.randomUUID(), widePayload, CONTENT.value(), "deployment", "high", null, highPolicy)
+                    .toCompletableFuture().join().payload());
+            String narrowPayload = "x".repeat(24);
+            ai.ravenroot.api.payload.PayloadException refused = assertThrows(
+                    ai.ravenroot.api.payload.PayloadException.class,
+                    () -> runner.execute(TestIdentities.TENANT_A, lowKey.processInstanceId(),
+                            UUID.randomUUID(), narrowPayload, CONTENT.value(), "deployment", "low", null,
+                            lowPolicy));
+            assertEquals(ai.ravenroot.api.payload.PayloadException.Reason.TEXT_TOO_LONG, refused.reason());
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("structuralBindings")
-    void everyStructuralBindingChangesThePinnedLimitsDigestAndRetainsTheAcceptedManifest(
+    void everyStructuralBindingChangesNewPinsButRecoveryRestoresTheAcceptedValues(
             String name, int configured, ToIntFunction<GraphExecutionLimits> value) {
         GraphExecutionLimits changed = GraphExecutionLimits.fromEnvironment(
                 Map.of(name, Integer.toString(configured)));
@@ -52,10 +96,11 @@ class GraphExecutionLimitsManifestTest {
         String acceptedLimitsDigest = accepted.manifest().runtime().executionLimitsDigest();
 
         var changedRuntime = new ExecutionManifestService(store, resolver(changed), CLOCK);
-        var refusal = assertThrows(ExecutionManifestIncompatibleException.class,
-                () -> changedRuntime.verify(key, ExecutionPolicy.STANDARD));
-        assertEquals(List.of(ExecutionManifestDifference.Dimension.EXECUTION_LIMITS),
-                refusal.report().dimensions());
+        assertEquals(accepted, changedRuntime.verify(key, ExecutionPolicy.STANDARD));
+        GraphExecutionLimits restored = ExecutionManifestResolver.graphExecutionLimits(
+                changedRuntime.resolvePolicy(key, ExecutionPolicy.STANDARD, List.of()));
+        assertEquals(0, differingLimits(GraphExecutionLimits.DEFAULTS, restored),
+                "recovery consumes the accepted tuple after the current environment changes");
         assertNotEquals(acceptedLimitsDigest,
                 resolver(changed).manifestFor(key, CONTENT, GraphDefinitionIdentity.forSubmission(CONTENT),
                         ExecutionPolicy.STANDARD, accepted.manifest().pinnedAt())

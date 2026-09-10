@@ -1,6 +1,9 @@
 package ai.ravenroot.server.plugin;
 
 import ai.ravenroot.api.node.NodeSdk;
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.deployment.TrustedIngress;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.core.graph.GraphNode;
@@ -196,9 +199,9 @@ class PluginActivationOrchestratorTest {
                 "orchestrator.services", Map.of())).orElseThrow();
         var services = ServiceAwareOrchestratorFixtureNodePackage.RECEIVED_SERVICES.get();
 
-        assertTrue(await(services.credentials().resolve(message("tenant-a"), "allowed",
+        assertTrue(await(services.credentials().resolve(sourceContext("tenant-a"), "allowed",
                 java.time.Duration.ofSeconds(5))), "an admitted reference must resolve");
-        assertFalse(await(services.credentials().resolve(message("tenant-a"), "denied",
+        assertFalse(await(services.credentials().resolve(sourceContext("tenant-a"), "denied",
                 java.time.Duration.ofSeconds(5))), "a reference outside the list must not resolve");
         assertEquals(List.of("allowed"), asked,
                 "the deployment credential path must never even be asked for a reference outside the list");
@@ -244,15 +247,15 @@ class PluginActivationOrchestratorTest {
         var services = ServiceAwareOrchestratorFixtureNodePackage.RECEIVED_SERVICES.get();
 
         try (var lease = services.credentials()
-                .resolve(message("tenant-a"), "storage-key", java.time.Duration.ofSeconds(5))
+                .resolve(sourceContext("tenant-a"), "storage-key", java.time.Duration.ofSeconds(5))
                 .completion().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS)) {
             assertEquals("secret:storage-key", new String(lease.copy()),
                     "once written into the list, a SigV4-bound reference is readable in the clear");
         }
         // The list still governs everything it names, and everything it does not.
-        assertTrue(await(services.credentials().resolve(message("tenant-a"), "api-key",
+        assertTrue(await(services.credentials().resolve(sourceContext("tenant-a"), "api-key",
                 java.time.Duration.ofSeconds(5))));
-        assertFalse(await(services.credentials().resolve(message("tenant-a"), "unrelated",
+        assertFalse(await(services.credentials().resolve(sourceContext("tenant-a"), "unrelated",
                 java.time.Duration.ofSeconds(5))));
         registered.activation().close();
     }
@@ -268,12 +271,24 @@ class PluginActivationOrchestratorTest {
         }
     }
 
-    private static ai.ravenroot.api.execution.NodeMessage message(String tenant) {
-        java.util.UUID id = java.util.UUID.randomUUID();
-        return new ai.ravenroot.api.execution.NodeMessage(
-                new ai.ravenroot.api.security.SecurityContext("request", tenant, "subject",
-                        ai.ravenroot.api.security.PrincipalType.USER, "issuer"),
-                id, id, "node", null, Map.of());
+    private static InboundSourceContext sourceContext(String tenant) {
+        var identity = new ai.ravenroot.api.security.SecurityContext(
+                "request", tenant, "subject",
+                ai.ravenroot.api.security.PrincipalType.USER, "issuer");
+        return new InboundSourceContext() {
+            @Override public DeploymentId deploymentId() {
+                return DeploymentId.of("plugin-orchestrator-test");
+            }
+            @Override public String nodeId() { return "source"; }
+            @Override public ai.ravenroot.api.security.SecurityContext identity() {
+                return identity;
+            }
+            @Override public TrustedIngress ingress() {
+                throw new UnsupportedOperationException();
+            }
+            @Override public void reportDegraded(String sanitizedReason) { }
+            @Override public void reportHealthy() { }
+        };
     }
 
     /**

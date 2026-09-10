@@ -80,7 +80,7 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
     private final ExecutionManifestService manifests;
     private final Function<String, Optional<ai.ravenroot.api.catalog.NodeTypeDescriptor>> descriptors;
     private final GraphMlLimits graphMlLimits;
-    private final Map<GraphDefinitionKey, RepeatabilityDeclarations> parsed;
+    private final Map<ParsedKey, ParsedDefinition> parsed;
 
     /**
      * Composes the authority over the stores a rebuild reads from.
@@ -107,7 +107,7 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
         this.graphMlLimits = Objects.requireNonNull(limits, "limits").graphMl();
         this.parsed = new LinkedHashMap<>(16, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<GraphDefinitionKey, RepeatabilityDeclarations> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<ParsedKey, ParsedDefinition> eldest) {
                 return size() > MAX_CACHED_DOCUMENTS;
             }
         };
@@ -156,8 +156,20 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
             return manifestVerdict;
         }
         try {
-            declarationsFor(definitionKey(key, pin));
+            var parsingPolicy = manifests == null ? null
+                    : manifests.graphPolicyForParsing(key, ExecutionPolicy.STANDARD);
+            GraphMlLimits limits = parsingPolicy == null ? graphMlLimits
+                    : ai.ravenroot.core.manifest.ExecutionManifestResolver
+                            .graphExecutionLimits(parsingPolicy).graphMl();
+            ParsedDefinition definition = parsedDefinition(definitionKey(key, pin), limits);
+            if (manifests != null) {
+                manifests.resolvePolicy(key, ExecutionPolicy.STANDARD, definition.behaviorNames());
+            }
             return new RecoveryClassification.Rehydratable(key);
+        } catch (ai.ravenroot.core.manifest.ExecutionManifestResolutionException unavailable) {
+            return new RecoveryClassification.Refused(key,
+                    RecoveryClassification.Reason.MANIFEST_UNRESOLVED,
+                    "the legacy manifest does not contain required operational policy");
         } catch (RuntimeException unresolved) {
             return refusedDefinition(key, unresolved);
         }
@@ -247,7 +259,16 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
             if (!classify(key, pin).rehydratable()) {
                 return AttemptRepeatability.UNDECLARED;
             }
-            return declarationsFor(definitionKey(key, pin)).declaredFor(nodeId);
+            var parsingPolicy = manifests == null ? null
+                    : manifests.graphPolicyForParsing(key, ExecutionPolicy.STANDARD);
+            GraphMlLimits limits = parsingPolicy == null ? graphMlLimits
+                    : ai.ravenroot.core.manifest.ExecutionManifestResolver
+                            .graphExecutionLimits(parsingPolicy).graphMl();
+            ParsedDefinition definition = parsedDefinition(definitionKey(key, pin), limits);
+            if (manifests != null) {
+                manifests.resolvePolicy(key, ExecutionPolicy.STANDARD, definition.behaviorNames());
+            }
+            return definition.declarations().declaredFor(nodeId);
         } catch (RuntimeException unreadable) {
             return AttemptRepeatability.UNDECLARED;
         }
@@ -266,24 +287,32 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
      * snapshot is taken — {@link RepeatabilityDeclarations#fromGraph} copies what it needs — so
      * nothing here retains a live graph between sweeps.</p>
      */
-    private RepeatabilityDeclarations declarationsFor(GraphDefinitionKey definitionKey) {
+    private ParsedDefinition parsedDefinition(GraphDefinitionKey definitionKey, GraphMlLimits limits) {
+        ParsedKey key = new ParsedKey(definitionKey, limits);
         synchronized (parsed) {
-            RepeatabilityDeclarations cached = parsed.get(definitionKey);
+            ParsedDefinition cached = parsed.get(key);
             if (cached != null) {
                 return cached;
             }
         }
         StoredGraphDefinition stored = await(definitions.load(definitionKey));
-        RepeatabilityDeclarations snapshot;
+        ParsedDefinition snapshot;
         try (GraphManager manager = GraphManager.readGraphMl(
-                new ByteArrayInputStream(stored.canonical().bytes()), graphMlLimits)) {
-            snapshot = RepeatabilityDeclarations.fromGraph(manager.definition().nodes(), descriptors);
+                new ByteArrayInputStream(stored.canonical().bytes()), limits)) {
+            var nodes = manager.definition().nodes();
+            snapshot = new ParsedDefinition(RepeatabilityDeclarations.fromGraph(nodes, descriptors),
+                    nodes.stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
+                            .filter(java.util.Objects::nonNull).toList());
         }
         synchronized (parsed) {
-            parsed.putIfAbsent(definitionKey, snapshot);
-            return parsed.get(definitionKey);
+            parsed.putIfAbsent(key, snapshot);
+            return parsed.get(key);
         }
     }
+
+    private record ParsedKey(GraphDefinitionKey definition, GraphMlLimits limits) { }
+    private record ParsedDefinition(RepeatabilityDeclarations declarations,
+                                    java.util.List<String> behaviorNames) { }
 
     /** Reports a refusal once, at the boundary that decided it, so it is not lost inside a boolean. */
     void report(RecoveryClassification.Refused refused) {

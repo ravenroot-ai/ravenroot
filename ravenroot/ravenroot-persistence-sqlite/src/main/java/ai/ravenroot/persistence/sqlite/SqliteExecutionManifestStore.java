@@ -11,6 +11,7 @@ import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.persistence.ResolvedRuntimeProfile;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
 
@@ -283,7 +284,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                 "SELECT format_version, digest, graph_content_id, graph_id, version_id, "
                         + "graph_schema_version, definition_format_version, execution_policy, "
                         + "unknown_behavior_mode, engine_digest, store_digest, limits_digest, "
-                        + "program_runtime_digest, pinned_at_epoch_second, pinned_at_nano, "
+                        + "program_runtime_digest, operational_policy, pinned_at_epoch_second, pinned_at_nano, "
                         + "committed_at_epoch_second, committed_at_nano FROM execution_manifest "
                         + "WHERE tenant_id = ? AND process_instance_id = ?")) {
             statement.setString(1, key.tenantId());
@@ -293,7 +294,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                     return null;
                 }
                 recordedDigest = rows.getString(2);
-                committedAt = Instant.ofEpochSecond(rows.getLong(16), rows.getInt(17));
+                committedAt = Instant.ofEpochSecond(rows.getLong(17), rows.getInt(18));
                 try {
                     var profile = new ResolvedRuntimeProfile(rows.getInt(6), rows.getInt(7),
                             rows.getString(8), rows.getString(9), rows.getString(10),
@@ -302,7 +303,9 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                             new GraphContentId(rows.getString(3)),
                             new GraphDefinitionIdentity(rows.getString(4), rows.getString(5)),
                             profile, readPackages(key),
-                            Instant.ofEpochSecond(rows.getLong(14), rows.getInt(15)));
+                            Instant.ofEpochSecond(rows.getLong(15), rows.getInt(16)),
+                            rows.getString(14) == null ? null
+                                    : ResolvedOperationalPolicy.decode(rows.getString(14)));
                 } catch (IllegalArgumentException | NullPointerException malformed) {
                     throw failure(new ExecutionManifestStoreFailure.Corrupted(key,
                             String.valueOf(malformed.getMessage())));
@@ -340,9 +343,9 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                 "INSERT INTO execution_manifest (tenant_id, process_instance_id, format_version, digest, "
                         + "graph_content_id, graph_id, version_id, graph_schema_version, "
                         + "definition_format_version, execution_policy, unknown_behavior_mode, "
-                        + "engine_digest, store_digest, limits_digest, program_runtime_digest, "
+                        + "engine_digest, store_digest, limits_digest, program_runtime_digest, operational_policy, "
                         + "pinned_at_epoch_second, pinned_at_nano, committed_at_epoch_second, "
-                        + "committed_at_nano) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                        + "committed_at_nano) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
             statement.setInt(3, manifest.formatVersion());
@@ -358,10 +361,12 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
             statement.setString(13, runtime.storeDigest());
             statement.setString(14, runtime.executionLimitsDigest());
             statement.setString(15, runtime.programRuntimeDigest());
-            statement.setLong(16, manifest.pinnedAt().getEpochSecond());
-            statement.setInt(17, manifest.pinnedAt().getNano());
-            statement.setLong(18, now.getEpochSecond());
-            statement.setInt(19, now.getNano());
+            statement.setString(16, manifest.operationalPolicy() == null
+                    ? null : manifest.operationalPolicy().encode());
+            statement.setLong(17, manifest.pinnedAt().getEpochSecond());
+            statement.setInt(18, manifest.pinnedAt().getNano());
+            statement.setLong(19, now.getEpochSecond());
+            statement.setInt(20, now.getNano());
             statement.executeUpdate();
         }
         if (manifest.nodePackages().isEmpty()) {

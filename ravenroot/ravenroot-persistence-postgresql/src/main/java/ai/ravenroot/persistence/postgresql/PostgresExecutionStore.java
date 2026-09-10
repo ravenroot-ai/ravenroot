@@ -1292,10 +1292,16 @@ public final class PostgresExecutionStore implements ExecutionStore {
      */
     @Override
     public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return recordExecutionResult(result, config.maxPayloadBytes());
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
         return async(() -> {
             Objects.requireNonNull(result, "result");
             ExecutionKey key = result.key();
-            requireResultPayloadWithinLimit(result);
+            requireResultPayloadWithinLimit(result, resolvedMaximumPayloadBytes);
             DurableExecutionResult candidate = result.withRetainedUntil(
                     plusClamped(result.endedAt(), config.executionResultRetention()));
             Instant now = clock.instant();
@@ -2689,15 +2695,16 @@ public final class PostgresExecutionStore implements ExecutionStore {
 
     // ---------------------------------------------------------------- execution result helpers
 
-    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result, int maximumPayloadBytes) {
+        if (maximumPayloadBytes < 1) throw new IllegalArgumentException("maximumPayloadBytes must be positive");
         ExecutionResultPayload payload = result.payload();
         if (payload.state() == ResultPayloadState.RETAINED
-                && payload.bytes() > config.maxPayloadBytes()) {
+                && payload.bytes() > maximumPayloadBytes) {
             // Refused rather than silently relabelled WITHHELD. The projection decides what to keep, and
             // a store that rewrote that decision would report a payload as refused for size by an
             // adapter the caller never asked about the size of.
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(),
-                    config.maxPayloadBytes()));
+                    maximumPayloadBytes));
         }
         if (payload.state() == ResultPayloadState.EXPIRED) {
             throw failure(ExecutionStoreFailure.invalid(

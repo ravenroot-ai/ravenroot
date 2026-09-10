@@ -62,7 +62,8 @@ class SharedExecutionStoreBootstrapSmokeTest {
 
     @Test
     void theSharedSelectorComposesThreeStoresOverOneRealDatabase() throws Exception {
-        var configuration = ExecutionStoreConfiguration.fromEnvironment(environment(Map.of()));
+        var configuration = ExecutionStoreConfiguration.fromEnvironment(environment(Map.of(
+                ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7")));
         assertInstanceOf(ExecutionStoreConfiguration.Shared.class, configuration);
 
         try (var opened = ExecutionStoreBootstrap.openOwned(configuration, Clock.systemUTC(),
@@ -70,6 +71,9 @@ class SharedExecutionStoreBootstrapSmokeTest {
             assertNotNull(opened.store(), "the shared branch must compose an execution store");
             assertNotNull(opened.graphDefinitionStore());
             assertNotNull(opened.executionManifestStore());
+            assertEquals(7, ((ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore)
+                    opened.executionManifestStore()).maximumPinAttempts(),
+                    "the typed server setting must reach the manifest adapter");
             assertTrue(opened.store().supports(StoreCapability.DURABLE));
             assertTrue(opened.store().supports(StoreCapability.TRANSACTIONAL_BATCH),
                     "the application refuses a store that cannot batch, so the seam must produce one "

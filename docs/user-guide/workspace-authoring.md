@@ -15,9 +15,10 @@ and canonical graph content return after reload. A legacy service, an offline co
 service without a workspace scope keeps documents in the current browser session only; export them
 before closing the page. Session-only documents are never silently moved into a tenant workspace.
 
-Test and deployed documents are read-only snapshots. Use **File → Fork as Draft** to create a new,
-independently editable document whose provenance still points to the snapshot and source graph
-version. The snapshot and any deployed version remain unchanged.
+Previously persisted Test documents and deployed documents are read-only snapshots. Use **File →
+Fork as Draft** to create a new, independently editable document whose provenance still points to
+the snapshot and source graph version. The snapshot and any deployed version remain unchanged.
+Running **Test** or **Run** from a Draft does not create another document or change its lifecycle mode.
 
 Inspector saves change graph content without choosing a presentation for you. **Save node**, **Save edge**,
 valid autosaves, undo, and redo retain the active document's Design arrangement, positions, viewport, and

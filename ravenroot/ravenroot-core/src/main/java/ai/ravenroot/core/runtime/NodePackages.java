@@ -23,8 +23,10 @@ import ai.ravenroot.core.graph.ReservedGraphProperties;
 
 import java.util.HashSet;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -245,8 +247,7 @@ public final class NodePackages {
 
         @Override
         public NodeHandler create(GraphNode node) {
-            NodeConfiguration configuration = new NodeConfiguration(
-                    node.id(), node.behavior(), node.properties());
+            NodeConfiguration configuration = configurationOf(node);
             NodeAction action = serviceAware
                     ? behavior.create(configuration, services)
                     : behavior.create(configuration);
@@ -282,8 +283,7 @@ public final class NodePackages {
         public java.util.Optional<ai.ravenroot.api.node.ToolCallContinuationAction>
                 createToolCallContinuation(GraphNode node) {
             if (!serviceAware) return java.util.Optional.empty();
-            NodeConfiguration configuration = new NodeConfiguration(
-                    node.id(), node.behavior(), node.properties());
+            NodeConfiguration configuration = configurationOf(node);
             return behavior.createToolCallContinuation(configuration, services);
         }
 
@@ -292,11 +292,56 @@ public final class NodePackages {
                 throw new IllegalStateException("Behavior '" + node.behavior()
                         + "' does not declare inbound source lifecycle");
             }
-            NodeConfiguration configuration = new NodeConfiguration(
-                    node.id(), node.behavior(), node.properties());
+            NodeConfiguration configuration = configurationOf(node);
             return serviceAware
                     ? capable.createSource(configuration, context, services)
                     : capable.createSource(configuration, context);
+        }
+
+        /**
+         * The node's own configuration: the graph-supplied values for the properties this behavior's
+         * descriptor declares, and nothing else.
+         *
+         * <h2>Why the boundary filters, rather than each behavior</h2>
+         * <p>A {@code GraphNode}'s property map is everything the document wrote on that node. That
+         * is deliberately more than configuration: the editor annotates every node it serializes
+         * with presentation data ({@code layoutX}, {@code layoutY}, {@code layoutWidth},
+         * {@code layoutHeight}, {@code name}, {@code classification}, {@code description}), the
+         * platform owns operative flags such as {@link ai.ravenroot.api.catalog.NodeBypassProperty}'s
+         * {@code execution.bypass}, and {@code ReservedGraphProperties} guarantees that any other
+         * unknown key — a third-party editor's {@code viz:} extension — is preserved across a round
+         * trip rather than refused.</p>
+         *
+         * <p>None of that is the node's configuration, but before this filter all of it arrived as
+         * {@link NodeConfiguration#properties()}. A behavior that fails closed on a property it does
+         * not recognise therefore refused every graph that had ever been opened in the editor, while
+         * accepting the same graph hand-written — which is what {@code mail.imap.consume},
+         * {@code kafka.consume} and {@code amqp.consume} did.</p>
+         *
+         * <p>The descriptor is the right authority to filter by, and filtering here rather than in
+         * each source is what makes the rule hold for behaviors that have not been written yet. It is
+         * also what {@link NodeConfiguration}'s own contract already claims: which properties exist
+         * comes from the descriptor and never from graph content (SEC-09). A denylist of platform and
+         * presentation keys could not make the same promise — it would have to be extended for every
+         * new annotation any editor learns to write, and could never cover a third-party one.</p>
+         *
+         * <p>This narrows what a behavior <em>sees</em>; it does not narrow what the document
+         * <em>keeps</em>. {@link GraphNode#properties()} is untouched, so round-trip preservation,
+         * the bypass and nature validators and the catalog's schema validation all continue to read
+         * the full map.</p>
+         */
+        private NodeConfiguration configurationOf(GraphNode node) {
+            Set<String> declared = new LinkedHashSet<>();
+            for (NodePropertyDescriptor property : descriptor().properties()) {
+                declared.add(property.name());
+            }
+            Map<String, Object> owned = new LinkedHashMap<>();
+            node.properties().forEach((name, value) -> {
+                if (declared.contains(name)) {
+                    owned.put(name, value);
+                }
+            });
+            return new NodeConfiguration(node.id(), node.behavior(), owned);
         }
     }
 

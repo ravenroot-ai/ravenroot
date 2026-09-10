@@ -52,9 +52,20 @@ describe('application command catalog', () => {
     expect(byId['run.play'].isEnabled({ ...context, documentEditable: false })).toBe(true);
     expect(byId['edit.undo'].isEnabled(context)).toBe(true);
     expect(byId['edit.redo'].isEnabled(context)).toBe(false);
+    // The history controls have to name the step they would reverse; a control that only offers
+    // the generic help leaves an assistive-technology user to guess what "Undo" would undo.
+    expect(byId['edit.undo'].describe({ ...context, undoLabel: 'Edit properties on 2 selected nodes' }))
+      .toBe('Undo Edit properties on 2 selected nodes');
+    expect(byId['edit.undo'].describe({ ...context, undoLabel: '' })).toBe('Nothing to undo');
+    expect(byId['edit.redo'].describe({ ...context, redoLabel: 'Connect start' })).toBe('Redo Connect start');
+    expect(byId['edit.redo'].describe({ ...context, redoLabel: '' })).toBe('Nothing to redo');
     expect(byId['edit.connect'].isChecked(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled({ ...context, canDuplicateSelectedNode: false })).toBe(false);
+    expect(byId['edit.deleteSelection'].shortcuts).toEqual([
+      expect.objectContaining({ key: 'Delete', keyAliases: ['Del', 'Canc'] }),
+      expect.objectContaining({ key: 'Backspace' }),
+    ]);
     expect(byId['layout.design'].isChecked(context)).toBe(true);
     expect(byId['layout.design'].isChecked({ ...context, hasDocument: false })).toBe(false);
     expect(byId['workspace.grid'].isChecked(context)).toBe(true);
@@ -74,16 +85,29 @@ describe('application command catalog', () => {
       expect(byId[id].isEnabled({ ...context, edgeGestureActive: true })).toBe(false);
     }
     expect(byId['run.start'].isEnabled(context)).toBe(true);
-    for (const id of ['run.pause', 'run.stop', 'run.forceStop']) {
+    for (const id of ['run.pause', 'run.resume', 'run.cancel', 'run.stop']) {
       expect(byId[id].isEnabled(context)).toBe(false);
       expect(byId[id].placements).toContain('menu.run');
       expect(byId[id].placements).toContain('toolbar.primary');
     }
     expect(byId['run.stop'].isEnabled({ ...context, sourceSessionActive: true })).toBe(true);
     expect(byId['run.pause'].isEnabled({ ...context, sourceSessionActive: true })).toBe(false);
-    expect(byId['run.forceStop'].isEnabled({ ...context, sourceSessionActive: true })).toBe(false);
     expect(byId['run.pause'].isEnabled({ ...context, transientRunning: true })).toBe(true);
-    expect(byId['run.forceStop'].isEnabled({ ...context, transientRunning: true })).toBe(true);
+    expect(byId['run.resume'].isEnabled({ ...context, transientRunning: true, executionPaused: true })).toBe(true);
+    expect(byId['run.cancel'].isEnabled({ ...context, transientRunning: true })).toBe(true);
+    for (const id of ['run.pause', 'run.resume', 'run.cancel']) {
+      expect(byId[id].isEnabled({ ...context, transientRunning: true, executionCommandInFlight: true }))
+        .toBe(false);
+      expect(byId[id].isEnabled({ ...context, transientRunning: true, executionUnknown: true }))
+        .toBe(false);
+    }
+    expect(byId['run.pause'].isVisible({ ...context, transientRunning: true, executionPaused: false })).toBe(true);
+    expect(byId['run.resume'].isVisible({ ...context, transientRunning: true, executionPaused: false })).toBe(false);
+    expect(byId['run.resume'].isVisible({ ...context, transientRunning: true, executionPaused: true })).toBe(true);
+    expect(byId['run.stopDeployment'].isEnabled(context)).toBe(false);
+    expect(byId['run.stopDeployment'].help).toMatch(/does not advertise.*Stop API/i);
+    expect(byId['run.shutdown'].isEnabled(context)).toBe(false);
+    expect(byId['run.shutdown'].help).toMatch(/does not advertise.*Shutdown API/i);
     expect(byId['view.rightInspector'].isChecked(context)).toBe(false);
     expect(byId['view.themeDark'].isChecked(context)).toBe(true);
     expect(byId['view.themeLight'].isChecked(context)).toBe(false);

@@ -122,6 +122,13 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
       || !SOURCE_SESSION_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 1
       || value.scope !== 'LOCAL_PROCESS'
+      // Optional rather than required, and the difference is deliberate. A runtime that does not
+      // report the deployment its session runs under cannot have its events attributed to the
+      // graph, but that is a degraded view -- refusing the response outright would turn it into a
+      // failure to start, which is worse and is not what the caller asked about. `updateSourceSession`
+      // says so once in the activity panel instead of leaving the canvas quietly blank.
+      || (value.deploymentId !== null && value.deploymentId !== undefined
+        && (typeof value.deploymentId !== 'string' || !value.deploymentId))
       || (value.diagnostic !== null && value.diagnostic !== undefined
         && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
     throw new Error('Source session response is not a valid process-local status');
@@ -139,6 +146,22 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
 const LOCAL_DEPLOYMENT_STATES = new Set([
   'REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING', 'STOPPED', 'FAILED',
 ]);
+
+const EXECUTION_CONTROL_OUTCOMES = Object.freeze({
+  pause: new Set(['PAUSED', 'ALREADY_PAUSED', 'NOT_ACTIVE']),
+  resume: new Set(['RESUMED', 'NOT_PAUSED', 'NOT_ACTIVE']),
+  cancel: new Set(['CANCELLED', 'ALREADY_CANCELLED', 'ALREADY_COMPLETED']),
+});
+
+function validateExecutionControlResult(value, expectedExecutionId, operation) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !EXECUTION_CONTROL_OUTCOMES[operation]?.has(value.outcome)
+      || value.traversalId !== expectedExecutionId
+      || typeof value.note !== 'string') {
+    throw new Error(`Execution ${operation} response is invalid`);
+  }
+  return value;
+}
 
 export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -434,6 +457,27 @@ export class RavenrootRuntimeClient {
       headers: { Accept: 'application/json' },
       signal,
     });
+  }
+
+  async #controlExecution(executionId, operation, { signal } = {}) {
+    const id = String(executionId || '');
+    if (!id) throw new Error(`Execution ${operation} requires an id`);
+    const result = await this.#json(`/v1/executions/${encodeURIComponent(id)}/${operation}`, {
+      method: 'POST', headers: { Accept: 'application/json' }, signal,
+    });
+    return validateExecutionControlResult(result, id, operation);
+  }
+
+  async pauseExecution(executionId, options = {}) {
+    return this.#controlExecution(executionId, 'pause', options);
+  }
+
+  async resumeExecution(executionId, options = {}) {
+    return this.#controlExecution(executionId, 'resume', options);
+  }
+
+  async cancelExecution(executionId, options = {}) {
+    return this.#controlExecution(executionId, 'cancel', options);
   }
 
   /**

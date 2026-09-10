@@ -100,8 +100,11 @@ import {
   edgeFlowSnapshot,
   FLOW_PULSE_MS,
   bindMonitoringRuntimeState,
+  bindMonitoringRuntimeStateToDeployment,
   createMonitoringRuntimeState,
+  nodeActivitySnapshot,
   observeEdgeTraversal,
+  observeNodeActivity,
   resetMonitoringRuntimeState,
 } from './monitoring-runtime-state.js';
 import { isPropertyVisible, isPropertyRequiredNow } from './property-condition.js';
@@ -149,6 +152,7 @@ import {
   enforceExecutionOutcomeCapacity,
   executionCommandIsCurrent,
   executionOutcomeFetchSignal,
+  isTerminalExecution,
   preflightBoundExecutionCommand,
   reconcileExecution,
   releaseExecutionCommand,
@@ -265,6 +269,7 @@ import {
   duplicateNode,
   insertEdgeElement,
   insertNodeElement,
+  isDeleteShortcut,
   migrateJoinSemantics,
   moveNodesTo,
   nextModifyState,
@@ -285,6 +290,7 @@ import {
   edgeGestureSessionOwns,
   finishPointerEdgeGesture,
   nearestEndpoint,
+  pointerNodeGestureIntent,
   updatePointerEdgeGesture,
   validateEdgeConnection,
   validateEdgeId,
@@ -307,7 +313,7 @@ import {
   syncGraphPositionsFromCy,
 } from './graph-view-state.js';
 import { createCommandRegistry } from './command-registry.js';
-import { requestGraphLifecycle } from './graph-lifecycle.js';
+import { requestExecutionLifecycle, UNAVAILABLE_LIFECYCLE_REASONS } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { uiText } from './ui-text.js';
 import {
@@ -932,6 +938,8 @@ const PROGRAM_WORKSPACE_PROPERTY_NAMES = new Set(['language', 'source', 'testPay
 let hasRuntimeToken = false;
 let confirmedServiceOrigin = '';
 let activeExecutionId = null;
+let activeExecutionPaused = false;
+let activeExecutionCommandInFlight = false;
 let activeSourceSession = null;
 let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
@@ -1662,8 +1670,14 @@ function selectedRealNodeIds(owner = workspace.active, captured = null) {
 }
 
 function finishVisualGroups(owner = workspace.active) {
-  owner?.visualGroupsRenderer?.finish();
-  elasticRendererFor(owner)?.elasticMount?.finishVisualGroupTransition?.();
+  // Finishing an already-settled transition repaints its last projection. That projection owns a
+  // selection snapshot from the last group refresh, not the live selection a user may have made
+  // since then, so an otherwise read-only save could restore a stale (often empty) selection and
+  // clear the Inspector. A settled renderer is already at its target; only an active transition
+  // needs to be forced to its final frame.
+  if (owner?.visualGroupsRenderer?.isAnimating) owner.visualGroupsRenderer.finish();
+  const elastic = elasticRendererFor(owner)?.elasticMount;
+  if (elastic?.visualGroupAnimating) elastic.finishVisualGroupTransition?.();
 }
 
 // Group presentation lives only on its document; it has no module-level working-view mirror.
@@ -2308,6 +2322,7 @@ function captureActiveDocument() {
   document_.cursorId = graphCursorId;
   document_.fontSize = fontSize;
   document_.execution.executionId = activeExecutionId;
+  document_.execution.paused = activeExecutionPaused;
   document_.execution.graphVersion = activeGraphVersion;
   document_.execution.finished = finishedExecutions;
   document_.execution.events = recentRuntimeEvents;
@@ -2397,6 +2412,8 @@ function applyActiveDocument() {
   graphCursorId = document_?.cursorId ?? null;
   fontSize = document_?.fontSize ?? DEFAULT_FONT_SIZE;
   activeExecutionId = document_?.execution.executionId ?? null;
+  activeExecutionPaused = document_?.execution.paused ?? false;
+  activeExecutionCommandInFlight = Boolean(document_?.execution.commandFlight);
   activeSourceSession = document_?.sourceSession ?? null;
   activeGraphVersion = document_?.execution.graphVersion ?? null;
   finishedExecutions = document_?.execution.finished ?? new Set();
@@ -3253,6 +3270,8 @@ function completeReplaceActiveDocument(target, graph, name) {
   graphCursorId = null;
   fontSize = DEFAULT_FONT_SIZE;
   activeExecutionId = null;
+  activeExecutionPaused = false;
+  activeExecutionCommandInFlight = false;
   activeGraphVersion = null;
   activeExecutionReconciliation = 'known';
   finishedExecutions = new Set();
@@ -3398,6 +3417,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
   document_.execution.executionId = executionId;
   document_.execution.processInstanceId = processInstanceId;
   document_.execution.graphVersion = graphVersion;
+  document_.execution.paused = false;
   document_.execution.reconciliationState = 'known';
   document_.execution.reconciliationClient = reconciliationClient;
   document_.execution.monitoringFlow ||= createMonitoringRuntimeState();
@@ -3409,6 +3429,8 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
   }
   if (document_ === workspace.active) {
     activeExecutionId = executionId;
+    activeExecutionPaused = false;
+    activeExecutionCommandInFlight = false;
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
     if (humanTaskController) void configureHumanTasks(document_);
@@ -3420,6 +3442,15 @@ function setExecutionReconciliationState(owner, state) {
   owner.execution.reconciliationState = state;
   if (owner.id === workspace.activeId) activeExecutionReconciliation = state;
   refreshCommands();
+}
+
+function setExecutionPaused(owner, paused) {
+  const next = Boolean(paused);
+  if (owner.execution.paused === next) return false;
+  owner.execution.paused = next;
+  if (owner.id === workspace.activeId) activeExecutionPaused = next;
+  refreshCommands();
+  return true;
 }
 
 // The auxiliary panels are single and follow the active document, so switching document has to
@@ -3712,11 +3743,14 @@ function initCy(elements, gd, options = {}) {
     if (e.target === cy) {
       elementSelectionAtPointerStart.delete(e.cy);
     } else {
+      const captured = stageSelectionAtPointerStart.get(e.cy);
+      const capturedMatches = captured?.owner === rendererOwner
+        && captured.rendererToken === (rendererFor(rendererOwner)?.token || null);
       elementSelectionAtPointerStart.set(e.cy, {
         owner: rendererOwner,
         rendererToken: rendererFor(rendererOwner)?.token || null,
         elementId: e.target.id(),
-        selectedIds: e.cy.$(':selected').map(element => element.id()),
+        selectedIds: capturedMatches ? captured.selectedIds : e.cy.$(':selected').map(element => element.id()),
         additive: isAdditiveSelection(e.originalEvent),
       });
     }
@@ -3782,9 +3816,15 @@ function initCy(elements, gd, options = {}) {
   // In Editing, dragging a node draws a new edge; dragging an edge near one of its ends moves that end.
   // Both open the same gesture the keyboard opens, so the rules and the wording cannot diverge.
   cy.on('tapstart', 'node', e => {
-    if (!prepareEdgeGestureOwner(rendererOwner, e.cy)
-        || !modifyEnabled || navigationEnabled || connectArmed || edgeGestureSession
-        || !nodeCanSourceEdge(e.target.selected())) return;
+    const intent = pointerNodeGestureIntent({
+      editing: modifyEnabled,
+      navigating: navigationEnabled,
+      connectArmed,
+      edgeGestureActive: Boolean(edgeGestureSession),
+      selectedAtPointerStart: nodeWasSelectedAtPointerStart(rendererOwner, e.cy, e.target.id()),
+      sourceEligible: nodeCanSourceEdge(e.target.selected()),
+    });
+    if (!prepareEdgeGestureOwner(rendererOwner, e.cy) || intent !== 'connect') return;
     // A press records only a private candidate. Visual authoring starts after the pointer crosses
     // the accessible intent threshold, so a plain click remains selection and never flashes an
     // edge preview or leaves "Connecting…" behind in the live region or inspector.
@@ -6011,9 +6051,15 @@ function inspectInspectorDraft(draft = inspectorDraft) {
 }
 
 function syncAutosavedNodeRenderer(nodeId) {
-  const element = cy?.getElementById(nodeId);
+  const owner = workspace.active;
+  const target = cy;
+  const element = target?.getElementById(nodeId);
   if (!element?.nonempty()) return;
+  const selectedIds = target.$(':selected').map(candidate => candidate.id());
   syncGraphRendererInPlace({ nodeIds: [nodeId], refreshDependentEdges: true });
+  if (!owner || workspace.active !== owner || owner.cy !== target || cy !== target || target.destroyed()) return;
+  applyStableSelection(target, selectedIds.filter(id => target.getElementById(id).nonempty()));
+  scheduleSelectionOverlay(target);
 }
 
 function syncAutosavedEdgeRenderer(edgeId) {
@@ -6181,6 +6227,41 @@ function bindInspectorDraft(form, model, elementType, creating) {
   });
 }
 
+function preserveNodeInspectorAfterSave({ owner, target, draft, selectedIds }) {
+  if (!owner || !target || workspace.active !== owner || owner.cy !== target || cy !== target
+      || target.destroyed() || draft?.documentId !== owner.id || !draft.form.isConnected) return;
+  const model = owner.graph?.nodeMap?.[draft.elementId];
+  const rendered = target.getElementById(draft.elementId);
+  if (!model || rendered.empty()) return;
+
+  // A node save updates the existing renderer element in place. Keep the same stable-ID selection
+  // authoritative as well: neither a data/style event nor a delayed click repair may turn saving
+  // into a selection change, and IDs from another document are never consulted here.
+  const intendedSelection = selectedIds.includes(draft.elementId) ? selectedIds : [draft.elementId];
+  invalidateStableSelection(target);
+  applyStableSelection(target, intendedSelection.filter(id => target.getElementById(id).nonempty()));
+  scheduleSelectionOverlay(target);
+
+  document.getElementById('info-title').textContent = model.name || model.id;
+  if (model.behavior === 'human-task') void humanTaskController?.selectNode(model.id);
+  else humanTaskController?.selectNode(null);
+
+  // Do not rebuild the form after editing an existing node: its controls already contain the
+  // committed values, while replacing the markup detaches the active edit session. Return focus to
+  // the last surviving editor control after a pointer submission; dynamically replaced controls
+  // fall back to the stable Name field.
+  const focusTarget = draft.lastFocusControl?.isConnected
+    ? draft.lastFocusControl : draft.form.elements.name;
+  queueMicrotask(() => {
+    if (workspace.active !== owner || owner.cy !== target || cy !== target
+        || target.destroyed() || inspectorDraft !== draft || !draft.form.isConnected) return;
+    const current = owner.graph?.nodeMap?.[draft.elementId];
+    if (!current || target.getElementById(draft.elementId).empty()) return;
+    const survivingFocus = focusTarget?.isConnected ? focusTarget : draft.form.elements.name;
+    survivingFocus?.focus?.({ preventScroll: true });
+  });
+}
+
 function retireInspectorDraft(form = null) {
   if (!inspectorDraft || (form && inspectorDraft.form !== form)) return;
   clearTimeout(inspectorDraft.timer);
@@ -6219,12 +6300,13 @@ function guardInspectorSelectionChange(desiredIds) {
   return true;
 }
 
-function openInspectorUnsavedDialog(draft, desiredIds, valid) {
+function openInspectorUnsavedDialog(draft, desiredIds, valid, { preserveDraft = false } = {}) {
   pendingInspectorTransition = {
     draft,
     desiredIds: [...desiredIds],
     origin: document.activeElement,
     complete: null,
+    preserveDraft,
   };
   restoreDraftSelection(draft);
   const dialog = document.getElementById('inspector-unsaved-dialog');
@@ -6259,8 +6341,18 @@ function completeInspectorTransition(action) {
   }
   pendingInspectorTransition = null;
   dialog.close();
-  retireInspectorDraft(pending.draft.form);
-  if (pending.complete) return Boolean(pending.complete());
+  const retainCommittedDraft = pending.preserveDraft && action === 'save';
+  if (!retainCommittedDraft) retireInspectorDraft(pending.draft.form);
+  if (pending.complete) {
+    const completed = Boolean(pending.complete());
+    // Discard intentionally keeps the document model and drops the form values. Saving GraphML
+    // does not otherwise transition the Inspector, so repaint the selected element after the
+    // download instead of leaving a disconnected invalid draft on screen.
+    if (pending.preserveDraft && action === 'discard') {
+      queueMicrotask(() => showSelectionInfo({ skipDraftGuard: true }));
+    }
+    return completed;
+  }
   applyStableSelection(cy, pending.desiredIds);
   queueMicrotask(() => showSelectionInfo({ skipDraftGuard: true }));
   return true;
@@ -6268,7 +6360,9 @@ function completeInspectorTransition(action) {
 
 // Commands that mutate the graph or replace the Inspector enter here before doing either. The
 // dialog therefore owns a deferred intention, not a rollback of work that already happened.
-function runAfterInspectorDraft(action, { deferredAction = action, deferredResult = true } = {}) {
+function runAfterInspectorDraft(action, {
+  deferredAction = action, deferredResult = true, preserveDraft = false,
+} = {}) {
   if (pendingInspectorTransition) return deferredResult;
   const draft = inspectorDraft;
   if (!draft?.form.isConnected) return Boolean(action());
@@ -6277,18 +6371,18 @@ function runAfterInspectorDraft(action, { deferredAction = action, deferredResul
   const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
     if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
-      openInspectorUnsavedDialog(draft, [draft.elementId], false);
+      openInspectorUnsavedDialog(draft, [draft.elementId], false, { preserveDraft });
       pendingInspectorTransition.complete = deferredAction;
       return deferredResult;
     }
-    retireInspectorDraft(draft.form);
+    if (!preserveDraft) retireInspectorDraft(draft.form);
     return Boolean(action());
   }
   if (!assessment.changed) {
-    retireInspectorDraft(draft.form);
+    if (!preserveDraft) retireInspectorDraft(draft.form);
     return Boolean(action());
   }
-  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid);
+  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid, { preserveDraft });
   pendingInspectorTransition.complete = deferredAction;
   return deferredResult;
 }
@@ -6411,16 +6505,21 @@ function renderNodeForm(model, creating) {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
     const values = new FormData(form);
     const id = String(values.get('id') || '').trim();
+    const owner = workspace.active;
+    const target = cy;
+    const selectedIds = target?.$(':selected').map(element => element.id()) || [];
     if (creating && graphData.nodeMap[id]) return showFormError(form, `Node ID ${id} already exists`);
     const patch = readNodeEditorPatch(form, model);
     // Creating applies the values to a detached node and inserts it as one command; editing patches
     // the document node. Either way the mutation is a command, never a write from the form.
+    let savedDraft = null;
     if (creating) {
       const created = createNode(id, patch.name, patch.kind);
       Object.assign(created, patch);
       insertNodeElement(graphData, created, editHistory);
     } else {
       const draft = inspectorDraft?.form === form ? inspectorDraft : null;
+      savedDraft = draft;
       if (draft) {
         const assessment = inspectInspectorDraft(draft);
         if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
@@ -6434,10 +6533,15 @@ function renderNodeForm(model, creating) {
         syncAutosavedNodeRenderer(model.id);
       }
     }
-    retireInspectorDraft(form);
-    if (creating) rebuildGraph();
-    updateHistoryUi();
-    showNodeInfo(cy.getElementById(id));
+    if (creating) {
+      retireInspectorDraft(form);
+      rebuildGraph();
+      updateHistoryUi();
+      showNodeInfo(cy.getElementById(id));
+    } else if (savedDraft) {
+      updateHistoryUi();
+      preserveNodeInspectorAfterSave({ owner, target, draft: savedDraft, selectedIds });
+    }
     scheduleProgramGraphReadiness(workspace.active);
   });
   document.getElementById('delete-node')?.addEventListener('click', () => {
@@ -9279,14 +9383,6 @@ function updateHistoryUi() {
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
   const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
-  const undoButton = document.getElementById('btn-undo');
-  if (undoButton) {
-    undoButton.title = state.canUndo ? `Undo ${state.undoLabel}` : 'Nothing to undo';
-  }
-  const redoButton = document.getElementById('btn-redo');
-  if (redoButton) {
-    redoButton.title = state.canRedo ? `Redo ${state.redoLabel}` : 'Nothing to redo';
-  }
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
     indicator.classList.toggle('dirty', dirty);
@@ -10070,7 +10166,15 @@ function captureEdgePointerOrigin(originalEvent) {
     };
     const sourceId = nodeAtRenderedPosition(renderedPosition, targetCy);
     const source = sourceId ? targetCy.getElementById(sourceId) : null;
-    if (sourceId && nodeCanSourceEdge(source.selected())
+    const intent = pointerNodeGestureIntent({
+      editing: modifyEnabled,
+      navigating: navigationEnabled,
+      connectArmed,
+      edgeGestureActive: Boolean(edgeGestureSession),
+      selectedAtPointerStart: nodeWasSelectedAtPointerStart(owner, targetCy, sourceId),
+      sourceEligible: nodeCanSourceEdge(source?.selected()),
+    });
+    if (sourceId && intent === 'connect'
         && startEdgeGesture(owner, beginConnectGesture(graphData, sourceId), {
       announce: false, deferVisuals: true,
     })) {
@@ -10162,7 +10266,18 @@ function captureStagePointerSelection(originalEvent) {
   if (originalEvent.type === 'mousedown' && stageSelectionAtPointerStart.has(owner.cy)) return;
   stageSelectionAtPointerStart.set(owner.cy, {
     hasSelection: owner.cy.$(':selected').nonempty(),
+    owner,
+    rendererToken: rendererFor(owner)?.token || null,
+    selectedIds: owner.cy.$(':selected').map(element => element.id()),
   });
+}
+
+function nodeWasSelectedAtPointerStart(owner, targetCy, nodeId) {
+  const selection = elementSelectionAtPointerStart.get(targetCy)
+    || stageSelectionAtPointerStart.get(targetCy);
+  if (!selection || selection.owner !== owner
+      || selection.rendererToken !== (rendererFor(owner)?.token || null)) return false;
+  return selection.selectedIds?.includes(nodeId) ?? false;
 }
 
 // Cytoscape may stop its synthetic drag stream at a node boundary. The bubbling native event is
@@ -10778,36 +10893,127 @@ function setRuntimeConnectionState(status, message) {
   state.setAttribute('aria-label', `Runtime status: ${status.replaceAll('-', ' ')}. ${message}`);
 }
 
-function graphLifecycleCommand(action) {
+function stopCurrentSourceSession() {
   if (!workspace.active || !graphData) return showInspectorMessage('Create or load a workflow first.');
   if (!tenantAuthorityAllows(workspace.active)) {
     return showInspectorMessage('Wait for this document workspace authority to be verified.');
   }
-  if (action === 'stop' && sourceSessionIsActive(activeSourceSession)) {
-    void stopActiveSourceSession(workspace.active);
-    return { status: 'stopping', deploymentId: activeSourceSession.sessionId };
+  if (!sourceSessionIsActive(activeSourceSession)) {
+    return showInspectorMessage('No process-local source session is active for this document.');
   }
-  const result = requestGraphLifecycle(action, {
-    documentId: workspace.activeId,
-    graphName: graphDisplayName,
-    // A transient Test graph version is deliberately not treated as a durable deployment ID.
-    deploymentId: null,
-  });
-  const target = result.deploymentId
-    ? `deployment ${shortId(result.deploymentId)}`
-    : `current graph “${result.graphName || result.documentId}”`;
-  const message = `${result.status}: ${result.message} The command is scoped to ${target}, never the shared ActorSystem.`;
-  addActivityMessage(action === 'forceStop' ? 'Force stop' : action, message, 'failed');
-  document.getElementById('info-title').textContent = `${action === 'forceStop' ? 'Force stop' : action} · not yet implemented`;
-  document.getElementById('info-body').innerHTML = `<div class="info-empty">${escapeHtml(message)}</div>`;
-  return result;
+  void stopActiveSourceSession(workspace.active);
+  return true;
 }
 
-function updateSourceSession(owner, status, token = null, { observationUnavailable = false } = {}) {
+function showUnavailableLifecycle(reason) {
+  showInspectorMessage(reason);
+  addActivityMessage('Lifecycle control unavailable', reason, 'failed');
+  return false;
+}
+
+async function executionLifecycleCommand(action) {
+  const owner = workspace.active;
+  if (!owner || !graphData) return showInspectorMessage('Create or load a workflow first.');
+  if (!tenantAuthorityAllows(owner)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified.');
+  }
+  const flight = acquireExecutionCommand(owner.execution);
+  if (!flight || !flight.executionId || flight.executionId === PENDING_EXECUTION) {
+    if (flight) releaseExecutionCommand(flight);
+    addActivityMessage('Execution control unavailable',
+      'Another command is already in flight, or this execution has not received its runtime ID.', 'failed');
+    refreshCommands();
+    return false;
+  }
+  const current = () => workspace.find(owner.id) === owner && tenantAuthorityAllows(owner, flight.client)
+    && executionCommandIsCurrent(flight);
+  if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
+  refreshCommands();
+  addActivityMessage(action, `${action[0].toUpperCase()}${action.slice(1)} requested for execution ${shortId(flight.executionId)}…`);
+  try {
+    const result = await requestExecutionLifecycle(action, {
+      client: flight.client,
+      executionId: flight.executionId,
+      signal: flight.controller.signal,
+      isCurrent: current,
+    });
+    if (result.status === 'stale' || !current()) return false;
+    if (result.status === 'unknown') {
+      setExecutionReconciliationState(owner, 'unknown');
+      if (workspace.activeId === owner.id) {
+        const reason = result.observationError?.message || result.commandError?.message
+          || 'the runtime returned no readable reason';
+        addActivityMessage(`${action} status unknown`,
+          `Execution ${shortId(flight.executionId)} could not be authoritatively read after the command: ${reason}. `
+          + 'Automatic reconciliation continues; no success state was assumed.', 'failed');
+        syncExecutionReconciliationChrome(true);
+      }
+      return false;
+    }
+
+    const outcome = result.authoritative;
+    setExecutionReconciliationState(owner, 'known');
+    setExecutionPaused(owner, Boolean(outcome?.paused));
+    if (isTerminalExecution(outcome)) {
+      settleReconciledExecution(owner, flight.executionId, flight.client, flight.generation, outcome, false);
+    }
+    if (workspace.activeId === owner.id) {
+      const commandOutcome = result.command?.outcome || 'transport outcome unavailable';
+      const status = String(outcome?.status || 'active').toLowerCase();
+      const paused = outcome?.paused ? 'paused' : 'not paused';
+      addActivityMessage(action,
+        `${commandOutcome} · authoritative state ${status}, ${paused} · execution ${shortId(flight.executionId)}`,
+        result.commandError ? 'failed' : 'completed');
+      if (result.commandError) addActivityMessage(`${action} request response unavailable`,
+        `${result.commandError.message}. The displayed lifecycle state comes from the authoritative execution read.`,
+        'failed');
+      document.getElementById('activity-summary').textContent =
+        `${action[0].toUpperCase()}${action.slice(1)} · ${status} · execution ${shortId(flight.executionId)}`;
+      document.getElementById('activity-summary').removeAttribute('aria-label');
+    }
+    return true;
+  } finally {
+    releaseExecutionCommand(flight);
+    if (owner.id === workspace.activeId) activeExecutionCommandInFlight = false;
+    refreshCommands();
+  }
+}
+
+// `fromRuntime` separates an answer the SERVER gave from one this file synthesized. Only the first
+// can carry a deployment identity, and only the first can prove one is missing: warning on a local
+// STARTING placeholder would report the runtime for something the runtime was never asked.
+function updateSourceSession(owner, status, token = null,
+  { observationUnavailable = false, fromRuntime = false } = {}) {
   if (token && !sourceSessionCommandIsCurrent(owner, token)) return false;
   const session = owner.sourceSession;
   const changed = session.state !== status.state || session.diagnostic !== (status.diagnostic || '')
     || session.observationUnavailable !== observationUnavailable;
+  // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
+  // the recovery states above) carry no deploymentId and must not erase the one the server gave.
+  if (typeof status.deploymentId === 'string' && status.deploymentId) {
+    session.deploymentId = status.deploymentId;
+    // The projection accumulates across every traversal this deployment produces, instead of being
+    // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
+    // observation rather than only when the id changes: the call is idempotent -- rebinding to the
+    // deployment it already holds preserves the projection -- and doing it unconditionally means the
+    // projection cannot fall out of step with the session it belongs to. Guarding on the session's
+    // own field would have made that agreement rest on a separate fact (that a live session's id is
+    // never reused across a reset), which is true today and is not this function's to rely on.
+    owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
+    bindMonitoringRuntimeStateToDeployment(owner.execution.monitoringFlow, status.deploymentId);
+    session.deploymentUnreported = false;
+  } else if (fromRuntime && !session.deploymentId && !session.deploymentUnreported) {
+    // A server answer that named no deployment. Say it once: the session will still start and the
+    // lifecycle pill will still be truthful, but nothing on the canvas can be attributed to it, and
+    // an unexplained blank canvas is exactly the symptom this binding exists to remove.
+    session.deploymentUnreported = true;
+    if (owner === workspace.active) {
+      addActivityMessage('Source activity not attributable',
+        'This runtime reported no deployment identity for the session, so its runtime events cannot '
+        + 'be attributed to this graph. The lifecycle state remains accurate; node activity, '
+        + 'monitoring and log output will stay empty.', 'failed');
+    }
+  }
   session.state = status.state;
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
@@ -10847,7 +11053,7 @@ async function observeSourceSession(owner, token) {
       if (controller.signal.aborted) break;
       const status = await client.sourceSession(sessionId, { signal: controller.signal });
       if (!sourceSessionCommandIsCurrent(owner, token)) break;
-      updateSourceSession(owner, status, token);
+      updateSourceSession(owner, status, token, { fromRuntime: true });
       if (status.state === 'FAILED' || status.state === 'STOPPED') break;
     } catch (error) {
       if (controller.signal.aborted) break;
@@ -10897,7 +11103,7 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
   try {
     const status = await startPromise;
     if (!sourceSessionCommandIsCurrent(owner, token)) return false;
-    updateSourceSession(owner, status, token);
+    updateSourceSession(owner, status, token, { fromRuntime: true });
     if (!session.stopRequested
         && (status.state === 'STARTING' || status.state === 'LISTENING' || status.state === 'DEGRADED')) {
       void observeSourceSession(owner, token);
@@ -10951,7 +11157,9 @@ async function stopActiveSourceSession(owner) {
       session.pollController?.abort();
       const status = await token.client.stopSourceSession(token.sessionId);
       if (!sourceSessionCleanupIsCurrent(owner, token)) return false;
-      if (sourceSessionCommandIsCurrent(owner, token)) updateSourceSession(owner, status, token);
+      if (sourceSessionCommandIsCurrent(owner, token)) {
+        updateSourceSession(owner, status, token, { fromRuntime: true });
+      }
       return status.state === 'STOPPED';
     } catch (error) {
       if (!sourceSessionCleanupIsCurrent(owner, token)) return false;
@@ -10981,6 +11189,7 @@ async function stopActiveSourceSession(owner) {
     }
   })();
   session.stopPromise = stopPromise;
+  if (owner === workspace.active) refreshCommands();
   return stopPromise;
 }
 
@@ -11068,6 +11277,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
       },
       onKnown: outcome => {
         setExecutionReconciliationState(owner, 'known');
+        setExecutionPaused(owner, Boolean(outcome?.paused));
         if (owner.id !== workspace.activeId) return;
         syncExecutionReconciliationChrome(true);
         addActivityMessage('Execution status available',
@@ -11075,6 +11285,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
           + 'Test and Run remain unavailable while it is active.');
       },
       onTerminal: ({ outcome, recoveredFromUnknown }) => {
+        setExecutionPaused(owner, false);
         settleReconciledExecution(owner, executionId, client, generation, outcome, recoveredFromUnknown);
       },
     });
@@ -11098,6 +11309,7 @@ async function preflightUnknownExecution(owner, flight) {
     onNonTerminal: outcome => {
       if (!executionCommandIsCurrent(flight)) return;
       setExecutionReconciliationState(owner, 'known');
+      setExecutionPaused(owner, Boolean(outcome?.paused));
       if (workspace.activeId === owner.id) {
         syncExecutionReconciliationChrome(true);
         addActivityMessage('Execution still active',
@@ -11149,7 +11361,6 @@ async function playGraph(mode = 'test') {
   // now, not read from whichever document may become active while a delayed terminal GET is pending.
   syncGraphPositions();
   const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
-  const testProjectionGraph = mode === 'test' ? canonicalGraphSnapshot(ownerGraph) : null;
   const payload = document.getElementById('execution-payload').value;
   const displayName = graphDisplayName;
   const ownerCy = cy;
@@ -11203,6 +11414,11 @@ async function playGraph(mode = 'test') {
   // as required by the confirmation-text contract above.
   if (sourceCount > 0) {
     try {
+      // The canvas is cleared for a listener session exactly as it is for a run. Before this, a
+      // source start left the previous run's colours in place -- and once a session can actually
+      // paint, stale paint is no longer harmless decoration but a claim about traffic that is not
+      // this session's.
+      resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
       await startSourceSession(owner, executionClient, graphMl, sourceCount);
     } catch (error) {
       // startSourceSession normally converts request failures to an honest, fenced lifecycle state.
@@ -11239,34 +11455,20 @@ async function playGraph(mode = 'test') {
       graphMl, payload);
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
         || owner.execution.reconciliationClient !== executionClient) return;
-    let executionOwner = owner;
-    if (mode === 'test' && owner.mode !== DOCUMENT_MODES.TEST) {
-      setDocumentExecution(owner, null, null);
-      testProjectionGraph.nodeMap = Object.fromEntries(
-        testProjectionGraph.nodes.map(node => [node.id, node]));
-      const projectionId = openDocument({
-        name: owner.name,
-        displayName: allocateDocumentDisplayName(`${owner.displayName} · test`),
-        graph: testProjectionGraph,
-        tenantId: owner.tenantId,
-        mode: DOCUMENT_MODES.TEST,
-        provenance: {
-          originMode: owner.mode,
-          sourceDocumentId: owner.documentId,
-          sourceGraphVersion: submission.graphVersion,
-          deploymentId: null,
-        },
-      });
-      executionOwner = workspace.find(projectionId);
-    }
-    setDocumentExecution(executionOwner, submission.executionId, submission.graphVersion, executionClient,
+    // Test and Run are executions of the immutable GraphML captured above, not document lifecycle
+    // operations. Keep the binding on the document that submitted that snapshot: creating a Test
+    // projection here used to change focus, identity, editability, history and viewport merely
+    // because an asynchronous POST completed. The owner reference is also the routing fence for
+    // later events, so a response received after the user switches panes still cannot attach to the
+    // newly active document.
+    setDocumentExecution(owner, submission.executionId, submission.graphVersion, executionClient,
       submission.processInstanceId ?? null);
-    void reconcileTestCompletion(executionOwner, submission.executionId, executionClient);
-    if (workspace.activeId !== executionOwner.id) return;
+    void reconcileTestCompletion(owner, submission.executionId, executionClient);
+    if (workspace.activeId !== owner.id) return;
     addActivityMessage('accepted',
       `${submission.executionPolicy || 'policy unreported'} · execution ${shortId(submission.executionId)} · graph ${shortId(submission.graphVersion)}`,
       'completed');
-    if (executionOwner.execution.finished.has(submission.executionId)) refreshCommands();
+    if (owner.execution.finished.has(submission.executionId)) refreshCommands();
     scheduleWorkspacePersistence();
   } catch (error) {
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
@@ -11310,7 +11512,13 @@ function handleRuntimeEvent(event) {
   // is its default state.
   if (isActive) refreshAssistantContext();
 
+  // Events provide the low-latency projection; the reconciliation GET remains authoritative and
+  // will continuously confirm or correct this flag. Binding lookup above fences document/version.
+  if (event.type === 'EXECUTION_PAUSED') setExecutionPaused(target, true);
+  if (event.type === 'EXECUTION_RESUMED') setExecutionPaused(target, false);
+
   if (isTerminal) {
+    setExecutionPaused(target, false);
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
       target.execution.generation, {
@@ -11341,41 +11549,93 @@ function handleRuntimeEvent(event) {
     return;
   }
   if (!event.nodeId || !targetCy) return;
-  const node = targetCy.getElementById(event.nodeId);
-  if (!node.length) return;
-
-  let state = node.data('runtimeState') || 'idle';
-  if (event.type === 'NODE_STARTED') state = 'active';
-  if (event.type === 'NODE_DEFAULTED') state = 'fallback';
-  if (event.type === 'NODE_BYPASSED') state = 'bypassed';
-  if (event.type === 'NODE_COMPLETED' && state !== 'fallback' && state !== 'bypassed') state = 'completed';
-  if (event.type === 'NODE_FAILED') state = 'failed';
-  // A retried attempt leaves the node ACTIVE, not failed: the visit has not settled, and the next
-  // attempt's own NODE_STARTED is already on its way. Rendering it as failed and then back to active
-  // would flash a terminal state the traversal never reached.
-  if (event.type === 'NODE_RETRY_SCHEDULED') state = 'active';
+  if (!targetCy.getElementById(event.nodeId).length) return;
+  // What the node shows is decided by the aggregate over every traversal in this view, not by
+  // whichever event arrived last -- see `observeNodeActivity` for the rule and why one is needed.
   // `activeInstances` is the count of LIVE INSTANCES of this node's actor -- 1 for a resident
   // nature however much traffic crosses it, one per concurrent invocation for the default one. It is
   // what the node is rendered by. `inFlightArrivals` is the queue depth and is deliberately kept in a
   // separate field: the two are equal for an ordinary worker node and differ for a resident one, and
-  // rendering the second under the first's name reports the wrong quantity.
-  const instances = Number(event.activeInstances) || 0;
-  const arrivals = Number(event.inFlightArrivals) || 0;
-  node.data('instances', instances);
-  node.data('arrivals', arrivals);
-  node.data('runtimeState', state);
-  node.data('runtimeObserved', true);
-  node.data('lastEventType', event.type);
-  node.data('lastOccurredAt', event.occurredAt || null);
-  node.data('processingDuration', event.processingDuration ?? null);
-  node.data('fallback', Boolean(event.fallback));
-  applyRuntimeVisual(node);
-  updateD3RuntimeNode(target, event.nodeId, instances, state, arrivals, event);
+  // rendering the second under the first's name reports the wrong quantity. Both are carried through
+  // the aggregate unchanged.
+  target.execution.monitoringFlow ||= createMonitoringRuntimeState();
+  if (!observeNodeActivity(target.execution.monitoringFlow, event).changed) return;
+  scheduleRuntimeNodePaint(target, event.nodeId);
+}
+
+// ── Painting is coalesced, per document, to one frame ────────────────────────────────────────────
+//
+// A run emits a handful of node events and painting each one as it arrives cost nothing. A source
+// has no such ceiling: it emits as fast as it admits, and every paint writes Cytoscape styles, runs
+// a 180 ms D3 transition and restarts the force simulation. At that point per-event repainting is
+// not merely wasteful, it is self-defeating -- the browser spends the frame it needed for the next
+// event on re-rendering a state that is already superseded.
+//
+// So events update the aggregate immediately and the canvas is repainted at most once per frame,
+// from that aggregate. Nothing is dropped: a node touched fifty times in one frame is painted once,
+// with the state it actually ended the frame in. The queue holds node ids only, so it is bounded by
+// the size of the document rather than by the volume of the stream.
+const runtimeNodePaintQueues = new WeakMap();
+
+function scheduleFrame(callback) {
+  return typeof globalThis.requestAnimationFrame === 'function'
+    ? globalThis.requestAnimationFrame(callback)
+    : setTimeout(callback, 16);
+}
+
+function scheduleRuntimeNodePaint(owner, nodeId) {
+  let queue = runtimeNodePaintQueues.get(owner);
+  if (!queue) {
+    queue = { nodes: new Set(), scheduled: false };
+    runtimeNodePaintQueues.set(owner, queue);
+  }
+  queue.nodes.add(nodeId);
+  if (queue.scheduled) return;
+  queue.scheduled = true;
+  scheduleFrame(() => {
+    queue.scheduled = false;
+    flushRuntimeNodePaint(owner, queue);
+  });
+}
+
+function flushRuntimeNodePaint(owner, queue) {
+  const pending = [...queue.nodes];
+  queue.nodes.clear();
+  if (!pending.length || workspace.find(owner.id) !== owner) return;
+  const isActive = owner === workspace.active;
+  const ownerCy = isActive ? cy : owner.cy;
+  if (!ownerCy) return;
+  const flow = owner.execution.monitoringFlow;
+  for (const nodeId of pending) {
+    const node = ownerCy.getElementById(nodeId);
+    if (!node.length) continue;
+    const view = nodeActivitySnapshot(flow, nodeId);
+    // A reset between the event and this frame leaves nothing to paint, and painting the frame's
+    // stale aggregate would put a cleared run back on the canvas.
+    if (!view.observed) continue;
+    node.data('instances', view.instances);
+    node.data('arrivals', view.arrivals);
+    node.data('runtimeState', view.state);
+    node.data('runtimeObserved', true);
+    node.data('runtimeFailures', view.failures);
+    node.data('lastEventType', view.lastEventType);
+    node.data('lastOccurredAt', view.lastOccurredAt);
+    node.data('processingDuration', view.processingDuration);
+    node.data('fallback', view.fallback);
+    applyRuntimeVisual(node);
+    updateD3RuntimeNode(owner, nodeId, view.instances, view.state, view.arrivals, {
+      type: view.lastEventType,
+      occurredAt: view.lastOccurredAt,
+      processingDuration: view.processingDuration,
+      fallback: view.fallback,
+    });
+  }
 }
 
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
+  runtimeNodePaintQueues.get(owner)?.nodes.clear();
   if (!targetCy) return;
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
@@ -11386,6 +11646,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     node.data('lastOccurredAt', '');
     node.data('processingDuration', null);
     node.data('fallback', false);
+    node.data('runtimeFailures', 0);
     // `removeStyle` drops the run's inline border and hands the node back to the stylesheet,
     // where `node[?bypassed]` still applies -- the flag is a property of the DOCUMENT, not of the
     // run, so clearing run state must not clear it. The label is rebuilt through the same helper for
@@ -11421,11 +11682,16 @@ function runtimeColor(state) {
  * For an ordinary worker node they are equal and one number is shown -- printing "10 instances · 10 in
  * flight" everywhere would train the eye to ignore a pair that matters precisely when it stops matching.
  */
-function runtimeCountLabel(name, instances, arrivals = 0) {
-  if (!(instances > 0)) return name;
+function runtimeCountLabel(name, instances, arrivals = 0, failures = 0) {
+  // The colour answers "what is this node doing now" and can only answer one question at a time; a
+  // node that failed for one message and then succeeded for the next is green, truthfully. This
+  // number is the other half: every failed arrival since the binding began, never decremented, so a
+  // failure under a busy source leaves a mark instead of a flash the user had to be watching for.
+  const failed = failures > 0 ? `${failures} failed` : '';
+  if (!(instances > 0)) return failed ? `${name} · ${failed}` : name;
   const noun = instances === 1 ? 'instance' : 'instances';
   const queued = arrivals > instances ? ` · ${arrivals} in flight` : '';
-  return `${name} · ${instances} ${noun}${queued}`;
+  return `${name} · ${instances} ${noun}${queued}${failed ? ` · ${failed}` : ''}`;
 }
 
 function runtimeNodeLabel(node) {
@@ -11436,13 +11702,14 @@ function runtimeNodeLabel(node) {
   // The switched-off marker rides on the node's name, so it survives a run painting over the
   // label. A bypassed node can still report instances -- a run that crosses it emits NODE_BYPASSED
   // with a count -- and the two facts belong on the same label, not one replacing the other.
+  const failures = Number(node.data('runtimeFailures')) || 0;
   const name = bypassedNodeName(node.data('name'), node.data('bypassed'));
-  if (!(instances > 0)) return humanTaskNodeLabel(name, attention);
+  if (!(instances > 0) && !(failures > 0)) return humanTaskNodeLabel(name, attention);
   // Same text as the elastic caption, on the line break this renderer uses. Composed against the RAW
   // name and recombined with the display name afterwards, so the `.replace` below keeps operating on
   // the one separator pinned it to: the bypass marker uses the same ` · `, and a first-match
   // replace over the display name would put the line break INSIDE the name instead of after it.
-  const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals)
+  const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals, failures)
     .replace(' · ', '\n').split('\n');
   return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }
@@ -12504,9 +12771,10 @@ function executeGlobalShortcut(event, expectedCommandId = '') {
 // Delete is an editing command for the graph selection, not for whichever non-editable child last
 // received focus. Some legitimate controls own and stop their keydown contract, so a document-level
 // bubbling listener cannot guarantee that a released canvas gesture reaches deletion. Capture only
-// these two keys; every other global shortcut retains its established bubbling/menu behaviour.
+// the platform spellings of the two delete key families; every other global shortcut retains its
+// established bubbling/menu behaviour.
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+  if (!isDeleteShortcut(event)) return;
   if (executeGlobalShortcut(event, 'edit.deleteSelection')) capturedDeleteShortcutEvents.add(event);
 }, true);
 
@@ -13693,7 +13961,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
   replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
   forkDocument: () => runAfterInspectorDraft(() => forkActiveDocument()),
-  save: () => runAfterInspectorDraft(() => exportGraphML()),
+  save: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),
@@ -13731,9 +13999,12 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
-  pause: () => graphLifecycleCommand('pause'),
-  stop: () => graphLifecycleCommand('stop'),
-  forceStop: () => graphLifecycleCommand('forceStop'),
+  pause: () => executionLifecycleCommand('pause'),
+  resume: () => executionLifecycleCommand('resume'),
+  cancel: () => executionLifecycleCommand('cancel'),
+  stop: () => stopCurrentSourceSession(),
+  stopDeployment: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.deploymentStop),
+  shutdown: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.shutdown),
   authenticate: () => authenticateRuntime(),
   forgetToken: () => revokeRuntimeAccess(),
   openCredentials: () => credentialsWindow?.open(),
@@ -13744,7 +14015,8 @@ const commandRegistry = createCommandRegistry(createAppCommands({
 
 function commandContext() {
   const history = editHistory.state();
-  const transientRunning = Boolean(activeExecutionId) && !finishedExecutions.has(activeExecutionId);
+  const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
+    && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
   const running = transientRunning || sourceSessionActive;
   const selectedNodes = cy?.nodes(':selected');
@@ -13783,9 +14055,16 @@ function commandContext() {
     workspaceLayoutDefault: workspaceLayoutIsDefault(),
     canUndo: documentIsEditable(workspace.active) && history.canUndo && !layoutBusy,
     canRedo: documentIsEditable(workspace.active) && history.canRedo && !layoutBusy,
+    // Empty when there is no step, which is what makes the history commands describe themselves
+    // as having nothing to reverse.
+    undoLabel: history.canUndo ? history.undoLabel : '',
+    redoLabel: history.canRedo ? history.redoLabel : '',
     running,
     transientRunning,
+    executionPaused: activeExecutionPaused,
+    executionCommandInFlight: activeExecutionCommandInFlight,
     sourceSessionActive,
+    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise),
     executionUnknown: activeExecutionReconciliation === 'unknown',
     hasToken: hasRuntimeToken,
     leftCollapsed: Boolean(panelLayout.zones.left.collapsed),
@@ -13805,13 +14084,24 @@ function refreshCommands({ menu = true } = {}) {
     const id = control.dataset.commandId;
     const command = commandRegistry.get(id);
     const state = commandRegistry.state(id, context);
+    control.hidden = state.visible === false;
     if ('disabled' in control) control.disabled = !state.enabled;
     control.setAttribute('aria-disabled', String(!state.enabled));
     control.classList.toggle('active', state.checked === true);
     if (command.kind === 'checkbox') control.setAttribute('aria-pressed', String(state.checked === true));
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
     if (control.hasAttribute('data-command-label')) control.textContent = command.label;
-    if (command.help && control.hasAttribute('data-command-label')) control.title = command.help;
+    // This runs after every edit, undo, redo and save, so whatever it writes here is the last
+    // word: a title applied elsewhere before the refresh does not survive it. Writing the state's
+    // description rather than the static help is what lets the history controls keep naming the
+    // step they would reverse, while every other control still shows its help -- including the
+    // lifecycle controls, which need it here because they carry no `data-command-label`.
+    if (state.description) {
+      control.title = state.description;
+      if (command.group === 'unavailable-lifecycle') {
+        control.setAttribute('aria-label', `${command.label}. ${command.help}`);
+      }
+    }
     const firstShortcut = command.shortcuts?.find(shortcut => (shortcut.scope || 'global') === 'global');
     if (firstShortcut) control.setAttribute('aria-keyshortcuts', commandRegistry.ariaShortcut(firstShortcut));
   });
@@ -13846,7 +14136,8 @@ function menuTrigger(name) {
 function renderApplicationMenu(name) {
   const popup = document.getElementById('application-menu');
   const context = commandContext();
-  const commands = commandRegistry.listPlacement(`menu.${name}`);
+  const commands = commandRegistry.listPlacement(`menu.${name}`)
+    .filter(command => commandRegistry.state(command.id, context).visible !== false);
   let lastGroup = null;
   popup.innerHTML = commands.map(command => {
     const state = commandRegistry.state(command.id, context);
@@ -13859,8 +14150,11 @@ function renderApplicationMenu(name) {
     const shortcut = shortcuts.length ? shortcuts.map(item => commandRegistry.shortcutLabel(item)).join(' / ') : '';
     const ariaShortcut = shortcuts[0] ? ` aria-keyshortcuts="${escapeAttribute(commandRegistry.ariaShortcut(shortcuts[0]))}"` : '';
     const checked = command.kind ? ` aria-checked="${state.checked === true}"` : '';
+    const help = state.description ? ` title="${escapeAttribute(state.description)}"` : '';
+    const unavailableLabel = command.group === 'unavailable-lifecycle' && command.help
+      ? ` aria-label="${escapeAttribute(`${command.label}. ${command.help}`)}"` : '';
     return `${separator}<button type="button" class="application-menu-item" role="${role}"
-      data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}>
+      data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}${help}${unavailableLabel}>
       <span>${escapeHtml(command.label)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
     </button>`;
   }).join('');

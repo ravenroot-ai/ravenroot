@@ -85,11 +85,13 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'edit.undo', group: 'history', order: 10,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.undo,
       isEnabled: context => context.documentEditable && context.canUndo,
+      describe: context => (context.undoLabel ? `Undo ${context.undoLabel}` : 'Nothing to undo'),
       shortcuts: [global({ key: 'z', primary: true })],
     },
     { id: 'edit.redo', group: 'history', order: 20,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.redo,
       isEnabled: context => context.documentEditable && context.canRedo,
+      describe: context => (context.redoLabel ? `Redo ${context.redoLabel}` : 'Nothing to redo'),
       shortcuts: [global({ key: 'z', primary: true, shift: true }), global({ key: 'y', ctrl: true })],
     },
     { id: 'edit.modify', group: 'mode', order: 30, kind: 'checkbox',
@@ -115,7 +117,7 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'edit.deleteSelection', group: 'author', order: 80,
       placements: ['menu.edit', 'help'], execute: actions.deleteSelection,
       isEnabled: context => authoring(context) && context.hasSelection,
-      shortcuts: [global({ key: 'Delete' }), global({ key: 'Backspace' })],
+      shortcuts: [global({ key: 'Delete', keyAliases: ['Del', 'Canc'] }), global({ key: 'Backspace' })],
     },
     { id: 'edit.groupSelection', group: 'visual-groups', order: 100,
       placements: ['menu.edit', 'help'], execute: actions.groupSelection,
@@ -218,18 +220,34 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'run.pause', group: 'execution', order: 30,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.pause,
       isEnabled: context => Boolean(context.tenantAuthority
-        && context.transientRunning && !context.sourceSessionActive) },
-    { id: 'run.stop', group: 'execution', order: 40,
+        && context.transientRunning && !context.executionPaused && !context.executionUnknown
+        && !context.executionCommandInFlight),
+      isVisible: context => Boolean(context.transientRunning && !context.executionPaused) },
+    { id: 'run.resume', group: 'execution', order: 40,
+      placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.resume,
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && context.executionPaused && !context.executionUnknown
+        && !context.executionCommandInFlight),
+      isVisible: context => Boolean(context.transientRunning && context.executionPaused) },
+    { id: 'run.cancel', group: 'execution', order: 50,
+      placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.cancel,
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.executionUnknown && !context.executionCommandInFlight),
+      isVisible: context => Boolean(context.transientRunning) },
+    { id: 'run.stop', group: 'execution', order: 60,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.stop,
       isEnabled: context => Boolean(context.tenantAuthority
-        && (context.transientRunning || context.sourceSessionActive)) },
-    { id: 'run.forceStop', group: 'execution', order: 50,
-      placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.forceStop,
-      isEnabled: context => Boolean(context.tenantAuthority
-        && context.transientRunning && !context.sourceSessionActive) },
-    { id: 'run.authenticate', group: 'connection', order: 60,
+        && context.sourceSessionActive && !context.sourceSessionStopInFlight),
+      isVisible: context => Boolean(context.sourceSessionActive) },
+    { id: 'run.stopDeployment', group: 'unavailable-lifecycle', order: 70,
+      placements: ['menu.run', 'help'], execute: actions.stopDeployment,
+      isEnabled: () => false },
+    { id: 'run.shutdown', group: 'unavailable-lifecycle', order: 80,
+      placements: ['menu.run', 'help'], execute: actions.shutdown,
+      isEnabled: () => false },
+    { id: 'run.authenticate', group: 'connection', order: 90,
       placements: ['menu.run', 'toolbar.runtime'], execute: actions.authenticate },
-    { id: 'run.forgetToken', group: 'connection', order: 70,
+    { id: 'run.forgetToken', group: 'connection', order: 100,
       placements: ['menu.run', 'toolbar.runtime'], execute: actions.forgetToken,
       isEnabled: context => context.hasToken },
     // Its own group, so the menu separator puts a line between "sign this editor in to my
@@ -240,7 +258,7 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     // ALWAYS ENABLED, including with no connection. The window is where an author is TOLD that a
     // credential needs a service to be stored in, and a menu entry that is greyed out until they
     // guess why teaches them nothing. Its own status line says it in a sentence instead.
-    { id: 'run.credentials', group: 'credentials', order: 80,
+    { id: 'run.credentials', group: 'credentials', order: 110,
       placements: ['menu.run'], execute: actions.openCredentials },
 
     // Its own group, same reasoning as `run.credentials` just above: a line separates

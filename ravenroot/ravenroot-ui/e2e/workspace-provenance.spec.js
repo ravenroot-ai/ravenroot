@@ -256,96 +256,51 @@ test('an unreadable stored schema remains intact and write-locked', async ({ pag
     names: expect.arrayContaining(['must-survive.graphml']) });
 });
 
-test('Test creates an immutable exact snapshot and Fork creates a distinct editable draft', async ({ page }) => {
+test('legacy Test snapshot documents still restore and fork as editable drafts', async ({ page }) => {
   const tenant = { value: 'tenant-test' };
   await installWorkspaceService(page, tenant);
-  let postedGraph = '';
-  let executionOrdinal = 0;
-  let buildOrdinal = 0;
-  await page.route('**/v1/program-artifacts/build', route => {
-    buildOrdinal += 1;
-    return route.fulfill({
-    status: 200, contentType: 'application/json', body: JSON.stringify({ buildId: `build-test-${buildOrdinal}`,
-      revision: 1, terminal: true, programs: [{ nodeId: 'dosomething', phase: 'READY', ready: true,
-        reused: true, artifactId: buildOrdinal === 1 ? 'artifact-test' : 'artifact-revalidated' }] }),
-    });
-  });
-  await page.route('**/v1/executions**', async route => {
-    if (route.request().method() === 'POST') {
-      postedGraph = route.request().postData() || '';
-      executionOrdinal += 1;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        executionId: `execution-test-${executionOrdinal}`, processInstanceId: 'process-test',
-        graphVersion: 'graph-version-test', executionPolicy: 'TEST_PASSTHROUGH',
-      }) });
-      return;
-    }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-      status: 'COMPLETED', executionId: 'execution-test', handledFailureNodes: [],
-      defaultedNodes: [], bypassedNodes: [],
-    }) });
-  });
   await page.goto('/');
   await waitForWorkspace(page, tenant.value);
-  await page.evaluate(() => {
-    const node = window.ravenroot.activeDocument().graph.nodeMap.dosomething;
-    node.kind = 'BEHAVIOR';
-    node.behavior = 'program';
-    node.properties = { language: 'javascript', source: 'return input;', testPayload: 'hello' };
-    node.propertyTypes = { language: 'string', source: 'string', testPayload: 'string' };
-  });
-  const draft = await page.evaluate(() => window.ravenroot.activeDocument().documentId);
-  await page.locator('#btn-play').click();
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().mode)).toBe('test');
-  expect(postedGraph).toContain('<graphml');
-  const firstSubmittedGraphMl = postedGraph;
   const tested = await page.evaluate(() => {
-    const document_ = window.ravenroot.activeDocument();
-    return { id: document_.documentId, mode: document_.mode, provenance: document_.provenance };
+    const source = window.ravenroot.activeDocument();
+    const graph = structuredClone(source.graph);
+    const id = window.ravenroot.openDocument({
+      name: 'legacy-test.graphml', graph, mode: 'test',
+      provenance: {
+        originMode: 'draft', sourceDocumentId: source.documentId,
+        sourceGraphVersion: 'legacy-graph-version', deploymentId: null,
+      },
+    });
+    return { id, sourceId: source.documentId, graphJson: JSON.stringify(graph), semantic: {
+      nodes: graph.nodes.map(node => ({ id: node.id, name: node.name, kind: node.kind })),
+      edges: graph.edges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target,
+        outcome: edge.outcome })),
+    } };
   });
-  expect(tested).toMatchObject({ mode: 'test', provenance: { sourceDocumentId: draft,
-    sourceGraphVersion: 'graph-version-test', deploymentId: null } });
   await expect(page.locator('#btn-modify')).toBeDisabled();
   await expect(page.locator('#graph-mode-label')).toContainText('Test · Read-only');
-  const immutableBefore = await page.evaluate(() => {
-    const owner = window.ravenroot.activeDocument();
-    owner.cy.nodes()[0].select();
-    return JSON.stringify(owner.graph);
-  });
+  await page.evaluate(() => { window.ravenroot.activeDocument().cy.nodes()[0].select(); });
   await page.keyboard.press('Delete');
   expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
-    .toBe(immutableBefore);
+    .toBe(tested.graphJson);
 
   await page.locator('#btn-monitoring').click();
-  await page.locator('#btn-design').click();
-  await page.locator('#menu-layout').click();
-  await page.getByRole('menuitem', { name: 'Flow' }).click();
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutBusy)).toBe(false);
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save GraphML' }).click();
-  await download;
   await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().pending)).toBe(false);
   await page.reload();
   await waitForWorkspace(page, tenant.value);
   await page.evaluate(id => window.ravenroot.activateDocument(id), tested.id);
-  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
-    .toBe(immutableBefore);
-  await page.locator('#btn-play').click();
-  await expect.poll(() => executionOrdinal).toBe(2);
-  expect(firstSubmittedGraphMl).toContain('artifact-test');
-  expect(postedGraph).toContain('artifact-revalidated');
-  expect(postedGraph).not.toBe(firstSubmittedGraphMl);
-  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
-    .toBe(immutableBefore);
-
-  await page.locator('#replace-file-inp').setInputFiles({
-    name: 'replacement.graphml', mimeType: 'application/xml',
-    buffer: Buffer.from(postedGraph),
-  });
+  expect(await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return { semantic: {
+      nodes: document_.graph.nodes.map(node => ({ id: node.id, name: node.name, kind: node.kind })),
+      edges: document_.graph.edges.map(edge => ({ id: edge.id, source: edge.source,
+        target: edge.target, outcome: edge.outcome })),
+    }, mode: document_.mode,
+      provenance: document_.provenance, renderMode: document_.renderMode };
+  })).toEqual({ semantic: tested.semantic, mode: 'test', renderMode: 'monitoring',
+    provenance: { originMode: 'draft', sourceDocumentId: tested.sourceId,
+      sourceGraphVersion: 'legacy-graph-version', deploymentId: null } });
   await expect(page.locator('#graph-mode-label')).toContainText('Test · Read-only');
-  await expect(page.locator('#info-body')).toContainText('Only Draft documents can be replaced');
-  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
-    .toBe(immutableBefore);
 
   await page.locator('#menu-file').click();
   await page.getByRole('menuitem', { name: 'Fork as Draft' }).click();
@@ -355,13 +310,14 @@ test('Test creates an immutable exact snapshot and Fork creates a distinct edita
   });
   expect(fork.id).not.toBe(tested.id);
   expect(fork).toMatchObject({ mode: 'draft', provenance: { originMode: 'test',
-    sourceDocumentId: tested.id, sourceGraphVersion: 'graph-version-test', deploymentId: null } });
+    sourceDocumentId: tested.id, sourceGraphVersion: 'legacy-graph-version', deploymentId: null } });
+  await page.locator('#btn-design').click();
   await expect(page.locator('#btn-modify')).toBeEnabled();
   await flush(page);
   await page.reload();
   await waitForWorkspace(page, tenant.value);
   expect(await page.evaluate(id => window.ravenroot.workspace.find(id)?.provenance, fork.id))
-    .toMatchObject({ sourceDocumentId: tested.id, sourceGraphVersion: 'graph-version-test' });
+    .toMatchObject({ sourceDocumentId: tested.id, sourceGraphVersion: 'legacy-graph-version' });
 });
 
 test('deployment registration persists the exact captured graph as an immutable deployed view', async ({ page }) => {

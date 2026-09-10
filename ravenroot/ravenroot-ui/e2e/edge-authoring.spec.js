@@ -862,6 +862,7 @@ test('a Cyto click selects and its subsequent selected-node drag moves without l
   const before = await edgeLinks(page);
   const source = await centreOf(page, 'node-1');
   const canvasDrop = await blankCanvasPoint(page);
+  const positionBefore = await page.evaluate(() => window.cy.getElementById('node-1').position());
 
   // Pressing is still a selection candidate: authoring must remain entirely invisible until the
   // pointer crosses the drag-intent threshold.
@@ -873,11 +874,10 @@ test('a Cyto click selects and its subsequent selected-node drag moves without l
   await expect.poll(() => page.evaluate(() => window.cy.getElementById('node-1').hasClass('connect-source')))
     .toBe(false);
   await page.mouse.up();
-  await expect(page.locator('#cy-wrap')).toHaveAttribute('data-edge-gesture-state', 'idle');
-  await expect(page.locator('#graph-live')).not.toContainText('Connecting');
-  await expect.poll(() => edgeLinks(page)).toEqual(before);
+  // This is intentionally a synchronous boundary assertion: do not poll, sleep, or otherwise
+  // let the selection debounce settle before starting the next physical interaction.
+  expect(await page.evaluate(() => window.cy.getElementById('node-1').selected())).toBe(true);
 
-  const positionBefore = await page.evaluate(() => window.cy.getElementById('node-1').position());
   await page.mouse.move(source.x, source.y);
   await page.mouse.down();
   await page.mouse.move(canvasDrop.x, canvasDrop.y, { steps: 10 });
@@ -890,6 +890,30 @@ test('a Cyto click selects and its subsequent selected-node drag moves without l
   await expect.poll(() => page.evaluate(() => window.cy.getElementById('node-1').position()))
     .not.toEqual(positionBefore);
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Move node-1/);
+});
+
+test('a viewer click selects and immediately drags the selected node', async ({ page }) => {
+  await page.goto('/');
+  const before = await edgeLinks(page);
+  const source = await centreOf(page, 'start');
+  const canvasDrop = await blankCanvasPoint(page);
+  const positionBefore = await page.evaluate(() => window.cy.getElementById('start').position());
+
+  await page.mouse.move(source.x, source.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  // Keep this adjacent to pointer-down below: selection must be usable in the next interaction,
+  // not only after a debounce timer has run.
+  expect(await page.evaluate(() => window.cy.getElementById('start').selected())).toBe(true);
+
+  await page.mouse.move(source.x, source.y);
+  await page.mouse.down();
+  await page.mouse.move(canvasDrop.x, canvasDrop.y, { steps: 10 });
+  await page.mouse.up();
+
+  await expect.poll(() => page.evaluate(() => window.cy.getElementById('start').position()))
+    .not.toEqual(positionBefore);
+  await expect.poll(() => edgeLinks(page)).toEqual(before);
 });
 
 // The three renderer flags a pointer gesture suspends. They are read directly rather than through a

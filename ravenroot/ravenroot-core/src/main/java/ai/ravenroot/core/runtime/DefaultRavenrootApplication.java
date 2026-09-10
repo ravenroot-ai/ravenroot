@@ -2770,6 +2770,17 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         };
     }
 
+    /**
+     * Projects one session, naming the deployment its traversals belong to.
+     *
+     * <p>{@code sessionId} is also the deployment id, and that is a property of this implementation
+     * rather than a coincidence: {@link #register} keys the local deployment by
+     * {@code LocalDeploymentKey.deploymentId()} — the session id — and hands exactly that value to
+     * {@code registerDeployment} as the hosted executions' deployment id. Every event these
+     * traversals publish therefore carries it in {@link ExecutionEvent#deploymentId()}, which is what
+     * lets a client that was never told any execution id still attribute them to the session it
+     * started. The 3- and 4-argument {@code of} factories say the same thing in the API's own words.</p>
+     */
     private SourceSessionStatus sourceSessionStatus(String sessionId, LocalDeploymentRecord record) {
         DeploymentStatus deployment = deployments.get(record.engineId()).status();
         return switch (deployment.state()) {

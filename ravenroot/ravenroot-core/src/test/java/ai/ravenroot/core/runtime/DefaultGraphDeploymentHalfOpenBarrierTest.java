@@ -341,9 +341,10 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
      * <p>Offers run continuously from several threads while {@code barrier} is in flight, so arrivals
      * land on both sides of it and in the window between the snapshot and the cancellations. Every
      * accepted one is then accounted for exactly once. A refusal is an assignment too and is counted
-     * separately: an arrival whose generation the barrier closed while its durable-commit window was
-     * open is refused rather than dispatched, which is the closing side answering, not a unit going
-     * missing.</p>
+     * separately: an arrival whose generation the barrier closed while it was still awaiting dispatch
+     * is refused rather than dispatched, which is the closing side answering, not a unit going
+     * missing -- and not a unit the barrier ended, which is why {@code refused} is never part of the
+     * identity below.</p>
      */
     @Test
     void everyArrivalRacingABarrierIsAccountedForExactlyOnce() throws Exception {

@@ -968,6 +968,8 @@ final class PostgresSchema {
                     FOREIGN KEY (tenant_id, deployment_id)
                         REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
                 )
-                """)));
+                """)),
+                new SchemaMigration(3, "execution manifest operational policy v2", List.of(
+                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")));
     }
 }

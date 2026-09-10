@@ -155,13 +155,18 @@ public final class NodePackages {
             // fail; the placement is what keeps that true if it ever changes.
             plans.add(new RegistrationPlan(packageId,
                     PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()),
-                    serviceAware, packageServices, List.copyOf(validated)));
+                    serviceAware, packageServices, packageServices.egressCapacityProfile(),
+                    List.copyOf(validated)));
         }
 
         for (RegistrationPlan plan : plans) {
+            if (plan.services() instanceof
+                    ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices managed) {
+                managed.bindExecutionPolicyResolver(registry::operationalPolicyFor);
+            }
             plan.behaviors().forEach(behavior -> registry.registerPackageFactory(
                     new SdkNodeBehaviorFactory(behavior, plan.services(), plan.serviceAware()),
-                    plan.packageId(), plan.pinned()));
+                    plan.packageId(), plan.pinned(), plan.capacity()));
         }
         return registry;
     }
@@ -346,6 +351,9 @@ public final class NodePackages {
     }
 
     private record RegistrationPlan(String packageId, PinnedNodePackage pinned, boolean serviceAware,
-                                    NodePackageServices services, List<NodeBehavior> behaviors) {
+                                    NodePackageServices services,
+                                    java.util.Optional<ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile>
+                                            capacity,
+                                    List<NodeBehavior> behaviors) {
     }
 }

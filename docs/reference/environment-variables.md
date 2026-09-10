@@ -257,6 +257,7 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_AUDIT_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | PostgreSQL-only positive lost-race repair bound; unset defaults to `3` |
 | `RAVENROOT_EXECUTION_STORE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_ENABLED` | See the linked contract for exact type, default, and applicability. |

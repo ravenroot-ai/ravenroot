@@ -70,6 +70,9 @@ ROW_BOUNDARIES = {
     ),
     "RAVENROOT_PLUGINS_INSTALL_DIR": "installed-bundle directory; unset defaults to `/opt/ravenroot/plugins`",
     "RAVENROOT_REPLICAS": "positive replica count; unset defaults to `1`",
+    "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS": (
+        "PostgreSQL-only positive lost-race repair bound; unset defaults to `3`"
+    ),
     "RAVENROOT_TRUSTED_PROXY_ADDRESSES": (
         "comma-separated exact IP literals trusted as proxy peers; blank trusts none"
     ),
@@ -141,6 +144,7 @@ def group(name: str) -> str:
     if name.startswith(("RAVENROOT_GRAAL_", "RAVENROOT_PROGRAM_", "RAVENROOT_ARTIFACT_")):
         return "program"
     if name.startswith("RAVENROOT_EXECUTION_STORE") \
+            or name == "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS" \
             or name in {"RAVENROOT_AUDIT_DIR", "RAVENROOT_CREDENTIAL_DIR",
                         "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS", "RAVENROOT_WORKER_ID"}:
         return "persistence"

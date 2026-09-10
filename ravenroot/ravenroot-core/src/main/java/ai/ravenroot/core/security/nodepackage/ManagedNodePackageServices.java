@@ -8,6 +8,7 @@ import ai.ravenroot.api.node.service.NodeCredentialService;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
@@ -126,6 +127,9 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private volatile HttpClient client;
     private final AdmissionController admission;
     private final NodePackageServices unavailable = NodePackageServices.unavailable();
+    private final AtomicReference<java.util.function.Function<NodeMessage,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy>> executionPolicies =
+            new AtomicReference<>();
 
     private ManagedNodePackageServices(Builder builder) {
         packageId = safePackageId(builder.packageId);
@@ -155,6 +159,24 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     }
 
     @Override
+    public Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+        return Optional.of(NodePackageEgressCapacityProfile.bounded(
+                policy.maximumRequestBytes(), policy.maximumResponseBytes(),
+                policy.maximumWebSocketMessageBytes(), policy.maximumWebSocketFragments(),
+                policy.maximumConcurrentOperations(), policy.maximumConcurrentPerTenant(),
+                policy.maximumQueuedWebSocketSends(), policy.maximumDeadline(),
+                policy.maximumWebSocketLifetime(), policy.maximumWebSocketIdle()));
+    }
+
+    /** Installs the core-owned active-execution lookup once, before package behavior can run. */
+    public void bindExecutionPolicyResolver(java.util.function.Function<NodeMessage,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy> resolver) {
+        if (!executionPolicies.compareAndSet(null, Objects.requireNonNull(resolver, "resolver"))) {
+            throw new IllegalStateException("execution policy resolver is already bound");
+        }
+    }
+
+    @Override
     public NodeCredentialService credentials() {
         if (!capabilities.contains(NodePackageCapability.CREDENTIAL_RESOLUTION)) {
             return unavailable.credentials();
@@ -162,8 +184,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         return new NodeCredentialService() {
             @Override public OutboundCall<CredentialLease> resolve(NodeMessage message, String reference,
                                                                    Duration deadline) {
-                return resolveCredential(() -> Objects.requireNonNull(message, "deliveredMessage").security(),
-                        reference, deadline);
+                return resolveCredential(messageIdentity(message), reference, deadline);
             }
 
             @Override public OutboundCall<CredentialLease> resolve(InboundSourceContext context,
@@ -182,7 +203,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         return new OutboundHttpService() {
             @Override public OutboundCall<OutboundHttpResponse> execute(NodeMessage message,
                                                                         OutboundHttpRequest request) {
-                return executeHttp(() -> Objects.requireNonNull(message, "deliveredMessage").security(), request);
+                return executeHttp(messageIdentity(message), request);
             }
 
             @Override public OutboundCall<OutboundHttpResponse> execute(InboundSourceContext context,
@@ -201,8 +222,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             @Override public OutboundCall<OutboundWebSocketSession> open(NodeMessage message,
                                                                          OutboundWebSocketRequest request,
                                                                          OutboundWebSocketListener listener) {
-                return openWebSocket(() -> Objects.requireNonNull(message, "deliveredMessage").security(),
-                        request, listener);
+                return openWebSocket(messageIdentity(message), request, listener);
             }
 
             @Override public OutboundCall<OutboundWebSocketSession> open(InboundSourceContext context,
@@ -473,10 +493,12 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         String tenant;
         String safeReference;
         Duration deadline;
+        NodePackageEgressCapacityProfile.Limits capacity;
         try {
             tenant = tenant(identity.identity());
             safeReference = safeReference(reference);
-            deadline = policy.deadline(requestedDeadline);
+            capacity = capacityFor(identity);
+            deadline = deadline(requestedDeadline, capacity.maximumDeadline());
         } catch (NodePackageServiceException refused) {
             return OutboundCall.failed(refused);
         } catch (IllegalArgumentException refused) {
@@ -484,7 +506,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         } catch (RuntimeException refused) {
             return failed(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE);
         }
-        AdmissionController.Lease lease = admission.tryAcquire(tenant);
+        AdmissionController.Lease lease = admission.tryAcquire(tenant,
+                capacity.maximumConcurrentOperations(), capacity.maximumConcurrentPerTenant());
         if (lease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
         return submit(deadline, lease, () -> {
             try (SecretValue secret = credentials.resolve(packageId, tenant, safeReference)
@@ -521,7 +544,9 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         byte[] body = request.body();
         Duration deadline;
         ExternalIoLimits limits;
+        NodePackageEgressCapacityProfile.Limits capacity;
         try {
+            capacity = capacityFor(identity);
             headers = validateHeaders(request.headers());
             if (request.credential().isPresent() && request.signing().isPresent()) {
                 return failed(NodePackageServiceException.Reason.PROTOCOL_REFUSED);
@@ -530,22 +555,24 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 AwsSigV4Signer.requireTransportStableTarget(destination);
                 requireSigningGrant(signing, destination);
             });
-            ExternalIoLimits authority = new ExternalIoLimits(policy.maximumRequestBytes(),
-                    policy.maximumResponseBytes(), policy.maximumResponseBytes(),
-                    policy.maximumResponseBytes(), 100, policy.maximumDeadline(),
+            ExternalIoLimits authority = new ExternalIoLimits(capacity.maximumRequestBytes(),
+                    capacity.maximumResponseBytes(), capacity.maximumResponseBytes(),
+                    capacity.maximumResponseBytes(), request.limits().maximumDecompressionRatio(),
+                    capacity.maximumDeadline(),
                     Duration.ofSeconds(2), Set.of(), Set.of("identity", "gzip"));
             limits = request.limits().intersect(authority);
             if (body.length > limits.maximumRequestBytes()) {
                 return failed(NodePackageServiceException.Reason.REQUEST_TOO_LARGE);
             }
-            deadline = policy.deadline(request.deadline());
+            deadline = deadline(request.deadline(), capacity.maximumDeadline());
             if (limits.maximumDuration().compareTo(deadline) < 0) deadline = limits.maximumDuration();
         } catch (NodePackageServiceException refused) {
             return OutboundCall.failed(refused);
         } catch (IllegalArgumentException invalid) {
             return failed(NodePackageServiceException.Reason.PROTOCOL_REFUSED);
         }
-        AdmissionController.Lease lease = admission.tryAcquire(tenant);
+        AdmissionController.Lease lease = admission.tryAcquire(tenant,
+                capacity.maximumConcurrentOperations(), capacity.maximumConcurrentPerTenant());
         if (lease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
         Duration effectiveDeadline = deadline;
         return submit(effectiveDeadline, lease, () -> {
@@ -589,22 +616,25 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         Map<String, List<String>> headers;
         Duration deadline;
         WebSocketLimits limits;
+        NodePackageEgressCapacityProfile.Limits capacity;
         try {
+            capacity = capacityFor(identity);
             headers = validateHeaders(request.headers());
             if (request.subprotocols().size() > 16
                     || request.subprotocols().stream().distinct().count() != request.subprotocols().size()
                     || !policy.webSocketSubprotocols().containsAll(request.subprotocols())) {
                 return failed(NodePackageServiceException.Reason.PROTOCOL_REFUSED);
             }
-            deadline = policy.deadline(request.deadline());
+            deadline = deadline(request.deadline(), capacity.maximumDeadline());
             // Re-validated here, not only in the request type: this is the bridge's own guarantee
             // that no session is ever opened with a limit it would not enforce, and it runs before
             // admission and before the handshake so an out-of-range limit costs no transport.
-            limits = WebSocketLimits.of(policy, request.maximumMessageBytes(), request.maximumFragments());
+            limits = WebSocketLimits.of(capacity, request.maximumMessageBytes(), request.maximumFragments());
         } catch (IllegalArgumentException invalid) {
             return failed(NodePackageServiceException.Reason.PROTOCOL_REFUSED);
         }
-        AdmissionController.Lease admissionLease = admission.tryAcquire(tenant);
+        AdmissionController.Lease admissionLease = admission.tryAcquire(tenant,
+                capacity.maximumConcurrentOperations(), capacity.maximumConcurrentPerTenant());
         if (admissionLease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
 
         ManagedCall<OutboundWebSocketSession> call = new ManagedCall<>();
@@ -625,7 +655,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 opening = builder.buildAsync(destination, bridge);
                 call.transportFuture(opening);
                 WebSocket socket = opening.get(deadline.toNanos(), TimeUnit.NANOSECONDS);
-                ManagedWebSocketSession session = new ManagedWebSocketSession(socket, bridge, policy,
+                ManagedWebSocketSession session = new ManagedWebSocketSession(socket, bridge, capacity,
                         limits, release);
                 bridge.attach(session);
                 if (bridge.isTerminal()) {
@@ -1002,8 +1032,55 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     @FunctionalInterface
     private interface ThrowingSupplier<T> { T get() throws Exception; }
 
+    private IdentitySource messageIdentity(NodeMessage message) {
+        NodeMessage delivered = Objects.requireNonNull(message, "deliveredMessage");
+        return new MessageIdentity(delivered);
+    }
+
+    private NodePackageEgressCapacityProfile.Limits capacityFor(IdentitySource identity) {
+        ai.ravenroot.api.persistence.ResolvedOperationalPolicy pinned = identity instanceof MessageIdentity message
+                ? trustedPolicy(message.message()) : null;
+        if (pinned == null) return currentCapacity();
+        return pinned.nodePackages().stream()
+                .filter(entry -> packageId.equals(entry.packageId())).findFirst()
+                .flatMap(entry -> entry.capacity().limits())
+                .orElseThrow(() -> refusal(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE));
+    }
+
+    private ai.ravenroot.api.persistence.ResolvedOperationalPolicy trustedPolicy(NodeMessage message) {
+        var resolver = executionPolicies.get();
+        return resolver == null ? null : resolver.apply(message);
+    }
+
+    private NodePackageEgressCapacityProfile.Limits currentCapacity() {
+        return egressCapacityProfile().orElseThrow().limits().orElseThrow();
+    }
+
+    private static NodePackageEgressCapacityProfile.Limits capacityOf(NodePackageEgressPolicy policy) {
+        return NodePackageEgressCapacityProfile.bounded(policy.maximumRequestBytes(),
+                policy.maximumResponseBytes(), policy.maximumWebSocketMessageBytes(),
+                policy.maximumWebSocketFragments(), policy.maximumConcurrentOperations(),
+                policy.maximumConcurrentPerTenant(), policy.maximumQueuedWebSocketSends(),
+                policy.maximumDeadline(), policy.maximumWebSocketLifetime(),
+                policy.maximumWebSocketIdle()).limits().orElseThrow();
+    }
+
+    private static Duration deadline(Duration requested, Duration maximum) {
+        if (requested == null || requested.isZero() || requested.isNegative()) {
+            throw new IllegalArgumentException("deadline must be positive");
+        }
+        return requested.compareTo(maximum) > 0 ? maximum : requested;
+    }
+
     @FunctionalInterface
-    private interface IdentitySource { SecurityContext identity(); }
+    private interface IdentitySource {
+        SecurityContext identity();
+    }
+
+    private record MessageIdentity(NodeMessage message) implements IdentitySource {
+        private MessageIdentity { Objects.requireNonNull(message, "message"); }
+        @Override public SecurityContext identity() { return message.security(); }
+    }
 
     private static final class ManagedCall<T> implements OutboundCall<T> {
         private enum State { ACTIVE, COMPLETED, CANCELLED, EXPIRED }
@@ -1066,60 +1143,42 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     }
 
     private static final class AdmissionController {
-        private final Semaphore packagePermits;
-        private final int tenantMaximum;
-        private final Map<String, TenantSlot> tenantSlots = new ConcurrentHashMap<>();
+        private int packageActive;
+        private final Map<String, Integer> tenantActive = new ConcurrentHashMap<>();
 
         AdmissionController(int packageMaximum, int tenantMaximum) {
-            packagePermits = new Semaphore(packageMaximum, true);
-            this.tenantMaximum = tenantMaximum;
-        }
-
-        Lease tryAcquire(String tenant) {
-            if (!packagePermits.tryAcquire()) return null;
-            synchronized (tenantSlots) {
-                TenantSlot slot = tenantSlots.get(tenant);
-                if (slot == null) {
-                    if (tenantSlots.size() >= MAX_TRACKED_TENANTS) {
-                        packagePermits.release();
-                        return null;
-                    }
-                    slot = new TenantSlot(new Semaphore(tenantMaximum, true));
-                    tenantSlots.put(tenant, slot);
-                }
-                if (!slot.permits.tryAcquire()) {
-                    packagePermits.release();
-                    return null;
-                }
-                slot.active++;
-                return new Lease(this, tenant, slot);
+            // Constructor values remain validation of the startup policy; each request supplies the
+            // immutable values pinned for its own execution.
+            if (packageMaximum < 1 || tenantMaximum < 1 || tenantMaximum > packageMaximum) {
+                throw new IllegalArgumentException("invalid admission limits");
             }
         }
 
-        private void release(String tenant, TenantSlot slot) {
-            synchronized (tenantSlots) {
-                slot.permits.release();
-                if (--slot.active == 0) tenantSlots.remove(tenant, slot);
-            }
-            packagePermits.release();
+        synchronized Lease tryAcquire(String tenant, int packageMaximum, int tenantMaximum) {
+            int active = tenantActive.getOrDefault(tenant, 0);
+            if (packageActive >= packageMaximum || active >= tenantMaximum) return null;
+            if (active == 0 && tenantActive.size() >= MAX_TRACKED_TENANTS) return null;
+            packageActive++;
+            tenantActive.put(tenant, active + 1);
+            return new Lease(this, tenant);
         }
 
-        private static final class TenantSlot {
-            final Semaphore permits;
-            int active;
-            TenantSlot(Semaphore permits) { this.permits = permits; }
+        private synchronized void release(String tenant) {
+            int remaining = tenantActive.getOrDefault(tenant, 0) - 1;
+            if (remaining <= 0) tenantActive.remove(tenant);
+            else tenantActive.put(tenant, remaining);
+            packageActive--;
         }
 
         static final class Lease implements AutoCloseable {
             private final AdmissionController owner;
             private final String tenant;
-            private final TenantSlot slot;
             private final AtomicBoolean closed = new AtomicBoolean();
-            Lease(AdmissionController owner, String tenant, TenantSlot slot) {
-                this.owner = owner; this.tenant = tenant; this.slot = slot;
+            Lease(AdmissionController owner, String tenant) {
+                this.owner = owner; this.tenant = tenant;
             }
             @Override public void close() {
-                if (closed.compareAndSet(false, true)) owner.release(tenant, slot);
+                if (closed.compareAndSet(false, true)) owner.release(tenant);
             }
         }
     }
@@ -1143,9 +1202,14 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
 
         /** Operator authority alone, used by callers that carry no per-request limits. */
+        static WebSocketLimits of(NodePackageEgressCapacityProfile.Limits capacity) {
+            return new WebSocketLimits(capacity.maximumWebSocketMessageBytes(),
+                    capacity.maximumWebSocketFragments());
+        }
+
+        /** Compatibility overload for direct transport tests and unmanifested embedding. */
         static WebSocketLimits of(NodePackageEgressPolicy policy) {
-            return new WebSocketLimits(policy.maximumWebSocketMessageBytes(),
-                    policy.maximumWebSocketFragments());
+            return of(capacityOf(policy));
         }
 
         /**
@@ -1153,9 +1217,9 @@ public final class ManagedNodePackageServices implements NodePackageServices {
          * rather than being clamped, so a package cannot express a nonsensical limit and silently
          * receive a working session.
          */
-        static WebSocketLimits of(NodePackageEgressPolicy policy, OptionalLong requestedBytes,
+        static WebSocketLimits of(NodePackageEgressCapacityProfile.Limits capacity, OptionalLong requestedBytes,
                                   OptionalInt requestedFragments) {
-            long bytes = policy.maximumWebSocketMessageBytes();
+            long bytes = capacity.maximumWebSocketMessageBytes();
             if (requestedBytes.isPresent()) {
                 long requested = requestedBytes.getAsLong();
                 if (requested <= 0 || requested > Integer.MAX_VALUE) {
@@ -1163,7 +1227,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 }
                 bytes = Math.min(bytes, requested);
             }
-            int fragments = policy.maximumWebSocketFragments();
+            int fragments = capacity.maximumWebSocketFragments();
             if (requestedFragments.isPresent()) {
                 int requested = requestedFragments.getAsInt();
                 if (requested <= 0) throw new IllegalArgumentException("maximumFragments");
@@ -1171,13 +1235,19 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             }
             return new WebSocketLimits(bytes, fragments);
         }
+
+        /** Compatibility overload for direct transport tests and unmanifested embedding. */
+        static WebSocketLimits of(NodePackageEgressPolicy policy, OptionalLong requestedBytes,
+                                  OptionalInt requestedFragments) {
+            return of(capacityOf(policy), requestedBytes, requestedFragments);
+        }
     }
 
     /** Internal session; package-visible solely for deterministic core transport tests. */
     static final class ManagedWebSocketSession implements OutboundWebSocketSession {
         private final WebSocket socket;
         private final WebSocketBridge bridge;
-        private final NodePackageEgressPolicy policy;
+        private final NodePackageEgressCapacityProfile.Limits capacity;
         private final WebSocketLimits limits;
         private final Runnable release;
         private final Semaphore sendQueue;
@@ -1189,19 +1259,26 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         /** Policy-only overload: the effective ceilings are the operator ceilings. */
         ManagedWebSocketSession(WebSocket socket, WebSocketBridge bridge,
                                 NodePackageEgressPolicy policy, Runnable release) {
-            this(socket, bridge, policy, WebSocketLimits.of(policy), release);
+            this(socket, bridge, capacityOf(policy), WebSocketLimits.of(capacityOf(policy)), release);
         }
 
+        /** Compatibility overload with request-narrowed limits. */
         ManagedWebSocketSession(WebSocket socket, WebSocketBridge bridge,
                                 NodePackageEgressPolicy policy, WebSocketLimits limits,
                                 Runnable release) {
+            this(socket, bridge, capacityOf(policy), limits, release);
+        }
+
+        ManagedWebSocketSession(WebSocket socket, WebSocketBridge bridge,
+                                NodePackageEgressCapacityProfile.Limits capacity, WebSocketLimits limits,
+                                Runnable release) {
             this.socket = socket;
             this.bridge = bridge;
-            this.policy = policy;
+            this.capacity = capacity;
             this.limits = limits;
             this.release = release;
-            this.sendQueue = new Semaphore(policy.maximumQueuedWebSocketSends(), true);
-            lifetime = DEADLINES.schedule(this::forceAbort, policy.maximumWebSocketLifetime().toNanos(),
+            this.sendQueue = new Semaphore(capacity.maximumQueuedWebSocketSends(), true);
+            lifetime = DEADLINES.schedule(this::forceAbort, capacity.maximumWebSocketLifetime().toNanos(),
                     TimeUnit.NANOSECONDS);
             touch();
         }
@@ -1279,7 +1356,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         boolean touch() {
             if (closed.get()) return false;
             ScheduledFuture<?> next = DEADLINES.schedule(this::forceAbort,
-                    policy.maximumWebSocketIdle().toNanos(),
+                    capacity.maximumWebSocketIdle().toNanos(),
                     TimeUnit.NANOSECONDS);
             ScheduledFuture<?> previous = idle.getAndSet(next);
             if (previous != null) previous.cancel(false);
@@ -1329,7 +1406,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
 
         /** Policy-only overload: the effective ceilings are the operator ceilings. */
         WebSocketBridge(OutboundWebSocketListener listener, NodePackageEgressPolicy policy, Runnable release) {
-            this(listener, WebSocketLimits.of(policy), release);
+            this(listener, WebSocketLimits.of(capacityOf(policy)), release);
         }
 
         WebSocketBridge(OutboundWebSocketListener listener, WebSocketLimits limits, Runnable release) {

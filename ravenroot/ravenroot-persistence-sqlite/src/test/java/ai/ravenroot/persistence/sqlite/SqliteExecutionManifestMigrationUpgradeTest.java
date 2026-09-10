@@ -151,6 +151,59 @@ class SqliteExecutionManifestMigrationUpgradeTest {
     }
 
     @Test
+    void aFixedVersionOneManifestSurvivesTheOperationalPolicySchemaUpgrade(@TempDir Path directory)
+            throws Exception {
+        Path databaseFile = directory.resolve("manifest-v1-to-v2.db");
+        List<SchemaMigration> beforePolicyV2 = SqliteSchema.migrations().stream()
+                .filter(migration -> migration.version() < policyV2MigrationVersion()).toList();
+        var key = new ExecutionKey("acme", UUID.fromString("aaaaaaaa-0000-0000-0000-000000000316"));
+        ExecutionManifest legacy = manifest(key, "STANDARD", List.of());
+        assertEquals("a1092d3b81ed16f38cab383c9e7e3aa0900ac1549732319cacb8f643f597afbf", legacy.digest().value());
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databaseFile)) {
+            SqliteSchema.migrate(connection, beforePolicyV2, CLOCK);
+            try (var statement = connection.prepareStatement("""
+                    INSERT INTO execution_manifest (
+                        tenant_id, process_instance_id, format_version, digest, graph_content_id,
+                        graph_id, version_id, graph_schema_version, definition_format_version,
+                        execution_policy, unknown_behavior_mode, engine_digest, store_digest,
+                        limits_digest, program_runtime_digest, pinned_at_epoch_second, pinned_at_nano,
+                        committed_at_epoch_second, committed_at_nano)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """)) {
+                statement.setString(1, key.tenantId());
+                statement.setString(2, key.processInstanceId().toString());
+                statement.setInt(3, legacy.formatVersion());
+                statement.setString(4, legacy.digest().value());
+                statement.setString(5, legacy.graphContentId().value());
+                statement.setString(6, legacy.graphIdentity().graphId());
+                statement.setString(7, legacy.graphIdentity().versionId());
+                statement.setInt(8, legacy.runtime().graphSchemaVersion());
+                statement.setInt(9, legacy.runtime().definitionFormatVersion());
+                statement.setString(10, legacy.runtime().executionPolicy());
+                statement.setString(11, legacy.runtime().unknownBehaviorMode());
+                statement.setString(12, legacy.runtime().engineDigest());
+                statement.setString(13, legacy.runtime().storeDigest());
+                statement.setString(14, legacy.runtime().executionLimitsDigest());
+                statement.setString(15, legacy.runtime().programRuntimeDigest());
+                statement.setLong(16, legacy.pinnedAt().getEpochSecond());
+                statement.setInt(17, legacy.pinnedAt().getNano());
+                statement.setLong(18, CLOCK.instant().getEpochSecond());
+                statement.setInt(19, CLOCK.instant().getNano());
+                statement.executeUpdate();
+            }
+        }
+
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            assertEquals(legacy, store.load(key).toCompletableFuture().join().manifest());
+        }
+        try (var reopened = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            assertEquals(legacy, reopened.load(key).toCompletableFuture().join().manifest());
+        }
+    }
+
+    @Test
     void aManifestMayNotBeRemovedWhileItsInstanceStillExists(@TempDir Path directory) {
         Path databaseFile = directory.resolve("retention.db");
         var key = new ExecutionKey("acme", UUID.randomUUID());
@@ -225,7 +278,7 @@ class SqliteExecutionManifestMigrationUpgradeTest {
                                               List<PinnedNodePackage> packages) {
         var profile = new ResolvedRuntimeProfile(1, 1, policy, "pass-through",
                 "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
-        return new ExecutionManifest(ExecutionManifest.CURRENT_FORMAT_VERSION, key,
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1, key,
                 new GraphContentId("a".repeat(64)),
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
                 profile, packages, Instant.parse("2026-01-01T00:00:00Z"));
@@ -238,6 +291,13 @@ class SqliteExecutionManifestMigrationUpgradeTest {
                 .map(SchemaMigration::version)
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no migration creates the manifest table"));
+    }
+
+    private static int policyV2MigrationVersion() {
+        return SqliteSchema.migrations().stream()
+                .filter(migration -> migration.statements().stream()
+                        .anyMatch(statement -> statement.contains("ADD COLUMN operational_policy")))
+                .map(SchemaMigration::version).findFirst().orElseThrow();
     }
 
     private static void unwrap(java.util.function.Supplier<java.util.concurrent.CompletionStage<?>> call) {

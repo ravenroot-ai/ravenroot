@@ -1085,6 +1085,23 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
+     * Records against the immutable payload limit accepted for this execution. Adapters that can
+     * honor historical pins override this method; an older adapter fails closed when its current
+     * limit differs rather than silently substituting it.
+     */
+    default CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
+        if (resolvedMaximumPayloadBytes < 1) {
+            throw new IllegalArgumentException("resolvedMaximumPayloadBytes must be positive");
+        }
+        if (resolvedMaximumPayloadBytes != maxExecutionResultPayloadBytes()) {
+            return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                    ExecutionStoreFailure.invalid("the execution store cannot honor the pinned result limit")));
+        }
+        return recordExecutionResult(result);
+    }
+
+    /**
      * Reads one traversal's recorded result.
      *
      * <p><strong>Empty is the answer for a traversal that has no result, for one belonging to another

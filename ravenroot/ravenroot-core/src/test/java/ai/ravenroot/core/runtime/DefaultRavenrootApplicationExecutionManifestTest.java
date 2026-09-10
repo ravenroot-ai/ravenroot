@@ -158,7 +158,7 @@ class DefaultRavenrootApplicationExecutionManifestTest {
     }
 
     @Test
-    void aRuntimeThatResolvesDifferentLimitsRefusesToReproduceTheExecution() {
+    void aRuntimeThatResolvesDifferentLimitsRestoresTheAcceptedExecutionValues() {
         var executions = new InMemoryExecutionStore();
         var definitions = new InMemoryGraphDefinitionStore(Clock.systemUTC());
         var manifests = new InMemoryExecutionManifestStore(Clock.systemUTC());
@@ -184,14 +184,10 @@ class DefaultRavenrootApplicationExecutionManifestTest {
                 GraphExecutionLimits.DEFAULTS.maxRecoveryDeliveriesPerAttempt());
         var recovering = applicationWith(executions, definitions, manifests, tightened);
 
-        ExecutionManifestIncompatibleException refused = assertThrows(
-                ExecutionManifestIncompatibleException.class,
-                () -> recovering.executionManifests().verify(key, ExecutionPolicy.STANDARD));
-
-        assertEquals(1, refused.report().differences().size());
-        assertEquals(ExecutionManifestDifference.Dimension.EXECUTION_LIMITS,
-                refused.report().differences().get(0).dimension());
-        assertFalse(refused.report().truncated());
+        assertEquals(GraphExecutionLimits.DEFAULTS,
+                ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                        recovering.executionManifests().resolvePolicy(key, ExecutionPolicy.STANDARD,
+                                java.util.List.of())));
         recovering.close();
     }
 

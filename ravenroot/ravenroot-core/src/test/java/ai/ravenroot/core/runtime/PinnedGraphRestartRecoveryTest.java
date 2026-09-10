@@ -185,8 +185,8 @@ class PinnedGraphRestartRecoveryTest {
     }
 
     @Test
-    @DisplayName("a manifest this deployment cannot reproduce withholds the declaration and dispatches nothing")
-    void anIncompatibleManifestRefusesInsteadOfAuthorisingARepeat(@TempDir Path dir) {
+    @DisplayName("a v2 manifest restores accepted limits after deployment defaults change")
+    void aV2ManifestRestoresAcceptedLimitsAndAuthorisesARepeat(@TempDir Path dir) {
         var clock = new MovableClock(EPOCH);
         Fixture fixture = crashMidEffect(dir, RecoveryRepeatabilityProperty.REPEATABLE, clock);
 
@@ -213,12 +213,11 @@ class PinnedGraphRestartRecoveryTest {
             var dispatcher = new RecordingDispatcher();
             List<RecoveryOutcome> outcomes = sweep(reopened, documents, verifying, dispatcher, clock);
 
-            assertInstanceOf(RecoveryOutcome.Deferred.class, outcomes.get(0),
-                    "an execution this deployment cannot reproduce is withheld, not parked: parking "
-                            + "would spend a human decision on a deployment mistake");
-            assertTrue(dispatcher.effectKeys.isEmpty());
+            assertInstanceOf(RecoveryOutcome.ReDispatched.class, outcomes.get(0),
+                    "current limits must not replace the values accepted in a format 2 manifest");
+            assertEquals(List.of(fixture.attemptId.toString()), dispatcher.effectKeys);
             assertEquals(NodeAttemptStatus.RUNNING, attemptIn(reopened, fixture).status(),
-                    "a refusal writes nothing at all");
+                    "redelivery keeps the original attempt identity");
         }
     }
 

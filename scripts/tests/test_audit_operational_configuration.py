@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import io
 import copy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -61,32 +62,197 @@ def classify_non_pending(root: Path) -> None:
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
-    def test_helm_program_timeout_authority_closes_chart_and_java_evidence(self) -> None:
+    def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
-        schema = json.loads((ROOT / "deploy/helm/ravenroot/values.schema.json").read_text())
-        resolver = ROOT / "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java"
-        source = resolver.read_text()
-        test_path = ROOT / "scripts/tests/test_program_timeout_helm_contract.sh"
-        authority = {
-            "kind": "helm-program-timeout-authority-v1", "valuesPath": "deploy/helm/ravenroot/values.yaml",
-            "valuePath": "programTimeoutMs", "schemaPath": "deploy/helm/ravenroot/values.schema.json",
-            "schemaPointer": "/properties/programTimeoutMs", "schemaContract": schema["properties"]["programTimeoutMs"],
-            "templatePath": "deploy/helm/ravenroot/templates/deployment.yaml", "environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
-            "testPath": "scripts/tests/test_program_timeout_helm_contract.sh",
-            "testDigest": audit.hashlib.sha256(test_path.read_bytes()).hexdigest(),
-            "candidateIds": sorted({c.id for c in candidates if c.path in {"deploy/helm/ravenroot/values.yaml", "deploy/helm/ravenroot/values.schema.json", "deploy/helm/ravenroot/templates/deployment.yaml", "scripts/tests/test_program_timeout_helm_contract.sh"} and (c.role in {"programTimeoutMs", "RAVENROOT_PROGRAM_TIMEOUT_MS"} or c.path.endswith("test_program_timeout_helm_contract.sh"))}),
-            "resolverPath": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-            "resolverType": "GraalVmProgramRuntime", "resolverMethod": "fromEnvironment",
-            "resolverDigest": audit.java_method_digest(source, "GraalVmProgramRuntime", "fromEnvironment"),
-            "fingerprintMethod": "compatibilityFingerprint", "fingerprintDigest": audit.java_method_digest(source, "GraalVmProgramRuntime", "compatibilityFingerprint"),
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        entries = {
+            identifier: {
+                "id": identifier, "setting": contract["setting"],
+                "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["defaultDisplay"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "helmAuthority": audit.HELM_AUTHORITY_ID,
+            }
+            for contract in authority["contracts"] for identifier in contract["candidateIds"]
         }
-        self.assertEqual([], audit.helm_program_timeout_authority_errors(ROOT, authority, candidates))
+        self.assertEqual([], audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
         altered = copy.deepcopy(authority)
         altered["candidateIds"] = altered["candidateIds"][:-1]
-        self.assertTrue(audit.helm_program_timeout_authority_errors(ROOT, altered, candidates))
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
         altered = copy.deepcopy(authority)
-        altered["schemaContract"]["oneOf"][0]["maximum"] = 1
-        self.assertTrue(audit.helm_program_timeout_authority_errors(ROOT, altered, candidates))
+        altered["candidateIds"].append("oc-foreign")
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"].append(altered["candidateIds"][0])
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        wrong_entries = copy.deepcopy(entries)
+        next(iter(wrong_entries.values()))["owner"] = "Example.java#Example"
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
+        wrong_entries = copy.deepcopy(entries)
+        next(iter(wrong_entries.values()))["setting"] = "deployment.unsupported"
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
+
+    def test_helm_authority_rejects_source_contract_and_executable_evidence_drift(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        entries = {
+            identifier: {
+                "id": identifier, "setting": contract["setting"],
+                "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["defaultDisplay"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "helmAuthority": audit.HELM_AUTHORITY_ID,
+            }
+            for contract in authority["contracts"] for identifier in contract["candidateIds"]
+        }
+        mutations = (
+            (audit.HELM_VALUES_PATH, "programTimeoutMs: 15000", "programTimeoutMs: 15001"),
+            (audit.HELM_SCHEMA_PATH, '"maximum": 300000', '"maximum": 300001'),
+            (audit.HELM_SCHEMA_PATH,
+             '"pattern": "^[\\u0009-\\u000D\\u001C-\\u0020\\u1680',
+             '"pattern": "^[\\u0009-\\u000D\\u0020'),
+            (audit.HELM_SCHEMA_PATH, '"additionalProperties": false', '"additionalProperties": true'),
+            (audit.HELM_SCHEMA_PATH, '"required": ["replicaCount"', '"required": ["image"'),
+            (audit.HELM_SCHEMA_PATH, '"enum": ["RuntimeDefault"]',
+             '"enum": ["RuntimeDefault", "Unconfined"]'),
+            (audit.HELM_TEMPLATE_PATHS[1],
+             '          resources:\n            {{- toYaml .Values.resources | nindent 12 }}',
+             '      resources:\n        {{- toYaml .Values.resources | nindent 8 }}'),
+            (audit.HELM_TEMPLATE_PATHS[1], '- name: RAVENROOT_PROGRAM_TIMEOUT_MS',
+             '# - name: RAVENROOT_PROGRAM_TIMEOUT_MS'),
+            ("scripts/tests/test_program_timeout_helm_contract.sh",
+             "for invalid in 99 300001; do", "for invalid in 99; do"),
+            (authority["timeoutRuntime"]["path"],
+             'Duration timeout = Duration.ofMillis(', '// Duration timeout = Duration.ofMillis('),
+            (authority["timeoutRuntime"]["path"],
+             'static GraalVmProgramRuntime fromEnvironment(java.util.Map<String, String> environment)',
+             'static GraalVmProgramRuntime fromChangedEnvironment(java.util.Map<String, String> environment)'),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(relative=relative, before=before):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    required = {audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                                *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                                authority["timeoutRuntime"]["path"]}
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    target = root / relative
+                    source = target.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                    self.assertTrue(audit.helm_authority_errors(
+                        root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+        for removed in (audit.HELM_TEMPLATE_PATHS[0],
+                        "scripts/tests/test_helm_values_contract.sh",
+                        authority["timeoutRuntime"]["path"]):
+            with self.subTest(removed=removed):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    required = {audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                                *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                                authority["timeoutRuntime"]["path"]}
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    (root / removed).unlink()
+                    self.assertTrue(audit.helm_authority_errors(
+                        root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            for path in {audit.HELM_VALUES_PATH, *audit.HELM_TEMPLATE_PATHS,
+                         *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            target = root / audit.HELM_SCHEMA_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('{"type":"object","properties":[]}', encoding="utf-8")
+            self.assertTrue(audit.helm_authority_errors(
+                root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+    def test_inventory_errors_routes_only_exact_helm_owned_rows_through_helm_proof(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        document = copy.deepcopy(audit.load_inventory(allow_previous_schema=True))
+        document["entries"] = []
+        document["evidenceRecords"] = {
+            candidate.evidence_digest: candidate.evidence for candidate in candidates}
+        for candidate in candidates:
+            entry = {**candidate.source_fields(), "status": "pending-review", "classification": None}
+            if candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture")
+            document["entries"].append(entry)
+        by_id = {entry["id"]: entry for entry in document["entries"]}
+        for contract in authority["contracts"]:
+            for identifier in contract["candidateIds"]:
+                by_id[identifier].update(
+                    status="already-centralized", classification="operator-configurable",
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], default=contract["defaultDisplay"],
+                    defaultEvidence=contract["candidateIds"], validation=contract["validation"],
+                    scope=contract["scope"], pinning=contract["pinning"],
+                    coverage=contract["coverage"], helmAuthority=audit.HELM_AUTHORITY_ID,
+                    rationale="The closed Helm values authority proves this deployment setting.",
+                )
+        document["helmAuthorities"] = {audit.HELM_AUTHORITY_ID: authority}
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("Helm" in error for error in errors), errors)
+
+        altered = copy.deepcopy(document)
+        marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))
+        marked.pop("helmAuthority")
+        errors = audit.inventory_errors(ROOT, altered, candidates)
+        self.assertTrue(any("Helm candidate coverage" in error for error in errors), errors)
+
+        altered = copy.deepcopy(document)
+        marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))
+        marked["owner"] = (
+            "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/"
+            "GraphExecutionLimits.java#GraphExecutionLimits")
+        errors = audit.inventory_errors(ROOT, altered, candidates)
+        self.assertTrue(any("unsupported Helm authority owner" in error for error in errors), errors)
+
+    def test_helm_live_candidate_references_remap_without_touching_history_or_prose(self) -> None:
+        document = {
+            "helmAuthorities": {audit.HELM_AUTHORITY_ID: {
+                "candidateIds": ["oc-old"],
+                "contracts": [{"candidateIds": ["oc-old"]}],
+                "evidence": "oc-old remains historical prose",
+            }},
+            "semanticReviewHistory": [{"candidateIds": ["oc-old"]}],
+        }
+        locations = audit.candidate_reference_locations(document, {"oc-old"})
+        self.assertTrue(all(audit.allowed_migrated_reference(path)
+                            or audit.immutable_historical_reference(path)
+                            or path[-1] == "evidence" for path in locations))
+        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
+        authority = document["helmAuthorities"][audit.HELM_AUTHORITY_ID]
+        self.assertEqual(["oc-new"], authority["candidateIds"])
+        self.assertEqual(["oc-new"], authority["contracts"][0]["candidateIds"])
+        self.assertEqual(["oc-old"], document["semanticReviewHistory"][0]["candidateIds"])
+        self.assertEqual("oc-old remains historical prose", authority["evidence"])
 
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}

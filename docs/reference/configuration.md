@@ -2,6 +2,19 @@
 
 Configuration is environment-owned. A graph cannot select an engine, authentication mode, browser origin, credential backend, adapter, sandbox, or egress policy.
 
+## Helm values compatibility
+
+The Helm values schema is closed over the fields published in `values.yaml`. Older chart revisions
+allowed additional nested keys under `resources`, `podSecurityContext`, `securityContext`, and
+`probes` to pass through `toYaml` without a chart contract. Those undocumented extensions are no
+longer accepted. Before upgrading, remove such keys or apply the required Kubernetes fields with a
+post-renderer or a maintained chart overlay. Supported resource quantities, pod and container
+identity fields, probe timing, storage, image, Service, OIDC, and runtime-policy carriers remain
+available as named values and reject malformed input before a workload is rendered. Quote resource
+quantities in values files and use `--set-string` for unitless quantities, such as
+`--set-string resources.limits.cpu=2`; numeric YAML quantities that older charts passed through must
+be changed to strings before upgrading.
+
 ## Runtime and behavior resolution
 
 | Variable | Default | Accepted contract |

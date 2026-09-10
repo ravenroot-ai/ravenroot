@@ -135,6 +135,69 @@ DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS = {
     }),
     "rawKubernetes": frozenset({"deploy/kubernetes/ravenroot.yaml"}),
 }
+HELM_AUTHORITY_ID = "ravenroot-helm-values-v1"
+HELM_VALUES_PATH = "deploy/helm/ravenroot/values.yaml"
+HELM_SCHEMA_PATH = "deploy/helm/ravenroot/values.schema.json"
+HELM_TEMPLATE_PATHS = (
+    "deploy/helm/ravenroot/templates/_helpers.tpl",
+    "deploy/helm/ravenroot/templates/deployment.yaml",
+    "deploy/helm/ravenroot/templates/pvc.yaml",
+    "deploy/helm/ravenroot/templates/service.yaml",
+)
+HELM_TEST_ROLES = {
+    "scripts/tests/test_helm_values_contract.sh": (
+        "closed-schema", "default-render", "nondefault-render", "refusal"),
+    "scripts/tests/test_program_timeout_helm_contract.sh": (
+        "timeout-default", "timeout-nondefault", "timeout-blank", "timeout-refusal"),
+    "scripts/tests/test_execution_manifest_pin_helm_contract.sh": (
+        "unsupported-setting-refusal",),
+}
+
+# This is the complete chart-owned operator surface. Blank Java-default carriers are intentionally
+# absent: their typed authorities remain in Java and this Helm proof only verifies their transport.
+# Entries are value path, setting, exact serialized default, schema rule, projection rule.
+HELM_OPERATOR_VALUE_CONTRACTS = (
+    ("image.repository", "deployment.image.repository", "ravenroot", "nonempty-string", "image-helper"),
+    ("image.tag", "deployment.image.tag", "local", "string", "image-helper"),
+    ("image.digest", "deployment.image.digest", '""', "image-digest", "image-helper"),
+    ("image.pullPolicy", "deployment.image.pull-policy", "IfNotPresent", "image-pull-policy", "image-pull-policy"),
+    ("service.type", "deployment.service.type", "ClusterIP", "service-type", "service-type"),
+    ("service.port", "deployment.service.port", "8080", "service-port", "service-port"),
+    ("auth.issuer", "deployment.auth.issuer", '""', "required-auth", "auth-required"),
+    ("auth.audience", "deployment.auth.audience", '""', "required-auth", "auth-required"),
+    ("auth.jwksUri", "deployment.auth.jwks-uri", '""', "required-auth", "auth-required"),
+    ("programTimeoutMs", "deployment.program-timeout-ms", "15000", "program-timeout", "program-timeout"),
+    ("resources.requests.cpu", "deployment.resources.requests.cpu", "100m", "quantity", "resources"),
+    ("resources.requests.memory", "deployment.resources.requests.memory", "256Mi", "quantity", "resources"),
+    ("resources.limits.cpu", "deployment.resources.limits.cpu", '"1"', "quantity", "resources"),
+    ("resources.limits.memory", "deployment.resources.limits.memory", "1Gi", "quantity", "resources"),
+    ("podSecurityContext.runAsNonRoot", "deployment.pod-security.run-as-non-root", "true", "boolean", "pod-security"),
+    ("podSecurityContext.fsGroup", "deployment.pod-security.fs-group", "10001", "positive-id", "pod-security"),
+    ("podSecurityContext.fsGroupChangePolicy", "deployment.pod-security.fs-group-change-policy", "OnRootMismatch", "fs-group-policy", "pod-security"),
+    ("securityContext.allowPrivilegeEscalation", "deployment.container-security.allow-privilege-escalation", "false", "boolean", "container-security"),
+    ("securityContext.readOnlyRootFilesystem", "deployment.container-security.read-only-root-filesystem", "true", "boolean", "container-security"),
+    ("securityContext.runAsUser", "deployment.container-security.run-as-user", "10001", "positive-id", "container-security"),
+    ("securityContext.runAsGroup", "deployment.container-security.run-as-group", "10001", "positive-id", "container-security"),
+    ("probes.readiness.initialDelaySeconds", "deployment.probe.readiness-initial-delay-seconds", "3", "probe-initial", "readiness-probe"),
+    ("probes.readiness.periodSeconds", "deployment.probe.readiness-period-seconds", "5", "probe-period", "readiness-probe"),
+    ("probes.liveness.initialDelaySeconds", "deployment.probe.liveness-initial-delay-seconds", "15", "probe-initial", "liveness-probe"),
+    ("probes.liveness.periodSeconds", "deployment.probe.liveness-period-seconds", "10", "probe-period", "liveness-probe"),
+    ("tmpfs.sizeLimit", "deployment.tmpfs.size-limit", "64Mi", "positive-quantity", "tmpfs"),
+    ("persistence.size", "deployment.persistence.size", "1Gi", "positive-quantity", "persistence-size"),
+    ("persistence.storageClass", "deployment.persistence.storage-class", '""', "string", "persistence-storage-class"),
+)
+HELM_FIXED_VALUE_CONTRACTS = {
+    "replicaCount": "1",
+    "engine": "pekko",
+    "podSecurityContext.seccompProfile.type": "RuntimeDefault",
+}
+HELM_FIXED_LIST_CONTRACTS = {
+    "securityContext.capabilities.drop.0": "ALL",
+    "persistence.accessModes.0": "ReadWriteOnce",
+}
+HELM_JAVA_CARRIER_PREFIXES = (
+    "executionRuntime.", "graph.", "humanTask.", "assistant.", "rateLimit.",
+)
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java")
@@ -1659,50 +1722,464 @@ def yaml_scalar_at_path(source: str, dotted_path: str) -> str | None:
     return found[0] if len(found) == 1 else None
 
 
-def helm_program_timeout_authority_errors(root: Path, authority: object,
-                                          candidates: tuple[Candidate, ...]) -> list[str]:
-    """Verify the one supported split Helm/Java timeout contract without relaxing Java owners."""
-    required = {"kind", "valuesPath", "valuePath", "schemaPath", "schemaPointer",
-                "schemaContract", "templatePath", "environment", "testPath", "testDigest",
-                "candidateIds", "resolverPath", "resolverType", "resolverMethod",
-                "resolverDigest", "fingerprintMethod", "fingerprintDigest"}
-    if not isinstance(authority, dict) or set(authority) != required \
-            or authority.get("kind") != "helm-program-timeout-authority-v1":
-        return ["Helm program-timeout authority has an unsupported shape"]
-    values_path = "deploy/helm/ravenroot/values.yaml"
-    schema_path = "deploy/helm/ravenroot/values.schema.json"
-    template_path = "deploy/helm/ravenroot/templates/deployment.yaml"
-    resolver_path = "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java"
-    expected = {"valuesPath": values_path, "valuePath": "programTimeoutMs", "schemaPath": schema_path,
-                "schemaPointer": "/properties/programTimeoutMs", "templatePath": template_path,
-                "environment": "RAVENROOT_PROGRAM_TIMEOUT_MS", "testPath": "scripts/tests/test_program_timeout_helm_contract.sh",
-                "resolverPath": resolver_path, "resolverType": "GraalVmProgramRuntime",
-                "resolverMethod": "fromEnvironment", "fingerprintMethod": "compatibilityFingerprint"}
-    if any(authority.get(key) != value for key, value in expected.items()):
-        return ["Helm program-timeout authority paths or symbols have drifted"]
-    schema = json.loads((root / schema_path).read_text(encoding="utf-8"))
-    contract = schema["properties"]["programTimeoutMs"]
-    if authority["schemaContract"] != contract or contract != {"x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS", "oneOf": [{"type": "integer", "minimum": 100, "maximum": 300000}, {"$ref": "#/definitions/graphBlank"}]}:
-        return ["Helm program-timeout schema contract has drifted"]
-    if yaml_scalar_at_path((root / values_path).read_text(encoding="utf-8"), "programTimeoutMs") != "15000":
-        return ["Helm program-timeout default has drifted"]
-    template = (root / template_path).read_text(encoding="utf-8")
-    if template.count('- name: RAVENROOT_PROGRAM_TIMEOUT_MS\n              value: {{ include "ravenroot.graphLimitValue" .Values.programTimeoutMs }}') != 1:
-        return ["Helm program-timeout template binding has drifted"]
-    test = root / str(authority["testPath"])
-    if hashlib.sha256(test.read_bytes()).hexdigest() != authority["testDigest"]:
-        return ["Helm program-timeout test evidence has drifted"]
-    source = (root / resolver_path).read_text(encoding="utf-8")
-    if authority["resolverDigest"] != java_method_digest(source, "GraalVmProgramRuntime", "fromEnvironment") \
-            or authority["fingerprintDigest"] != java_method_digest(source, "GraalVmProgramRuntime", "compatibilityFingerprint") \
-            or 'integerEnvironment(environment, "RAVENROOT_PROGRAM_TIMEOUT_MS", 5_000, 100, 300_000)' not in source \
-            or "Duration.ofMillis(" not in source or "policy.deadline().toMillis()" not in source:
-        return ["Helm program-timeout Java resolver/fingerprint evidence has drifted"]
-    actual = {candidate.id for candidate in candidates if candidate.path in {values_path, schema_path, template_path, str(authority["testPath"])} and (candidate.role in {"programTimeoutMs", "RAVENROOT_PROGRAM_TIMEOUT_MS"} or candidate.path == str(authority["testPath"]))}
-    declared = authority["candidateIds"]
-    if not isinstance(declared, list) or len(declared) != len(set(declared)) or set(declared) != actual:
-        return ["Helm program-timeout candidate coverage is incomplete, duplicate, or foreign"]
-    return []
+def helm_schema_pointer(value_path: str) -> str:
+    return "/properties/" + "/properties/".join(value_path.split("."))
+
+
+def helm_schema_contract(schema: object, value_path: str) -> object | None:
+    """Resolve one value leaf while requiring every mapping ancestor to be closed and required."""
+    node = schema
+    for component in value_path.split("."):
+        if not isinstance(node, dict):
+            return None
+        reference = node.get("$ref")
+        if reference is not None:
+            resolved = json_pointer(schema, str(reference))
+            if not isinstance(resolved, dict):
+                return None
+            node = resolved
+        properties = node.get("properties")
+        if node.get("type") != "object" or node.get("additionalProperties") is not False \
+                or not isinstance(properties, dict) or component not in properties \
+                or not isinstance(node.get("required"), list) \
+                or node["required"].count(component) != 1:
+            return None
+        node = properties[component]
+    if isinstance(node, dict) and "$ref" in node:
+        node = json_pointer(schema, str(node["$ref"]))
+    return node
+
+
+def helm_schema_rule_matches(schema: object, value_path: str, rule: str) -> bool:
+    node = helm_schema_contract(schema, value_path)
+    if not isinstance(node, dict):
+        return False
+    graph_blank = {"$ref": "#/definitions/graphBlank"}
+    rules: dict[str, object] = {
+        "nonempty-string": {"type": "string", "minLength": 1},
+        "string": {"type": "string"},
+        "image-digest": {"type": "string", "pattern": "^(|sha256:[a-f0-9]{64})$"},
+        "image-pull-policy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]},
+        "service-type": {"type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"]},
+        "service-port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "required-auth": {"type": "string", "minLength": 1, "not": graph_blank},
+        "program-timeout": {"x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
+                            "oneOf": [{"type": "integer", "minimum": 100, "maximum": 300000}, graph_blank]},
+        "boolean": {"type": "boolean"},
+        "positive-id": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "fs-group-policy": {"type": "string", "enum": ["Always", "OnRootMismatch"]},
+        "probe-initial": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "probe-period": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "positive-quantity": {"type": "string", "pattern": "^\\+?(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"},
+        "quantity": {"type": "string", "pattern": "^\\+?(?:(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"},
+    }
+    graph_blank_contract = {
+        "type": "string",
+        "pattern": "^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000]*$",
+    }
+    if ("#/definitions/graphBlank" in json.dumps(node, sort_keys=True)
+            and json_pointer(schema, "#/definitions/graphBlank") != graph_blank_contract):
+        return False
+    return rule in rules and node == rules[rule]
+
+
+def helm_values_leaf_paths(source: str) -> set[str]:
+    paths = {path for _line, path, _value in yaml_scalar_rows(source)}
+    stack: list[tuple[int, str]] = []
+    for raw in source.splitlines():
+        mapping = re.match(r'^([ ]*)([A-Za-z_][A-Za-z0-9_.-]*)\s*:\s*(.*?)\s*$', raw)
+        if mapping is not None:
+            indent = len(mapping.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            if not mapping.group(3):
+                stack.append((indent, mapping.group(2)))
+            continue
+        item = re.match(r'^([ ]*)-\s+(\S.*?)\s*$', raw)
+        if item is not None:
+            indent = len(item.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            if stack:
+                prefix = ".".join(component for _depth, component in stack)
+                index = sum(1 for path in paths if path.startswith(prefix + ".") and
+                            path[len(prefix) + 1:].split(".", 1)[0].isdigit())
+                paths.add(f"{prefix}.{index}")
+    return paths
+
+
+def json_value_spans(source: str) -> dict[tuple[str, ...], tuple[int, int]] | None:
+    """Return exact character spans for values in a JSON object without accepting extensions."""
+    decoder = json.JSONDecoder()
+    spans: dict[tuple[str, ...], tuple[int, int]] = {}
+
+    def whitespace(offset: int) -> int:
+        while offset < len(source) and source[offset].isspace():
+            offset += 1
+        return offset
+
+    def parse(offset: int, path: tuple[str, ...]) -> int:
+        start = whitespace(offset)
+        if start >= len(source):
+            raise ValueError("missing JSON value")
+        if source[start] == "{":
+            cursor = whitespace(start + 1)
+            if cursor < len(source) and source[cursor] == "}":
+                end = cursor + 1
+            else:
+                while True:
+                    key, consumed = decoder.raw_decode(source[cursor:])
+                    if not isinstance(key, str):
+                        raise ValueError("JSON object key is not a string")
+                    cursor = whitespace(cursor + consumed)
+                    if cursor >= len(source) or source[cursor] != ":":
+                        raise ValueError("missing JSON colon")
+                    cursor = parse(cursor + 1, path + (key,))
+                    cursor = whitespace(cursor)
+                    if cursor < len(source) and source[cursor] == ",":
+                        cursor = whitespace(cursor + 1)
+                        continue
+                    if cursor >= len(source) or source[cursor] != "}":
+                        raise ValueError("unterminated JSON object")
+                    end = cursor + 1
+                    break
+        elif source[start] == "[":
+            cursor = whitespace(start + 1)
+            index = 0
+            if cursor < len(source) and source[cursor] == "]":
+                end = cursor + 1
+            else:
+                while True:
+                    cursor = parse(cursor, path + (str(index),))
+                    index += 1
+                    cursor = whitespace(cursor)
+                    if cursor < len(source) and source[cursor] == ",":
+                        cursor = whitespace(cursor + 1)
+                        continue
+                    if cursor >= len(source) or source[cursor] != "]":
+                        raise ValueError("unterminated JSON array")
+                    end = cursor + 1
+                    break
+        else:
+            _value, consumed = decoder.raw_decode(source[start:])
+            end = start + consumed
+        spans[path] = (start, end)
+        return end
+
+    try:
+        end = parse(0, ())
+        if whitespace(end) != len(source):
+            return None
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return spans
+
+
+def helm_projection_matches(root: Path, value_path: str, projection: str) -> bool:
+    executable = lambda path: "\n".join(
+        line for line in (root / path).read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#"))
+    try:
+        deployment = executable(HELM_TEMPLATE_PATHS[1])
+        helpers = executable(HELM_TEMPLATE_PATHS[0])
+        pvc = executable(HELM_TEMPLATE_PATHS[2])
+        service = executable(HELM_TEMPLATE_PATHS[3])
+    except (FileNotFoundError, UnicodeDecodeError):
+        return False
+    direct = {
+        "image-pull-policy": (deployment, r"imagePullPolicy:\s*{{\s*\.Values\.image\.pullPolicy\s*}}"),
+        "service-type": (service, r"type:\s*{{\s*\.Values\.service\.type\s*}}"),
+        "service-port": (service, r"port:\s*{{\s*\.Values\.service\.port\s*}}"),
+        "resources": (deployment, r"(?m)^          resources:\s*$\n^            {{- toYaml \.Values\.resources \| nindent 12 }}$"),
+        "pod-security": (deployment, r"(?m)^      securityContext:\s*$\n^        {{- toYaml \.Values\.podSecurityContext \| nindent 8 }}$"),
+        "container-security": (deployment, r"(?m)^          securityContext:\s*$\n^            {{- toYaml \.Values\.securityContext \| nindent 12 }}$"),
+        "readiness-probe": (deployment, r"(?m)^            {{- toYaml \.Values\.probes\.readiness \| nindent 12 }}$"),
+        "liveness-probe": (deployment, r"(?m)^            {{- toYaml \.Values\.probes\.liveness \| nindent 12 }}$"),
+        "tmpfs": (deployment, r"sizeLimit:\s*{{\s*\.Values\.tmpfs\.sizeLimit\s*\|\s*quote\s*}}"),
+        "persistence-size": (pvc, r"storage:\s*{{\s*\.Values\.persistence\.size\s*\|\s*quote\s*}}"),
+        "persistence-storage-class": (pvc, r"with\s+\.Values\.persistence\.storageClass\b"),
+    }
+    if projection == "image-helper":
+        return len(re.findall(r"\.Values\.image\.(?:repository|tag|digest)\b", helpers)) == 5 \
+            and len(re.findall(r'include\s+"ravenroot\.image"', deployment)) == 1
+    if projection == "auth-required":
+        leaf = value_path.rsplit(".", 1)[1]
+        environment = {"issuer": "ISSUER", "audience": "AUDIENCE", "jwksUri": "JWKS_URI"}[leaf]
+        pattern = rf'- name:\s*RAVENROOT_AUTH_{environment}\s+value:\s*{{{{\s*required\s+"auth\.{leaf} is required"\s+\.Values\.auth\.{leaf}\s*\|\s*quote\s*}}}}'
+        return len(re.findall(pattern, deployment)) == 1
+    if projection == "program-timeout":
+        return deployment.count(
+            '- name: RAVENROOT_PROGRAM_TIMEOUT_MS\n'
+            '              value: {{ include "ravenroot.graphLimitValue" .Values.programTimeoutMs }}') == 1
+    source_pattern = direct.get(projection)
+    return source_pattern is not None and len(re.findall(source_pattern[1], source_pattern[0])) == 1
+
+
+def helm_test_evidence_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    sources: dict[str, str] = {}
+    for path in HELM_TEST_ROLES:
+        test = root / path
+        if not test.is_file():
+            errors.append(f"Helm authority test evidence is missing: {path}")
+        else:
+            sources[path] = "\n".join(line for line in test.read_text(encoding="utf-8").splitlines()
+                                      if not line.lstrip().startswith("#"))
+    values = sources.get("scripts/tests/test_helm_values_contract.sh", "")
+    timeout = sources.get("scripts/tests/test_program_timeout_helm_contract.sh", "")
+    unsupported = sources.get("scripts/tests/test_execution_manifest_pin_helm_contract.sh", "")
+    requirements = (
+        (values, r'^helm_base >"\$TEMP_DIR/default\.yaml"$', "default render"),
+        (values, r'^helm_base \\$', "nondefault render"),
+        (values, r'^for invalid in \\$', "invalid-value refusal"),
+        (values, r'set\(schema\.get\("required", \[\]\)\) != expected_top', "required closure"),
+        (timeout, r'^for value in 100 15000 300000; do$', "timeout boundaries"),
+        (timeout, r'^for invalid in 99 300001; do$', "timeout range refusal"),
+        (timeout, r'^for label_and_value in ', "timeout blank delegation"),
+        (unsupported, r'RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS', "unsupported setting refusal"),
+    )
+    for source, pattern, label in requirements:
+        if re.search(pattern, source, re.MULTILINE) is None:
+            errors.append(f"Helm authority test evidence lacks executable {label}")
+    for value_path, _setting, _default, _schema_rule, _projection in HELM_OPERATOR_VALUE_CONTRACTS:
+        source = timeout if value_path == "programTimeoutMs" else values
+        if value_path not in source:
+            errors.append(f"Helm authority test evidence does not exercise {value_path}")
+    for assertion in (
+            "default image values did not render", "required OIDC values did not render",
+            "default Service values did not render", "default pod security values did not render",
+            "default resource requirements did not render", "default probe timing values did not render",
+            "default tmpfs size limit did not render",
+            "default persistent-volume contract did not render", "nondefault image values did not render",
+            "nondefault Service values did not render", "nondefault resource requirements did not render",
+            "nondefault pod security values did not render", "nondefault container identity values did not render",
+            "nondefault probe timing values did not render", "nondefault tmpfs size limit did not render",
+            "nondefault persistent-volume values did not render"):
+        if assertion not in values:
+            errors.append(f"Helm authority test evidence lacks executable assertion: {assertion}")
+    return errors
+
+
+def helm_timeout_runtime_evidence(root: Path) -> dict[str, object] | None:
+    path = ("ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/"
+            "programming/graalvm/GraalVmProgramRuntime.java")
+    try:
+        source = (root / path).read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        return None
+    methods = ("policyFor", "compatibilityFingerprint", "invokeSupervisor")
+    spans = {method: java_method_span(source, "GraalVmProgramRuntime", method) for method in methods}
+    masked = strip_c_comments_and_literals(source)
+    signature = re.search(
+        r'\bstatic\s+GraalVmProgramRuntime\s+fromEnvironment\s*\(\s*java\.util\.Map<String,\s*String>\s+environment\s*\)\s*\{',
+        masked)
+    spans["fromEnvironmentMap"] = None
+    if signature is not None:
+        opening = masked.find("{", signature.start())
+        closing = matching_delimiter(masked, opening, "{", "}")
+        spans["fromEnvironmentMap"] = None if closing is None else (signature.start(), closing + 1)
+    if any(span is None for span in spans.values()):
+        return None
+    bodies = {method: strip_c_comments(source[slice(*spans[method])]) for method in methods}
+    bodies["fromEnvironment"] = strip_c_comments(source[slice(*spans["fromEnvironmentMap"])])
+    checks = (
+        re.search(r'Duration\s+timeout\s*=\s*Duration\.ofMillis\s*\(\s*integerEnvironment\s*\(\s*environment\s*,\s*"RAVENROOT_PROGRAM_TIMEOUT_MS"\s*,\s*5_000\s*,\s*100\s*,\s*300_000\s*\)\s*\)', bodies["fromEnvironment"]),
+        re.search(r'new\s+SandboxPolicy\s*\(\s*timeout\s*,\s*Math\.toIntExact\s*\(\s*timeout\.toMillis\s*\(\s*\)\s*\)', bodies["policyFor"]),
+        re.search(r'policy\.deadline\s*\(\s*\)\.toMillis\s*\(\s*\)', bodies["compatibilityFingerprint"]),
+        re.search(r'deadline\s*=\s*start\s*\+\s*policy\.deadline\s*\(\s*\)\.toNanos\s*\(\s*\)', bodies["invokeSupervisor"]),
+    )
+    if not all(checks):
+        return None
+    return {"path": path, "type": "GraalVmProgramRuntime",
+            "methods": {method: hashlib.sha256(normalized(bodies[
+                "fromEnvironment" if method == "fromEnvironmentMap" else method]).encode("utf-8")).hexdigest()
+                        for method in (*methods, "fromEnvironmentMap")}}
+
+
+def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) -> dict[str, object] | None:
+    try:
+        values_source = (root / HELM_VALUES_PATH).read_text(encoding="utf-8")
+        schema_source = (root / HELM_SCHEMA_PATH).read_text(encoding="utf-8")
+        schema = json.loads(schema_source)
+    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    operator_paths = {contract[0] for contract in HELM_OPERATOR_VALUE_CONTRACTS}
+    fixed_paths = set(HELM_FIXED_VALUE_CONTRACTS) | set(HELM_FIXED_LIST_CONTRACTS)
+    actual_paths = helm_values_leaf_paths(values_source)
+    external_paths = {path for path in actual_paths
+                      if any(path.startswith(prefix) for prefix in HELM_JAVA_CARRIER_PREFIXES)}
+    if actual_paths != operator_paths | fixed_paths | external_paths:
+        return None
+    schema_spans = json_value_spans(schema_source)
+    if schema_spans is None:
+        return None
+    contracts: list[dict[str, object]] = []
+    scalar_rows = {(line, path): value for line, path, value in yaml_scalar_rows(values_source)}
+    values_candidates = [candidate for candidate in candidates if candidate.path == HELM_VALUES_PATH]
+    schema_candidates = [candidate for candidate in candidates if candidate.path == HELM_SCHEMA_PATH]
+    template_candidates = [candidate for candidate in candidates
+                           if candidate.path in HELM_TEMPLATE_PATHS]
+    schema_lines = [0]
+    for match in re.finditer("\n", schema_source):
+        schema_lines.append(match.end())
+    for value_path, setting, default, schema_rule, projection in HELM_OPERATOR_VALUE_CONTRACTS:
+        if yaml_scalar_at_path(values_source, value_path) != default \
+                or not helm_schema_rule_matches(schema, value_path, schema_rule) \
+                or not helm_projection_matches(root, value_path, projection):
+            return None
+        lines = {line for (line, path), _value in scalar_rows.items() if path == value_path}
+        pointer_path = tuple(component for pair in
+                             (("properties", part) for part in value_path.split("."))
+                             for component in pair)
+        candidate_ids = {candidate.id for candidate in values_candidates if candidate.line in lines}
+        schema_span = schema_spans.get(pointer_path)
+        if schema_span is not None:
+            first_line = bisect_right(schema_lines, schema_span[0])
+            last_line = bisect_right(schema_lines, max(schema_span[0], schema_span[1] - 1))
+            candidate_ids.update(candidate.id for candidate in schema_candidates
+                                 if first_line <= candidate.line <= last_line)
+        template_value = f".Values.{value_path}"
+        # Direct leaf projections are unambiguous. Parent toYaml projections remain structural
+        # Helm candidates and are covered by the authority-wide exact set instead of being assigned
+        # to multiple logical settings.
+        for path in HELM_TEMPLATE_PATHS:
+            local_lines = {index for index, line in enumerate(
+                (root / path).read_text(encoding="utf-8").splitlines(), 1)
+                           if template_value in line}
+            if local_lines:
+                candidate_ids.update(candidate.id for candidate in template_candidates
+                                     if candidate.path == path and candidate.line in local_lines)
+        schema_contract = helm_schema_contract(schema, value_path)
+        environment_name = schema_contract.get("x-ravenroot-environment") \
+            if isinstance(schema_contract, dict) else None
+        environment_name = {
+            "auth.issuer": "RAVENROOT_AUTH_ISSUER",
+            "auth.audience": "RAVENROOT_AUTH_AUDIENCE",
+            "auth.jwksUri": "RAVENROOT_AUTH_JWKS_URI",
+        }.get(value_path, environment_name)
+        if isinstance(environment_name, str):
+            candidate_ids.update(candidate.id for candidate in template_candidates
+                                 if candidate.kind == "environment-binding"
+                                 and candidate.expression == environment_name)
+        contracts.append({
+            "setting": setting,
+            "owner": f"{HELM_VALUES_PATH}#{value_path.split('.', 1)[0]}",
+            "field": value_path,
+            "valuePath": value_path,
+            "default": default,
+            "defaultDisplay": (
+                "no valid default; an explicit nonblank public OIDC value is required"
+                if schema_rule == "required-auth" else
+                "15000 ms Helm deployment profile; blank delegates to the Java-owned 5000 ms default"
+                if value_path == "programTimeoutMs" else default),
+            "validation": schema_rule,
+            "scope": "one rendered Helm release",
+            "pinning": "resolved by Helm schema validation and rendered into the pod specification",
+            "coverage": "closed values/schema/template and executable default, nondefault, and refusal contracts",
+            "schemaPointer": helm_schema_pointer(value_path),
+            "schemaRule": schema_rule,
+            "schemaContract": schema_contract,
+            "projection": projection,
+            "bindings": [] if environment_name is None else [environment_name],
+            "candidateIds": sorted(candidate_ids),
+        })
+    for path, expected in HELM_FIXED_VALUE_CONTRACTS.items():
+        if yaml_scalar_at_path(values_source, path) != expected:
+            return None
+    fixed_schema = {
+        "replicaCount": {"type": "integer", "minimum": 1, "maximum": 1},
+        "engine": {"type": "string", "enum": ["pekko"]},
+        "podSecurityContext.seccompProfile.type": {"type": "string", "enum": ["RuntimeDefault"]},
+    }
+    if any(helm_schema_contract(schema, path) != contract
+           for path, contract in fixed_schema.items()):
+        return None
+    if json_pointer(schema, "#/properties/securityContext/properties/capabilities/properties/drop") \
+            != {"type": "array", "minItems": 1, "uniqueItems": True,
+                "items": {"type": "string", "enum": ["ALL"]}} \
+            or json_pointer(schema, "#/properties/persistence/properties/accessModes") \
+            != {"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": True,
+                "items": {"type": "string", "enum": ["ReadWriteOnce"]}}:
+        return None
+    for path, expected in HELM_FIXED_LIST_CONTRACTS.items():
+        parent, index = path.rsplit(".", 1)
+        if index != "0" or re.search(
+                rf'(?m)^\s*{re.escape(parent.rsplit(".", 1)[-1])}:\s*$[\s\S]*?^\s*-\s*{re.escape(expected)}\s*$',
+                values_source) is None:
+            return None
+    runtime = helm_timeout_runtime_evidence(root)
+    if runtime is None or helm_test_evidence_errors(root):
+        return None
+    covered_paths = {HELM_VALUES_PATH, HELM_SCHEMA_PATH, *HELM_TEMPLATE_PATHS, *HELM_TEST_ROLES}
+    return {
+        "kind": "helm-values-authority-v1",
+        "valuesPath": HELM_VALUES_PATH,
+        "schemaPath": HELM_SCHEMA_PATH,
+        "templatePaths": list(HELM_TEMPLATE_PATHS),
+        "contracts": contracts,
+        "fixedValuePaths": sorted(fixed_paths),
+        "javaCarrierPaths": sorted(external_paths),
+        "testEvidence": [{"path": path, "roles": list(roles),
+                          "digest": hashlib.sha256((root / path).read_bytes()).hexdigest()}
+                         for path, roles in HELM_TEST_ROLES.items()],
+        "timeoutRuntime": runtime,
+        "candidateIds": sorted(candidate.id for candidate in candidates
+                               if candidate.path in covered_paths),
+    }
+
+
+def helm_authority_errors(root: Path, authorities: object,
+                          entries: dict[str, dict[str, object]],
+                          candidates: tuple[Candidate, ...]) -> list[str]:
+    expected = helm_authority_from_source(root, candidates)
+    helm_entries = [entry for entry in entries.values() if entry.get("helmAuthority") is not None]
+    if not helm_entries:
+        return ([] if authorities in (None, {})
+                else ["Helm authority exists without Helm-owned inventory rows"])
+    errors: list[str] = []
+    if expected is None:
+        return ["Helm values, schema, templates, runtime, or executable tests violate the closed authority"]
+    if not isinstance(authorities, dict) or set(authorities) != {HELM_AUTHORITY_ID} \
+            or authorities.get(HELM_AUTHORITY_ID) != expected:
+        errors.append("Helm settings require the exact source-derived closed values authority")
+    by_setting = {str(contract["setting"]): contract for contract in expected["contracts"]}
+    expected_candidate_settings: dict[str, str] = {}
+    for setting, contract in by_setting.items():
+        candidate_ids = contract.get("candidateIds")
+        if not isinstance(candidate_ids, list):
+            errors.append(f"{setting}: Helm authority candidate evidence is malformed")
+            continue
+        for identifier in candidate_ids:
+            previous = expected_candidate_settings.setdefault(str(identifier), setting)
+            if previous != setting:
+                errors.append(
+                    f"Helm candidate {identifier} is assigned to both {previous} and {setting}")
+    assigned: dict[str, set[str]] = defaultdict(set)
+    for entry in entries.values():
+        marker = entry.get("helmAuthority")
+        if marker is None:
+            continue
+        setting = str(entry.get("setting", ""))
+        contract = by_setting.get(setting)
+        assigned[setting].add(str(entry.get("id")))
+        if marker != HELM_AUTHORITY_ID or contract is None:
+            errors.append(f"{entry.get('id')}: unsupported Helm authority or setting")
+            continue
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"]:
+            errors.append(f"{entry.get('id')}: Helm owner or value path has drifted")
+        for field in ("bindings", "defaultDisplay", "validation", "scope", "pinning", "coverage"):
+            entry_field = "default" if field == "defaultDisplay" else field
+            if entry.get(entry_field) != contract[field]:
+                errors.append(f"{entry.get('id')}: Helm {entry_field} metadata has drifted")
+        if not str(entry.get("owner", "")).startswith(HELM_VALUES_PATH + "#"):
+            errors.append(f"{entry.get('id')}: Helm proof cannot authorize a non-values owner")
+    for setting, contract in by_setting.items():
+        expected_ids = {str(identifier) for identifier in contract.get("candidateIds", [])}
+        if assigned[setting] != expected_ids:
+            errors.append(
+                f"{setting}: Helm candidate coverage is incomplete, duplicate, or foreign")
+    errors.extend(helm_test_evidence_errors(root))
+    return errors
 
 
 def yaml_default_removal_errors(root: Path, identifier: str, entry: dict[str, object],
@@ -1952,6 +2429,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[4] == "expectedCandidateIds" \
             and path[5] in {"compose", "deploymentExamples", "helm", "rawKubernetes"}:
         return path[6].isdigit()
+    if len(path) == 4 and path[0] == "helmAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "helmAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -2060,6 +2544,17 @@ def remap_declared_candidate_references(document: dict[str, object],
                         if isinstance(carrier, dict) else None
                     for field in ("compose", "deploymentExamples", "helm", "rawKubernetes"):
                         remap_list(expected, field)
+
+    helm_authorities = document.get("helmAuthorities")
+    if isinstance(helm_authorities, dict):
+        for authority in helm_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -2266,6 +2761,12 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["routeTableAuthorities"] = {
         ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
     }
+    if any(isinstance(entry, dict) and entry.get("helmAuthority") == HELM_AUTHORITY_ID
+           for entry in merged):
+        helm_authority = helm_authority_from_source(root, candidates)
+        if helm_authority is None:
+            return None, ["cannot derive the closed Helm values authority from current source"]
+        refreshed["helmAuthorities"] = {HELM_AUTHORITY_ID: helm_authority}
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history
@@ -5944,7 +6445,12 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
                         errors.append(f"{identifier}: reviewed operator setting requires {field}")
                 owner = str(entry.get("owner", ""))
-                if current_source_owner(root, owner) is None:
+                helm_authority = entry.get("helmAuthority")
+                if helm_authority is not None:
+                    if helm_authority != HELM_AUTHORITY_ID \
+                            or not owner.startswith(HELM_VALUES_PATH + "#"):
+                        errors.append(f"{identifier}: unsupported Helm authority owner: {owner}")
+                elif current_source_owner(root, owner) is None:
                     errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
                 elif not current_source_field(root, owner, str(entry.get("field", ""))):
                     errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
@@ -6086,6 +6592,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             json.dumps(entry.get("schemaEvidence"), sort_keys=True),
             json.dumps(entry.get("coverageEvidence"), sort_keys=True),
             json.dumps(entry.get("carrierEvidence"), sort_keys=True),
+            entry.get("helmAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -6139,6 +6646,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(graph_limit_authority_errors(
         root, document.get("graphLimitAuthorities"), entries, discovered,
     ))
+    errors.extend(helm_authority_errors(
+        root, document.get("helmAuthorities"), entries, candidates,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -6148,6 +6658,15 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         representative = entries[authorities[setting][0]]
         representatives[setting] = representative
         if representative.get("authorityStatus") == "unresolved":
+            continue
+        if representative.get("helmAuthority") == HELM_AUTHORITY_ID:
+            for entry in setting_entries:
+                evidence_ids = entry.get("defaultEvidence", [])
+                if isinstance(evidence_ids, list):
+                    for evidence_id in evidence_ids:
+                        if evidence_id not in setting_ids:
+                            errors.append(
+                                f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -6211,6 +6730,16 @@ def render_report(document: dict[str, object]) -> str:
     duplicates = len(duplicate_settings)
     deferred = statuses["deferred"]
     hardcoded = statuses["confirmed-hardcoded"]
+    helm_authorities = document.get("helmAuthorities")
+    helm_authority = helm_authorities.get(HELM_AUTHORITY_ID) \
+        if isinstance(helm_authorities, dict) else None
+    helm_contracts = helm_authority.get("contracts", []) \
+        if isinstance(helm_authority, dict) else []
+    helm_source_fields = len(helm_contracts) if isinstance(helm_contracts, list) else 0
+    helm_inventory_fields = sum(
+        1 for contract in helm_contracts
+        if isinstance(contract, dict) and isinstance(contract.get("candidateIds"), list)
+        and bool(contract["candidateIds"]))
     complete = statuses["pending-review"] == 0 and deferred == 0 and hardcoded == 0
     lines = [
         "# Operational configuration audit", "",
@@ -6243,6 +6772,9 @@ def render_report(document: dict[str, object]) -> str:
         "## Reproducible counts", "",
         "| Measure | Count |", "|---|---:|",
         f"| Atomic operational candidates discovered | {len(typed)} |",
+        f"| Source-proven Helm operator fields | {helm_source_fields} |",
+        f"| Helm operator fields represented by lexical inventory rows | {helm_inventory_fields} |",
+        f"| Source-proven Helm fields outside lexical candidate patterns | {helm_source_fields - helm_inventory_fields} |",
         f"| Reviewed | {reviewed} |",
         f"| Pending review | {statuses['pending-review']} |",
         f"| Confirmed hard-coded candidates awaiting remediation | {hardcoded} |",

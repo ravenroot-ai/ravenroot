@@ -17,14 +17,21 @@ helm_base() {
 
 helm_base >"$TEMP_DIR/default.yaml"
 helm_base \
+  --set-string image.repository=registry.example.test/ravenroot \
+  --set-string image.tag=release-test \
+  --set-string image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --set image.pullPolicy=Always \
   --set service.type=NodePort \
   --set service.port=9090 \
   --set resources.requests.cpu=200m \
   --set resources.requests.memory=384Mi \
   --set-string resources.limits.cpu=2 \
   --set resources.limits.memory=2Gi \
+  --set podSecurityContext.runAsNonRoot=false \
   --set podSecurityContext.fsGroup=10002 \
   --set podSecurityContext.fsGroupChangePolicy=Always \
+  --set securityContext.allowPrivilegeEscalation=true \
+  --set securityContext.readOnlyRootFilesystem=false \
   --set securityContext.runAsUser=10002 \
   --set securityContext.runAsGroup=10002 \
   --set probes.readiness.initialDelaySeconds=4 \
@@ -106,26 +113,52 @@ for document_path, expected in [(Path(sys.argv[2]), values), (Path(sys.argv[3]),
     if volumes["ravenroot-data"].get("persistentVolumeClaim", {}).get("claimName") != pvc["metadata"]["name"]:
         raise SystemExit("the data mount must use the chart PVC")
     if expected is not None:
+        if container["image"] != "ravenroot:local" or container["imagePullPolicy"] != "IfNotPresent":
+            raise SystemExit("default image values did not render")
+        if {name: env[name] for name in ("RAVENROOT_AUTH_ISSUER", "RAVENROOT_AUTH_AUDIENCE", "RAVENROOT_AUTH_JWKS_URI")} != {
+                "RAVENROOT_AUTH_ISSUER": "https://idp.example.test/",
+                "RAVENROOT_AUTH_AUDIENCE": "ravenroot-helm-values-contract",
+                "RAVENROOT_AUTH_JWKS_URI": "https://idp.example.test/jwks"}:
+            raise SystemExit("required OIDC values did not render")
         if service_doc["spec"]["type"] != expected["service"]["type"] or service_doc["spec"]["ports"][0]["port"] != expected["service"]["port"]:
             raise SystemExit("default Service values did not render")
         if pod["securityContext"] != expected["podSecurityContext"] or container["securityContext"] != expected["securityContext"]:
             raise SystemExit("default pod security values did not render")
         if container["resources"] != expected["resources"]:
             raise SystemExit("default resource requirements did not render")
+        if (container["readinessProbe"]["initialDelaySeconds"], container["readinessProbe"]["periodSeconds"],
+                container["livenessProbe"]["initialDelaySeconds"], container["livenessProbe"]["periodSeconds"]) \
+                != (expected["probes"]["readiness"]["initialDelaySeconds"],
+                    expected["probes"]["readiness"]["periodSeconds"],
+                    expected["probes"]["liveness"]["initialDelaySeconds"],
+                    expected["probes"]["liveness"]["periodSeconds"]):
+            raise SystemExit("default probe timing values did not render")
         if volumes["temporary-files"]["emptyDir"] != {"medium": "Memory", "sizeLimit": expected["tmpfs"]["sizeLimit"]}:
             raise SystemExit("default tmpfs size limit did not render")
         if pvc["spec"]["accessModes"] != expected["persistence"]["accessModes"] or pvc["spec"]["resources"]["requests"]["storage"] != expected["persistence"]["size"]:
             raise SystemExit("default persistent-volume contract did not render")
+        if "storageClassName" in pvc["spec"]:
+            raise SystemExit("empty default storage class must delegate to the cluster")
     else:
+        if container["image"] != "registry.example.test/ravenroot@sha256:" + "a" * 64 \
+                or container["imagePullPolicy"] != "Always":
+            raise SystemExit("nondefault image values did not render")
         if service_doc["spec"]["type"] != "NodePort" or service_doc["spec"]["ports"][0]["port"] != 9090:
             raise SystemExit("nondefault Service values did not render")
         if container["resources"] != {"requests": {"cpu": "200m", "memory": "384Mi"}, "limits": {"cpu": "2", "memory": "2Gi"}}:
             raise SystemExit("nondefault resource requirements did not render")
-        if pod["securityContext"]["fsGroup"] != 10002 or pod["securityContext"]["fsGroupChangePolicy"] != "Always":
+        if pod["securityContext"]["runAsNonRoot"] is not False \
+                or pod["securityContext"]["fsGroup"] != 10002 \
+                or pod["securityContext"]["fsGroupChangePolicy"] != "Always":
             raise SystemExit("nondefault pod security values did not render")
-        if container["securityContext"]["runAsUser"] != 10002 or container["securityContext"]["runAsGroup"] != 10002:
+        if container["securityContext"]["allowPrivilegeEscalation"] is not True \
+                or container["securityContext"]["readOnlyRootFilesystem"] is not False \
+                or container["securityContext"]["runAsUser"] != 10002 \
+                or container["securityContext"]["runAsGroup"] != 10002:
             raise SystemExit("nondefault container identity values did not render")
-        if container["readinessProbe"]["initialDelaySeconds"] != 4 or container["livenessProbe"]["periodSeconds"] != 11:
+        if (container["readinessProbe"]["initialDelaySeconds"], container["readinessProbe"]["periodSeconds"],
+                container["livenessProbe"]["initialDelaySeconds"], container["livenessProbe"]["periodSeconds"]) \
+                != (4, 6, 16, 11):
             raise SystemExit("nondefault probe timing values did not render")
         if volumes["temporary-files"]["emptyDir"]["sizeLimit"] != "128Mi":
             raise SystemExit("nondefault tmpfs size limit did not render")
@@ -134,6 +167,11 @@ for document_path, expected in [(Path(sys.argv[2]), values), (Path(sys.argv[3]),
 
 dockerfile = (root / "Dockerfile").read_text()
 raw = (root / "deploy/kubernetes/ravenroot.yaml").read_text()
+documentation = (root / "docs/reference/configuration.md").read_text()
+for required in ("Helm values compatibility", "post-renderer", "maintained chart overlay",
+                 "--set-string resources.limits.cpu=2"):
+    if required not in documentation:
+        raise SystemExit("closed Helm values migration guidance is incomplete")
 for source, required in [
         (dockerfile, "ENV RAVENROOT_PORT=8080"),
         (dockerfile, "RAVENROOT_BIND_ADDRESS=0.0.0.0"),
@@ -145,6 +183,9 @@ for source, required in [
 PY
 
 for invalid in \
+  image.repository= \
+  image.digest=sha256:bad \
+  image.pullPolicy=Sometimes \
   service.type=ExternalName \
   service.port=0 \
   service.port=65536 \
@@ -156,10 +197,19 @@ for invalid in \
   persistence.size=-1Gi \
   persistence.size=0 \
   persistence.accessModes[0]=ReadOnlyMany \
+  podSecurityContext.runAsNonRoot=not-a-boolean \
+  podSecurityContext.fsGroup=0 \
+  podSecurityContext.fsGroupChangePolicy=Never \
   podSecurityContext.seccompProfile.type=Unconfined \
+  securityContext.allowPrivilegeEscalation=not-a-boolean \
+  securityContext.readOnlyRootFilesystem=not-a-boolean \
   securityContext.capabilities.drop[0]=NET_ADMIN \
   securityContext.runAsUser=0 \
+  securityContext.runAsGroup=0 \
+  probes.readiness.initialDelaySeconds=-1 \
   probes.readiness.periodSeconds=0 \
+  probes.liveness.initialDelaySeconds=-1 \
+  probes.liveness.periodSeconds=0 \
   unrecognizedValue=true; do
   if helm_base --set "$invalid" >"$TEMP_DIR/invalid.out" 2>&1; then
     echo "Helm accepted an invalid values contract input: $invalid" >&2

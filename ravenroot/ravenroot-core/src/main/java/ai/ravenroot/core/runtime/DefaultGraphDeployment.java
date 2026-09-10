@@ -34,6 +34,8 @@ import java.io.ByteArrayInputStream;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -290,12 +292,28 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
      */
     private final ConcurrentHashMap<UUID, Long> admitted = new ConcurrentHashMap<>();
     /**
+     * The units in {@link #admitted} that {@link IngressView#offer} has assigned a generation but not
+     * yet handed to the runner, because it is opening their recorder outside {@link #lock}.
+     *
+     * <p>A barrier cannot end such a unit -- there is no traversal yet -- so it closes it instead, by
+     * taking it out of this set and out of {@link #admitted}. The offer then finds it gone when it
+     * returns to dispatch and refuses it. Deciding the refusal here rather than from whether a barrier
+     * still governs when the offer returns is what keeps it the barrier's decision: a pause and resume
+     * in between adopt a new generation and stand the barrier down, and must not reopen a generation it
+     * ended. Written and read under {@link #lock}.</p>
+     */
+    private final Set<UUID> awaitingDispatch = new HashSet<>();
+    /**
      * How many admitted units the most recent {@link #barrier(long)} actually ended.
      *
-     * <p>Counted from cancellations the runner accepted, never from the size of the barrier's own
-     * snapshot: a unit that finished between the snapshot and the cancellation completed under its own
-     * generation and was not ended by anything, and counting it here would claim one arrival landed on
-     * both sides of the barrier.</p>
+     * <p>Counted from cancellations the runner accepted over units the runner had actually been handed,
+     * never from the size of the barrier's own snapshot. {@link GraphRunner#cancelTraversal} answers
+     * {@code true} for any identifier it has not refused before, whether or not a traversal with that
+     * identifier ever ran, so only the snapshot can say there was work to end: a unit still
+     * {@link #awaitingDispatch} is refused by its offer and counted there, never here, or one arrival
+     * would be reported on both sides of the barrier. A dispatched unit that completes between the
+     * snapshot and its cancellation is still counted; cooperative cancellation cannot tell that
+     * afterwards, which is why the barrier tests park their work until the count has been read.</p>
      */
     private long endedByLastBarrier;
     private Semaphore ingressPermits;
@@ -1000,10 +1018,21 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 return CompletableFuture.completedFuture(null);
             }
             activeRunner = runner;
-            ending = admitted.entrySet().stream()
-                    .filter(entry -> entry.getValue() != deploymentGeneration)
-                    .map(Map.Entry::getKey)
-                    .toList();
+            ending = new ArrayList<>();
+            for (Map.Entry<UUID, Long> entry : admitted.entrySet()) {
+                if (entry.getValue() == deploymentGeneration) {
+                    continue;
+                }
+                UUID traversalId = entry.getKey();
+                if (awaitingDispatch.remove(traversalId)) {
+                    // Assigned the closing generation but never handed to the runner: there is no
+                    // traversal to end. Closing it here is what makes its offer refuse it, and
+                    // cancelling it as well would count that refusal a second time as ended work.
+                    admitted.remove(traversalId);
+                } else {
+                    ending.add(traversalId);
+                }
+            }
             ingressGeneration = deploymentGeneration;
             barrierStanding = true;
             barrierGeneration = deploymentGeneration;
@@ -1016,10 +1045,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             long ended = 0;
             if (cancelling != null) {
                 for (UUID traversalId : ending) {
-                    // Counted only when the runner accepted the cancellation. A traversal that
-                    // finished between the snapshot and this call completed under its own generation
-                    // and was ended by nothing; counting it would claim one arrival landed on both
-                    // sides of this barrier.
+                    // Every unit here was handed to the runner; the runner's answer only filters one
+                    // an earlier call already asked to stop. It is not evidence that the traversal is
+                    // still running -- cancelTraversal publishes its refusal unconditionally -- which
+                    // is why units awaiting dispatch were closed above instead of reaching this loop.
                     if (cancelling.cancelTraversal(traversalId)) {
                         ended++;
                     }
@@ -1222,9 +1251,21 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
-    /** Undoes one admission: the generation assignment and the permit, in that order. */
+    /**
+     * Undoes one admission: the generation assignment and the permit, in that order.
+     *
+     * <p>Taken under {@link #lock} so a barrier's snapshot sees the unit either still awaiting dispatch
+     * or gone, never admitted with its dispatch state already cleared -- which the barrier would read
+     * as a dispatched traversal and count as ended.</p>
+     */
     private void releaseAdmission(UUID traversalId, Semaphore permits) {
-        admitted.remove(traversalId);
+        lock.lock();
+        try {
+            awaitingDispatch.remove(traversalId);
+            admitted.remove(traversalId);
+        } finally {
+            lock.unlock();
+        }
         permits.release();
     }
 
@@ -2057,6 +2098,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 // neither ended nor admitted is exactly the one ADR 0038 D6 forbids.
                 generation = ingressGeneration;
                 admitted.put(traversalId, generation);
+                awaitingDispatch.add(traversalId);
             } finally {
                 lock.unlock();
             }
@@ -2079,11 +2121,13 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 // what one accepted ingress event's traversal already is. Both are fixed for this one
                 // execute() call, so every event it produces carries the same pair.
                 //
-                // Dispatched under the lock, and only while this arrival's own generation is still the
-                // one a barrier would open: the durable commit above runs outside the lock because it
-                // is I/O, and a barrier that ran during it has already closed this generation. Handing
+                // Dispatched under the lock, and only if no barrier closed this arrival while it was
+                // awaiting dispatch: the durable commit above runs outside the lock because it is I/O,
+                // and a barrier that ran during it took this arrival out of awaitingDispatch. Handing
                 // the runner a traversal afterwards would start work on the closing side of a barrier
-                // that had finished ending everything it could see.
+                // that had finished ending everything it could see -- even if a later pause and resume
+                // have since stood that barrier down, which is why this reads the barrier's own mark
+                // rather than whether a barrier still governs.
                 //
                 // The cost was weighed rather than overlooked: this widens the critical section to
                 // cover the dispatch. Everything inside it is a map write and one message to an
@@ -2094,7 +2138,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 // short lock for a convergence loop with no natural end.
                 lock.lock();
                 try {
-                    if (barrierStanding && generation != barrierGeneration) {
+                    if (!awaitingDispatch.remove(traversalId)) {
                         closeQuietly(recorder);
                         releaseAdmission(traversalId, permits);
                         return IngressDisposition.REJECTED_ADMISSION_CLOSED;

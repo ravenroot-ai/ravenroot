@@ -40,12 +40,13 @@ class ParseLabelsTest(unittest.TestCase):
 
 
 class ClassifyTest(unittest.TestCase):
-    def test_pull_request_to_dev_is_fast(self):
+    def test_pull_request_to_dev_is_full(self):
+        """`dev` is the verification point, so its pull requests carry the whole functional suite."""
         self.assertEqual(
             classify(event_name="pull_request", base_ref="dev", ref_name="feature/x", labels=set(), paths=[])[
                 "tier"
             ],
-            "fast",
+            "full",
         )
 
     def test_main_requires_exactly_one_release_label(self):
@@ -59,7 +60,7 @@ class ClassifyTest(unittest.TestCase):
                     paths=["README.md"],
                 )
 
-    def test_main_content_promotion_uses_docs_tier(self):
+    def test_main_content_promotion_keeps_its_intent_without_a_functional_tier(self):
         self.assertEqual(
             classify(
                 event_name="pull_request",
@@ -68,7 +69,7 @@ class ClassifyTest(unittest.TestCase):
                 labels={"release:none"},
                 paths=["README.md", "docs/index.md"],
             ),
-            {"tier": "docs", "release_intent": "none", "docs_only": "true"},
+            {"tier": "promotion", "release_intent": "none", "docs_only": "true"},
         )
 
     def test_release_none_rejects_product_or_workflow_changes(self):
@@ -92,16 +93,19 @@ class ClassifyTest(unittest.TestCase):
                 paths=["docs/index.md"],
             )
 
-    def test_release_change_uses_full_tier(self):
-        result = classify(
-            event_name="pull_request",
-            base_ref="main",
-            ref_name="dev",
-            labels={"release:minor"},
-            paths=["ravenroot/pom.xml", "docs/index.md"],
-        )
-        self.assertEqual(result["tier"], "full")
-        self.assertEqual(result["release_intent"], "minor")
+    def test_every_promotion_to_main_uses_the_promotion_tier(self):
+        """The promotion re-verifies nothing; the release intent still has to survive it."""
+        for label, intent in (("release:patch", "patch"), ("release:minor", "minor"), ("release:major", "major")):
+            with self.subTest(label=label):
+                result = classify(
+                    event_name="pull_request",
+                    base_ref="main",
+                    ref_name="dev",
+                    labels={label},
+                    paths=["ravenroot/pom.xml", "docs/index.md"],
+                )
+                self.assertEqual(result["tier"], "promotion")
+                self.assertEqual(result["release_intent"], intent)
 
     def test_push_to_main_infers_docs_tier_from_paths(self):
         result = classify(
@@ -113,6 +117,19 @@ class ClassifyTest(unittest.TestCase):
         )
         self.assertEqual(result["tier"], "docs")
         self.assertEqual(result["release_intent"], "none")
+
+    def test_a_routed_dependabot_run_is_classified_as_its_pull_request_into_dev(self):
+        """The routing workflow replays the event as `pull_request` into `dev`, so it earns the suite."""
+        self.assertEqual(
+            classify(
+                event_name="pull_request",
+                base_ref="dev",
+                ref_name="dependabot/npm_and_yarn/example",
+                labels=set(),
+                paths=["ravenroot/ravenroot-ui/package-lock.json"],
+            )["tier"],
+            "full",
+        )
 
     def test_push_to_dev_and_manual_dispatch_are_full(self):
         for event_name, ref_name in (("push", "dev"), ("workflow_dispatch", "main")):

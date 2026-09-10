@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Classify a CI event without trusting mutable pull-request prose."""
+"""Classify a CI event without trusting mutable pull-request prose.
+
+`dev` is the verification point and `main` is a promotion. Every functional check therefore belongs
+on a pull request into `dev`, where a failure names the single pull request that caused it, and the
+`dev` to `main` promotion carries only the security gate and the two checks that make the release
+classification real. The tier this module returns is what encodes that: `full` runs the functional
+suite, `promotion` deliberately runs none of it, and `docs` covers a content-only push to `main`.
+"""
 
 from __future__ import annotations
 
@@ -84,7 +91,7 @@ def classify(
     docs_only = documentation_only(paths)
 
     if event_name == "pull_request" and base_ref == "dev":
-        return {"tier": "fast", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":
         selected = sorted(RELEASE_LABELS.intersection(labels))
@@ -105,8 +112,11 @@ def classify(
                 "A documentation-only pull request to main must use release:none; "
                 "it must not advance the product version."
             )
+        # The promotion re-verifies nothing: the behaviour was already verified commit by commit on
+        # the pull requests into `dev`. What remains here is the security gate, `main-source-policy`
+        # and this job, so no tier-gated functional job may run for either release intent.
         return {
-            "tier": "docs" if intent == "none" else "full",
+            "tier": "promotion",
             "release_intent": intent,
             "docs_only": str(docs_only).lower(),
         }

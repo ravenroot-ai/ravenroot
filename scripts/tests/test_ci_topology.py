@@ -1,44 +1,17 @@
-"""Structural regression tests for the visible GitHub Actions CI topology."""
+"""Structural regression tests for the visible GitHub Actions CI topology.
+
+Which jobs each event requires, and whether `ci.yml` still gates them that way, is decided by
+`scripts/ci_required.py` and covered by `test_ci_required.py`. What remains here is the shape of the
+jobs themselves: that they stay independently actionable, that builds and tests are separate, and
+that every artifact a job consumes is one it explicitly waited for.
+"""
 
 from __future__ import annotations
 
 import re
 import unittest
-from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
-
-
-def job_blocks(contents: str) -> dict[str, str]:
-    """Return top-level job blocks without adding a YAML dependency to repository tooling."""
-    jobs_marker = contents.index("\njobs:\n") + len("\njobs:\n")
-    body = contents[jobs_marker:]
-    matches = list(re.finditer(r"(?m)^  ([a-z0-9-]+):\n", body))
-    return {
-        match.group(1): body[match.start() : matches[index + 1].start() if index + 1 < len(matches) else None]
-        for index, match in enumerate(matches)
-    }
-
-
-def declared_needs(block: str) -> set[str]:
-    """Read either the inline or block-list needs syntax used by this workflow."""
-    inline = re.search(r"(?m)^    needs: \[([^]]*)]$", block)
-    if inline:
-        return {item.strip() for item in inline.group(1).split(",") if item.strip()}
-
-    lines = block.splitlines()
-    for index, line in enumerate(lines):
-        if line == "    needs:":
-            needs: set[str] = set()
-            for candidate in lines[index + 1 :]:
-                match = re.fullmatch(r"      - ([a-z0-9-]+)", candidate)
-                if not match:
-                    break
-                needs.add(match.group(1))
-            return needs
-    return set()
+from scripts.ci_required import WORKFLOW, declared_needs, job_blocks
 
 
 class ContinuousIntegrationTopologyTest(unittest.TestCase):
@@ -56,6 +29,8 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "full-ui-audit",
             "full-ui-unit-tests",
             "full-ui-build",
+            "full-ui-e2e-harness",
+            "full-ui-e2e-shard",
             "full-ui-e2e",
             "backend-build",
             "full-backend-tests",
@@ -80,11 +55,12 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])
         self.assertNotIn("npm test", self.jobs["full-ui-build"])
-        self.assertNotIn("npm run build", self.jobs["full-ui-e2e"])
+        self.assertNotIn("npm run build", self.jobs["full-ui-e2e-shard"])
 
     def test_verified_artifact_dependencies_are_explicit(self) -> None:
         artifact_consumers = {
-            "full-ui-e2e": {"full-ui-build"},
+            "full-ui-e2e-harness": {"full-ui-build"},
+            "full-ui-e2e-shard": {"full-ui-build"},
             "backend-test": {"backend-build"},
             "full-plugin-boundary": {"backend-build"},
             "full-runtime-auth-smoke": {"backend-build"},
@@ -102,40 +78,47 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
                     {"release-classification", *producers},
                 )
         self.assertIn("name: ravenroot-ui", self.jobs["full-ui-build"])
-        self.assertIn("name: ravenroot-ui", self.jobs["full-ui-e2e"])
+        self.assertIn("name: ravenroot-ui", self.jobs["full-ui-e2e-shard"])
         self.assertIn("name: ravenroot-backend-build", self.jobs["backend-build"])
         self.assertIn("name: ravenroot-backend-build", self.jobs["backend-test"])
         self.assertIn("name: ravenroot-plugins", self.jobs["full-plugin-boundary"])
         self.assertIn("name: ravenroot-plugins", self.jobs["full-runtime-container-smoke"])
 
-    def test_required_gate_observes_every_visible_full_job(self) -> None:
-        required_needs = declared_needs(self.jobs["ci-required"])
-        visible_full_jobs = {
-            job for job, block in self.jobs.items() if re.search(r"(?m)^    name: full-", block)
-        }
-        self.assertEqual(visible_full_jobs, visible_full_jobs.intersection(required_needs))
-        for job in visible_full_jobs:
+    def test_the_end_to_end_aggregator_observes_the_shards_it_reports_for(self) -> None:
+        """`full-ui-e2e` is now a verdict on other jobs, so it must depend on all of them."""
+        self.assertEqual(
+            declared_needs(self.jobs["full-ui-e2e"]),
+            {"release-classification", "full-ui-e2e-harness", "full-ui-e2e-shard"},
+        )
+        for job in ("full-ui-e2e-harness", "full-ui-e2e-shard"):
             with self.subTest(job=job):
-                self.assertGreaterEqual(
-                    self.jobs["ci-required"].count(job),
-                    2,
-                    f"{job} must be both a dependency and an explicitly checked tier result",
-                )
+                self.assertIn(f"{job}:$", self.jobs["full-ui-e2e"])
 
-    def test_full_jobs_preserve_event_tier_routing(self) -> None:
-        policy_jobs = {
-            "full-docs-policy",
-            "full-python-contracts",
-            "full-shell-contracts",
-            "full-source-policy",
-        }
-        for job in policy_jobs:
-            with self.subTest(job=job):
-                self.assertIn("needs.release-classification.outputs.tier != 'fast'", self.jobs[job])
-        for job, block in self.jobs.items():
-            if re.search(r"(?m)^    name: full-", block) and job not in policy_jobs:
-                with self.subTest(job=job):
-                    self.assertIn("needs.release-classification.outputs.tier == 'full'", block)
+    def test_the_end_to_end_work_is_split_rather_than_reduced(self) -> None:
+        """Sharding shortens the wall clock; it must not quietly narrow what runs."""
+        shard = self.jobs["full-ui-e2e-shard"]
+        self.assertIn("npx playwright test", shard)
+        self.assertNotIn("--grep", shard)
+        self.assertNotIn("testIgnore", shard)
+        self.assertIn("fail-fast: false", shard)
+        # The JVM harness is a separate real-process test and must keep running in full.
+        self.assertIn(
+            "HumanTaskConfirmationBrowserProcessIntegrationTest", self.jobs["full-ui-e2e-harness"]
+        )
+
+    def test_every_artifact_upload_name_is_unique(self) -> None:
+        """Two jobs uploading one name is an upload failure, and a shard makes that easy to reach."""
+        names = re.findall(r"(?m)^          name: ([^\n]+)$", self.contents)
+        uploads = [
+            name
+            for name in names
+            if name.startswith(("ravenroot-", "playwright-report", "human-task-confirmation"))
+        ]
+        self.assertEqual(
+            sorted({name for name in uploads if uploads.count(name) > 1}),
+            ["ravenroot-backend-build", "ravenroot-plugins", "ravenroot-ui"],
+            "only the download side may repeat a producer's artifact name",
+        )
 
 
 if __name__ == "__main__":

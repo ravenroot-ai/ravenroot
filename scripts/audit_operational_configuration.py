@@ -1850,6 +1850,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
     return False
 
 
+def immutable_historical_reference(path: tuple[str, ...]) -> bool:
+    """Recognize anchored historical candidate references that must never be rewritten."""
+    return bool(path) and path[0] in {
+        "reconciliationHistory", "semanticReviewHistory", "retiredEntries",
+    }
+
+
 def remap_route_table_references(document: dict[str, object], replacements: dict[str, str]) -> None:
     authorities = document.get("routeTableAuthorities")
     if not isinstance(authorities, dict):
@@ -2034,7 +2041,9 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
                     for item in plan["mappings"] if isinstance(item, dict)}
     source_ids = set(source_entries)
     unexpected = [path for path in candidate_reference_locations(document, source_ids - {
-        candidate.id for candidate in candidates}) if not allowed_migrated_reference(path)]
+        candidate.id for candidate in candidates})
+                  if not allowed_migrated_reference(path)
+                  and not immutable_historical_reference(path)]
     if unexpected:
         rendered = ", ".join("/".join(path) for path in unexpected[:5])
         return None, [f"candidate identity appears in an undeclared reference field: {rendered}"]

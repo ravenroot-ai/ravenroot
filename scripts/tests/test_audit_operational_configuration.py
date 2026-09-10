@@ -3859,6 +3859,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "sourceFileDigest": "b" * 64, "candidateCount": 1,
                     "statusCounts": {"retained": 1}, "rationale": "Earlier schema migration.",
                 }],
+                "reconciliationHistory": [{
+                    "id": "earlier-reconciliation",
+                    "additions": [{"id": "oc-old"}],
+                }],
                 "evidenceRecords": {old_entry["evidenceDigest"]: "old evidence"},
             }
             inventory.write_text(json.dumps(source_document, indent=2) + "\n", encoding="utf-8")

@@ -1614,6 +1614,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         lease_rows = [entry for entry in document["entries"]
                       if entry.get("setting") == "execution.lease-ttl"]
         self.assertEqual({"#318"}, {entry["followUp"] for entry in lease_rows})
+        unresolved_rows = [entry for entry in document["entries"]
+                           if entry.get("authorityStatus") == "unresolved"]
+        self.assertEqual(28, len({entry["setting"] for entry in unresolved_rows}))
+        self.assertTrue(all(entry.get("sourceFact") for entry in unresolved_rows))
+        self.assertFalse(any(str(entry["default"]).startswith("Current internal source value:")
+                             for entry in unresolved_rows))
 
         missing = copy.deepcopy(document)
         del missing["remediationDomains"]

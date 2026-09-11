@@ -1718,7 +1718,13 @@ function refreshVisualGroups(owner = workspace.active, { animate = false, select
     if (owner === workspace.active) {
       graphCursorId = owner.cursorId;
       if (context.groupId) showVisualGroupInfo(readVisualGroups(owner.graph).groups.find(group => group.id === context.groupId));
-      else scheduleSelectionInspectorRefresh(target);
+      // The renderer reports every final paint, including one that restored exactly the selection
+      // it was handed. Only a projection that moved the selection (a member folded into its summary,
+      // a header expanded to its members) changes what the Inspector describes. Refreshing on an
+      // unchanged selection re-reads it one microtask later and overwrites whatever the caller has
+      // shown since: a node just created from the editor is deliberately left unselected, so the
+      // refresh found nothing selected and closed the editor on the node it had just re-opened.
+      else if (!sameSelectedIds(selected, ids)) scheduleSelectionInspectorRefresh(target);
     }
   };
   const elastic = elasticRendererFor(owner);
@@ -2474,6 +2480,9 @@ window.ravenroot = {
   resetWorkspaceLayout,
   workspaceLayout: () => ({ ...workspaceLayout, plan: workspacePlan }),
   minimapSnapshot: () => minimapLastSnapshot ? JSON.parse(JSON.stringify(minimapLastSnapshot)) : null,
+  // The serializer Save and Export use, bundled with them, so a test compares against the bytes the
+  // editor would actually write rather than against a separately loaded copy of the module.
+  serializeGraphML: graph => serializeGraphML(graph),
   graphDocumentByteLimit: currentGraphDocumentByteLimit,
   flushWorkspacePersistence,
   workspacePersistence: () => ({
@@ -6141,6 +6150,7 @@ function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
   draft.baseline = structuredClone(assessment.patch);
   draft.dirty = false;
   syncAutosavedNodeRenderer(draft.elementId);
+  refreshJoinStatus(draft.form, graphData, graphData.nodeMap?.[draft.elementId]);
   updateHistoryUi();
   scheduleProgramGraphReadiness(workspace.active);
   return true;
@@ -7312,6 +7322,10 @@ function maxConcurrencyFieldHtml(descriptor, model) {
   const state = resolved.declared
     ? (resolved.valid ? `Declared (${resolved.value}).` : 'Declared value is invalid and will be refused.')
     : `Inherited default (${resolved.value}).`;
+  // `resolved.value` is the EFFECTIVE limit, which is the declared one when a declaration exists.
+  // The placeholder and the live "Inherited default" label describe what clearing the field falls
+  // back to, so they need the catalog default, never the value about to be cleared.
+  const inheritedDefault = effectiveMaxConcurrency(descriptor, null).value;
   const help = `Positive, per node and per traversal. The trusted catalog ceiling is ${resolved.ceiling}; stricter plugin or profile limits still apply.`;
   return `<div class="editor-section-title"><span>Runtime concurrency</span>
       ${contextualHelpButtonHtml('Runtime concurrency', help)}</div>
@@ -7320,9 +7334,9 @@ function maxConcurrencyFieldHtml(descriptor, model) {
         <span class="nature-state" data-max-concurrency-state>${escapeHtml(state)}</span></label>
       <input id="node-max-concurrency" name="runtimeMaxConcurrency" type="number" inputmode="numeric"
         min="1" max="${resolved.ceiling}" value="${escapeAttribute(inputValue)}"
-        placeholder="Inherit default (${resolved.value})"
+        placeholder="Inherit default (${inheritedDefault})"
         data-max-concurrency-property="${escapeAttribute(property)}"
-        data-default-max-concurrency="${resolved.value}" data-max-concurrency-ceiling="${resolved.ceiling}">
+        data-default-max-concurrency="${inheritedDefault}" data-max-concurrency-ceiling="${resolved.ceiling}">
     </div>`;
 }
 
@@ -7469,6 +7483,25 @@ function bindJoinField() {
     if (quorumField) quorumField.hidden = select.value !== 'quorum';
     if (timeoutField) timeoutField.hidden = select.value === 'none';
   });
+}
+
+/** Brings the join status beside the controls up to date with the committed document. Saving an
+ * existing node keeps its form (see `preserveNodeInspectorAfterSave`), so nothing re-renders
+ * `#node-join-section` -- but the effective-join label and the END fan-in warning describe the
+ * DOCUMENT, not the form: the warning exists because nothing is declared, so it must go once a
+ * declaration is committed. Only those two derived parts are replaced; the controls, their values
+ * and focus stay exactly as the author left them. */
+function refreshJoinStatus(form, graph, model) {
+  const section = form?.querySelector('#node-join-section');
+  if (!section || !graph || !model) return;
+  const fresh = document.createElement('template');
+  fresh.innerHTML = joinFieldHtml(graph, model);
+  const state = fresh.content.querySelector('[data-join-state]');
+  if (state) section.querySelector('[data-join-state]')?.replaceChildren(state.textContent);
+  const warning = fresh.content.querySelector('.join-end-warning');
+  const current = section.querySelector('.join-end-warning');
+  if (!warning) current?.remove();
+  else if (!current) section.querySelector('.node-join')?.append(warning);
 }
 
 /** The three join-only properties `node` currently carries, verbatim -- raw values, no

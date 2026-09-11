@@ -48,7 +48,12 @@ Work this deployment cannot rebuild is withheld rather than dispatched, and how 
 
 Two waits are deliberately not bounded by this, and you should know which. A settled handler whose execution cannot be rebuilt stays waiting, because it carries no attempt against which a decision could be recorded; the startup report is what surfaces it. And a plain interrupted node attempt is not dispatched by any shipped adapter whatever its classification — see the limit below — so in a default deployment that path ends in the item being reported rather than run.
 
-Due timers are deliberately outside all of this. A timer closes a durable wait by committing store transitions under its own claim's fence: no graph is loaded, no runner is built, no authored behaviour runs. Refusing one because the execution's document or manifest does not resolve here would withhold a wait for a rebuild that path never performs, leaving a human task that can never expire and an approval that can never lapse, with no attempt to park and so no bound. Timers therefore fire as they always have. What an expiry then produces — a re-entry that does rebuild a runner — is gated like anything else.
+Due timers are deliberately outside full graph compatibility. A timer closes a durable wait by
+committing store transitions under its own claim's fence: no graph is loaded, no runner is built, no
+authored behaviour runs. It does still require the manifest's format-3 generic persistence capacity,
+because expiry writes durable payloads. Recovery pages past executions whose capacity is absent or no
+longer equals the immutable live store capacity and atomically claims only verified keys. What an
+expiry then produces — a re-entry that rebuilds a runner — is gated by the complete manifest as usual.
 
 One limit is worth stating plainly, because it bounds what "resumes" means. The durable execution record holds lifecycle state — traversals, invocations, attempts and their statuses — and not the data flowing between nodes. An interrupted node attempt therefore has no recorded input, and Ravenroot does not re-execute one by inventing it. What resumes automatically is work whose committed boundary recorded enough to continue from: a settled durable handler, a due timer, a tool-approval or human-task continuation, and an operator-resumed hold. An ordinary interrupted attempt is discovered, classified and reported, and then waits for an operator decision.
 

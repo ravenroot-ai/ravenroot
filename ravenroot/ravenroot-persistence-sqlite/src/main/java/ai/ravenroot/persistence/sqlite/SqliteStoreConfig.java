@@ -77,10 +77,14 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      * probe and skips. Both are the kind of threshold that quietly turns a passing assertion into an
      * unrun one, so they are stated here rather than discovered.</p>
      */
+    public static final SqliteStoreConfig DEFAULTS = new SqliteStoreConfig(
+            SynchronousMode.FULL, SqliteConnectionPolicy.DEFAULTS.busyTimeout(), Duration.ofMinutes(5),
+            1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7),
+            Duration.ofDays(7));
+
+    /** Returns the one shipped typed default value retained for source compatibility. */
     public static SqliteStoreConfig defaults() {
-        return new SqliteStoreConfig(SynchronousMode.FULL, Duration.ofSeconds(5), Duration.ofMinutes(5),
-                1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7),
-                Duration.ofDays(7));
+        return DEFAULTS;
     }
 
     public SqliteStoreConfig {

@@ -44,6 +44,7 @@ public final class ExecutionManifestResolver {
     private final Set<StoreCapability> storeCapabilities;
     private final GraphExecutionLimits graphExecutionLimits;
     private final int maximumExecutionResultPayloadBytes;
+    private final Integer maximumPersistencePayloadBytes;
     private final BehaviorRegistry behaviors;
 
     private ExecutionManifestResolver(String engineDigest, String storeDigest,
@@ -52,6 +53,7 @@ public final class ExecutionManifestResolver {
                                       Set<StoreCapability> storeCapabilities,
                                       GraphExecutionLimits graphExecutionLimits,
                                       int maximumExecutionResultPayloadBytes,
+                                      Integer maximumPersistencePayloadBytes,
                                       BehaviorRegistry behaviors) {
         this.engineDigest = engineDigest;
         this.storeDigest = storeDigest;
@@ -61,6 +63,7 @@ public final class ExecutionManifestResolver {
         this.storeCapabilities = Set.copyOf(storeCapabilities);
         this.graphExecutionLimits = graphExecutionLimits;
         this.maximumExecutionResultPayloadBytes = maximumExecutionResultPayloadBytes;
+        this.maximumPersistencePayloadBytes = maximumPersistencePayloadBytes;
         this.behaviors = behaviors;
     }
 
@@ -86,7 +89,27 @@ public final class ExecutionManifestResolver {
         return new ExecutionManifestResolver(engineDigestOf(engine),
                 storeDigestOf(storeCapabilities), limitsDigestOf(limits),
                 programRuntimeDigestOf(programRuntime), normalizedMode(unknownBehaviors),
-                storeCapabilities, limits, maximumExecutionResultPayloadBytes, behaviors);
+                storeCapabilities, limits, maximumExecutionResultPayloadBytes, null, behaviors);
+    }
+
+    /** Resolves a v3 authority including the exact generic capacity of the managed execution store. */
+    public static ExecutionManifestResolver completeManaged(ExecutionEngine engine,
+                                                            Set<StoreCapability> storeCapabilities,
+                                                            int maximumExecutionResultPayloadBytes,
+                                                            int maximumPersistencePayloadBytes,
+                                                            BehaviorRegistry behaviors,
+                                                            UnknownBehaviorPolicy unknownBehaviors,
+                                                            GraphExecutionLimits limits,
+                                                            ProgramRuntime programRuntime) {
+        if (maximumPersistencePayloadBytes < 1) {
+            throw new IllegalArgumentException("maximumPersistencePayloadBytes must be positive");
+        }
+        ExecutionManifestResolver legacy = complete(engine, storeCapabilities,
+                maximumExecutionResultPayloadBytes, behaviors, unknownBehaviors, limits, programRuntime);
+        return new ExecutionManifestResolver(legacy.engineDigest, legacy.storeDigest,
+                legacy.executionLimitsDigest, legacy.programRuntimeDigest, legacy.unknownBehaviorMode,
+                legacy.storeCapabilities, legacy.graphExecutionLimits,
+                legacy.maximumExecutionResultPayloadBytes, maximumPersistencePayloadBytes, behaviors);
     }
 
     /**
@@ -124,7 +147,9 @@ public final class ExecutionManifestResolver {
                 new ResolvedOperationalPolicy.ResultLimits(
                         storeCapabilities.contains(StoreCapability.EXECUTION_RESULTS),
                         maximumExecutionResultPayloadBytes),
-                behaviors.builtInHttpCapacityFor(behaviorNames), capacities);
+                behaviors.builtInHttpCapacityFor(behaviorNames), capacities,
+                java.util.Optional.ofNullable(maximumPersistencePayloadBytes)
+                        .map(ResolvedOperationalPolicy.PersistenceLimits::new));
     }
 
     /** Compatibility overload: includes every installed package. */
@@ -145,7 +170,9 @@ public final class ExecutionManifestResolver {
         List<PinnedNodePackage> packages = operational.nodePackages().stream()
                 .map(entry -> behaviors.nodePackageBinding(entry.packageId()).orElseThrow().identity())
                 .toList();
-        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_2, key, graphContentId,
+        int formatVersion = maximumPersistencePayloadBytes == null
+                ? ExecutionManifest.FORMAT_VERSION_2 : ExecutionManifest.FORMAT_VERSION_3;
+        return new ExecutionManifest(formatVersion, key, graphContentId,
                 graphIdentity, runtime, packages, pinnedAt, operational);
     }
 
@@ -223,7 +250,8 @@ public final class ExecutionManifestResolver {
         if (!compatibility.compatible()) {
             throw new ExecutionManifestIncompatibleException(pinned.key(), compatibility);
         }
-        if (pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_2) {
+        if (pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_2
+                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_3) {
             return pinned.operationalPolicy();
         }
         if (storeCapabilities.contains(StoreCapability.EXECUTION_RESULTS)
@@ -247,7 +275,8 @@ public final class ExecutionManifestResolver {
         if (!compatibility.compatible()) {
             throw new ExecutionManifestIncompatibleException(pinned.key(), compatibility);
         }
-        if (pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_2) {
+        if (pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_2
+                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_3) {
             return pinned.operationalPolicy();
         }
         return new ResolvedOperationalPolicy(graphPolicyOf(graphExecutionLimits),

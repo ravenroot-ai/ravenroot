@@ -2000,9 +2000,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 && executionStore.supports(StoreCapability.EXECUTION_RESULTS)
                 ? executionStore.maxExecutionResultPayloadBytes()
                 : graphExecutionLimits.payload().maxEncodedBytes();
-        var resolver = ai.ravenroot.core.manifest.ExecutionManifestResolver.complete(engine,
-                executionStore == null ? java.util.Set.of() : executionStore.capabilities(),
-                resultPayloadBytes, behaviors, unknownBehaviors, graphExecutionLimits, programRuntime);
+        var resolver = executionStore != null && executionStore.protectsManagedPersistence()
+                ? ai.ravenroot.core.manifest.ExecutionManifestResolver.completeManaged(engine,
+                        executionStore.capabilities(), resultPayloadBytes, executionStore.maxPayloadBytes(),
+                        behaviors, unknownBehaviors, graphExecutionLimits, programRuntime)
+                : ai.ravenroot.core.manifest.ExecutionManifestResolver.complete(engine,
+                        executionStore == null ? java.util.Set.of() : executionStore.capabilities(),
+                        resultPayloadBytes, behaviors, unknownBehaviors,
+                        graphExecutionLimits, programRuntime);
         var created = new ai.ravenroot.core.manifest.ExecutionManifestService(
                 executionManifestStore, resolver, java.time.Clock.systemUTC());
         return executionManifests.compareAndSet(null, created) ? created : executionManifests.get();

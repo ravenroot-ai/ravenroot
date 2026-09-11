@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import io
 import copy
 import shutil
@@ -820,6 +821,526 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
                             and "partition" in error for error in errors), errors)
 
+    def test_persistence_policy_authority_is_closed_over_source_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.persistence_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        self.assertEqual(43, len(expected["contracts"]))
+        self.assertEqual(97, len(expected["candidateIds"]))
+        self.assertEqual(
+            "471891f10e915939b5d29ae276a5ece19c8ada9abc8513f2ccf24beef9872e83",
+            hashlib.sha256(json.dumps(expected["contracts"][:40], sort_keys=True,
+                                      separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "the accepted 40-contract prefix must not be rewritten to add the new path policies",
+        )
+        self.assertEqual(
+            {
+                "execution.store.selector", "execution.store.url", "execution.store.user",
+                "execution.store.password", "execution.store.pool-size",
+                "execution.store.pool-timeout", "execution.worker-id", "execution.lease-ttl",
+                "deployment.audit-directory", "execution.store.directory",
+                "execution.store.enabled",
+            },
+            {contract["setting"] for contract in expected["contracts"][-11:]},
+        )
+        entries = {}
+        contracts = {identifier: contract for contract in expected["contracts"]
+                     for identifier in contract["candidateIds"]}
+        for identifier, contract in contracts.items():
+            entry = discovered[identifier].inventory_entry()
+            entry.update(
+                status="already-centralized", classification="operator-configurable",
+                setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                bindings=contract["bindings"], default="source-derived typed default",
+                defaultEvidence=contract["defaultCandidateIds"],
+                validation="The typed policy validates this value before work.",
+                scope="One explicitly composed adapter or caller.",
+                pinning="Resolved before managed work where replay can observe it.",
+                coverage="Source-derived owner, default, binding, consumer and test evidence.",
+                rationale="The closed persistence policy is the source authority.",
+                persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+            )
+            entries[identifier] = entry
+        hikari_minimum = "oc-0c1ca37de0bb555b5298"
+        self.assertNotIn(hikari_minimum, expected["candidateIds"])
+        sqlite_file_name = [candidate.id for candidate in candidates
+                            if candidate.path == audit.PERSISTENCE_SQLITE_LOCATION_PATH.as_posix()
+                            and candidate.kind == "fixed-declaration"
+                            and candidate.expression == '"ravenroot-execution-store.db"']
+        self.assertEqual(1, len(sqlite_file_name))
+        self.assertNotIn(sqlite_file_name[0], expected["candidateIds"])
+        minimum_entry = discovered[hikari_minimum].inventory_entry()
+        minimum_entry.update(
+            status="retained", classification="protocol-or-format-invariant",
+            rationale="HikariCP's minimum accepted pool-acquisition timeout is a fixed dependency contract.",
+        )
+        entries[hikari_minimum] = minimum_entry
+        authorities = {audit.PERSISTENCE_POLICY_AUTHORITY_ID: expected}
+        self.assertEqual([], audit.persistence_policy_authority_errors(
+            ROOT, authorities, entries, discovered))
+
+        missing = copy.deepcopy(authorities)
+        missing.clear()
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, missing, entries, discovered))
+        relabelled = copy.deepcopy(entries)
+        for entry in relabelled.values():
+            if entry["id"] in contracts:
+                entry.update(status="retained", classification="protocol-or-format-invariant")
+        self.assertTrue(any("requires one reviewed operator setting" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, relabelled, discovered)))
+        unmarked = copy.deepcopy(relabelled)
+        for entry in unmarked.values():
+            if entry["id"] in contracts:
+                entry.pop("persistenceAuthority")
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, unmarked, discovered)))
+        malformed = copy.deepcopy(entries)
+        first = next(iter(malformed.values()))
+        first["defaultEvidence"] = "not-an-array"
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, authorities, malformed, discovered))
+        duplicated = copy.deepcopy(authorities)
+        duplicated_contract = duplicated[audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"][-1]
+        duplicated_contract["candidateIds"].append(duplicated_contract["candidateIds"][0])
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, duplicated, entries, discovered))
+        missing_contract = copy.deepcopy(authorities)
+        missing_contract[audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"].pop()
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, missing_contract, entries, discovered))
+        missing_entry = copy.deepcopy(entries)
+        missing_entry.pop(next(iter(missing_entry)))
+        self.assertTrue(any("current source candidate set is incomplete" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, missing_entry, discovered)))
+        foreign = copy.deepcopy(entries)
+        outsider = next(candidate for candidate in candidates if candidate.id not in contracts)
+        foreign[outsider.id] = {
+            **outsider.inventory_entry(), "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Unrelated fixed vocabulary.",
+            "persistenceAuthority": audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+        }
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, foreign, discovered)))
+
+    def test_inventory_routes_mandatory_persistence_authority_without_markers(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        authority = audit.persistence_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(authority)
+        entries = []
+        protected = set(authority["candidateIds"])
+        contracts = {identifier: contract for contract in authority["contracts"]
+                     for identifier in contract["candidateIds"]}
+        for candidate in candidates:
+            entry = candidate.inventory_entry()
+            contract = contracts.get(candidate.id)
+            if contract is not None:
+                entry.update(
+                    status="already-centralized", classification="operator-configurable",
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], default=contract["defaultExpression"],
+                    defaultEvidence=contract["defaultCandidateIds"],
+                    validation="The typed policy validates this value before work.",
+                    scope="One explicitly composed adapter or caller.",
+                    pinning="Resolved before managed work where replay can observe it.",
+                    coverage="Source-derived owner, default, binding, consumer and test evidence.",
+                    rationale="The closed persistence policy is the source authority.",
+                    persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+                )
+            elif candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture",
+                             rationale="Executable audit fixture.")
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                for candidate in candidates},
+            "persistencePolicyAuthorities": {
+                audit.PERSISTENCE_POLICY_AUTHORITY_ID: authority,
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        target_tokens = protected | {contract["setting"] for contract in authority["contracts"]}
+        target_errors = [error for error in errors
+                         if "persistence policy" in error or "persistence authority" in error
+                         or any(token in error for token in target_tokens)]
+        self.assertEqual([], target_errors)
+        self.assertTrue(errors, "the synthetic document deliberately omits unrelated family authorities")
+        unrelated = [error for error in errors if error not in target_errors]
+        self.assertTrue(unrelated, "the synthetic document deliberately omits unrelated authorities")
+        self.assertEqual([], [error for error in unrelated if not (
+            error == "AssistantConfiguration operational limits require one closed family authority"
+            or error == "Helm settings require the exact source-derived closed values authority"
+            or (error.startswith("deployment.")
+                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
+        )], unrelated)
+
+        enabled = next(contract for contract in authority["contracts"]
+                       if contract["setting"] == "execution.store.enabled")
+        self.assertEqual(1, len(enabled["defaultCandidateIds"]))
+        self.assertIn(enabled["defaultCandidateIds"][0], enabled["candidateIds"])
+        missing_default = copy.deepcopy(document)
+        for entry in missing_default["entries"]:
+            if entry.get("setting") == "execution.store.enabled":
+                entry["defaultEvidence"] = []
+        errors = audit.inventory_errors(ROOT, missing_default, candidates)
+        self.assertTrue(any("execution.store.enabled" in error or identifier in error
+                            for identifier in enabled["candidateIds"] for error in errors), errors)
+
+        removed = copy.deepcopy(document)
+        removed.pop("persistencePolicyAuthorities")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error for error in errors))
+
+        relabelled = copy.deepcopy(document)
+        for entry in relabelled["entries"]:
+            if entry["id"] in protected:
+                entry.update(status="retained", classification="protocol-or-format-invariant",
+                             rationale="Incorrectly hidden as a fixed protocol value.")
+        errors = audit.inventory_errors(ROOT, relabelled, candidates)
+        self.assertTrue(any("requires one reviewed operator setting" in error for error in errors),
+                        errors)
+        unmarked = copy.deepcopy(relabelled)
+        for entry in unmarked["entries"]:
+            if entry["id"] in protected:
+                entry.pop("persistenceAuthority")
+        errors = audit.inventory_errors(ROOT, unmarked, candidates)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+    def test_persistence_policy_authority_rejects_partial_or_drifted_source(self) -> None:
+        paths = (
+            audit.PERSISTENCE_POSTGRES_CONFIG_PATH, audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+            audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+            audit.PERSISTENCE_SHARED_CONNECTION_PATH, audit.PERSISTENCE_SHARED_DATASOURCE_PATH,
+            audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+            audit.PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
+            audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+            audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+            audit.PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+            audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+            audit.PERSISTENCE_REGISTRY_POLICY_PATH, audit.PERSISTENCE_IN_MEMORY_POLICY_PATH,
+            audit.PERSISTENCE_SQLITE_CONFIG_PATH, audit.PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
+            audit.PERSISTENCE_QUERY_PATH, audit.PERSISTENCE_MANAGED_STORE_PATH,
+            audit.PERSISTENCE_MANIFEST_PATH, audit.PERSISTENCE_BOOTSTRAP_PATH,
+            audit.PERSISTENCE_SERVER_MAIN_PATH, audit.PERSISTENCE_IN_MEMORY_REGISTRY_PATH,
+            audit.PERSISTENCE_SQLITE_REGISTRY_PATH, audit.PERSISTENCE_POSTGRES_REGISTRY_PATH,
+            audit.PERSISTENCE_SQLITE_ARTIFACT_PATH, audit.PERSISTENCE_SQLITE_EMBED_PATH,
+            audit.PERSISTENCE_SQLITE_EXECUTION_PATH, audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+            audit.PERSISTENCE_OPERATIONAL_POLICY_PATH, audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
+            audit.PERSISTENCE_MANIFEST_RESOLVER_PATH, audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+            audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_MANAGED_STORE_TEST_PATH,
+            audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+            audit.PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH,
+            audit.PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+            audit.PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+            Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+            Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+            Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+            Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+            Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+            Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+            discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+            self.assertIsNotNone(audit.persistence_policy_authority_from_source(root, discovered))
+
+            resolver = root / audit.PERSISTENCE_POSTGRES_RESOLVER_PATH
+            original = resolver.read_text(encoding="utf-8")
+            resolver.write_text(original.replace(
+                "String raw = properties.get(property);",
+                "String raw = environment.get(variable);", 1), encoding="utf-8")
+            changed = {candidate.id: candidate for candidate in audit.discover(root)}
+            self.assertIsNone(audit.persistence_policy_authority_from_source(root, changed))
+            resolver.write_text(original, encoding="utf-8")
+
+            def rejects(relative: Path, before: str, after: str) -> None:
+                target = root / relative
+                source = target.read_text(encoding="utf-8")
+                self.assertEqual(1, source.count(before), (relative, before))
+                target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                try:
+                    current = {candidate.id: candidate for candidate in audit.discover(root)}
+                    self.assertIsNone(audit.persistence_policy_authority_from_source(root, current),
+                                      relative)
+                finally:
+                    target.write_text(source, encoding="utf-8")
+
+            rejects(audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                    "defaults.maxClockSkew(), true)", "defaults.maxClockSkew(), false)")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "|| isConfigured(properties, POOL_TIMEOUT_PROPERTY);",
+                    "|| false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'static final String DEFAULT_ENABLED_VALUE = "true";',
+                    'static final String DEFAULT_ENABLED_VALUE = "false";')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "? DEFAULT_ENABLED_VALUE\n                : raw.trim()",
+                    '? "true"\n                : raw.trim()')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "return SQLITE_SELECTOR;", "return POSTGRESQL_SELECTOR;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'String SQLITE_SELECTOR = "sqlite";',
+                    'String SQLITE_SELECTOR = "single-host";')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'String POSTGRESQL_SELECTOR = "postgresql";',
+                    'String POSTGRESQL_SELECTOR = "shared";')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    ".orElseThrow(() -> new IllegalArgumentException(",
+                    ".orElseGet(() -> String.valueOf(")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    'private static final String REQUIRED_URL_PREFIX = "jdbc:postgresql:";',
+                    'private static final String REQUIRED_URL_PREFIX = "jdbc:";')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "if (!url.startsWith(REQUIRED_URL_PREFIX)) {",
+                    "if (!url.endsWith(REQUIRED_URL_PREFIX)) {")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "trimmed(environment, ExecutionStoreConfiguration.USER_VARIABLE),",
+                    "Optional.ofNullable(environment.get(ExecutionStoreConfiguration.USER_VARIABLE)),")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "Optional.ofNullable(environment.get(ExecutionStoreConfiguration.PASSWORD_VARIABLE)),",
+                    "trimmed(environment, ExecutionStoreConfiguration.PASSWORD_VARIABLE),")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    'return "SharedStoreConnection[url=<redacted>, user="',
+                    'return "SharedStoreConnection[url=" + url + ", user="')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final int DEFAULT_POOL_SIZE = 10;",
+                    "private static final int DEFAULT_POOL_SIZE = 11;")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final int MAX_POOL_SIZE = 1_000;",
+                    "private static final int MAX_POOL_SIZE = 999;")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(250);",
+                    "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(251);")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "connection.poolTimeout().compareTo(storeConfig.statementTimeout()) >= 0",
+                    "connection.poolTimeout().compareTo(storeConfig.statementTimeout()) > 0")
+            rejects(audit.PERSISTENCE_SHARED_DATASOURCE_PATH,
+                    "config.setMaximumPoolSize(connection.poolSize());",
+                    "config.setMaximumPoolSize(10);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "? hostName() : configured.trim();",
+                    "? UNRESOLVED_REPLICA_NAME : configured.trim();")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "WorkerIdentity.of(replicaName, WorkerIdentity.Role.RUNTIME);",
+                    "WorkerIdentity.of(replicaName, WorkerIdentity.Role.RECOVERY);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "return WorkerIdentity.of(replicaName, WorkerIdentity.Role.RECOVERY);",
+                    "return WorkerIdentity.of(replicaName, WorkerIdentity.Role.RUNTIME);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "return ExecutionOwnership.DEFAULT_LEASE_TTL;",
+                    "return Duration.ofSeconds(1);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "if (seconds < 1) {", "if (seconds < 0) {")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "if (leaseTtl.compareTo(store.maxLeaseTtl()) > 0) {",
+                    "if (leaseTtl.compareTo(store.maxLeaseTtl()) >= 0) {")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "executionOwnershipConfiguration.requireCompatible(managedExecutionStore);",
+                    "/* ownership compatibility omitted */")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "return raw != null && SHARED_STORE_SELECTOR.equals(raw.trim().toLowerCase(java.util.Locale.ROOT));",
+                    "return false;")
+            rejects(audit.PERSISTENCE_POSTGRES_CONFIG_PATH,
+                    "Duration.ofSeconds(30), 3", "Duration.ofSeconds(31), 3")
+            rejects(audit.PERSISTENCE_REGISTRY_POLICY_PATH,
+                    "Duration.ofMinutes(5)", "Duration.ofSeconds(5)")
+            rejects(audit.PERSISTENCE_BOOTSTRAP_PATH,
+                    "configuration.manifestPinAttempts(), storeConfig)",
+                    "configuration.manifestPinAttempts(), PostgresStoreConfig.defaults())")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "executionStoreOwner.store(), executionStoreOwner.executionManifestStore())",
+                    "executionStoreOwner.store(), null)")
+            rejects(audit.PERSISTENCE_SQLITE_ARTIFACT_PATH,
+                    "connectionPolicy.apply(connection);", "SqliteConnectionPolicy.DEFAULTS.apply(connection);")
+            rejects(audit.PERSISTENCE_SQLITE_EMBED_PATH,
+                    "connectionPolicy.apply(opened);", "SqliteConnectionPolicy.DEFAULTS.apply(opened);")
+            rejects(audit.PERSISTENCE_SQLITE_REGISTRY_PATH,
+                    "this.limits = policy.limits();", "this.limits = DeploymentRegistryPolicy.DEFAULTS.limits();")
+            rejects(audit.PERSISTENCE_POSTGRES_REGISTRY_PATH,
+                    "this.commandRetention = policy.commandRetention();",
+                    "this.commandRetention = DeploymentRegistryPolicy.DEFAULTS.commandRetention();")
+            rejects(audit.PERSISTENCE_IN_MEMORY_REGISTRY_PATH,
+                    "this.limits = Objects.requireNonNull(limits, \"limits\");",
+                    "this.limits = DeploymentRegistryPolicy.inMemoryLimits();")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    "return applyInternal(batch, authority);", "return apply(batch);")
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    "if (authority != null) {\n            requireManagedAuthority(connection, key, authority);\n            requireBatchPayloads(batch);\n        }",
+                    "if (authority != null) {\n            requireManagedAuthority(connection, key, ExecutionPersistenceAuthority.from(null));\n            requireBatchPayloads(batch);\n        }")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+                    "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_2")
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    "pinned != config.maxPayloadBytes()",
+                    "pinned < config.maxPayloadBytes()")
+            rejects(audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+                    "ExecutionManifestResolver.completeManaged(engine,",
+                    "ExecutionManifestResolver.complete(engine,")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    ".map(ResolvedOperationalPolicy.PersistenceLimits::new)",
+                    ".map(ignored -> new ResolvedOperationalPolicy.PersistenceLimits(1))")
+            rejects(audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
+                    "|| manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3",
+                    "&& manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3")
+            rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
+                    "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;",
+                    "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_1;")
+            rejects(Path(
+                    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+                    "@Test\n    void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()",
+                    "void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
+                    "final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
+                    "final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void aPasswordIsNotTrimmedBecauseItIsOpaque()",
+                    "void aPasswordIsNotTrimmedBecauseItIsOpaque()")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct()",
+                    "void theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct()")
+            rejects(audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+                    "@Test\n    void theSelectorSpellingMatchesTheServersOwn()",
+                    "void theSelectorSpellingMatchesTheServersOwn()")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    'public static final String ENVIRONMENT_VARIABLE = "RAVENROOT_AUDIT_DIR";',
+                    'public static final String ENVIRONMENT_VARIABLE = "RAVENROOT_AUDIT_PATH";')
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    'public static final String DEFAULT_DIRECTORY = "./data/audit";',
+                    'public static final String DEFAULT_DIRECTORY = "./audit";')
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim()",
+                    "raw == null ? DEFAULT_DIRECTORY : raw.trim()")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "DEFAULT_DIRECTORY : raw.trim()",
+                    "DEFAULT_DIRECTORY : raw")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "return new AuditTrailDirectory(Path.of(selected));",
+                    "return new AuditTrailDirectory(Path.of(DEFAULT_DIRECTORY));")
+            rejects(audit.PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+                    "AuditTrailDirectory.resolve(environment.get(DIRECTORY_VARIABLE))",
+                    "AuditTrailDirectory.resolve(null)")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "AuditTrailConfiguration.fromEnvironment(System.getenv()).directory()",
+                    "AuditTrailConfiguration.fromEnvironment(Map.of()).directory()")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "new FileAuditTrail(auditDirectory.path(), java.time.Clock.systemUTC(),",
+                    "new FileAuditTrail(Path.of(\"./data/audit\"), java.time.Clock.systemUTC(),")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "AuditTrailDirectory.resolve(environment.get(AUDIT_DIR_VARIABLE)).path()",
+                    "AuditTrailDirectory.resolve(null).path()")
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    'public static final String DEFAULT_DIRECTORY = "./data/execution-store";',
+                    'public static final String DEFAULT_DIRECTORY = "./execution-store";')
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    "raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim()",
+                    "raw == null ? DEFAULT_DIRECTORY : raw.trim()")
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    "return underDirectory(Path.of(selected));",
+                    "return underDirectory(Path.of(DEFAULT_DIRECTORY));")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "SqliteStoreLocation.underConfiguredDirectory(environment.get(DIRECTORY_VARIABLE))",
+                    "SqliteStoreLocation.underConfiguredDirectory(null)")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "SqliteStoreLocation.underConfiguredDirectory(\n                environment.get(EXECUTION_STORE_DIR_VARIABLE))",
+                    "SqliteStoreLocation.underConfiguredDirectory(\n                null)")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "case \"false\", \"off\", \"0\", \"no\" -> false;",
+                    "case \"false\", \"off\", \"0\" -> false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "default -> throw new IllegalArgumentException(ENABLED_VARIABLE",
+                    "default -> throw new UnsupportedOperationException(ENABLED_VARIABLE")
+            rejects(audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+                    "@Test\n    void auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()",
+                    "void auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()")
+            rejects(audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+                    "@Test\n    void executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()",
+                    "void executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases()",
+                    "void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases()")
+
+            test_path = root / Path(
+                "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
+            test_bytes = test_path.read_bytes()
+            test_path.unlink()
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+            test_path.write_bytes(test_bytes)
+            ownership_path = root / audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH
+            ownership_bytes = ownership_path.read_bytes()
+            ownership_path.unlink()
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+            ownership_path.write_bytes(ownership_bytes)
+            resolver.unlink()
+            self.assertTrue(audit.persistence_policy_source_present(root))
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+
+    def test_manifest_pin_authority_rejects_behavior_changes_that_keep_old_markers(self) -> None:
+        paths = (
+            audit.MANIFEST_PIN_CONFIGURATION_PATH, audit.MANIFEST_PIN_BOOTSTRAP_PATH,
+            audit.MANIFEST_PIN_STORE_PATH,
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/SharedExecutionStoreBootstrapSmokeTest.java"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+
+            def authority() -> object:
+                discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+                return audit.manifest_pin_attempt_authorities(root, discovered)
+
+            self.assertIsNotNone(authority())
+            configuration = root / audit.MANIFEST_PIN_CONFIGURATION_PATH
+            original = configuration.read_text(encoding="utf-8")
+            mutations = (
+                ("if (raw == null || raw.isBlank()) return fallback;",
+                 "if (raw == null) return fallback; if (raw.isBlank()) return 1;"),
+                ("return value;\n        } catch", "return fallback;\n        } catch"),
+                ("throw new IllegalArgumentException(variable + \" must be a positive integer\");",
+                 "return fallback;"),
+                ("if (manifestPinAttempts < 1) {",
+                 "if (false && manifestPinAttempts < 1) {"),
+            )
+            for before, after in mutations:
+                with self.subTest(before=before):
+                    self.assertEqual(1, original.count(before))
+                    configuration.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    self.assertIsNone(authority())
+                    configuration.write_text(original, encoding="utf-8")
     def route_table_authority_fixture(self, root: Path):
         paths = (
             audit.ROUTE_TABLE_PATH, audit.ROUTE_DESCRIPTOR_PATH, audit.OPENAPI_GENERATOR_PATH,
@@ -2361,22 +2882,36 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         owners = document["remediationDomains"]["settingOwners"]
-        expected_unresolved_settings = 27
+        expected_owners = {
+            "embed.enabled": "#321",
+            "ui.monitoring.max-deployment-event-streams": "#321",
+        }
+        expected_unresolved_settings = len(expected_owners)
         self.assertEqual(expected_unresolved_settings, len(owners))
         self.assertEqual(len(owners), len({item["setting"] for item in owners}))
+        self.assertEqual(expected_owners, {item["setting"]: item["issue"] for item in owners})
         self.assertEqual(
             expected_unresolved_settings,
             sum(domain["confirmedUnresolvedOperatorSettings"]
                 for domain in document["remediationDomains"]["domains"]),
         )
-        self.assertEqual(
-            "#318",
-            next(item["issue"] for item in owners
-                 if item["setting"] == "execution.lease-ttl"),
-        )
+        self.assertNotIn("execution.lease-ttl", {item["setting"] for item in owners})
         lease_rows = [entry for entry in document["entries"]
                       if entry.get("setting") == "execution.lease-ttl"]
-        self.assertEqual({"#318"}, {entry["followUp"] for entry in lease_rows})
+        self.assertEqual(5, len(lease_rows))
+        for entry in lease_rows:
+            with self.subTest(lease_candidate=entry["id"]):
+                self.assertEqual("already-centralized", entry["status"])
+                self.assertEqual("operator-configurable", entry["classification"])
+                self.assertEqual("ravenroot-persistence-policy-v1", entry["persistenceAuthority"])
+                self.assertEqual(
+                    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/"
+                    "ExecutionOwnershipConfiguration.java#ExecutionOwnershipConfiguration",
+                    entry["owner"],
+                )
+                self.assertEqual("leaseTtl", entry["field"])
+                self.assertNotIn("authorityStatus", entry)
+                self.assertNotIn("followUp", entry)
         unresolved_rows = [entry for entry in document["entries"]
                            if entry.get("authorityStatus") == "unresolved"]
         self.assertEqual(expected_unresolved_settings,
@@ -2395,8 +2930,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any("duplicate setting ownership" in error
                             for error in audit.remediation_domain_errors(duplicate)))
         split = copy.deepcopy(document)
-        next(entry for entry in split["entries"]
-             if entry.get("setting") == "execution.lease-ttl")["followUp"] = "#321"
+        conflicting_owner = copy.deepcopy(unresolved_rows[0])
+        conflicting_owner.update(id="oc-split-owner", followUp="#318")
+        split["entries"].append(conflicting_owner)
         self.assertTrue(any("requires one follow-up owner" in error
                             for error in audit.remediation_domain_errors(split)))
 
@@ -2406,24 +2942,40 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIn("CR/LF", delimiter["rationale"])
 
         postgres_defaults = {
-            "postgres.lock-timeout": "5 seconds.",
-            "postgres.statement-timeout": "30 seconds.",
-            "postgres.serialization-retries": "3 retries.",
-            "postgres.max-lease-ttl": "5 minutes.",
-            "postgres.max-payload-bytes": "1,048,576 bytes (1,024 × 1,024).",
-            "postgres.max-clock-skew": "5 seconds.",
-            "postgres.journal-retention": "24 hours.",
-            "postgres.max-inventory-page-size": "100 rows.",
-            "postgres.terminal-retention": "7 days.",
-            "postgres.execution-result-retention": "7 days.",
+            "postgres.lock-timeout": "Duration.ofSeconds(5)",
+            "postgres.statement-timeout": "Duration.ofSeconds(30)",
+            "postgres.serialization-retries": "3",
+            "postgres.max-lease-ttl": "Duration.ofMinutes(5)",
+            "postgres.max-payload-bytes": "1024 * 1024",
+            "postgres.max-clock-skew": "Duration.ofSeconds(5)",
+            "postgres.journal-retention": "Duration.ofHours(24)",
+            "postgres.max-inventory-page-size": "100",
+            "postgres.terminal-retention": "Duration.ofDays(7)",
+            "postgres.execution-result-retention": "Duration.ofDays(7)",
         }
+        source_candidates = {candidate.id: candidate for candidate in audit.discover(ROOT)}
+        persistence_authority = audit.persistence_policy_authority_from_source(ROOT, source_candidates)
+        self.assertIsNotNone(persistence_authority)
+        contracts = {contract["setting"]: contract
+                     for contract in persistence_authority["contracts"]}
         for setting, expected in postgres_defaults.items():
             with self.subTest(postgres_default=setting):
                 rows = [entry for entry in document["entries"]
                         if entry.get("setting") == setting]
                 self.assertTrue(rows)
                 self.assertEqual({expected}, {entry["default"] for entry in rows})
-                self.assertTrue(all(entry.get("sourceFact") for entry in rows))
+                contract = contracts[setting]
+                self.assertEqual(expected, contract["defaultExpression"])
+                self.assertEqual(set(contract["candidateIds"]), {entry["id"] for entry in rows})
+                self.assertTrue(contract["defaultCandidateIds"])
+                for entry in rows:
+                    self.assertEqual("already-centralized", entry["status"])
+                    self.assertEqual("operator-configurable", entry["classification"])
+                    self.assertEqual(audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+                                     entry["persistenceAuthority"])
+                    self.assertEqual(contract["defaultCandidateIds"], entry["defaultEvidence"])
+                    self.assertEqual(source_candidates[entry["id"]].evidence_digest,
+                                     entry["evidenceDigest"])
 
     def test_default_completion_gate_rejects_pending_review(self) -> None:
         errors = audit.check(ROOT)
@@ -2914,10 +3466,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
 
     def graph_limit_inventory_errors(self, document, candidates):
-        # This fixture intentionally contains only graph rows. The separately mandatory assistant
-        # and Helm authorities are covered by their own unmocked general-entrypoint tests.
+        # This fixture intentionally contains only graph rows. The separately mandatory assistant,
+        # Helm and persistence authorities have their own unmocked general-entrypoint tests.
         with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -4888,9 +5441,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             },
         }
         def errors(value):
-            # These two unresolved rows contain neither the assistant nor the Helm family.
+            # These two unresolved rows contain no assistant, Helm or persistence family.
             with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "helm_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

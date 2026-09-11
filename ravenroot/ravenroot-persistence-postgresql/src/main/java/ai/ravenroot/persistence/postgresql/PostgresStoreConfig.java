@@ -43,24 +43,23 @@ import java.util.Objects;
  *                             {@link ai.ravenroot.api.persistence.ExecutionStore#terminalRetention()}
  * @param executionResultRetention the window published by
  *                             {@link ai.ravenroot.api.persistence.ExecutionStore#executionResultRetention()}
+ * @param graphDefinitionUpsertAttempts attempts allowed when a definition insert loses a race with
+ *                             concurrent removal; must be positive
  */
 public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeout,
                                   int serializationRetries, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention,
                                   int maxInventoryPageSize, Duration terminalRetention,
-                                  Duration executionResultRetention) {
+                                  Duration executionResultRetention,
+                                  int graphDefinitionUpsertAttempts) {
 
     /**
      * Five seconds of lock timeout, thirty of statement timeout, three serialization retries, and the
      * same published bounds the other adapters declare.
      *
-     * <p>The bounds match {@code SqliteStoreConfig.defaults()} and {@code InMemoryExecutionStore}
-     * exactly, so a deployment can move between adapters without a caller discovering a different
-     * limit. Two of them are additionally constrained by the conformance suite rather than by taste:
-     * the payload limit must stay under 64 MiB or the payload-rejection assertion cannot allocate a
-     * payload large enough to exceed it and skips, and the skew budget must exceed two seconds or the
-     * ambiguity-window assertion has no room to probe and skips. Both are thresholds that quietly
-     * turn a passing assertion into an unrun one, so they are stated here rather than discovered.</p>
+     * <p>The published bounds match the other bundled adapters' defaults so a default deployment can
+     * move between them without discovering a different contract. The configured values themselves
+     * remain explicit: test-harness allocation limits never define production policy.</p>
      *
      * <p>{@code serializationRetries} is three because a retry only helps against a conflict that has
      * already resolved; a transaction still losing after three attempts is contending with something
@@ -68,10 +67,24 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
      * {@link StoreCapability#TRANSACTIONAL_BATCH}-preserving unavailability is a better answer to the
      * caller than an unbounded retry that hides it.</p>
      */
+    public static final PostgresStoreConfig DEFAULTS = new PostgresStoreConfig(
+            Duration.ofSeconds(5), Duration.ofSeconds(30), 3, Duration.ofMinutes(5), 1024 * 1024,
+            Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7), Duration.ofDays(7), 3);
+
+    /** Returns the one shipped typed default value retained for source compatibility. */
     public static PostgresStoreConfig defaults() {
-        return new PostgresStoreConfig(Duration.ofSeconds(5), Duration.ofSeconds(30), 3,
-                Duration.ofMinutes(5), 1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100,
-                Duration.ofDays(7), Duration.ofDays(7));
+        return DEFAULTS;
+    }
+
+    /** Source-compatible constructor for callers written before definition retry policy was explicit. */
+    public PostgresStoreConfig(Duration lockTimeout, Duration statementTimeout,
+                               int serializationRetries, Duration maxLeaseTtl, int maxPayloadBytes,
+                               Duration maxClockSkew, Duration journalRetention,
+                               int maxInventoryPageSize, Duration terminalRetention,
+                               Duration executionResultRetention) {
+        this(lockTimeout, statementTimeout, serializationRetries, maxLeaseTtl, maxPayloadBytes,
+                maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention,
+                executionResultRetention, defaults().graphDefinitionUpsertAttempts());
     }
 
     public PostgresStoreConfig {
@@ -91,6 +104,8 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
         if (statementTimeout.isZero() || statementTimeout.isNegative()) {
             throw new IllegalArgumentException("statementTimeout must be positive");
         }
+        requireJdbcMillis(lockTimeout, "lockTimeout");
+        requireJdbcMillis(statementTimeout, "statementTimeout");
         if (statementTimeout.compareTo(lockTimeout) < 0) {
             // A statement timeout below the lock timeout makes the lock timeout unreachable, so
             // contention would surface as a generic statement abort rather than as the lock-wait it
@@ -116,6 +131,9 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
         if (maxInventoryPageSize < 1) {
             throw new IllegalArgumentException("maxInventoryPageSize must be positive");
         }
+        if (maxInventoryPageSize == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("maxInventoryPageSize must leave room for pagination lookahead");
+        }
         if (terminalRetention.isZero() || terminalRetention.isNegative()) {
             throw new IllegalArgumentException("terminalRetention must be positive");
         }
@@ -130,6 +148,21 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
         }
         if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
             throw new IllegalArgumentException("executionResultRetention must be positive");
+        }
+        if (terminalRetention.compareTo(executionResultRetention) < 0) {
+            throw new IllegalArgumentException("terminalRetention " + terminalRetention
+                    + " cannot be shorter than executionResultRetention " + executionResultRetention);
+        }
+        if (graphDefinitionUpsertAttempts < 1) {
+            throw new IllegalArgumentException("graphDefinitionUpsertAttempts must be positive");
+        }
+    }
+
+    private static void requireJdbcMillis(Duration value, String name) {
+        try {
+            value.toMillis();
+        } catch (ArithmeticException unrepresentable) {
+            throw new IllegalArgumentException(name + " must fit PostgreSQL's millisecond timeout", unrepresentable);
         }
     }
 }

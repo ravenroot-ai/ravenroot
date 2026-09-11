@@ -89,12 +89,12 @@ final class AgentAuthorityBudgetCodec {
             // encoding that followed map iteration order would make two equal ledgers compare
             // unequal as bytes, which is exactly the comparison a diagnosis of "did this write
             // change anything" would reach for.
-            out.writeInt(aggregate.grants().size());
+            writeCount(out, aggregate.grants().size());
             for (Map.Entry<UUID, DurableAgentAuthorityBudget.DurableAgentGrant> entry
                     : sorted(aggregate.grants())) {
                 grant(out, entry.getValue());
             }
-            out.writeInt(aggregate.reservations().size());
+            writeCount(out, aggregate.reservations().size());
             for (Map.Entry<UUID, AgentBudgetReservation> entry : sorted(aggregate.reservations())) {
                 reservation(out, entry.getValue());
             }
@@ -327,7 +327,7 @@ final class AgentAuthorityBudgetCodec {
     }
 
     private static void strings(DataOutputStream out, Set<String> values) throws IOException {
-        out.writeInt(values.size());
+        writeCount(out, values.size());
         for (String value : values.stream().sorted().toList()) {
             text(out, value);
         }
@@ -345,7 +345,7 @@ final class AgentAuthorityBudgetCodec {
     }
 
     private static void uuids(DataOutputStream out, Set<UUID> values) throws IOException {
-        out.writeInt(values.size());
+        writeCount(out, values.size());
         for (UUID value : values.stream().sorted().toList()) {
             uuid(out, value);
         }
@@ -375,5 +375,12 @@ final class AgentAuthorityBudgetCodec {
             throw new IllegalArgumentException("invalid agent authority aggregate item count");
         }
         return value;
+    }
+
+    static void writeCount(DataOutputStream out, int value) throws IOException {
+        if (value < 0 || value > MAX_ITEMS) {
+            throw new IllegalArgumentException("agent authority aggregate has too many items");
+        }
+        out.writeInt(value);
     }
 }

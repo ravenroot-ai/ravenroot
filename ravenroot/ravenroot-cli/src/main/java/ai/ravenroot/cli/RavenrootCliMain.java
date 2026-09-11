@@ -30,7 +30,7 @@ public final class RavenrootCliMain {
         // against rather than for.
         if (args.length >= 1 && ("backup".equals(args[0]) || "restore".equals(args[0])
                 || "verify".equals(args[0]))) {
-            System.exit(runBackupRestore(args, System.getenv(), System.out, System.err));
+            System.exit(runBackupRestore(args, System.getProperties(), System.getenv(), System.out, System.err));
             return;
         }
         // Validate is intercepted for the same reason and at the same
@@ -251,6 +251,12 @@ public final class RavenrootCliMain {
      */
     static int runBackupRestore(String[] args, java.util.Map<String, String> environment,
                                 java.io.PrintStream output, java.io.PrintStream errors) {
+        return runBackupRestore(args, new java.util.Properties(), environment, output, errors);
+    }
+
+    static int runBackupRestore(String[] args, java.util.Properties properties,
+                                java.util.Map<String, String> environment,
+                                java.io.PrintStream output, java.io.PrintStream errors) {
         if (args.length != 2) {
             errors.println("Usage: ravenroot " + args[0] + " <directory>");
             return 2;
@@ -262,7 +268,7 @@ public final class RavenrootCliMain {
                 // Verification is bundle-local and must not depend on ambient live-store paths.
                 return command.verify(directory);
             }
-            if (BackupRestoreConfiguration.sharedStoreSelected(environment)) {
+            if (BackupRestoreConfiguration.sharedStoreSelected(properties, environment)) {
                 // Not "unimplemented for now". A recovery bundle is a copy of SQLite files taken
                 // under a single-host file lock, and every part of that is adapter-local
                 // administration: there are no files to copy, the lock excludes a process on this

@@ -403,6 +403,10 @@ persist in the credential database and can rotate without rebuilding GraphML. Se
 | `RAVENROOT_CREDENTIAL_DIR` | credential database directory; `./data/credentials` |
 | `RAVENROOT_ARTIFACT_STORE_DIR` | artifact database directory; `/opt/ravenroot/data/artifact-store` |
 
+The audit and execution-store directory values are trimmed. Unset or blank values delegate to the
+listed defaults in both the server and the offline backup/restore CLI, so both composition roots
+address the same files.
+
 Directory changes require restart and do not migrate existing data. Stop the service before offline
 backup or restore and use the [persistence lifecycle](../operator-guide/persistence-lifecycle.md).
 

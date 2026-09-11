@@ -110,7 +110,9 @@ class DefaultRavenrootApplicationExecutionManifestTest {
             assertEquals(submission.graphVersion(), recovered.manifest().graphContentId().value(),
                     "the manifest pins the same document address the caller was handed, so there is "
                             + "one graph identity rather than two to keep in step");
-            assertEquals(ExecutionManifest.CURRENT_FORMAT_VERSION, recovered.manifest().formatVersion());
+            assertEquals(ExecutionManifest.FORMAT_VERSION_2, recovered.manifest().formatVersion(),
+                    "a raw adapter composition remains explicitly unmanaged and does not claim the "
+                            + "server's atomic format-3 persistence protection");
             assertEquals(recovered.manifest().digest(), recovered.digest());
             assertEquals(ExecutionPolicy.STANDARD.name(), recovered.manifest().runtime().executionPolicy());
         }

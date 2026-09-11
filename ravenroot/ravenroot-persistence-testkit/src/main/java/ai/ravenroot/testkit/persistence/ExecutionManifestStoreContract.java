@@ -209,6 +209,27 @@ public abstract class ExecutionManifestStoreContract {
     }
 
     @Test
+    final void aVersionThreePersistenceCapacitySurvivesPinLoadAndReopen() {
+        ExecutionKey key = key(DEFAULT_TENANT);
+        PinnedNodePackage nodePackage = PinnedNodePackage.of("alpha.nodes", "1", "node-sdk-1");
+        ResolvedOperationalPolicy previous = operationalPolicy("alpha.nodes");
+        ResolvedOperationalPolicy policy = new ResolvedOperationalPolicy(previous.graph(), previous.results(),
+                previous.builtInHttp(), previous.nodePackages(),
+                java.util.Optional.of(new ResolvedOperationalPolicy.PersistenceLimits(1_048_576)));
+        var profile = new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through",
+                "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
+        ExecutionManifest manifest = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_3, key,
+                new GraphContentId("a".repeat(64)),
+                new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
+                profile, List.of(nodePackage), EPOCH, policy);
+
+        await(store().pin(manifest));
+        assertEquals(policy, await(store().load(key)).manifest().operationalPolicy());
+        assumeCapability(StoreCapability.DURABLE);
+        assertEquals(manifest, await(reopen().load(key)).manifest());
+    }
+
+    @Test
     final void nodePackagesSurviveTheRoundTripSortedAndComplete() {
         ExecutionKey key = key(DEFAULT_TENANT);
         List<PinnedNodePackage> packages = List.of(

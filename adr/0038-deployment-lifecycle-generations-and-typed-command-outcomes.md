@@ -207,6 +207,15 @@ published value space, which belongs to the change that owns that surface and ca
 and release notes. The divergence between the three lifecycle vocabularies is closed as documentation
 — a mapping table on `DeploymentState` — rather than by growing the published one.
 
+**D14 — Registry operating limits have one typed programmatic authority.**
+`DeploymentRegistryPolicy` owns command-ledger retention, maximum page size, maximum lease TTL and
+clock-skew allowance. The SQLite and PostgreSQL adapters accept that value directly and retain their
+source-compatible constructors by delegating to its defaults. These values are deliberately separate
+from execution-store retention, inventory and lease settings: the two stores coordinate different
+resources and changing one must not silently change the other. Ravenroot has no production registry
+composition that can truthfully bind an environment variable in this release, so embedders supply
+the typed policy and no unused deployment setting is advertised.
+
 ## Consequences
 
 - **The contract is implemented in this change; only the external surface is not.**
@@ -229,6 +238,10 @@ and release notes. The divergence between the three lifecycle vocabularies is cl
   once and then trusted everywhere. The in-tree reference adapter publishes zero, because its clock
   *is* the caller's clock, and publishing a comfortable non-zero value there would let a caller
   calibrate against a tolerance that does not exist and carry it to a durable adapter where it does.
+- **Durable registry defaults now have one source and an explicit override seam.** Existing
+  constructors continue to use seven-day command retention, page size 100, five-minute maximum lease
+  TTL and five-second skew. An embedder that needs different values passes one
+  `DeploymentRegistryPolicy`; the adapter publishes and enforces that exact policy.
 - **`DeploymentRegistry.Command` gains a component, and the pre-existing constructors keep compiling
   and keep meaning what they meant.** They supply `GenerationExpectation.any()`. An out-of-tree caller
   that deconstructs the record positionally, or implements it by pattern match on the canonical

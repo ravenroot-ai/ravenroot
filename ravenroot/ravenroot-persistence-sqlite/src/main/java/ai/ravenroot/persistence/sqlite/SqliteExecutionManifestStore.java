@@ -79,6 +79,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
     private final Path databaseFile;
     private final Clock clock;
     private final ExecutionManifestReferences references;
+    private final Runnable cleanupStarted;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Connection connection;
@@ -104,10 +105,16 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
      */
     public SqliteExecutionManifestStore(SqliteStoreLocation location, Clock clock,
                                         ExecutionManifestReferences references) {
+        this(location, clock, references, () -> {});
+    }
+
+    SqliteExecutionManifestStore(SqliteStoreLocation location, Clock clock,
+                                 ExecutionManifestReferences references, Runnable cleanupStarted) {
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.references = Objects.requireNonNull(references, "references");
+        this.cleanupStarted = Objects.requireNonNull(cleanupStarted, "cleanupStarted");
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-manifests-"
                     + this.databaseFile.getFileName());
@@ -179,6 +186,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
     public CompletionStage<Void> remove(ExecutionKey key) {
         return async(() -> {
             requireKey(key);
+            cleanupStarted.run();
             return inWriteTransaction(key, () -> {
                 if (readDigest(key) == null) {
                     throw failure(new ExecutionManifestStoreFailure.NotFound(key));
@@ -200,6 +208,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
             if (tenantId == null || tenantId.isBlank()) {
                 throw failure(new ExecutionManifestStoreFailure.InvalidRequest("tenantId cannot be blank"));
             }
+            cleanupStarted.run();
             return inWriteTransaction(null, () -> {
                 var candidates = new ArrayList<UUID>();
                 try (PreparedStatement statement = connection.prepareStatement(
@@ -305,7 +314,8 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
                             profile, readPackages(key),
                             Instant.ofEpochSecond(rows.getLong(15), rows.getInt(16)),
                             rows.getString(14) == null ? null
-                                    : ResolvedOperationalPolicy.decode(rows.getString(14)));
+                                    : ResolvedOperationalPolicy.decodeForManifest(
+                                            rows.getString(14), rows.getInt(1)));
                 } catch (IllegalArgumentException | NullPointerException malformed) {
                     throw failure(new ExecutionManifestStoreFailure.Corrupted(key,
                             String.valueOf(malformed.getMessage())));
@@ -362,7 +372,7 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
             statement.setString(14, runtime.executionLimitsDigest());
             statement.setString(15, runtime.programRuntimeDigest());
             statement.setString(16, manifest.operationalPolicy() == null
-                    ? null : manifest.operationalPolicy().encode());
+                    ? null : manifest.operationalPolicy().encodeForManifest(manifest.formatVersion()));
             statement.setLong(17, manifest.pinnedAt().getEpochSecond());
             statement.setInt(18, manifest.pinnedAt().getNano());
             statement.setLong(19, now.getEpochSecond());

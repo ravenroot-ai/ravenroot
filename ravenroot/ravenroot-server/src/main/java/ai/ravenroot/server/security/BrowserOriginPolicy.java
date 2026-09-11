@@ -39,22 +39,37 @@ public final class BrowserOriginPolicy {
     }
 
     public boolean acceptActual(HttpExchange exchange) throws IOException {
-        String origin;
-        try {
-            origin = exactOriginHeader(exchange);
-        } catch (OriginRejected handled) {
+        OriginDecision decision = evaluate(exchange.getRequestHeaders().get("Origin"));
+        if (!decision.accepted()) {
+            reject(exchange, decision.status(), decision.reason());
             return false;
         }
+        String origin = decision.origin();
         if (origin == null) {
             return true;
-        }
-        if (!allowedOrigins.contains(origin)) {
-            reject(exchange, 403, "browser origin is not allowed");
-            return false;
         }
         applyCorsResponse(exchange, origin);
         return true;
     }
+
+    /** Pure header check shared by HTTP and WebSocket handshakes. */
+    public OriginDecision evaluate(java.util.List<String> values) {
+        if (values == null || values.isEmpty()) return new OriginDecision(true, 0, null, null);
+        if (values.size() != 1) {
+            return new OriginDecision(false, 400, null, "Origin header must be unambiguous");
+        }
+        String origin;
+        try {
+            origin = canonicalOrigin(values.getFirst());
+        } catch (IllegalArgumentException invalid) {
+            return new OriginDecision(false, 400, null, "Origin header is invalid");
+        }
+        return allowedOrigins.contains(origin)
+                ? new OriginDecision(true, 0, origin, null)
+                : new OriginDecision(false, 403, null, "browser origin is not allowed");
+    }
+
+    public record OriginDecision(boolean accepted, int status, String origin, String reason) { }
 
     public boolean handlePreflight(HttpExchange exchange, Set<String> allowedMethods) throws IOException {
         if (!"OPTIONS".equals(exchange.getRequestMethod())) {

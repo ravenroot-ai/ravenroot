@@ -22,6 +22,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from check_product_version import SEMVER as PRODUCT_SEMVER, helm_errors as product_helm_errors
+except ModuleNotFoundError:  # Imported as scripts.audit_operational_configuration.
+    from scripts.check_product_version import (
+        SEMVER as PRODUCT_SEMVER,
+        helm_errors as product_helm_errors,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "scripts" / "operational-configuration-inventory.json"
@@ -137,6 +145,7 @@ DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS = {
 }
 HELM_AUTHORITY_ID = "ravenroot-helm-values-v1"
 HELM_CHART_PATH = "deploy/helm/ravenroot/Chart.yaml"
+HELM_RELEASE_CONTRACT_PATH = "scripts/check_product_version.py"
 HELM_VALUES_PATH = "deploy/helm/ravenroot/values.yaml"
 HELM_SCHEMA_PATH = "deploy/helm/ravenroot/values.schema.json"
 HELM_TEMPLATE_PATHS = (
@@ -2015,8 +2024,12 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
         elif scalar.startswith("'"):
             if len(scalar) < 2 or not scalar.endswith("'"):
                 return None
-            value = scalar[1:-1].replace("''", "'")
-        elif scalar[0] in "[{>|&*!" or " #" in scalar:
+            quoted = scalar[1:-1]
+            if "'" in quoted.replace("''", ""):
+                return None
+            value = quoted.replace("''", "'")
+        elif scalar[0] in "[{>|&*!" or " #" in scalar \
+                or re.search(r":(?:\s|$)", scalar):
             return None
         else:
             value = scalar
@@ -2028,11 +2041,10 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
             or fields["name"] != "ravenroot" \
             or fields["type"] != "application":
         return None
-    semantic_version = re.compile(
-        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-        r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
-    if semantic_version.fullmatch(fields["version"]) is None \
-            or fields["appVersion"] != fields["version"] \
+    # Release tooling owns version transitions; this proof reuses its accepted grammar and
+    # equality check while treating both values as chart metadata rather than operator settings.
+    if PRODUCT_SEMVER.fullmatch(fields["version"]) is None \
+            or product_helm_errors(fields["version"], source) \
             or re.fullmatch(r">=[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?",
                             fields["kubeVersion"]) is None:
         return None
@@ -2089,6 +2101,7 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
     try:
         values_source = (root / HELM_VALUES_PATH).read_text(encoding="utf-8")
         schema_source = (root / HELM_SCHEMA_PATH).read_text(encoding="utf-8")
+        release_contract_source = (root / HELM_RELEASE_CONTRACT_PATH).read_text(encoding="utf-8")
         schema = json.loads(schema_source)
     except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
         return None
@@ -2212,6 +2225,11 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
     return {
         "kind": "helm-values-authority-v1",
         "chartMetadata": chart_metadata,
+        "releaseVersionEvidence": {
+            "path": HELM_RELEASE_CONTRACT_PATH,
+            "fields": ["version", "appVersion"],
+            "digest": hashlib.sha256(release_contract_source.encode("utf-8")).hexdigest(),
+        },
         "valuesPath": HELM_VALUES_PATH,
         "schemaPath": HELM_SCHEMA_PATH,
         "templatePaths": list(HELM_TEMPLATE_PATHS),

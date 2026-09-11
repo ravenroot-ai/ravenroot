@@ -143,7 +143,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             authority = audit.helm_authority_from_source(ROOT, candidates)
             self.assertIsNotNone(authority)
             assert authority is not None
-            for path in {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+            for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                         audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                          *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                          authority["timeoutRuntime"]["path"]}:
                 target = root / path
@@ -164,11 +165,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ('appVersion: "0.1.0-alpha.1"\n', ""),
             ('kubeVersion: ">=1.25.0-0"\n', ""),
             ("apiVersion: v2", "apiVersion: ["),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+             "description: broken: metadata"),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+             "description: 'broken' metadata'"),
         )
         authority = audit.helm_authority_from_source(ROOT, candidates)
         self.assertIsNotNone(authority)
         assert authority is not None
-        required = {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+        required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                    audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                     *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                     authority["timeoutRuntime"]["path"]}
         for before, after in chart_mutations:
@@ -187,6 +193,21 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     errors = audit.helm_authority_errors(root, None, {}, candidates)
                     self.assertTrue(any("violate the closed authority" in error
                                         for error in errors), errors)
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            for path in required:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            chart = root / audit.HELM_CHART_PATH
+            source = chart.read_text(encoding="utf-8")
+            source = source.replace("version: 0.1.0-alpha.1",
+                                    "version: 0.1.0-alpha.1+build.7", 1)
+            source = source.replace('appVersion: "0.1.0-alpha.1"',
+                                    'appVersion: "0.1.0-alpha.1+build.7"', 1)
+            chart.write_text(source, encoding="utf-8")
+            self.assertIsNotNone(audit.helm_authority_from_source(root, candidates))
 
     def test_helm_authority_rejects_source_contract_and_executable_evidence_drift(self) -> None:
         candidates = audit.discover(ROOT)
@@ -254,7 +275,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             with self.subTest(relative=relative, before=before):
                 with tempfile.TemporaryDirectory() as location:
                     root = Path(location)
-                    required = {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH,
+                    required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                                audit.HELM_VALUES_PATH,
                                 audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                                 authority["timeoutRuntime"]["path"]}
@@ -276,7 +298,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             with self.subTest(removed=removed):
                 with tempfile.TemporaryDirectory() as location:
                     root = Path(location)
-                    required = {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH,
+                    required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                                audit.HELM_VALUES_PATH,
                                 audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                                 authority["timeoutRuntime"]["path"]}
@@ -291,7 +314,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
-            for path in {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH,
+            for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                         audit.HELM_VALUES_PATH,
                          *audit.HELM_TEMPLATE_PATHS,
                          *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
                 target = root / path

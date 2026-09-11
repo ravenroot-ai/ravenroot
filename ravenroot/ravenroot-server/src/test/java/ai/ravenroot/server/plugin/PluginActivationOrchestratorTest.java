@@ -298,6 +298,12 @@ class PluginActivationOrchestratorTest {
             @Override public TrustedIngress ingress() {
                 return issued.ingress();
             }
+            @Override public ai.ravenroot.api.deployment.RequestReplyIngress requestReply() {
+                return issued.requestReply();
+            }
+            @Override public java.util.Optional<ai.ravenroot.api.ingress.IngressRouteAuthority> ingressRoutes() {
+                return issued.ingressRoutes();
+            }
             @Override public void reportDegraded(String sanitizedReason) { }
             @Override public void reportHealthy() { }
         };

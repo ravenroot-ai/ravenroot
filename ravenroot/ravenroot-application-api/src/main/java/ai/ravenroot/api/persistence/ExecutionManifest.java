@@ -67,7 +67,13 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
      * deployment happened to install. The value is far above any plausible installation.
      */
     public static final int MAX_NODE_PACKAGES = 1_024;
-    public static final int MAX_NODE_EXTERNAL_IO_CAPACITIES = 16_384;
+    /**
+     * Largest minimum-size node-I/O table that fits the 512 KiB operational-policy envelope.
+     * Each entry occupies 90 bytes and the v4 fixed header occupies 131 bytes, so 5,823 fits while
+     * 5,824 cannot. Other policy fields still share the same aggregate byte bound and may lower the
+     * effective count for a particular manifest.
+     */
+    public static final int MAX_NODE_EXTERNAL_IO_CAPACITIES = 5_823;
 
     /** Rejects a manifest that could not stably identify what an execution was admitted against. */
     public ExecutionManifest {

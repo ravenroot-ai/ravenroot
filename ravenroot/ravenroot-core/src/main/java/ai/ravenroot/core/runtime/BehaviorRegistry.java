@@ -304,7 +304,7 @@ public final class BehaviorRegistry {
         for (GraphNode node : nodes) {
             java.util.Objects.requireNonNull(node, "node");
             if (!seenNodes.add(node.id())) throw new IllegalArgumentException("duplicate graph node id");
-            if (node.kind() != ai.ravenroot.core.graph.NodeKind.BEHAVIOR || node.behavior() == null) {
+            if (!requiresExternalIoCapacity(node)) {
                 continue;
             }
             var factory = factories.get(node.behavior());
@@ -318,7 +318,8 @@ public final class BehaviorRegistry {
     }
 
     public boolean requiresExternalIoCapacity(GraphNode node) {
-        if (node == null || node.behavior() == null) return false;
+        if (node == null || node.behavior() == null
+                || ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())) return false;
         var factory = factories.get(node.behavior());
         return factory instanceof NodePackages.SdkNodeBehaviorFactory sdk
                 && sdk.behavior() instanceof ai.ravenroot.api.node.ExecutionIoCapacityCapable;
@@ -641,21 +642,72 @@ public final class BehaviorRegistry {
                 builtInHttpCapacity, packages);
     }
 
-    /** Binds core-resolved policy to one live traversal before its first node dispatch. */
+    /** Compatibility binding for policy consumers that do not materialize node-scoped handlers. */
     void bindOperationalPolicy(ExecutionKey key, java.util.UUID traversalId,
                                ResolvedOperationalPolicy policy) {
+        bindOperationalPolicy(key, traversalId, policy, java.util.List.of(), false);
+    }
+
+    /** Binds core-resolved policy to one live traversal before its first node dispatch. */
+    void bindOperationalPolicy(ExecutionKey key, java.util.UUID traversalId,
+                               ResolvedOperationalPolicy policy,
+                               java.util.Collection<GraphNode> graphNodes,
+                               boolean materializeExecutionIo) {
         java.util.Objects.requireNonNull(key, "key");
         java.util.Objects.requireNonNull(traversalId, "traversalId");
-        ActiveOperationalPolicy candidate = new ActiveOperationalPolicy(key, policy);
+        java.util.Objects.requireNonNull(graphNodes, "graphNodes");
+        Map<String, NodeHandler> executionIoHandlers = materializeExecutionIo
+                ? executionIoHandlers(policy, graphNodes) : Map.of();
+        ActiveOperationalPolicy candidate = new ActiveOperationalPolicy(key, policy, executionIoHandlers);
         ActiveOperationalPolicy existing = activeOperationalPolicies.putIfAbsent(traversalId, candidate);
-        if (existing != null && !existing.equals(candidate)) {
+        if (existing != null && (!existing.key().equals(key)
+                || !java.util.Objects.equals(existing.policy(), policy))) {
             throw new IllegalStateException("traversal operational policy is already bound");
         }
+    }
+
+    private Map<String, NodeHandler> executionIoHandlers(ResolvedOperationalPolicy policy,
+                                                          java.util.Collection<GraphNode> graphNodes) {
+        if (policy == null) {
+            throw new ai.ravenroot.api.node.service.NodePackageServiceException(
+                    ai.ravenroot.api.node.service.NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
+        var capacities = new java.util.LinkedHashMap<String,
+                ai.ravenroot.api.node.service.NodeExternalIoCapacity>();
+        for (ResolvedOperationalPolicy.NodeIoCapacity entry : policy.nodeExternalIo()) {
+            if (capacities.putIfAbsent(entry.bindingDigest(), entry.capacity()) != null) {
+                throw new IllegalArgumentException("duplicate node external-I/O capacity binding");
+            }
+        }
+        var handlers = new java.util.LinkedHashMap<String, NodeHandler>();
+        var expected = new java.util.HashSet<String>();
+        for (GraphNode node : graphNodes) {
+            if (!requiresExternalIoCapacity(node)) continue;
+            String binding = externalIoBindingDigest(node);
+            if (!expected.add(binding)) {
+                throw new IllegalArgumentException("duplicate pin-capable node binding");
+            }
+            var capacity = java.util.Optional.ofNullable(capacities.get(binding));
+            if (capacity.isEmpty()) {
+                throw new IllegalArgumentException("external-I/O capacities do not match pin-capable graph nodes");
+            }
+            NodeHandler handler = create(node, capacity).orElseThrow(() ->
+                    new IllegalArgumentException("pin-capable graph behavior is not registered"));
+            handlers.put(binding, handler);
+        }
+        if (!capacities.keySet().equals(expected)) {
+            throw new IllegalArgumentException("external-I/O capacities do not match pin-capable graph nodes");
+        }
+        return Map.copyOf(handlers);
     }
 
     /** Releases the active traversal binding after all node instances have stopped. */
     void releaseOperationalPolicy(java.util.UUID traversalId) {
         activeOperationalPolicies.remove(java.util.Objects.requireNonNull(traversalId, "traversalId"));
+    }
+
+    int activeOperationalPolicyCount() {
+        return activeOperationalPolicies.size();
     }
 
     /**
@@ -677,7 +729,24 @@ public final class BehaviorRegistry {
         return active.policy();
     }
 
-    private record ActiveOperationalPolicy(ExecutionKey key, ResolvedOperationalPolicy policy) { }
+    /** Selects the once-per-traversal handler created from this execution's exact node pin. */
+    NodeHandler executionIoHandler(GraphNode node, ai.ravenroot.api.execution.NodeMessage message) {
+        ResolvedOperationalPolicy ignored = operationalPolicyFor(message);
+        ActiveOperationalPolicy active = activeOperationalPolicies.get(message.traversalId());
+        if (!message.nodeId().equals(node.id())) {
+            throw new ai.ravenroot.api.node.service.NodePackageServiceException(
+                    ai.ravenroot.api.node.service.NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
+        NodeHandler handler = active.executionIoHandlers().get(externalIoBindingDigest(node));
+        if (handler == null) {
+            throw new ai.ravenroot.api.node.service.NodePackageServiceException(
+                    ai.ravenroot.api.node.service.NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
+        return handler;
+    }
+
+    private record ActiveOperationalPolicy(ExecutionKey key, ResolvedOperationalPolicy policy,
+                                           Map<String, NodeHandler> executionIoHandlers) { }
 
     /** Immutable package identity paired with its quantitative service declaration. */
     public record RegisteredNodePackageBinding(PinnedNodePackage identity,

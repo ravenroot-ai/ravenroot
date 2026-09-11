@@ -4508,6 +4508,8 @@ PERSISTENCE_OPERATIONAL_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicy.java")
 PERSISTENCE_MANIFEST_DIGEST_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifestDigest.java")
+PERSISTENCE_AUTHORITY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionPersistenceAuthority.java")
 PERSISTENCE_MANIFEST_RESOLVER_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java")
 PERSISTENCE_DEFAULT_APPLICATION_PATH = Path(
@@ -4546,6 +4548,12 @@ PERSISTENCE_DIRECTORY_PARITY_TEST_PATH = Path(
     "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/server/persistence/BackupRestoreDirectoryParityTest.java")
 PERSISTENCE_SQLITE_LOCATION_TEST_PATH = Path(
     "ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteBackupRestoreTest.java")
+PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java")
+PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java")
+PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationExecutionManifestTest.java")
 
 PERSISTENCE_POSTGRES_FIELDS = (
     ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
@@ -4634,12 +4642,15 @@ def persistence_policy_authority_from_source(
         PERSISTENCE_POSTGRES_REGISTRY_PATH, PERSISTENCE_SQLITE_ARTIFACT_PATH,
         PERSISTENCE_SQLITE_EMBED_PATH, PERSISTENCE_SQLITE_EXECUTION_PATH,
         PERSISTENCE_POSTGRES_EXECUTION_PATH, PERSISTENCE_OPERATIONAL_POLICY_PATH,
-        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_PATH,
+        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_AUTHORITY_PATH,
+        PERSISTENCE_MANIFEST_RESOLVER_PATH,
         PERSISTENCE_DEFAULT_APPLICATION_PATH,
         PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
         PERSISTENCE_MANAGED_STORE_TEST_PATH, PERSISTENCE_CLI_SELECTOR_TEST_PATH,
         PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
         PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+        PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH,
+        PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
         Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
         Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
         Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -4680,6 +4691,7 @@ def persistence_policy_authority_from_source(
     postgres_execution = sources[PERSISTENCE_POSTGRES_EXECUTION_PATH]
     operational_policy = sources[PERSISTENCE_OPERATIONAL_POLICY_PATH]
     manifest_digest = sources[PERSISTENCE_MANIFEST_DIGEST_PATH]
+    persistence_authority = sources[PERSISTENCE_AUTHORITY_PATH]
     manifest_resolver = sources[PERSISTENCE_MANIFEST_RESOLVER_PATH]
     default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
     pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
@@ -4862,7 +4874,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "e6cd6a703f6daa7ed4e4f9ce498f5e33cb6bc77fbbf34f7415da44b27e8e1b62"),
+         "e0ddeb698b2f2755b9fcd57f393473609859851814d4c494d4ee0aa8209fc078"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -5176,6 +5188,21 @@ def persistence_policy_authority_from_source(
         if encode_span is not None else ""
     decode_body = normalized(strip_c_comments(operational_policy[slice(*decode_span)])) \
         if decode_span is not None else ""
+    authority_from_span = java_method_span(
+        persistence_authority, "ExecutionPersistenceAuthority", "from")
+    authority_from_body = normalized(strip_c_comments(
+        persistence_authority[slice(*authority_from_span)])) \
+        if authority_from_span is not None else ""
+    policy_for_nodes_span = java_method_span(
+        manifest_resolver, "ExecutionManifestResolver", "operationalPolicyForNodes")
+    policy_for_nodes_body = normalized(strip_c_comments(
+        manifest_resolver[slice(*policy_for_nodes_span)])) \
+        if policy_for_nodes_span is not None else ""
+    manifest_for_resolved_span = java_method_span(
+        manifest_resolver, "ExecutionManifestResolver", "manifestForResolved")
+    manifest_for_resolved_body = normalized(strip_c_comments(
+        manifest_resolver[slice(*manifest_for_resolved_span)])) \
+        if manifest_for_resolved_span is not None else ""
     operational_components = java_record_components(
         operational_policy, "ResolvedOperationalPolicy")
     persistence_argument = java_constructor_component_call(
@@ -5192,7 +5219,8 @@ def persistence_policy_authority_from_source(
     expected_managed_authority_conditions = (
         "!rows.next()",
         "!authority.manifestDigest().value().equals(rows.getString(1)) || "
-        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+        "(rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3 && "
+        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_4)",
         "pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()",
     )
     expected_selected = normalized("""selected(Map<String, String> properties,
@@ -5360,18 +5388,62 @@ def persistence_policy_authority_from_source(
                 "manifest.formatVersion()",) \
             or digest_conditions is None \
             or normalized("manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_2 || "
-                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3") \
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3 || "
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_4") \
                 not in digest_conditions \
+            or authority_from_body != normalized("""from(StoredExecutionManifest stored) {
+                Objects.requireNonNull(stored, "stored");
+                ExecutionManifest manifest = stored.manifest();
+                if ((manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3
+                        && manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_4)
+                        || manifest.operationalPolicy() == null
+                        || manifest.operationalPolicy().persistence().isEmpty()) {
+                    throw new IllegalArgumentException("execution manifest has no generic persistence capacity");
+                }
+                return new ExecutionPersistenceAuthority(stored.digest(), manifest.operationalPolicy()
+                        .persistence().orElseThrow().maximumPayloadBytes());
+            }""") \
+            or policy_for_nodes_body != normalized("""operationalPolicyForNodes(Collection<GraphNode> nodes) {
+                Objects.requireNonNull(nodes, "nodes");
+                var behaviorNames = nodes.stream().filter(node -> node.behavior() != null)
+                        .map(GraphNode::behavior).collect(java.util.stream.Collectors.toSet());
+                ResolvedOperationalPolicy base = operationalPolicyFor(behaviorNames);
+                return new ResolvedOperationalPolicy(base.graph(), base.results(), base.builtInHttp(),
+                        base.nodePackages(), base.persistence(),
+                        behaviors.nodeExternalIoCapacitiesFor(nodes));
+            }""") \
+            or manifest_for_resolved_body != normalized("""manifestForResolved(ExecutionKey key,
+                    GraphContentId graphContentId, GraphDefinitionIdentity graphIdentity,
+                    ExecutionPolicy policy, Instant pinnedAt, ResolvedOperationalPolicy operational) {
+                Objects.requireNonNull(policy, "policy");
+                Objects.requireNonNull(operational, "operational");
+                var runtime = runtime(policy, executionLimitsDigestOf(operational.graph()));
+                List<PinnedNodePackage> packages = operational.nodePackages().stream()
+                        .map(entry -> behaviors.nodePackageBinding(entry.packageId()).orElseThrow().identity())
+                        .toList();
+                return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key, graphContentId,
+                        graphIdentity, runtime, packages, pinnedAt, operational);
+            }""") \
             or persistence_argument is None \
             or normalized(persistence_argument[0]) != normalized(
                 "java.util.Optional.ofNullable(maximumPersistencePayloadBytes)"
                 " .map(ResolvedOperationalPolicy.PersistenceLimits::new)") \
             or encode_body != normalized("""encodeForManifest(int manifestFormatVersion) {
-                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2
+                        && persistence.isEmpty() && nodeExternalIo.isEmpty()
+                        && hasLegacyDecompressionAuthority()) {
                     return encodeVersion(ENCODING_VERSION_1);
                 }
-                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3 && persistence.isPresent()) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3
+                        && persistence.isPresent() && hasLegacyDecompressionAuthority()) {
+                    if (!nodeExternalIo.isEmpty()) {
+                        throw new IllegalArgumentException("manifest format 3 cannot carry new external-I/O capacity");
+                    }
                     return encodeVersion(ENCODING_VERSION_2);
+                }
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_4
+                        && hasCompleteDecompressionAuthority()) {
+                    return encodeVersion(ENCODING_VERSION_3);
                 }
                 throw new IllegalArgumentException("operational policy does not match manifest format");
             }""") \
@@ -5379,17 +5451,18 @@ def persistence_policy_authority_from_source(
                 return decodeVersion(encoded, switch (manifestFormatVersion) {
                     case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
                     case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;
+                    case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_3;
                     default -> throw new IllegalArgumentException("manifest format has no operational policy");
                 });
             }""") \
             or java_static_final_initializer(manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION") is None \
             or normalized(java_static_final_initializer(
-                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_3" \
+                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_4" \
             or any(java_static_final_initializer(manifest, "ExecutionManifest", field) is None
                    or normalized(java_static_final_initializer(
                        manifest, "ExecutionManifest", field)[0]) != value
                    for field, value in (("FORMAT_VERSION_1", "1"), ("FORMAT_VERSION_2", "2"),
-                                        ("FORMAT_VERSION_3", "3"))):
+                                        ("FORMAT_VERSION_3", "3"), ("FORMAT_VERSION_4", "4"))):
         return None
     candidate_ids = sorted(identifier for contract in contracts for identifier in contract["candidateIds"])
     if len(candidate_ids) != len(set(candidate_ids)):
@@ -5491,6 +5564,20 @@ def persistence_policy_authority_from_source(
          "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
         (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
          "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "formatFourRoundTripsExplicitPersistenceDispositionAndNodeBoundIo"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "nodeIoStructuralBoundaryFitsTheCodecAndOneMoreIsRefused"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "olderManifestCodecCannotDiscardANodeIoSnapshot"),
+        (PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH, "ExecutionManifestResolverEnginePolicyTest",
+         "formatFourPinsExactNodeIoWhileOlderRowsRefuseOnlyAffectedGraphs"),
+        (PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+         "DefaultRavenrootApplicationExecutionManifestTest",
+         "rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "exactFormatFourAuthorityCreatesAndClaimsIndividualAndRestrictedWork"),
     )
     approved_new_test_digests = {
         "anExplicitSqliteSelectorIsTheSameAsNoSelector": "ae9e843851cccb75ebfd373f4b4fc2890f59e280fbaabcee3ccee6c78aa8aeb4",

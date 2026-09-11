@@ -6,6 +6,9 @@ import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.DeploymentState;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.deployment.IngressDisposition;
+import ai.ravenroot.api.deployment.IngressReceipt;
+import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.execution.EngineCapability;
 import ai.ravenroot.api.execution.EngineState;
@@ -19,7 +22,13 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.execution.NodeStatus;
 import ai.ravenroot.api.execution.RavenNode;
 import ai.ravenroot.api.execution.Scheduler;
+import ai.ravenroot.api.ingress.IngressResponse;
+import ai.ravenroot.api.ingress.IngressRouteAuthority;
+import ai.ravenroot.api.ingress.IngressRouteLease;
+import ai.ravenroot.api.ingress.IngressRouteOwner;
+import ai.ravenroot.api.ingress.ManagedIngress;
 import ai.ravenroot.api.node.InboundSourceCapable;
+import ai.ravenroot.api.node.ManagedIngressSource;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -32,6 +41,7 @@ import ai.ravenroot.api.node.service.OutboundWebSocketListener;
 import ai.ravenroot.api.node.service.OutboundWebSocketRequest;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServicesTestFactory;
 import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
@@ -59,13 +69,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Production deployment wiring for source identities and their managed transport lifetime. */
 class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
@@ -95,6 +109,27 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
 
             InboundSourceContext secondContext = fixture.behavior.contexts.getLast();
             FakeWebSocket secondSocket = client.sockets.getLast();
+            assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED,
+                    firstContext.ingress().offer(IDENTITY, IngressTarget.start(), "stale"));
+            assertInstanceOf(IngressReceipt.Refused.class, firstContext.ingress().offerDurably(
+                    IDENTITY, IngressTarget.start(), "stale", "listener", "stale-key"));
+            assertThrows(CompletionException.class, () -> firstContext.ingress()
+                    .sourceCheckpoint(IDENTITY, "listener").toCompletableFuture().join());
+            assertThrows(CompletionException.class, () -> firstContext.ingress()
+                    .advanceSourceCheckpoint(JournalCursor.start("tenant-a", "source-authority/listener"), 1)
+                    .toCompletableFuture().join());
+            firstContext.reportDegraded("stale report");
+            assertEquals(DeploymentState.READY, fixture.deployment.status().state());
+            secondContext.reportDegraded("current report");
+            assertEquals(DeploymentState.DEGRADED, fixture.deployment.status().state());
+            firstContext.reportHealthy();
+            assertEquals(DeploymentState.DEGRADED, fixture.deployment.status().state());
+            secondContext.reportHealthy();
+            assertEquals(DeploymentState.READY, fixture.deployment.status().state());
+            assertEquals(IngressDisposition.ACCEPTED,
+                    secondContext.ingress().offer(IDENTITY, IngressTarget.start(), "current"));
+            assertInstanceOf(IngressReceipt.VolatileCustody.class, secondContext.ingress().offerDurably(
+                    IDENTITY, IngressTarget.start(), "current", "listener", "current-key"));
             fixture.deployment.shutdown().toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertEquals(1, secondSocket.aborts.get(), "undeploy must revoke the restarted source generation");
             assertSourceRefused(fixture.services, secondContext);
@@ -137,6 +172,114 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
         }
     }
 
+    @Test
+    void startFailureRevokesReadySiblingsBeforeTheCurrentRollbackCanBlock() throws Exception {
+        var client = new FakeHttpClient();
+        var fixture = fixture(SourceMode.BLOCK_SECOND_START_ROLLBACK, client, TWO_SOURCE_GRAPH);
+        try {
+            CompletableFuture<Throwable> failure = CompletableFuture.supplyAsync(() -> {
+                try {
+                    fixture.deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    return null;
+                } catch (Throwable thrown) {
+                    return thrown;
+                }
+            });
+            assertTrue(fixture.behavior.callbackEntered.await(10, TimeUnit.SECONDS),
+                    "the failed current source must enter its rollback callback");
+
+            assertEquals(2, fixture.behavior.contexts.size());
+            fixture.behavior.contexts.forEach(context -> {
+                assertSourceRefused(fixture.services, context);
+                assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED,
+                        context.ingress().offer(IDENTITY, IngressTarget.start(), "late"));
+            });
+            assertEquals(1, client.sockets.size());
+            assertEquals(1, client.sockets.getFirst().aborts.get(),
+                    "the ready sibling's handed-off session is cancelled before current rollback returns");
+
+            fixture.behavior.releaseCallback.countDown();
+            assertNotNull(failure.get(10, TimeUnit.SECONDS));
+            assertEquals(List.of("start:a-source", "start:b-source", "rollback:b-source", "rollback:a-source"),
+                    fixture.behavior.lifecycle);
+        } finally {
+            fixture.behavior.releaseCallback.countDown();
+            fixture.close();
+        }
+    }
+
+    @Test
+    void sourceStartFailureRetiresRouteAcquiredBeforeHandleOwnership() throws Exception {
+        var fixture = fixture(SourceMode.FAIL_START_AFTER_ROUTE, new FakeHttpClient(), ONE_SOURCE_GRAPH);
+        try {
+            assertThrows(Exception.class,
+                    () -> fixture.deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS));
+            assertEquals(List.of("start:listener", "rollback:listener"), fixture.behavior.lifecycle);
+            assertEquals(1, fixture.ingress.retired.size());
+            assertSourceRefused(fixture.services, fixture.behavior.contexts.getFirst());
+        } finally {
+            fixture.close();
+        }
+    }
+
+    @Test
+    void managedIngressFailureRevokesEverySiblingBeforeCallbacksAndRollsBackEachOnce() throws Exception {
+        var fixture = fixture(SourceMode.FAIL_SECOND_INGRESS_ACTIVATION, new FakeHttpClient(), TWO_SOURCE_GRAPH);
+        try {
+            CompletableFuture<Throwable> failure = CompletableFuture.supplyAsync(() -> {
+                try {
+                    fixture.deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    return null;
+                } catch (Throwable thrown) {
+                    return thrown;
+                }
+            });
+            assertTrue(fixture.behavior.callbackEntered.await(10, TimeUnit.SECONDS),
+                    "the first sibling must enter its rollback callback");
+
+            assertEquals(2, fixture.behavior.contexts.size());
+            fixture.behavior.contexts.forEach(context -> assertSourceRefused(fixture.services, context));
+            assertEquals(2, fixture.ingress.retired.size(),
+                    "every route owner must retire before the first package callback can block");
+
+            fixture.behavior.releaseCallback.countDown();
+            assertNotNull(failure.get(10, TimeUnit.SECONDS));
+            assertEquals(List.of("start:a-source", "start:b-source", "rollback:a-source", "rollback:b-source"),
+                    fixture.behavior.lifecycle,
+                    "the current source and its ready sibling are each rolled back exactly once");
+        } finally {
+            fixture.behavior.releaseCallback.countDown();
+            fixture.close();
+        }
+    }
+
+    @Test
+    void stopRevokesEverySiblingAndSessionBeforeTheFirstCallbackCanBlock() throws Exception {
+        var client = new FakeHttpClient();
+        var fixture = fixture(SourceMode.BLOCK_FIRST_STOP, client, TWO_SOURCE_GRAPH);
+        try {
+            fixture.deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            CompletableFuture<Void> stopping = CompletableFuture.runAsync(() ->
+                    fixture.deployment.stop().toCompletableFuture().join());
+            assertTrue(fixture.behavior.callbackEntered.await(10, TimeUnit.SECONDS),
+                    "the first sibling must enter its stop callback");
+
+            assertEquals(2, fixture.behavior.contexts.size());
+            fixture.behavior.contexts.forEach(context -> assertSourceRefused(fixture.services, context));
+            assertEquals(2, client.sockets.size());
+            client.sockets.forEach(socket -> assertEquals(1, socket.aborts.get(),
+                    "all handed-off sessions must be cancelled before any package callback"));
+            assertEquals(2, fixture.ingress.retired.size());
+
+            fixture.behavior.releaseCallback.countDown();
+            stopping.get(10, TimeUnit.SECONDS);
+            assertEquals(2, fixture.behavior.noOpStops.get());
+        } finally {
+            fixture.behavior.releaseCallback.countDown();
+            fixture.close();
+        }
+    }
+
     private static Fixture fixture(SourceMode mode, FakeHttpClient client, String graph) {
         var policy = NodePackageEgressPolicy.builder()
                 .allowOrigin("ws", "localhost", 80)
@@ -159,7 +302,9 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
         var deployment = new DefaultGraphDeployment(DeploymentId.of("source-authority"), engine, registry,
                 new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                 graph.getBytes(StandardCharsets.UTF_8), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
-        return new Fixture(deployment, engine, behavior, services);
+        var ingress = new RecordingIngress();
+        deployment.installManagedIngress(ingress);
+        return new Fixture(deployment, engine, behavior, services, ingress);
     }
 
     private static void assertSourceRefused(ManagedNodePackageServices services, InboundSourceContext context) {
@@ -169,13 +314,24 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
                 ((ai.ravenroot.api.node.service.NodePackageServiceException) failure.getCause()).reason());
     }
 
-    private enum SourceMode { OPEN_SOCKET, CREATE_THROW, CREATE_NULL, FAIL_SECOND_START }
+    private enum SourceMode {
+        OPEN_SOCKET,
+        CREATE_THROW,
+        CREATE_NULL,
+        FAIL_SECOND_START,
+        BLOCK_SECOND_START_ROLLBACK,
+        FAIL_START_AFTER_ROUTE,
+        FAIL_SECOND_INGRESS_ACTIVATION,
+        BLOCK_FIRST_STOP
+    }
 
     private static final class ManagedSourceBehavior implements NodeBehavior, InboundSourceCapable {
         private final SourceMode mode;
         private final List<InboundSourceContext> contexts = new CopyOnWriteArrayList<>();
         private final List<String> lifecycle = new CopyOnWriteArrayList<>();
         private final AtomicInteger noOpStops = new AtomicInteger();
+        private final CountDownLatch callbackEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseCallback = new CountDownLatch(1);
 
         private ManagedSourceBehavior(SourceMode mode) { this.mode = mode; }
 
@@ -202,13 +358,23 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
             contexts.add(context);
             if (mode == SourceMode.CREATE_THROW) throw new IllegalStateException("synthetic create failure");
             if (mode == SourceMode.CREATE_NULL) return null;
-            return new InboundSource() {
+            return new ManagedIngressSource() {
                 @Override public CompletionStage<Void> start(InboundSourceContext started) {
                     lifecycle.add("start:" + context.nodeId());
-                    if (mode == SourceMode.FAIL_SECOND_START && context.nodeId().equals("b-source")) {
+                    if (mode == SourceMode.FAIL_START_AFTER_ROUTE) {
+                        context.ingressRoutes().orElseThrow().acquire("early-route", "/early", Set.of("POST"),
+                                request -> CompletableFuture.completedFuture(
+                                        new IngressResponse(202, Map.of(), new byte[0])));
+                        return CompletableFuture.failedFuture(
+                                new IllegalStateException("synthetic failure after route acquisition"));
+                    }
+                    if ((mode == SourceMode.FAIL_SECOND_START || mode == SourceMode.BLOCK_SECOND_START_ROLLBACK)
+                            && context.nodeId().equals("b-source")) {
                         return CompletableFuture.failedFuture(new IllegalStateException("synthetic start failure"));
                     }
-                    if (mode == SourceMode.OPEN_SOCKET) {
+                    if (mode == SourceMode.OPEN_SOCKET || mode == SourceMode.BLOCK_FIRST_STOP
+                            || (mode == SourceMode.BLOCK_SECOND_START_ROLLBACK
+                                && context.nodeId().equals("a-source"))) {
                         services.outboundWebSocket().open(context, new OutboundWebSocketRequest(
                                 URI.create("ws://localhost/stream"), Map.of(), List.of(),
                                 Duration.ofSeconds(2), (OutboundCredentialBinding) null),
@@ -218,8 +384,25 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
                     return CompletableFuture.completedFuture(null);
                 }
 
+                @Override public CompletionStage<Void> activateManagedIngress(IngressRouteAuthority authority) {
+                    if (mode != SourceMode.FAIL_SECOND_INGRESS_ACTIVATION) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    authority.acquire("route-" + context.nodeId(), "/" + context.nodeId(), Set.of("POST"),
+                            request -> CompletableFuture.completedFuture(
+                                    new IngressResponse(202, Map.of(), new byte[0])));
+                    if (context.nodeId().equals("b-source")) {
+                        return CompletableFuture.failedFuture(
+                                new IllegalStateException("synthetic managed ingress activation failure"));
+                    }
+                    return CompletableFuture.completedFuture(null);
+                }
+
                 @Override public CompletionStage<Void> stop() {
                     noOpStops.incrementAndGet();
+                    if (mode == SourceMode.BLOCK_FIRST_STOP && context.nodeId().equals("a-source")) {
+                        awaitCallbackRelease();
+                    }
                     return CompletableFuture.completedFuture(null);
                 }
 
@@ -230,19 +413,54 @@ class DefaultGraphDeploymentSourceAuthorityIntegrationTest {
 
                 @Override public CompletionStage<Void> rollback() {
                     lifecycle.add("rollback:" + context.nodeId());
+                    if ((mode == SourceMode.FAIL_SECOND_INGRESS_ACTIVATION
+                            && context.nodeId().equals("a-source"))
+                            || (mode == SourceMode.BLOCK_SECOND_START_ROLLBACK
+                                && context.nodeId().equals("b-source"))) {
+                        awaitCallbackRelease();
+                    }
                     return CompletableFuture.completedFuture(null);
                 }
             };
         }
+
+        private void awaitCallbackRelease() {
+            callbackEntered.countDown();
+            try {
+                if (!releaseCallback.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("synthetic callback release timed out");
+                }
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("synthetic callback interrupted", failure);
+            }
+        }
     }
 
     private record Fixture(DefaultGraphDeployment deployment, ImmediateEngine engine,
-                           ManagedSourceBehavior behavior, ManagedNodePackageServices services)
+                           ManagedSourceBehavior behavior, ManagedNodePackageServices services,
+                           RecordingIngress ingress)
             implements AutoCloseable {
         @Override public void close() {
             try { deployment.shutdown().toCompletableFuture().get(10, TimeUnit.SECONDS); }
             catch (Exception ignored) { }
             engine.close();
+        }
+    }
+
+    private static final class RecordingIngress implements ManagedIngress {
+        private final List<IngressRouteOwner> retired = new CopyOnWriteArrayList<>();
+
+        @Override public IngressRouteAuthority authorityFor(IngressRouteOwner owner) {
+            return (routeId, relativePath, methods, handler) -> new IngressRouteLease() {
+                @Override public String routeId() { return routeId; }
+                @Override public IngressRouteOwner owner() { return owner; }
+                @Override public void release() { }
+            };
+        }
+
+        @Override public void retire(IngressRouteOwner owner) {
+            retired.add(owner);
         }
     }
 

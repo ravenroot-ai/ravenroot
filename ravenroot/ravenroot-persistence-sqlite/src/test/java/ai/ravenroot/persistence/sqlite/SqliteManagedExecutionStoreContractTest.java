@@ -76,7 +76,9 @@ class SqliteManagedExecutionStoreContractTest extends ManagedExecutionStoreContr
                      SqliteStoreLocation.ofFile(file), Clock.systemUTC(),
                      ExecutionManifestReferences.NONE, cleanupEntered::countDown)) {
             var key = new ai.ravenroot.api.persistence.ExecutionKey("acme", UUID.randomUUID());
-            var stored = await(manifests.pin(manifest(key, executions.maxPayloadBytes())));
+            var stored = await(manifests.pin(purge
+                    ? manifestV4(key, executions.maxPayloadBytes())
+                    : manifest(key, executions.maxPayloadBytes())));
             armed.set(true);
             var creation = executions.applyManaged(creationBatch(key), ExecutionPersistenceAuthority.from(stored));
             assertTrue(atCommit.await(10, TimeUnit.SECONDS));

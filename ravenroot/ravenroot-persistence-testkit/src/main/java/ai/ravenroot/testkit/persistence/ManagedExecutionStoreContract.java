@@ -80,6 +80,25 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     @Test
+    final void exactFormatFourAuthorityCreatesAndClaimsIndividualAndRestrictedWork() {
+        ExecutionKey direct = new ExecutionKey("format-four-direct", UUID.randomUUID());
+        var stored = await(bundle().manifestStore().pin(
+                manifestV4(direct, bundle().executionStore().maxPayloadBytes())));
+        ExecutionPersistenceAuthority authority = ExecutionPersistenceAuthority.from(stored);
+        assertEquals(1L, await(bundle().executionStore().applyManaged(
+                creationBatch(direct), authority)).revision());
+        assertEquals(direct, await(bundle().executionStore().claimManaged(
+                direct, "worker-1", java.time.Duration.ofSeconds(5), authority)).key());
+
+        ManagedFixture work = managedPendingWork("format-four-work", true);
+        assertEquals(List.of(work.key()), restrictedClaim(work.key().tenantId(), false,
+                Map.of(work.key(), work.authority())).stream().map(PendingWork::key).toList());
+        ManagedFixture timer = managedDueTimer("format-four-timer", true);
+        assertEquals(List.of(timer.key()), restrictedClaim(timer.key().tenantId(), true,
+                Map.of(timer.key(), timer.authority())).stream().map(PendingWork::key).toList());
+    }
+
+    @Test
     final void missingStaleAndLegacyAuthoritiesRefuseBeforeCreatingAProcess() {
         ExecutionKey missing = new ExecutionKey("acme", UUID.randomUUID());
         var invented = new ExecutionPersistenceAuthority(
@@ -253,6 +272,19 @@ public abstract class ManagedExecutionStoreContract {
                 profile(), List.of(), NOW, policy);
     }
 
+    protected static ExecutionManifest manifestV4(ExecutionKey key, int persistenceCapacity) {
+        ResolvedOperationalPolicy policy = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(), List.of(),
+                Optional.of(new ResolvedOperationalPolicy.PersistenceLimits(persistenceCapacity)),
+                List.of(new ResolvedOperationalPolicy.NodeIoCapacity("b".repeat(64),
+                        new ai.ravenroot.api.node.service.NodeExternalIoCapacity(
+                                4096, 8, java.time.Duration.ofSeconds(3), 4))));
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key,
+                new GraphContentId("a".repeat(64)),
+                new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
+                profile(), List.of(), NOW, policy);
+    }
+
     private static ExecutionManifest legacyManifest(ExecutionKey key) {
         return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_1, key,
                 new GraphContentId("a".repeat(64)),
@@ -337,11 +369,16 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     private ManagedFixture managedPendingWork(String tenantId) {
+        return managedPendingWork(tenantId, false);
+    }
+
+    private ManagedFixture managedPendingWork(String tenantId, boolean formatFour) {
         ExecutionKey key = new ExecutionKey(tenantId, UUID.randomUUID());
         UUID traversal = UUID.randomUUID();
         UUID invocation = UUID.randomUUID();
-        var stored = await(bundle().manifestStore().pin(
-                manifest(key, bundle().executionStore().maxPayloadBytes())));
+        var stored = await(bundle().manifestStore().pin(formatFour
+                ? manifestV4(key, bundle().executionStore().maxPayloadBytes())
+                : manifest(key, bundle().executionStore().maxPayloadBytes())));
         var authority = ExecutionPersistenceAuthority.from(stored);
         var created = await(bundle().executionStore().applyManaged(creationBatch(key, traversal), authority));
         await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)
@@ -360,10 +397,15 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     private ManagedFixture managedDueTimer(String tenantId) {
+        return managedDueTimer(tenantId, false);
+    }
+
+    private ManagedFixture managedDueTimer(String tenantId, boolean formatFour) {
         ExecutionKey key = new ExecutionKey(tenantId, UUID.randomUUID());
         UUID traversal = UUID.randomUUID();
-        var stored = await(bundle().manifestStore().pin(
-                manifest(key, bundle().executionStore().maxPayloadBytes())));
+        var stored = await(bundle().manifestStore().pin(formatFour
+                ? manifestV4(key, bundle().executionStore().maxPayloadBytes())
+                : manifest(key, bundle().executionStore().maxPayloadBytes())));
         var authority = ExecutionPersistenceAuthority.from(stored);
         var created = await(bundle().executionStore().applyManaged(creationBatch(key, traversal), authority));
         await(bundle().executionStore().applyManaged(ExecutionBatch.to(key)

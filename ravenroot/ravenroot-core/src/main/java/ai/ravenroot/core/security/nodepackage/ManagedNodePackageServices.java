@@ -573,7 +573,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                     capacity.maximumResponseBytes(), capacity.maximumDecompressionRatio().orElseThrow(() ->
                     refusal(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE)),
                     capacity.maximumDeadline(),
-                    Duration.ofSeconds(2), Set.of(), Set.of("identity", "gzip"));
+                    ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND,
+                    Set.of(), Set.of("identity", "gzip"));
             limits = request.limits().intersect(authority);
             if (body.length > limits.maximumRequestBytes()) {
                 return failed(NodePackageServiceException.Reason.REQUEST_TOO_LARGE);

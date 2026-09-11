@@ -1037,7 +1037,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.PERSISTENCE_SQLITE_ARTIFACT_PATH, audit.PERSISTENCE_SQLITE_EMBED_PATH,
             audit.PERSISTENCE_SQLITE_EXECUTION_PATH, audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
             audit.PERSISTENCE_OPERATIONAL_POLICY_PATH, audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
-            audit.PERSISTENCE_MANIFEST_RESOLVER_PATH, audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+            audit.PERSISTENCE_AUTHORITY_PATH, audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+            audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
             audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
             audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
             audit.PERSISTENCE_MANAGED_STORE_TEST_PATH,
@@ -1046,6 +1047,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
             audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
             audit.PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+            audit.PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH,
+            audit.PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH,
+            audit.PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
             Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
             Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
             Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -1202,9 +1206,21 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
                     "|| manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3",
                     "&& manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3")
+            rejects(audit.PERSISTENCE_AUTHORITY_PATH,
+                    "manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_4",
+                    "manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    "base.nodePackages(), base.persistence(), behaviors.nodeExternalIoCapacitiesFor(nodes)",
+                    "base.nodePackages(), java.util.Optional.empty(), behaviors.nodeExternalIoCapacitiesFor(nodes)")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    "return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key,",
+                    "return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_3, key,")
             rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
                     "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;",
                     "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_1;")
+            rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
+                    "case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_3;",
+                    "case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_2;")
             rejects(Path(
                     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
                     "@Test\n    void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()",
@@ -1213,6 +1229,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
                     "@Test\n    final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
                     "final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(audit.PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+                    "@Test\n    void rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity()",
+                    "void rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity()")
             rejects(Path(
                     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
                     "@Test\n    final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()",

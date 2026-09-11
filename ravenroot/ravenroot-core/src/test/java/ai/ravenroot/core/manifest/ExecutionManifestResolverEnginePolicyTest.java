@@ -17,6 +17,7 @@ import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.catalog.NodeBypassProperty;
 import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
@@ -112,6 +113,11 @@ class ExecutionManifestResolverEnginePolicyTest {
                                 List.of(node))).reason());
         assertEquals(old.operationalPolicy(), resolver.resolvePolicyForNodes(old,
                 ExecutionPolicy.STANDARD, List.of(GraphNode.behavior("plain", "unknown"))));
+        GraphNode bypassed = new GraphNode("socket", NodeKind.BEHAVIOR, "test.io",
+                java.util.Map.of(NodeBypassProperty.NAME, "true"));
+        assertTrue(resolver.operationalPolicyForNodes(List.of(bypassed)).nodeExternalIo().isEmpty());
+        assertEquals(old.operationalPolicy(), resolver.resolvePolicyForNodes(old,
+                ExecutionPolicy.STANDARD, List.of(bypassed)));
     }
 
     @Test

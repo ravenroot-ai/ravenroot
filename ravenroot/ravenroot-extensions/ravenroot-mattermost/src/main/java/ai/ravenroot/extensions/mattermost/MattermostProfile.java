@@ -10,6 +10,9 @@ record MattermostProfile(String tenantId, String name, URI origin, String teamId
                          String credentialBindingId, String credentialReference, String webhookTokenReference,
                          String outgoingWebhookRoute, int maxTextChars, int maxRequestBytes, int maxResponseBytes,
                          int maxConcurrency, int maxPerSecond, int requestTimeoutMs, int retries) {
+    /** Leaves transport and serialization time inside Mattermost's three-second acknowledgement window. */
+    static final int MAX_ACK_TIMEOUT_MS = 2_800;
+
     MattermostProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
         if (origin == null || !"https".equals(origin.getScheme()) || origin.getHost() == null
@@ -23,7 +26,8 @@ record MattermostProfile(String tenantId, String name, URI origin, String teamId
         if (maxTextChars < 1 || maxTextChars > 16_383 || maxRequestBytes < 1 || maxRequestBytes > 1024 * 1024
                 || maxResponseBytes < 1 || maxResponseBytes > 1024 * 1024 || maxConcurrency < 1
                 || maxConcurrency > 64 || maxPerSecond < 1 || maxPerSecond > 100
-                || requestTimeoutMs < 100 || requestTimeoutMs > 2_800 || retries < 0 || retries > 3)
+                || requestTimeoutMs < 100 || requestTimeoutMs > MAX_ACK_TIMEOUT_MS
+                || retries < 0 || retries > 3)
             throw configuration();
     }
     boolean permitsChannel(String channel) { return publicChannelIds.contains(channel); }

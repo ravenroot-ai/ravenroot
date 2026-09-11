@@ -56,6 +56,9 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
         nodePackages = List.copyOf(sorted);
         var sortedIo = new ArrayList<>(nodeExternalIo);
+        if (sortedIo.size() > ExecutionManifest.MAX_NODE_EXTERNAL_IO_CAPACITIES) {
+            throw new IllegalArgumentException("too many node external-I/O capacity entries");
+        }
         sortedIo.forEach(entry -> Objects.requireNonNull(entry, "node external-I/O capacity"));
         sortedIo.sort(java.util.Comparator.comparing(NodeIoCapacity::bindingDigest));
         var seenIo = new HashSet<String>();
@@ -102,6 +105,7 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
     /** Encodes the policy layout required by the containing manifest format. */
     public String encodeForManifest(int manifestFormatVersion) {
         if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()
+                && nodeExternalIo.isEmpty()
                 && hasLegacyDecompressionAuthority()) {
             return encodeVersion(ENCODING_VERSION_1);
         }

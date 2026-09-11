@@ -1350,16 +1350,20 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var behaviorNodes = manager.definition().nodes().stream()
                 .filter(node -> node.kind() == NodeKind.BEHAVIOR)
                 .toList();
-        var behaviorNames = behaviorNodes.stream()
-                .map(ai.ravenroot.core.graph.GraphNode::behavior).filter(java.util.Objects::nonNull)
-                .collect(java.util.stream.Collectors.toSet());
-        var manifestService = executionManifests();
-        ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy = manifestService == null ? null
-                : manifestService.policyForNodeAdmission(behaviorNodes);
-        var effectiveExecutionLimits = operationalPolicy == null ? graphExecutionLimits
-                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(operationalPolicy);
         GraphRunner runner;
+        ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy;
         try {
+            // Package capacity resolvers are third-party callbacks. Every graph/package check runs
+            // before one is invoked, and this outer cleanup boundary owns the parsed manager if
+            // either validation or policy resolution refuses.
+            GraphRunner.validateGraphAdmission(manager.definition(), behaviors, policy,
+                    graphExecutionLimits, null);
+            var manifestService = executionManifests();
+            operationalPolicy = manifestService == null ? null
+                    : manifestService.policyForNodeAdmission(behaviorNodes);
+            var effectiveExecutionLimits = operationalPolicy == null ? graphExecutionLimits
+                    : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                            operationalPolicy);
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
                     runnerShutdownStepBound, unknownBehaviors, policy, effectiveExecutionLimits,
                     operationalPolicy);

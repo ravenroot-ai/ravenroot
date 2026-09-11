@@ -97,6 +97,37 @@ class ResolvedOperationalPolicyTest {
     }
 
     @Test
+    void nodeIoStructuralBoundaryFitsTheCodecAndOneMoreIsRefused() {
+        var entries = new ArrayList<ResolvedOperationalPolicy.NodeIoCapacity>();
+        for (int index = 0; index < ExecutionManifest.MAX_NODE_EXTERNAL_IO_CAPACITIES; index++) {
+            entries.add(new ResolvedOperationalPolicy.NodeIoCapacity("%064x".formatted(index),
+                    new NodeExternalIoCapacity(1, 1, Duration.ofNanos(1), 1)));
+        }
+        var boundary = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 1), Optional.empty(), List.of(),
+                Optional.empty(), entries);
+        String encoded = boundary.encodeForManifest(ExecutionManifest.FORMAT_VERSION_4);
+        assertEquals(boundary, ResolvedOperationalPolicy.decodeForManifest(
+                encoded, ExecutionManifest.FORMAT_VERSION_4));
+
+        entries.add(new ResolvedOperationalPolicy.NodeIoCapacity("f".repeat(64),
+                new NodeExternalIoCapacity(1, 1, Duration.ofNanos(1), 1)));
+        assertThrows(IllegalArgumentException.class, () -> new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 1), Optional.empty(), List.of(),
+                Optional.empty(), entries));
+    }
+
+    @Test
+    void olderManifestCodecCannotDiscardANodeIoSnapshot() {
+        var policy = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 1), Optional.empty(), List.of(),
+                Optional.empty(), List.of(new ResolvedOperationalPolicy.NodeIoCapacity("a".repeat(64),
+                        new NodeExternalIoCapacity(1, 1, Duration.ofNanos(1), 1))));
+        assertThrows(IllegalArgumentException.class,
+                () -> policy.encodeForManifest(ExecutionManifest.FORMAT_VERSION_2));
+    }
+
+    @Test
     void formatTwoCanonicalBytesAndManifestDigestStayFixed() {
         var policy = new ResolvedOperationalPolicy(graph(),
                 new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(), List.of());

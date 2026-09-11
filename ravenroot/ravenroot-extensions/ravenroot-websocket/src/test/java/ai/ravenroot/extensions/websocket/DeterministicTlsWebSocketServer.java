@@ -28,7 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Raw RFC 6455 TLS peer: no WebSocket library can accidentally mirror production behavior. */
 final class DeterministicTlsWebSocketServer implements AutoCloseable {
-    enum Script { CAPTURE_SEND, RECEIVE_FRAGMENTS_AND_PING, REJECT_HANDSHAKE, SCRIPTED_FRAMES }
+    enum Script { CAPTURE_SEND, RECEIVE_FRAGMENTS_AND_PING, REJECT_HANDSHAKE, SCRIPTED_FRAMES,
+        HOLD_UNTIL_CLIENT_CLOSE }
     private static final char[] PASSWORD = "changeit".toCharArray();
     private static KeyStore keys;
 
@@ -106,6 +107,7 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
                     writeHandshake(peer.getOutputStream(), handshake.headers());
                     if (script == Script.CAPTURE_SEND) captureSend(peer);
                     else if (script == Script.RECEIVE_FRAGMENTS_AND_PING) receiveScript(peer);
+                    else if (script == Script.HOLD_UNTIL_CLIENT_CLOSE) holdUntilClientClose(peer);
                     else {
                         if (!scriptRelease.await(4, TimeUnit.SECONDS)) {
                             throw new IOException("script release timeout");
@@ -126,6 +128,12 @@ final class DeterministicTlsWebSocketServer implements AutoCloseable {
         ClientFrame frame = readClientFrame(peer.getInputStream());
         clientMessages.add(frame.payload());
         writeFrame(peer.getOutputStream(), 0x88, new byte[]{0x03, (byte) 0xE8});
+    }
+
+    private static void holdUntilClientClose(Socket peer) throws IOException {
+        while (peer.getInputStream().read() != -1) {
+            // A production session remains open until its revocable source scope closes it.
+        }
     }
 
     private void receiveScript(Socket peer) throws IOException {

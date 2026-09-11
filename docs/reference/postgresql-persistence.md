@@ -34,6 +34,11 @@ exists to prevent.
 one refuses startup instead of being ignored: the two name different stores, and a deployment that set
 both has not decided which it wants.
 
+The current Helm chart deploys the SQLite store only and does not expose this PostgreSQL-only bound.
+Set it directly in a PostgreSQL deployment that also supplies the supported store selector and
+connection configuration; the server rejects a nonblank value for every other store selection before
+it starts work.
+
 ### Which replica holds an execution
 
 Every claim on an execution is taken under an identity of the form `<replica>:<incarnation>/<role>`,

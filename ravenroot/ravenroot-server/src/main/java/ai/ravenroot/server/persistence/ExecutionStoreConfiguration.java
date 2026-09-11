@@ -138,6 +138,11 @@ public sealed interface ExecutionStoreConfiguration {
     static ExecutionStoreConfiguration fromEnvironment(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
         String selector = selectorIn(environment);
+        if (!POSTGRESQL_SELECTOR.equals(selector)
+                && isConfigured(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE)) {
+            throw new IllegalArgumentException(MANIFEST_PIN_ATTEMPTS_VARIABLE + " requires "
+                    + SELECTOR_VARIABLE + "=" + POSTGRESQL_SELECTOR);
+        }
         if (!enabledIn(environment)) {
             if (POSTGRESQL_SELECTOR.equals(selector)) {
                 // Refused rather than resolved in favour of one of the two. "Off" is not simply
@@ -223,6 +228,12 @@ public sealed interface ExecutionStoreConfiguration {
             default -> throw new IllegalArgumentException(ENABLED_VARIABLE
                     + " must be 'true', 'false', 'off', '0', or 'no'");
         };
+    }
+
+    /** A blank value has the same meaning as an absent optional environment setting. */
+    private static boolean isConfigured(Map<String, String> environment, String variable) {
+        String raw = environment.get(variable);
+        return raw != null && !raw.isBlank();
     }
 
     private static int positiveInt(Map<String, String> environment, String variable, int fallback) {

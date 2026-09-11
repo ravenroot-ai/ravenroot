@@ -167,7 +167,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def test_helm_authority_distinguishes_absent_partial_and_invalid_charts(self) -> None:
         with tempfile.TemporaryDirectory() as location:
-            self.assertEqual([], audit.helm_authority_errors(Path(location), None, {}, ()))
+            root = Path(location)
+            self.assertEqual([], audit.helm_authority_errors(root, None, {}, ()))
+            self.assertTrue(audit.helm_authority_errors(
+                root, {audit.HELM_AUTHORITY_ID: {}}, {}, ()))
+            self.assertTrue(audit.helm_authority_errors(
+                root, None, {"oc-owned": {"helmAuthority": audit.HELM_AUTHORITY_ID}}, ()))
 
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
@@ -1619,7 +1624,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }, selected)
 
     def test_assistant_two_limit_inventory_adapter_preserves_generic_checks(self) -> None:
-        with tempfile.TemporaryDirectory() as location:
+        # The assistant fixture has only its synthetic deployment carriers; the complete chart
+        # authority is exercised by the unmocked Helm tests.
+        with tempfile.TemporaryDirectory() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
             document, selected = self.assistant_limit_inventory_document(
@@ -2442,7 +2450,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                             for error in errors), errors)
 
     def test_environment_authority_is_candidate_driven_bijective_and_closed(self) -> None:
-        with synthetic_repository() as location:
+        # This resolver fixture uses partial carrier files, not a complete Helm chart.
+        # Keep its target-family and generic checks independent of the Helm authority tests.
+        with synthetic_repository() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             document, discovered, _source, _tests = self.environment_authority_fixture(root)
             self.assertEqual([], audit.inventory_errors(root, document, discovered))
@@ -2526,7 +2537,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("every checker-owned carrier group" in error for error in errors), errors)
 
     def test_environment_authority_source_test_and_carrier_mutations_fail(self) -> None:
-        with synthetic_repository() as location:
+        # Isolate the unrelated chart proof while mutating the synthetic environment carriers.
+        # The dedicated Helm tests exercise the production chart gate without this patch.
+        with synthetic_repository() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             document, discovered, source_path, test_path = self.environment_authority_fixture(root)
             original_source = source_path.read_text(encoding="utf-8")
@@ -2900,9 +2914,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
 
     def graph_limit_inventory_errors(self, document, candidates):
-        # This fixture intentionally contains only graph rows. Assistant's separately mandatory
-        # fixed family is covered by its own general-entrypoint tests.
-        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+        # This fixture intentionally contains only graph rows. The separately mandatory assistant
+        # and Helm authorities are covered by their own unmocked general-entrypoint tests.
+        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -4873,7 +4888,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             },
         }
         def errors(value):
-            with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+            # These two unresolved rows contain neither the assistant nor the Helm family.
+            with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "helm_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

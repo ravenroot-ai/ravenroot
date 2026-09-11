@@ -825,6 +825,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         discovered = {candidate.id: candidate for candidate in candidates}
         expected = audit.persistence_policy_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(expected)
+        self.assertEqual(40, len(expected["contracts"]))
+        self.assertEqual(87, len(expected["candidateIds"]))
+        self.assertEqual(
+            {
+                "execution.store.selector", "execution.store.url", "execution.store.user",
+                "execution.store.password", "execution.store.pool-size",
+                "execution.store.pool-timeout", "execution.worker-id", "execution.lease-ttl",
+            },
+            {contract["setting"] for contract in expected["contracts"][-8:]},
+        )
         entries = {}
         contracts = {identifier: contract for contract in expected["contracts"]
                      for identifier in contract["candidateIds"]}
@@ -843,6 +853,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
             )
             entries[identifier] = entry
+        hikari_minimum = "oc-0c1ca37de0bb555b5298"
+        self.assertNotIn(hikari_minimum, expected["candidateIds"])
+        minimum_entry = discovered[hikari_minimum].inventory_entry()
+        minimum_entry.update(
+            status="retained", classification="protocol-or-format-invariant",
+            rationale="HikariCP's minimum accepted pool-acquisition timeout is a fixed dependency contract.",
+        )
+        entries[hikari_minimum] = minimum_entry
         authorities = {audit.PERSISTENCE_POLICY_AUTHORITY_ID: expected}
         self.assertEqual([], audit.persistence_policy_authority_errors(
             ROOT, authorities, entries, discovered))
@@ -853,8 +871,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ROOT, missing, entries, discovered))
         relabelled = copy.deepcopy(entries)
         for entry in relabelled.values():
-            entry.pop("persistenceAuthority")
-            entry.update(status="retained", classification="protocol-or-format-invariant")
+            if entry["id"] in contracts:
+                entry.pop("persistenceAuthority")
+                entry.update(status="retained", classification="protocol-or-format-invariant")
         self.assertTrue(any("partition" in error for error in
                             audit.persistence_policy_authority_errors(
                                 ROOT, authorities, relabelled, discovered)))
@@ -863,6 +882,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         first["defaultEvidence"] = "not-an-array"
         self.assertTrue(audit.persistence_policy_authority_errors(
             ROOT, authorities, malformed, discovered))
+        duplicated = copy.deepcopy(authorities)
+        duplicated_contract = duplicated[audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"][-1]
+        duplicated_contract["candidateIds"].append(duplicated_contract["candidateIds"][0])
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, duplicated, entries, discovered))
+        missing_contract = copy.deepcopy(authorities)
+        missing_contract[audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"].pop()
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, missing_contract, entries, discovered))
         missing_entry = copy.deepcopy(entries)
         missing_entry.pop(next(iter(missing_entry)))
         self.assertTrue(any("current source candidate set is incomplete" in error for error in
@@ -925,6 +953,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         paths = (
             audit.PERSISTENCE_POSTGRES_CONFIG_PATH, audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
             audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+            audit.PERSISTENCE_SHARED_CONNECTION_PATH, audit.PERSISTENCE_SHARED_DATASOURCE_PATH,
+            audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+            audit.PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
+            audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
             audit.PERSISTENCE_REGISTRY_POLICY_PATH, audit.PERSISTENCE_IN_MEMORY_POLICY_PATH,
             audit.PERSISTENCE_SQLITE_CONFIG_PATH, audit.PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
             audit.PERSISTENCE_QUERY_PATH, audit.PERSISTENCE_MANAGED_STORE_PATH,
@@ -935,8 +967,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.PERSISTENCE_SQLITE_EXECUTION_PATH, audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
             audit.PERSISTENCE_OPERATIONAL_POLICY_PATH, audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
             audit.PERSISTENCE_MANIFEST_RESOLVER_PATH, audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
-            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
-            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java"),
+            audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_MANAGED_STORE_TEST_PATH,
+            audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
             Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
             Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
             Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -981,6 +1015,70 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
                     "|| isConfigured(properties, POOL_TIMEOUT_PROPERTY);",
                     "|| false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "return SQLITE_SELECTOR;", "return POSTGRESQL_SELECTOR;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'String SQLITE_SELECTOR = "sqlite";',
+                    'String SQLITE_SELECTOR = "single-host";')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'String POSTGRESQL_SELECTOR = "postgresql";',
+                    'String POSTGRESQL_SELECTOR = "shared";')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    ".orElseThrow(() -> new IllegalArgumentException(",
+                    ".orElseGet(() -> String.valueOf(")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    'private static final String REQUIRED_URL_PREFIX = "jdbc:postgresql:";',
+                    'private static final String REQUIRED_URL_PREFIX = "jdbc:";')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "if (!url.startsWith(REQUIRED_URL_PREFIX)) {",
+                    "if (!url.endsWith(REQUIRED_URL_PREFIX)) {")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "trimmed(environment, ExecutionStoreConfiguration.USER_VARIABLE),",
+                    "Optional.ofNullable(environment.get(ExecutionStoreConfiguration.USER_VARIABLE)),")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "Optional.ofNullable(environment.get(ExecutionStoreConfiguration.PASSWORD_VARIABLE)),",
+                    "trimmed(environment, ExecutionStoreConfiguration.PASSWORD_VARIABLE),")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    'return "SharedStoreConnection[url=<redacted>, user="',
+                    'return "SharedStoreConnection[url=" + url + ", user="')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final int DEFAULT_POOL_SIZE = 10;",
+                    "private static final int DEFAULT_POOL_SIZE = 11;")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final int MAX_POOL_SIZE = 1_000;",
+                    "private static final int MAX_POOL_SIZE = 999;")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(250);",
+                    "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(251);")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "connection.poolTimeout().compareTo(storeConfig.statementTimeout()) >= 0",
+                    "connection.poolTimeout().compareTo(storeConfig.statementTimeout()) > 0")
+            rejects(audit.PERSISTENCE_SHARED_DATASOURCE_PATH,
+                    "config.setMaximumPoolSize(connection.poolSize());",
+                    "config.setMaximumPoolSize(10);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "? hostName() : configured.trim();",
+                    "? UNRESOLVED_REPLICA_NAME : configured.trim();")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "WorkerIdentity.of(replicaName, WorkerIdentity.Role.RUNTIME);",
+                    "WorkerIdentity.of(replicaName, WorkerIdentity.Role.RECOVERY);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "return WorkerIdentity.of(replicaName, WorkerIdentity.Role.RECOVERY);",
+                    "return WorkerIdentity.of(replicaName, WorkerIdentity.Role.RUNTIME);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "return ExecutionOwnership.DEFAULT_LEASE_TTL;",
+                    "return Duration.ofSeconds(1);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "if (seconds < 1) {", "if (seconds < 0) {")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "if (leaseTtl.compareTo(store.maxLeaseTtl()) > 0) {",
+                    "if (leaseTtl.compareTo(store.maxLeaseTtl()) >= 0) {")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "executionOwnershipConfiguration.requireCompatible(managedExecutionStore);",
+                    "/* ownership compatibility omitted */")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "return raw != null && SHARED_STORE_SELECTOR.equals(raw.trim().toLowerCase(java.util.Locale.ROOT));",
+                    "return false;")
             rejects(audit.PERSISTENCE_POSTGRES_CONFIG_PATH,
                     "Duration.ofSeconds(30), 3", "Duration.ofSeconds(31), 3")
             rejects(audit.PERSISTENCE_REGISTRY_POLICY_PATH,
@@ -1038,6 +1136,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
                     "@Test\n    final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
                     "final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void aPasswordIsNotTrimmedBecauseItIsOpaque()",
+                    "void aPasswordIsNotTrimmedBecauseItIsOpaque()")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct()",
+                    "void theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct()")
+            rejects(audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+                    "@Test\n    void theSelectorSpellingMatchesTheServersOwn()",
+                    "void theSelectorSpellingMatchesTheServersOwn()")
 
             test_path = root / Path(
                 "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
@@ -1046,6 +1153,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertIsNone(audit.persistence_policy_authority_from_source(
                 root, {candidate.id: candidate for candidate in audit.discover(root)}))
             test_path.write_bytes(test_bytes)
+            ownership_path = root / audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH
+            ownership_bytes = ownership_path.read_bytes()
+            ownership_path.unlink()
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+            ownership_path.write_bytes(ownership_bytes)
             resolver.unlink()
             self.assertTrue(audit.persistence_policy_source_present(root))
             self.assertIsNone(audit.persistence_policy_authority_from_source(

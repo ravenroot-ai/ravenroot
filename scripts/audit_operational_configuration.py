@@ -4474,6 +4474,16 @@ PERSISTENCE_POSTGRES_RESOLVER_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java")
 PERSISTENCE_STORE_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
+PERSISTENCE_SHARED_CONNECTION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/SharedStoreConnection.java")
+PERSISTENCE_SHARED_DATASOURCE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/SharedExecutionStoreDataSource.java")
+PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfiguration.java")
+PERSISTENCE_EXECUTION_OWNERSHIP_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionOwnership.java")
+PERSISTENCE_BACKUP_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/BackupRestoreConfiguration.java")
 PERSISTENCE_REGISTRY_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicy.java")
 PERSISTENCE_IN_MEMORY_POLICY_PATH = Path(
@@ -4514,6 +4524,14 @@ PERSISTENCE_SQLITE_EXECUTION_PATH = Path(
     "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionStore.java")
 PERSISTENCE_POSTGRES_EXECUTION_PATH = Path(
     "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresExecutionStore.java")
+PERSISTENCE_STORE_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java")
+PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfigurationTest.java")
+PERSISTENCE_MANAGED_STORE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
+PERSISTENCE_CLI_SELECTOR_TEST_PATH = Path(
+    "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/cli/SharedStoreBundleRefusalTest.java")
 
 PERSISTENCE_POSTGRES_FIELDS = (
     ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
@@ -4587,7 +4605,10 @@ def persistence_policy_authority_from_source(
     """Derive the closed persistence policy from typed declarations and executable consumers."""
     paths = (
         PERSISTENCE_POSTGRES_CONFIG_PATH, PERSISTENCE_POSTGRES_RESOLVER_PATH,
-        PERSISTENCE_STORE_CONFIGURATION_PATH,
+        PERSISTENCE_STORE_CONFIGURATION_PATH, PERSISTENCE_SHARED_CONNECTION_PATH,
+        PERSISTENCE_SHARED_DATASOURCE_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+        PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
+        PERSISTENCE_BACKUP_CONFIGURATION_PATH,
         PERSISTENCE_REGISTRY_POLICY_PATH, PERSISTENCE_IN_MEMORY_POLICY_PATH,
         PERSISTENCE_SQLITE_CONFIG_PATH, PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
         PERSISTENCE_QUERY_PATH, PERSISTENCE_MANAGED_STORE_PATH, PERSISTENCE_MANIFEST_PATH,
@@ -4598,8 +4619,8 @@ def persistence_policy_authority_from_source(
         PERSISTENCE_POSTGRES_EXECUTION_PATH, PERSISTENCE_OPERATIONAL_POLICY_PATH,
         PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_PATH,
         PERSISTENCE_DEFAULT_APPLICATION_PATH,
-        Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
-        Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java"),
+        PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+        PERSISTENCE_MANAGED_STORE_TEST_PATH, PERSISTENCE_CLI_SELECTOR_TEST_PATH,
         Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
         Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
         Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -4614,6 +4635,11 @@ def persistence_policy_authority_from_source(
     pg = sources[PERSISTENCE_POSTGRES_CONFIG_PATH]
     resolver = sources[PERSISTENCE_POSTGRES_RESOLVER_PATH]
     store_configuration = sources[PERSISTENCE_STORE_CONFIGURATION_PATH]
+    shared_connection = sources[PERSISTENCE_SHARED_CONNECTION_PATH]
+    shared_data_source = sources[PERSISTENCE_SHARED_DATASOURCE_PATH]
+    ownership_configuration = sources[PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH]
+    execution_ownership = sources[PERSISTENCE_EXECUTION_OWNERSHIP_PATH]
+    backup_configuration = sources[PERSISTENCE_BACKUP_CONFIGURATION_PATH]
     registry = sources[PERSISTENCE_REGISTRY_POLICY_PATH]
     in_memory = sources[PERSISTENCE_IN_MEMORY_POLICY_PATH]
     sqlite = sources[PERSISTENCE_SQLITE_CONFIG_PATH]
@@ -4773,6 +4799,265 @@ def persistence_policy_authority_from_source(
         "bindings": ["ProcessInventoryQuery.Builder.limit(int)"], "defaultExpression": "50",
         "defaultCandidateIds": query_ids, "candidateIds": query_ids,
     })
+    # The eight deployment/composition settings below deliberately do not use the generic numeric
+    # record-component authorities.  Their executable contracts include a sealed selector, opaque
+    # credentials, a split pool policy, and a dynamic worker-name fallback.  Each exact method digest
+    # is an approved source shape: changing behavior cannot be blessed merely by refreshing the
+    # generated whole-file digest in inventory metadata.
+    approved_method_digests = (
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "fromSources",
+         "a039ad53983628039513d754eab7915736c73ae4fd62d5a3622070cae12ecf3d"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "selectorIn",
+         "7c2c5afebf35bf617e1cc3ed71e83f8ee0389484a80a32457ffdc2af54ef6af7"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "fromSources",
+         "3894af506beb3e9023fed14ef15e2096216d9e0fc0ee28953cc455c7a0184c00"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "poolSize",
+         "5e5b3ffa3add995faacc61f53bc2fe3e584face1c8b327a433d42da459300e96"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "poolTimeout",
+         "a88b3622bfc4791c7f08909a9987798ee154761db1caa70171f57af3af5c7bf0"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "selected",
+         "2ea7879f6b19fa0afcc348c0770bf5aba14c54dc6510de8b43ac5f6b49eee292"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "trimmed",
+         "a021259e23c302f4aaa3ac554251fb3d69322adf9b6b7eecfdfe5d243d8955f0"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "toString",
+         "01bc141b77a1150809f3100afdecf1b73408d7474b5d0341e02c9b77a912c6cd"),
+        (PERSISTENCE_SHARED_DATASOURCE_PATH, "SharedExecutionStoreDataSource", "open",
+         "6e2620dbfe05f4053025efecc0603b2dc2558d34a1388841088b9370098fa3b1"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "fromSources",
+         "a885517152cb34299e887fdc594001c67452c06f0602e3436ae32f527bddf6b0"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "leaseTtl",
+         "9e579c6bc82463894d8fc9ae854fad7ae8716b033d7ef01ec2f9fc23bcfbe81b"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "selected",
+         "d55b771b9e9e35402eeb5b2e54e9a4308bb2135e6da4309b77273d12cdd5a5f9"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "hostName",
+         "e239183f35515e56f755cebcf261b0ca55580f63c6959ee216e58b2a72686372"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "usableName",
+         "adf5c56cd390d84d4ea30aff6e5cf99d793eadc4e9d540022f303dd8fb7b88c5"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "runtimeOwnership",
+         "73754fdc86f588dcfdc0494242240230bfa7f923490fc1df482b13ac432b5b45"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "recoveryIdentity",
+         "79a701c248ce4e2af942ee2fd859ac90c724d223b3477df8c2f184355d99e2be"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
+         "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
+        (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
+         "c2851473a359b2e420d1de38789179322df8b2a6cd5e5ddce8daa086d6654d13"),
+    )
+    if any(java_method_digest(sources[path], type_symbol, method) != digest
+           for path, type_symbol, method, digest in approved_method_digests):
+        return None
+    configuration_span = java_type_span(store_configuration, "ExecutionStoreConfiguration")
+    configuration_type = strip_c_comments(
+        store_configuration[slice(*configuration_span)] if configuration_span is not None else "")
+    selector_constants_exact = all(len(re.findall(
+        rf'\bString\s+{field}\s*=\s*"{re.escape(value)}"\s*;', configuration_type)) == 1
+        for field, value in (("SQLITE_SELECTOR", "sqlite"),
+                             ("POSTGRESQL_SELECTOR", "postgresql")))
+    compact = java_compact_constructor_span(shared_connection, "SharedStoreConnection")
+    if compact is None or java_span_digest(shared_connection, compact) != \
+            "def1d81068a369cafbe90d4975eb1fc57067f20be43bdf211a45e059dd95c864" \
+            or _source_digest(backup_configuration) != \
+            "1135a6c722286014f9c3a43f8b8d015b4ab1eaab5cd55f03bea43558542a7ef6" \
+            or not selector_constants_exact \
+            or java_static_final_initializer(
+                shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX") is None \
+            or normalized(java_static_final_initializer(
+                shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX")[0]) != \
+            '"jdbc:postgresql:"':
+        return None
+    lease_default = java_static_final_initializer(
+        execution_ownership, "ExecutionOwnership", "DEFAULT_LEASE_TTL")
+    if lease_default is None or normalized(lease_default[0]) != "Duration.ofSeconds(30)":
+        return None
+
+    def exact_ids(specs: tuple[tuple[Path, str, str, str], ...]) -> list[str] | None:
+        identifiers: list[str] = []
+        for path, kind, expression, role in specs:
+            matched = sorted(candidate.id for candidate in discovered.values()
+                             if candidate.path == path.as_posix() and candidate.kind == kind
+                             and candidate.expression == expression and candidate.role == role)
+            if len(matched) != 1:
+                return None
+            identifiers.extend(matched)
+        return identifiers if len(identifiers) == len(set(identifiers)) else None
+
+    selector_ids = exact_ids((
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE", "RAVENROOT_EXECUTION_STORE"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_STORE"', "STORE_SELECTOR_VARIABLE"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"postgresql"', "SHARED_STORE_SELECTOR"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution-store"', "STORE_SELECTOR_PROPERTY"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store", "ravenroot.execution-store"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE", "RAVENROOT_EXECUTION_STORE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store", "ravenroot.execution-store"),
+    ))
+    url_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                          "RAVENROOT_EXECUTION_STORE_URL", "RAVENROOT_EXECUTION_STORE_URL"),))
+    user_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                           "RAVENROOT_EXECUTION_STORE_USER", "RAVENROOT_EXECUTION_STORE_USER"),))
+    password_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                               "RAVENROOT_EXECUTION_STORE_PASSWORD",
+                               "RAVENROOT_EXECUTION_STORE_PASSWORD"),))
+    pool_size_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_POOL_SIZE", "RAVENROOT_EXECUTION_STORE_POOL_SIZE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_POOL_SIZE"', "POOL_SIZE_VARIABLE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "10", "DEFAULT_POOL_SIZE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "1_000", "MAX_POOL_SIZE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"ravenroot.execution-store.pool-size"', "POOL_SIZE_PROPERTY"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store.pool-size", "ravenroot.execution-store.pool-size"),
+    ))
+    pool_timeout_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS", "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"', "POOL_TIMEOUT_VARIABLE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "10", "DEFAULT_POOL_TIMEOUT"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "250", "MIN_POOL_TIMEOUT"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"ravenroot.execution-store.pool-timeout-ms"', "POOL_TIMEOUT_PROPERTY"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store.pool-timeout-ms",
+         "ravenroot.execution-store.pool-timeout-ms"),
+    ))
+    worker_ids = exact_ids((
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_WORKER_ID", "RAVENROOT_WORKER_ID"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_WORKER_ID"', "WORKER_ID_VARIABLE"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution.worker-id"', "WORKER_ID_PROPERTY"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution.worker-id", "ravenroot.execution.worker-id"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"unnamed-replica"', "UNRESOLVED_REPLICA_NAME"),
+    ))
+    lease_ids = exact_ids((
+        (PERSISTENCE_EXECUTION_OWNERSHIP_PATH, "fixed-declaration", "30", "DEFAULT_LEASE_TTL"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS", "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"', "LEASE_TTL_VARIABLE"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution.lease-ttl-seconds"', "LEASE_TTL_PROPERTY"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution.lease-ttl-seconds", "ravenroot.execution.lease-ttl-seconds"),
+    ))
+    if any(group is None for group in (selector_ids, url_ids, user_ids, password_ids,
+                                       pool_size_ids, pool_timeout_ids, worker_ids, lease_ids)):
+        return None
+    assert selector_ids is not None and url_ids is not None and user_ids is not None \
+        and password_ids is not None and pool_size_ids is not None \
+        and pool_timeout_ids is not None and worker_ids is not None and lease_ids is not None
+    # MIN_POOL_TIMEOUT mirrors HikariCP's own admissibility floor.  It is source evidence for the
+    # parser's validation, but it is neither an operator default nor part of the operator setting's
+    # candidate partition; inventory retains that atom as a fixed dependency contract.
+    pool_timeout_contract_ids = [identifier for index, identifier in enumerate(pool_timeout_ids)
+                                 if index != 3]
+    contracts.extend((
+        {
+            "setting": "execution.store.selector",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+            "field": "selector", "bindings": ["ravenroot.execution-store", "RAVENROOT_EXECUTION_STORE"],
+            "defaultExpression": "SQLITE_SELECTOR", "defaultKind": "closed-variant-fallback",
+            "defaultCandidateIds": [selector_ids[5]],
+            "candidateIds": sorted(selector_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#sharedStoreSelected",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates; absent selects sqlite; only sqlite or postgresql is accepted; CLI spelling and refusal match the server.",
+        },
+        {
+            "setting": "execution.store.url",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "url", "bindings": ["RAVENROOT_EXECUTION_STORE_URL"],
+            "defaultExpression": "required for postgresql; no fallback",
+            "defaultKind": "required-no-fallback",
+            "defaultCandidateIds": url_ids, "candidateIds": url_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Required only for postgresql and accepted only with the jdbc:postgresql: prefix; diagnostics do not echo the value.",
+        },
+        {
+            "setting": "execution.store.user",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "user", "bindings": ["RAVENROOT_EXECUTION_STORE_USER"],
+            "defaultExpression": "Optional.empty() when absent or blank",
+            "defaultKind": "optional-absent",
+            "defaultCandidateIds": user_ids, "candidateIds": user_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "An optional nonblank role is trimmed; absence delegates authentication to the URL or server.",
+        },
+        {
+            "setting": "execution.store.password",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "password", "bindings": ["RAVENROOT_EXECUTION_STORE_PASSWORD"],
+            "defaultExpression": "Optional.empty() only when absent",
+            "defaultKind": "optional-absent-opaque", "valueHandling": "secret-verbatim-redacted",
+            "defaultCandidateIds": password_ids, "candidateIds": password_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "The optional secret is opaque and every present value, including empty or whitespace, is preserved verbatim and redacted from rendering.",
+        },
+        {
+            "setting": "execution.store.pool-size",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "poolSize", "bindings": ["ravenroot.execution-store.pool-size",
+                                                  "RAVENROOT_EXECUTION_STORE_POOL_SIZE"],
+            "defaultExpression": "10", "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [pool_size_ids[2]],
+            "candidateIds": sorted(pool_size_ids),
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Property overrides environment; blank delegates to 10; accepted range is 1 through 1000 and the resolved value configures the pool.",
+        },
+        {
+            "setting": "execution.store.pool-timeout",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "poolTimeout", "bindings": ["ravenroot.execution-store.pool-timeout-ms",
+                                                    "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"],
+            "defaultExpression": "Duration.ofSeconds(10)",
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [pool_timeout_ids[2]],
+            "candidateIds": sorted(pool_timeout_contract_ids),
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Property overrides environment; blank delegates to 10 seconds; at least 250 ms and strictly below the resolved statement timeout; the resolved duration configures the pool.",
+        },
+        {
+            "setting": "execution.worker-id",
+            "owner": f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#ExecutionOwnershipConfiguration",
+            "field": "replicaName", "bindings": ["ravenroot.execution.worker-id", "RAVENROOT_WORKER_ID"],
+            "defaultExpression": "usable host name or UNRESOLVED_REPLICA_NAME",
+            "defaultKind": "dynamic-host-fallback",
+            "defaultCandidateIds": [worker_ids[4]], "candidateIds": sorted(worker_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#runtimeOwnership",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#recoveryIdentity",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates to a validated host name or unnamed-replica; runtime and recovery identities have distinct roles.",
+        },
+        {
+            "setting": "execution.lease-ttl",
+            "owner": f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#ExecutionOwnershipConfiguration",
+            "field": "leaseTtl", "bindings": ["ravenroot.execution.lease-ttl-seconds",
+                                                "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"],
+            "defaultExpression": "ExecutionOwnership.DEFAULT_LEASE_TTL (Duration.ofSeconds(30))",
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [lease_ids[0]], "candidateIds": sorted(lease_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#requireCompatible",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates to 30 seconds; positive whole seconds, above store skew and no greater than store max lease; used by runtime and recovery claims.",
+        },
+    ))
     # Each relation below is extracted from an executable method or direct field assignment.  Whole
     # file digests are retained as provenance, but cannot by themselves approve a changed consumer.
     selected_body = normalized(strip_c_comments(
@@ -4946,32 +5231,101 @@ def persistence_policy_authority_from_source(
     candidate_ids = sorted(identifier for contract in contracts for identifier in contract["candidateIds"])
     if len(candidate_ids) != len(set(candidate_ids)):
         return None
-    test_paths = paths[-8:]
     test_methods = (
-        (test_paths[0], "ExecutionStoreConfigurationTest", "postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound"),
-        (test_paths[0], "ExecutionStoreConfigurationTest", "everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily"),
-        (test_paths[0], "ExecutionStoreConfigurationTest", "poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate"),
-        (test_paths[1], "ManagedExecutionStoreTest", "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
-        (test_paths[1], "ManagedExecutionStoreTest", "boundedSweepsAdvancePastEightIncompatiblePages"),
-        (test_paths[1], "ManagedExecutionStoreTest", "everyExecutionStoreMethodHasAnExplicitManagedRoute"),
-        (test_paths[2], "DeploymentRegistryPolicyTest", "defaultsAreOneTypedDurableRegistryDecision"),
-        (test_paths[3], "InMemoryExecutionStorePolicyTest", "explicitPolicyControlsTheReferenceStoreWithoutClaimingManagedPersistence"),
-        (test_paths[4], "SqliteConnectionPolicyTest", "oneTypedPolicyControlsArtifactAndEmbedConnectionWaits"),
-        (test_paths[5], "ManagedExecutionStoreContract", "fencingThenMatchingReplayPrecedeAChangedLiveCapacityCheck"),
-        (test_paths[5], "ManagedExecutionStoreContract", "individualManagedClaimsRefuseMissingStaleAndLegacyAuthorityWithoutLeasing"),
-        (test_paths[5], "ManagedExecutionStoreContract", "individualManagedClaimRefusesReopenedCapacityDriftWithoutLeasing"),
-        (test_paths[5], "ManagedExecutionStoreContract", "restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
-        (test_paths[5], "ManagedExecutionStoreContract", "restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
-        (test_paths[6], "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
-        (test_paths[6], "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
-        (test_paths[7], "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
-        (test_paths[7], "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "anExplicitSqliteSelectorIsTheSameAsNoSelector"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "anUnknownSelectorFailsClosedWithoutEchoingIt"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "theSharedStoreRequiresAUrlAndRefusesAnotherDriversUrl"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "poolSettingsDefaultAndAreBoundedOnBothSides"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "theConnectionNeverRendersItsUrlOrPassword"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "aPasswordIsNotTrimmedBecauseItIsOpaque"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theTtlDefaultsToTheValueThatUsedToBeHardCoded"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "aMalformedTtlFailsClosedRatherThanFallingBackToTheDefault"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "anUnsetNameStillProducesAUsableIdentity"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "aMalformedNameIsRefusedAgainstTheVariableTheOperatorSet"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theTtlIsCheckedAgainstTheComposedStoresOwnPublishedBounds"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "theSelectorSpellingMatchesTheServersOwn"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "selectorPropertyOverridesEnvironmentForBundleRefusal"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "backupAndRestoreAreRefusedUnderTheSharedStore"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "boundedSweepsAdvancePastEightIncompatiblePages"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "everyExecutionStoreMethodHasAnExplicitManagedRoute"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+         "DeploymentRegistryPolicyTest", "defaultsAreOneTypedDurableRegistryDecision"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+         "InMemoryExecutionStorePolicyTest", "explicitPolicyControlsTheReferenceStoreWithoutClaimingManagedPersistence"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+         "SqliteConnectionPolicyTest", "oneTypedPolicyControlsArtifactAndEmbedConnectionWaits"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "fencingThenMatchingReplayPrecedeAChangedLiveCapacityCheck"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "individualManagedClaimsRefuseMissingStaleAndLegacyAuthorityWithoutLeasing"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "individualManagedClaimRefusesReopenedCapacityDriftWithoutLeasing"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
     )
+    approved_new_test_digests = {
+        "anExplicitSqliteSelectorIsTheSameAsNoSelector": "ae9e843851cccb75ebfd373f4b4fc2890f59e280fbaabcee3ccee6c78aa8aeb4",
+        "anUnknownSelectorFailsClosedWithoutEchoingIt": "3c048de0c904f8f210a2e89b0c0e05f9c884e177f045df0268d7aba80e37329e",
+        "theSharedStoreRequiresAUrlAndRefusesAnotherDriversUrl": "18ce8ec8f9490e849603cd0ef1bb914974a27a96d9ad4bb537541683581ba541",
+        "poolSettingsDefaultAndAreBoundedOnBothSides": "1956e0e920ab339bc87c2f5066009ca91e80800ad60142ccab895b20aadad6fe",
+        "theConnectionNeverRendersItsUrlOrPassword": "917716431ddb7e3291a12f59921917b224d4c22d5642547dfda6ed07cd6a32a9",
+        "aPasswordIsNotTrimmedBecauseItIsOpaque": "e5bc520883ba15972c312eecfed1150202a3094b86fd37d78c0b6497aa0df345",
+        "theTtlDefaultsToTheValueThatUsedToBeHardCoded": "07ad8a3b60da4835e6262575c5c48e303c7682ce61c5190f241299d89a8c7914",
+        "ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate": "b3133e9a0c521aab63f5ccbef19974bb614cf29f7e8190528c5fdb0bbfe91517",
+        "aMalformedTtlFailsClosedRatherThanFallingBackToTheDefault": "aba1426f81a999845f700f745fc52e986d8bb71587db4b6efa0596b97a887cd1",
+        "theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct": "d94ce04c84dbd4215f0a79072398ef44b4b0c093929414796021263db88aa178",
+        "anUnsetNameStillProducesAUsableIdentity": "3be679136b89ee7081de5a8150c0b4ee9b3b8ef61d07ed4463e222873817790c",
+        "aMalformedNameIsRefusedAgainstTheVariableTheOperatorSet": "1fe0af9b6877c12c78a7e3324a831f15c8f6b470d0ab8839c79ed17e853d1091",
+        "theTtlIsCheckedAgainstTheComposedStoresOwnPublishedBounds": "81f3e4d0b75c4974ba60bad0ef528fb49436feebb926f497bece7fa84718c5e0",
+        "theSelectorSpellingMatchesTheServersOwn": "caf7902ec0f9f11a8c1706b22f294aa828ea5716c6463717fed7a10a0e30165e",
+        "selectorPropertyOverridesEnvironmentForBundleRefusal": "21355efcd75acec2071f4be9c8c2c65499afc6f12d987d14678efc04e03b6745",
+        "backupAndRestoreAreRefusedUnderTheSharedStore": "6adff2e480e35b2fec11c2433462ea2d442e71f81e6537628912ede299e9dcd0",
+    }
     test_evidence: list[dict[str, str]] = []
     for path, type_symbol, method in test_methods:
         source = sources[path]
         digest = java_method_digest(source, type_symbol, method)
         if digest is None or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            return None
+        if method in approved_new_test_digests and approved_new_test_digests[method] != digest:
             return None
         test_evidence.append({"path": path.as_posix(), "type": type_symbol,
                               "method": method, "methodDigest": digest})

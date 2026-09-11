@@ -2882,22 +2882,36 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         owners = document["remediationDomains"]["settingOwners"]
-        expected_unresolved_settings = 27
+        expected_owners = {
+            "embed.enabled": "#321",
+            "ui.monitoring.max-deployment-event-streams": "#321",
+        }
+        expected_unresolved_settings = len(expected_owners)
         self.assertEqual(expected_unresolved_settings, len(owners))
         self.assertEqual(len(owners), len({item["setting"] for item in owners}))
+        self.assertEqual(expected_owners, {item["setting"]: item["issue"] for item in owners})
         self.assertEqual(
             expected_unresolved_settings,
             sum(domain["confirmedUnresolvedOperatorSettings"]
                 for domain in document["remediationDomains"]["domains"]),
         )
-        self.assertEqual(
-            "#318",
-            next(item["issue"] for item in owners
-                 if item["setting"] == "execution.lease-ttl"),
-        )
+        self.assertNotIn("execution.lease-ttl", {item["setting"] for item in owners})
         lease_rows = [entry for entry in document["entries"]
                       if entry.get("setting") == "execution.lease-ttl"]
-        self.assertEqual({"#318"}, {entry["followUp"] for entry in lease_rows})
+        self.assertEqual(5, len(lease_rows))
+        for entry in lease_rows:
+            with self.subTest(lease_candidate=entry["id"]):
+                self.assertEqual("already-centralized", entry["status"])
+                self.assertEqual("operator-configurable", entry["classification"])
+                self.assertEqual("ravenroot-persistence-policy-v1", entry["persistenceAuthority"])
+                self.assertEqual(
+                    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/"
+                    "ExecutionOwnershipConfiguration.java#ExecutionOwnershipConfiguration",
+                    entry["owner"],
+                )
+                self.assertEqual("leaseTtl", entry["field"])
+                self.assertNotIn("authorityStatus", entry)
+                self.assertNotIn("followUp", entry)
         unresolved_rows = [entry for entry in document["entries"]
                            if entry.get("authorityStatus") == "unresolved"]
         self.assertEqual(expected_unresolved_settings,
@@ -2916,8 +2930,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any("duplicate setting ownership" in error
                             for error in audit.remediation_domain_errors(duplicate)))
         split = copy.deepcopy(document)
-        next(entry for entry in split["entries"]
-             if entry.get("setting") == "execution.lease-ttl")["followUp"] = "#321"
+        conflicting_owner = copy.deepcopy(unresolved_rows[0])
+        conflicting_owner.update(id="oc-split-owner", followUp="#318")
+        split["entries"].append(conflicting_owner)
         self.assertTrue(any("requires one follow-up owner" in error
                             for error in audit.remediation_domain_errors(split)))
 
@@ -2927,24 +2942,40 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIn("CR/LF", delimiter["rationale"])
 
         postgres_defaults = {
-            "postgres.lock-timeout": "5 seconds.",
-            "postgres.statement-timeout": "30 seconds.",
-            "postgres.serialization-retries": "3 retries.",
-            "postgres.max-lease-ttl": "5 minutes.",
-            "postgres.max-payload-bytes": "1,048,576 bytes (1,024 × 1,024).",
-            "postgres.max-clock-skew": "5 seconds.",
-            "postgres.journal-retention": "24 hours.",
-            "postgres.max-inventory-page-size": "100 rows.",
-            "postgres.terminal-retention": "7 days.",
-            "postgres.execution-result-retention": "7 days.",
+            "postgres.lock-timeout": "Duration.ofSeconds(5)",
+            "postgres.statement-timeout": "Duration.ofSeconds(30)",
+            "postgres.serialization-retries": "3",
+            "postgres.max-lease-ttl": "Duration.ofMinutes(5)",
+            "postgres.max-payload-bytes": "1024 * 1024",
+            "postgres.max-clock-skew": "Duration.ofSeconds(5)",
+            "postgres.journal-retention": "Duration.ofHours(24)",
+            "postgres.max-inventory-page-size": "100",
+            "postgres.terminal-retention": "Duration.ofDays(7)",
+            "postgres.execution-result-retention": "Duration.ofDays(7)",
         }
+        source_candidates = {candidate.id: candidate for candidate in audit.discover(ROOT)}
+        persistence_authority = audit.persistence_policy_authority_from_source(ROOT, source_candidates)
+        self.assertIsNotNone(persistence_authority)
+        contracts = {contract["setting"]: contract
+                     for contract in persistence_authority["contracts"]}
         for setting, expected in postgres_defaults.items():
             with self.subTest(postgres_default=setting):
                 rows = [entry for entry in document["entries"]
                         if entry.get("setting") == setting]
                 self.assertTrue(rows)
                 self.assertEqual({expected}, {entry["default"] for entry in rows})
-                self.assertTrue(all(entry.get("sourceFact") for entry in rows))
+                contract = contracts[setting]
+                self.assertEqual(expected, contract["defaultExpression"])
+                self.assertEqual(set(contract["candidateIds"]), {entry["id"] for entry in rows})
+                self.assertTrue(contract["defaultCandidateIds"])
+                for entry in rows:
+                    self.assertEqual("already-centralized", entry["status"])
+                    self.assertEqual("operator-configurable", entry["classification"])
+                    self.assertEqual(audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+                                     entry["persistenceAuthority"])
+                    self.assertEqual(contract["defaultCandidateIds"], entry["defaultEvidence"])
+                    self.assertEqual(source_candidates[entry["id"]].evidence_digest,
+                                     entry["evidenceDigest"])
 
     def test_default_completion_gate_rejects_pending_review(self) -> None:
         errors = audit.check(ROOT)
@@ -3435,10 +3466,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
 
     def graph_limit_inventory_errors(self, document, candidates):
-        # This fixture intentionally contains only graph rows. The separately mandatory assistant
-        # and Helm authorities are covered by their own unmocked general-entrypoint tests.
+        # This fixture intentionally contains only graph rows. The separately mandatory assistant,
+        # Helm and persistence authorities have their own unmocked general-entrypoint tests.
         with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -5409,9 +5441,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             },
         }
         def errors(value):
-            # These two unresolved rows contain neither the assistant nor the Helm family.
+            # These two unresolved rows contain no assistant, Helm or persistence family.
             with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "helm_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

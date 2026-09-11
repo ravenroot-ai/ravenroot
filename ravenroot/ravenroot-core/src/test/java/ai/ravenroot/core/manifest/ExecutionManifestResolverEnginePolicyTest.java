@@ -55,6 +55,21 @@ class ExecutionManifestResolverEnginePolicyTest {
     }
 
     @Test
+    void managedResolverPinsGenericCapacityInFormatThreeWhileLegacyFactoryStaysFormatTwo() {
+        var engine = engine("adapter", "a".repeat(64), new AtomicInteger());
+        var behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+        var legacy = ExecutionManifestResolver.complete(engine, Set.of(), 4096, behaviors,
+                UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null);
+        var managed = ExecutionManifestResolver.completeManaged(engine, Set.of(), 4096, 8192,
+                behaviors, UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null);
+
+        assertEquals(ExecutionManifest.FORMAT_VERSION_2, manifest(legacy).formatVersion());
+        ExecutionManifest current = manifest(managed);
+        assertEquals(ExecutionManifest.FORMAT_VERSION_3, current.formatVersion());
+        assertEquals(8192, current.operationalPolicy().persistence().orElseThrow().maximumPayloadBytes());
+    }
+
+    @Test
     void legacyAdapterDigestsStayByteForByteStableAndFingerprintIsReadOnce() {
         var pekkoReads = new AtomicInteger();
         var akkaReads = new AtomicInteger();

@@ -23,4 +23,12 @@ class AgentAuthorityBudgetCodecTest {
             assertThrows(EOFException.class, () -> AgentAuthorityBudgetCodec.text(input));
         }
     }
+
+    @Test
+    void writerRefusesACollectionTheReaderCouldNeverMaterialize() throws Exception {
+        try (var output = new DataOutputStream(new ByteArrayOutputStream())) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> AgentAuthorityBudgetCodec.writeCount(output, 100_001));
+        }
+    }
 }

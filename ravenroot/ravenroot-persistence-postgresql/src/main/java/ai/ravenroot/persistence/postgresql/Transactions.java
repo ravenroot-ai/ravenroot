@@ -71,7 +71,7 @@ final class Transactions {
      */
     <T> T inTransaction(Work<T> work) throws SQLException {
         SQLException lastRetryable = null;
-        for (int attempt = 0; attempt <= config.serializationRetries(); attempt++) {
+        for (long attempt = 0; attempt <= (long) config.serializationRetries(); attempt++) {
             try (Connection connection = open()) {
                 connection.setAutoCommit(false);
                 T result;
@@ -146,7 +146,7 @@ final class Transactions {
      */
     <T> T readConsistent(Work<T> work) throws SQLException {
         SQLException lastRetryable = null;
-        for (int attempt = 0; attempt <= config.serializationRetries(); attempt++) {
+        for (long attempt = 0; attempt <= (long) config.serializationRetries(); attempt++) {
             try (Connection connection = open()) {
                 connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
                 connection.setAutoCommit(false);

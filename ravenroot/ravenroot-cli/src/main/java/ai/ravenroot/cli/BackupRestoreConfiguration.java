@@ -5,6 +5,7 @@ import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 
 /**
  * Where the two durable stores {@code backup`/`restore} act on actually live, read
@@ -37,6 +38,7 @@ public record BackupRestoreConfiguration(Path auditDirectory, SqliteStoreLocatio
      * asserts the two spellings against each other so they cannot drift apart silently.
      */
     public static final String STORE_SELECTOR_VARIABLE = "RAVENROOT_EXECUTION_STORE";
+    public static final String STORE_SELECTOR_PROPERTY = "ravenroot.execution-store";
 
     /** The selector value naming the shared store; likewise spelled the same as the server's. */
     public static final String SHARED_STORE_SELECTOR = "postgresql";
@@ -73,8 +75,15 @@ public record BackupRestoreConfiguration(Path auditDirectory, SqliteStoreLocatio
      * @return {@code true} when the shared store is selected.
      */
     public static boolean sharedStoreSelected(Map<String, String> environment) {
+        return sharedStoreSelected(new Properties(), environment);
+    }
+
+    /** Resolves the same property-over-environment selector precedence as the server. */
+    public static boolean sharedStoreSelected(Properties properties, Map<String, String> environment) {
+        Objects.requireNonNull(properties, "properties");
         Objects.requireNonNull(environment, "environment");
-        String raw = environment.get(STORE_SELECTOR_VARIABLE);
+        String raw = properties.getProperty(STORE_SELECTOR_PROPERTY);
+        if (raw == null || raw.isBlank()) raw = environment.get(STORE_SELECTOR_VARIABLE);
         return raw != null && SHARED_STORE_SELECTOR.equals(raw.trim().toLowerCase(java.util.Locale.ROOT));
     }
 

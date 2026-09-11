@@ -43,6 +43,9 @@ public record ProcessInventoryQuery(Set<ProcessInstanceStatus> statuses, Optiona
                                     Optional<String> deploymentId, boolean includeTerminal,
                                     Optional<String> cursor, int limit) {
 
+    /** Caller-side first-page request size; every store still enforces its own published maximum. */
+    public static final int DEFAULT_LIMIT = 50;
+
     /** Copies the status set and normalises absent filters; every bound is the store's to enforce. */
     public ProcessInventoryQuery {
         statuses = statuses == null || statuses.isEmpty()
@@ -122,7 +125,7 @@ public record ProcessInventoryQuery(Set<ProcessInstanceStatus> statuses, Optiona
         private String deploymentId;
         private boolean includeTerminal;
         private String cursor;
-        private int limit = 50;
+        private int limit = DEFAULT_LIMIT;
 
         private Builder() {
         }

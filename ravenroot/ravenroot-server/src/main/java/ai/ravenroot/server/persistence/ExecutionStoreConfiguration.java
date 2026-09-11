@@ -2,11 +2,13 @@ package ai.ravenroot.server.persistence;
 
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
 import ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore;
+import ai.ravenroot.persistence.postgresql.PostgresStoreConfig;
 
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 
 /**
  * Which execution store this server composes, and where it lives.
@@ -51,6 +53,7 @@ public sealed interface ExecutionStoreConfiguration {
      * has no matching deployment shape.</p>
      */
     String SELECTOR_VARIABLE = "RAVENROOT_EXECUTION_STORE";
+    String SELECTOR_PROPERTY = "ravenroot.execution-store";
 
     /** Set to {@code true}, or to {@code false} (or {@code off}/{@code 0}/{@code no}). */
     String ENABLED_VARIABLE = "RAVENROOT_EXECUTION_STORE_ENABLED";
@@ -69,9 +72,11 @@ public sealed interface ExecutionStoreConfiguration {
 
     /** Largest number of connections this replica's pool opens against the shared database. */
     String POOL_SIZE_VARIABLE = "RAVENROOT_EXECUTION_STORE_POOL_SIZE";
+    String POOL_SIZE_PROPERTY = "ravenroot.execution-store.pool-size";
 
     /** How long a caller waits for a pooled connection before the operation is reported unavailable. */
     String POOL_TIMEOUT_VARIABLE = "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS";
+    String POOL_TIMEOUT_PROPERTY = "ravenroot.execution-store.pool-timeout-ms";
 
     /** Lost-race repair attempts for write-once PostgreSQL execution manifests. */
     String MANIFEST_PIN_ATTEMPTS_VARIABLE = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS";
@@ -114,17 +119,22 @@ public sealed interface ExecutionStoreConfiguration {
      *
      * @param connection everything needed to build a pool against that database.
      */
-    record Shared(SharedStoreConnection connection, int manifestPinAttempts)
+    record Shared(SharedStoreConnection connection, int manifestPinAttempts, PostgresStoreConfig storeConfig)
             implements ExecutionStoreConfiguration {
         public Shared {
             Objects.requireNonNull(connection, "connection");
+            Objects.requireNonNull(storeConfig, "storeConfig");
             if (manifestPinAttempts < 1) {
                 throw new IllegalArgumentException("manifestPinAttempts must be positive");
             }
         }
 
         public Shared(SharedStoreConnection connection) {
-            this(connection, DEFAULT_MANIFEST_PIN_ATTEMPTS);
+            this(connection, DEFAULT_MANIFEST_PIN_ATTEMPTS, PostgresStoreConfig.defaults());
+        }
+
+        public Shared(SharedStoreConnection connection, int manifestPinAttempts) {
+            this(connection, manifestPinAttempts, PostgresStoreConfig.defaults());
         }
     }
 
@@ -136,8 +146,26 @@ public sealed interface ExecutionStoreConfiguration {
      * @throws IllegalArgumentException when any setting is malformed or two settings contradict.
      */
     static ExecutionStoreConfiguration fromEnvironment(Map<String, String> environment) {
+        return fromSources(Map.of(), environment);
+    }
+
+    /** Resolves system properties before environment variables; blank values delegate. */
+    static ExecutionStoreConfiguration fromSystem(Properties properties, Map<String, String> environment) {
+        Objects.requireNonNull(properties, "properties");
+        Map<String, String> propertyValues = properties.stringPropertyNames().stream()
+                .collect(java.util.stream.Collectors.toMap(name -> name, properties::getProperty));
+        return fromSources(propertyValues, environment);
+    }
+
+    private static ExecutionStoreConfiguration fromSources(Map<String, String> properties,
+                                                           Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
-        String selector = selectorIn(environment);
+        String selector = selectorIn(properties, environment);
+        if (!POSTGRESQL_SELECTOR.equals(selector)
+                && PostgresStoreConfiguration.anyConfigured(properties, environment)) {
+            throw new IllegalArgumentException("PostgreSQL policy requires " + SELECTOR_VARIABLE
+                    + "=" + POSTGRESQL_SELECTOR);
+        }
         if (!POSTGRESQL_SELECTOR.equals(selector)
                 && isConfigured(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE)) {
             throw new IllegalArgumentException(MANIFEST_PIN_ATTEMPTS_VARIABLE + " requires "
@@ -162,9 +190,12 @@ public sealed interface ExecutionStoreConfiguration {
         }
         return switch (selector) {
             case SQLITE_SELECTOR -> new SingleHost(singleHostLocation(environment));
-            case POSTGRESQL_SELECTOR -> new Shared(SharedStoreConnection.fromEnvironment(environment),
+            case POSTGRESQL_SELECTOR -> {
+                PostgresStoreConfig config = PostgresStoreConfiguration.fromSources(properties, environment);
+                yield new Shared(SharedStoreConnection.fromSources(properties, environment, config),
                     positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE,
-                            DEFAULT_MANIFEST_PIN_ATTEMPTS));
+                            DEFAULT_MANIFEST_PIN_ATTEMPTS), config);
+            }
             // Unreachable: selectorIn rejects everything else. Present because the switch is over a
             // String and a future third selector must fail here rather than fall through to null.
             default -> throw new IllegalArgumentException(SELECTOR_VARIABLE + " is not supported");
@@ -184,8 +215,9 @@ public sealed interface ExecutionStoreConfiguration {
      * checked. Case is folded because {@code Postgresql} and {@code POSTGRESQL} are the same
      * intention, and refusing them would be pedantry rather than caution.
      */
-    private static String selectorIn(Map<String, String> environment) {
-        String raw = environment.get(SELECTOR_VARIABLE);
+    private static String selectorIn(Map<String, String> properties, Map<String, String> environment) {
+        String raw = properties.get(SELECTOR_PROPERTY);
+        if (raw == null || raw.isBlank()) raw = environment.get(SELECTOR_VARIABLE);
         if (raw == null || raw.isBlank()) {
             return SQLITE_SELECTOR;
         }

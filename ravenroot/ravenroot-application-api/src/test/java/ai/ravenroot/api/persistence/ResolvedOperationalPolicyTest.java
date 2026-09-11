@@ -6,9 +6,12 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +31,46 @@ class ResolvedOperationalPolicyTest {
                         1024, 2048, Duration.ofSeconds(30))), packages);
 
         assertEquals(policy, ResolvedOperationalPolicy.decode(policy.encode()));
+    }
+
+    @Test
+    void formatThreePersistenceCapacityRoundTripsWithoutChangingFormatTwoCodec() {
+        var legacy = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(), java.util.List.of());
+        var current = new ResolvedOperationalPolicy(graph(), legacy.results(), Optional.empty(),
+                java.util.List.of(), Optional.of(new ResolvedOperationalPolicy.PersistenceLimits(8192)));
+
+        assertEquals(legacy, ResolvedOperationalPolicy.decodeForManifest(
+                legacy.encodeForManifest(ExecutionManifest.FORMAT_VERSION_2),
+                ExecutionManifest.FORMAT_VERSION_2));
+        assertEquals(current, ResolvedOperationalPolicy.decodeForManifest(
+                current.encodeForManifest(ExecutionManifest.FORMAT_VERSION_3),
+                ExecutionManifest.FORMAT_VERSION_3));
+        assertThrows(IllegalArgumentException.class,
+                () -> ResolvedOperationalPolicy.decodeForManifest(
+                        current.encodeForManifest(ExecutionManifest.FORMAT_VERSION_3),
+                        ExecutionManifest.FORMAT_VERSION_2));
+        assertThrows(IllegalStateException.class, current::encode);
+    }
+
+    @Test
+    void formatTwoCanonicalBytesAndManifestDigestStayFixed() {
+        var policy = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(), List.of());
+        var manifest = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_2,
+                new ExecutionKey("acme", UUID.fromString("00000000-0000-0000-0000-000000000001")),
+                new GraphContentId("a".repeat(64)),
+                new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
+                new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through", "1".repeat(64),
+                        "2".repeat(64), "3".repeat(64), "4".repeat(64)),
+                List.of(), Instant.EPOCH, policy);
+
+        assertEquals("AAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAAB"
+                        + "AAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAAAAAAB"
+                        + "AAAAAAAAAAEAAAAAAAAAAQAAAAEAAAAQAAAAAAAA",
+                policy.encodeForManifest(ExecutionManifest.FORMAT_VERSION_2));
+        assertEquals("8313dd235e1d5246faa6bfe98744a5209f8df556544ebbf40baa84c3c4f54544",
+                manifest.digest().value());
     }
 
     @Test

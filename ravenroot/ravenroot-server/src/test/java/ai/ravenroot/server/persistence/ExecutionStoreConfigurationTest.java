@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -121,6 +123,94 @@ class ExecutionStoreConfigurationTest {
                         ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db:5432/ravenroot")));
         assertEquals("jdbc:postgresql://db:5432/ravenroot", shared.connection().url());
         assertEquals(3, shared.manifestPinAttempts());
+        assertEquals(ai.ravenroot.persistence.postgresql.PostgresStoreConfig.defaults(), shared.storeConfig());
+    }
+
+    @Test
+    void postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound() {
+        var properties = new Properties();
+        properties.setProperty(ExecutionStoreConfiguration.SELECTOR_PROPERTY, "postgresql");
+        properties.setProperty("ravenroot.postgresql.statement-timeout-ms", "60000");
+        properties.setProperty(ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY, "45000");
+        properties.setProperty("ravenroot.postgresql.serialization-retries", "9");
+        var environment = Map.of(
+                ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite",
+                ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot",
+                "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "30000",
+                ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "10000");
+
+        var shared = assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromSystem(properties, environment));
+
+        assertEquals(60_000, shared.storeConfig().statementTimeout().toMillis());
+        assertEquals(45_000, shared.connection().poolTimeout().toMillis());
+        assertEquals(9, shared.storeConfig().serializationRetries());
+    }
+
+    @Test
+    void everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily() {
+        var properties = new Properties();
+        properties.setProperty(ExecutionStoreConfiguration.SELECTOR_PROPERTY, "postgresql");
+        properties.setProperty("ravenroot.postgresql.lock-timeout-ms", "1000");
+        properties.setProperty("ravenroot.postgresql.statement-timeout-ms", "20000");
+        properties.setProperty("ravenroot.postgresql.serialization-retries", "5");
+        properties.setProperty("ravenroot.postgresql.max-lease-ttl-seconds", "120");
+        properties.setProperty("ravenroot.postgresql.max-payload-bytes", "65536");
+        properties.setProperty("ravenroot.postgresql.max-clock-skew-seconds", "2");
+        properties.setProperty("ravenroot.postgresql.journal-retention-seconds", "3600");
+        properties.setProperty("ravenroot.postgresql.max-inventory-page-size", "64");
+        properties.setProperty("ravenroot.postgresql.terminal-retention-seconds", "7200");
+        properties.setProperty("ravenroot.postgresql.execution-result-retention-seconds", "3600");
+        properties.setProperty("ravenroot.postgresql.graph-definition-upsert-attempts", "7");
+
+        var shared = assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromSystem(properties, Map.of(
+                        ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot")));
+        var config = shared.storeConfig();
+        assertEquals(Duration.ofSeconds(1), config.lockTimeout());
+        assertEquals(Duration.ofSeconds(20), config.statementTimeout());
+        assertEquals(5, config.serializationRetries());
+        assertEquals(Duration.ofSeconds(120), config.maxLeaseTtl());
+        assertEquals(65_536, config.maxPayloadBytes());
+        assertEquals(Duration.ofSeconds(2), config.maxClockSkew());
+        assertEquals(Duration.ofHours(1), config.journalRetention());
+        assertEquals(64, config.maxInventoryPageSize());
+        assertEquals(Duration.ofHours(2), config.terminalRetention());
+        assertEquals(Duration.ofHours(1), config.executionResultRetention());
+        assertEquals(7, config.graphDefinitionUpsertAttempts());
+    }
+
+    @Test
+    void malformedPostgresqlPolicyFailsWithoutEchoingTheSuppliedValue() {
+        String secretShaped = "secret-should-not-be-logged";
+        var environment = Map.of(
+                ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql",
+                ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot",
+                "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES", secretShaped);
+
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+        assertTrue(failure.getMessage().contains("RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES"));
+        assertFalse(failure.getMessage().contains(secretShaped));
+        assertNull(failure.getCause());
+    }
+
+    @Test
+    void postgresqlPolicyIsRejectedOutsideThePostgresqlSelectorAndCrossConstraintsFailEarly() {
+        assertThrows(IllegalArgumentException.class, () -> ExecutionStoreConfiguration.fromEnvironment(
+                Map.of("RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS", "1000")));
+
+        var environment = new HashMap<String, String>();
+        environment.put(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql");
+        environment.put(ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot");
+        environment.put("RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "5000");
+        environment.put(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "5000");
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+
+        environment.put(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "4999");
+        assertEquals(4_999, assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromEnvironment(environment)).connection().poolTimeout().toMillis());
     }
 
     @Test

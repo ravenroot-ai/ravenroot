@@ -1348,6 +1348,116 @@ def java_constructor_component_call(source: str, type_symbol: str, method: str,
     return argument, base + start, base + end
 
 
+def java_invocation_arguments(source: str, type_symbol: str, method: str,
+                              invocation: str) -> tuple[str, ...] | None:
+    """Return one exact invocation's arguments from an unambiguous direct method."""
+    method_span = java_method_span(source, type_symbol, method)
+    if method_span is None:
+        return None
+    base, limit = method_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    pattern = re.compile(rf"(?<![\w$]){re.escape(invocation)}\s*\(")
+    matches = list(pattern.finditer(code))
+    if len(matches) != 1:
+        return None
+    opening = matches[0].end() - 1
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None:
+        return None
+    if parsed[1] == opening + 1:
+        return ()
+    return tuple(argument for argument, _start, _end in parsed[0])
+
+
+def java_type_assignment_expressions(source: str, type_symbol: str,
+                                     field: str) -> tuple[str, ...]:
+    """Return every executable ``this.field = expression`` in one Java type."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return ()
+    base, limit = type_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    expressions: list[str] = []
+    for match in re.finditer(rf"\bthis\s*\.\s*{re.escape(field)}\s*=", code):
+        start = match.end()
+        round_depth = square_depth = brace_depth = 0
+        for end in range(start, len(code)):
+            char = code[end]
+            if char == "(": round_depth += 1
+            elif char == ")": round_depth -= 1
+            elif char == "[": square_depth += 1
+            elif char == "]": square_depth -= 1
+            elif char == "{": brace_depth += 1
+            elif char == "}": brace_depth -= 1
+            elif char == ";" and round_depth == square_depth == brace_depth == 0:
+                expressions.append(normalized(actual[start:end]))
+                break
+    return tuple(expressions)
+
+
+def java_constructor_delegation_arguments(source: str, type_symbol: str,
+                                          parameters: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Read the leading ``this(...)`` delegation from one exact constructor overload."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return None
+    base, limit = type_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    found: list[tuple[str, ...]] = []
+    for match in re.finditer(rf"\b{re.escape(type_symbol)}\s*\(", code):
+        if depths[match.start()] != 1:
+            continue
+        opening = match.end() - 1
+        parsed_parameters = split_java_arguments(actual, code, opening)
+        if parsed_parameters is None:
+            continue
+        parameter_names = tuple(
+            re.findall(r"\b[A-Za-z_$][\w$]*\b", argument)[-1]
+            for argument, _start, _end in parsed_parameters[0]
+            if re.findall(r"\b[A-Za-z_$][\w$]*\b", argument)
+        )
+        if parameter_names != parameters:
+            continue
+        closing = parsed_parameters[1]
+        opening_brace = code.find("{", closing)
+        if opening_brace < 0:
+            continue
+        closing_brace = matching_delimiter(code, opening_brace, "{", "}")
+        if closing_brace is None:
+            continue
+        body_actual = actual[opening_brace + 1:closing_brace]
+        body_code = code[opening_brace + 1:closing_brace]
+        delegation = re.search(r"^\s*this\s*\(", body_code)
+        if delegation is None:
+            continue
+        call_open = body_code.find("(", delegation.start())
+        call = split_java_arguments(body_actual, body_code, call_open)
+        if call is not None:
+            found.append(tuple(argument for argument, _start, _end in call[0]))
+    return found[0] if len(found) == 1 else None
+
+
+def java_method_if_conditions(source: str, type_symbol: str, method: str) -> tuple[str, ...] | None:
+    """Extract executable if conditions from one unambiguous method."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    actual = source[slice(*span)]
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    conditions: list[str] = []
+    for match in re.finditer(r"\bif\s*\(", code):
+        opening = code.find("(", match.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            return None
+        conditions.append(normalized(actual[opening + 1:closing]))
+    return tuple(conditions)
+
+
 def java_method_digest(source: str, type_symbol: str, method: str) -> str | None:
     span = java_method_span(source, type_symbol, method)
     if span is None:
@@ -2556,6 +2666,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] == "contracts" and path[3].isdigit() \
             and path[4] == "candidateIds":
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "persistencePolicyAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "persistencePolicyAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -2676,6 +2793,18 @@ def remap_declared_candidate_references(document: dict[str, object],
             if isinstance(contracts, list):
                 for contract in contracts:
                     remap_list(contract, "candidateIds")
+
+    persistence_authorities = document.get("persistencePolicyAuthorities")
+    if isinstance(persistence_authorities, dict):
+        for authority in persistence_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultCandidateIds")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -2888,6 +3017,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         if helm_authority is None:
             return None, ["cannot derive the closed Helm values authority from current source"]
         refreshed["helmAuthorities"] = {HELM_AUTHORITY_ID: helm_authority}
+    if persistence_policy_source_present(root):
+        persistence_authority = persistence_policy_authority_from_source(root, current)
+        if persistence_authority is None:
+            return None, ["cannot derive the closed persistence policy authority from current source"]
+        refreshed["persistencePolicyAuthorities"] = {
+            PERSISTENCE_POLICY_AUTHORITY_ID: persistence_authority,
+        }
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history
@@ -4330,6 +4466,544 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
     return errors, accounted
 
 
+
+PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
+PERSISTENCE_POSTGRES_CONFIG_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java")
+PERSISTENCE_POSTGRES_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java")
+PERSISTENCE_REGISTRY_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicy.java")
+PERSISTENCE_IN_MEMORY_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicy.java")
+PERSISTENCE_SQLITE_CONFIG_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java")
+PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicy.java")
+PERSISTENCE_QUERY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ProcessInventoryQuery.java")
+PERSISTENCE_MANAGED_STORE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java")
+PERSISTENCE_MANIFEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifest.java")
+PERSISTENCE_OPERATIONAL_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicy.java")
+PERSISTENCE_MANIFEST_DIGEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifestDigest.java")
+PERSISTENCE_MANIFEST_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java")
+PERSISTENCE_DEFAULT_APPLICATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+PERSISTENCE_BOOTSTRAP_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
+PERSISTENCE_SERVER_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+PERSISTENCE_IN_MEMORY_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/deployment/registry/InMemoryDeploymentRegistry.java")
+PERSISTENCE_SQLITE_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java")
+PERSISTENCE_POSTGRES_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresDeploymentRegistry.java")
+PERSISTENCE_SQLITE_ARTIFACT_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteArtifactRegistry.java")
+PERSISTENCE_SQLITE_EMBED_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java")
+PERSISTENCE_SQLITE_EXECUTION_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionStore.java")
+PERSISTENCE_POSTGRES_EXECUTION_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresExecutionStore.java")
+
+PERSISTENCE_POSTGRES_FIELDS = (
+    ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
+     "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS", "millis", None, "Duration.ofSeconds(5)"),
+    ("postgres.statement-timeout", "statementTimeout", "ravenroot.postgresql.statement-timeout-ms",
+     "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "millis", None, "Duration.ofSeconds(30)"),
+    ("postgres.serialization-retries", "serializationRetries", "ravenroot.postgresql.serialization-retries",
+     "RAVENROOT_POSTGRES_SERIALIZATION_RETRIES", "integer", "0", "3"),
+    ("postgres.max-lease-ttl", "maxLeaseTtl", "ravenroot.postgresql.max-lease-ttl-seconds",
+     "RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS", "seconds", "false", "Duration.ofMinutes(5)"),
+    ("postgres.max-payload-bytes", "maxPayloadBytes", "ravenroot.postgresql.max-payload-bytes",
+     "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES", "integer", "1", "1024 * 1024"),
+    ("postgres.max-clock-skew", "maxClockSkew", "ravenroot.postgresql.max-clock-skew-seconds",
+     "RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS", "seconds", "true", "Duration.ofSeconds(5)"),
+    ("postgres.journal-retention", "journalRetention", "ravenroot.postgresql.journal-retention-seconds",
+     "RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS", "seconds", "false", "Duration.ofHours(24)"),
+    ("postgres.max-inventory-page-size", "maxInventoryPageSize", "ravenroot.postgresql.max-inventory-page-size",
+     "RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE", "integer", "1", "100"),
+    ("postgres.terminal-retention", "terminalRetention", "ravenroot.postgresql.terminal-retention-seconds",
+     "RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS", "seconds", "false", "Duration.ofDays(7)"),
+    ("postgres.execution-result-retention", "executionResultRetention",
+     "ravenroot.postgresql.execution-result-retention-seconds",
+     "RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS", "seconds", "false", "Duration.ofDays(7)"),
+    ("graph.definition.upsert-retries", "graphDefinitionUpsertAttempts",
+     "ravenroot.postgresql.graph-definition-upsert-attempts",
+     "RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS", "integer", "1", "3"),
+)
+PERSISTENCE_IN_MEMORY_FIELDS = (
+    ("inmemory.maximum-lease-ttl", "maximumLeaseTtl", "Duration.ofMinutes(5)"),
+    ("inmemory.maximum-payload-bytes", "maximumPayloadBytes", "1024 * 1024"),
+    ("inmemory.maximum-clock-skew", "maximumClockSkew", "Duration.ofSeconds(5)"),
+    ("inmemory.journal-retention", "journalRetention", "Duration.ofHours(24)"),
+    ("inmemory.maximum-inventory-page-size", "maximumInventoryPageSize", "100"),
+    ("inmemory.terminal-retention", "terminalRetention", "Duration.ofDays(7)"),
+    ("inmemory.execution-result-retention", "executionResultRetention", "Duration.ofDays(7)"),
+)
+PERSISTENCE_SQLITE_FIELDS = (
+    ("sqlite.synchronous-mode", "synchronousMode", "SynchronousMode.FULL"),
+    ("sqlite.busy-timeout", "busyTimeout", "SqliteConnectionPolicy.DEFAULTS.busyTimeout()"),
+    ("sqlite.maximum-lease-ttl", "maxLeaseTtl", "Duration.ofMinutes(5)"),
+    ("sqlite.maximum-payload-bytes", "maxPayloadBytes", "1024 * 1024"),
+    ("sqlite.maximum-clock-skew", "maxClockSkew", "Duration.ofSeconds(5)"),
+    ("sqlite.journal-retention", "journalRetention", "Duration.ofHours(24)"),
+    ("sqlite.maximum-inventory-page-size", "maxInventoryPageSize", "100"),
+    ("sqlite.terminal-retention", "terminalRetention", "Duration.ofDays(7)"),
+    ("sqlite.execution-result-retention", "executionResultRetention", "Duration.ofDays(7)"),
+)
+
+
+def _source_digest(source: str) -> str:
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _exact_candidate_ids(discovered: dict[str, Candidate], path: Path, kind: str,
+                         expression: str) -> list[str]:
+    return sorted(candidate.id for candidate in discovered.values()
+                  if candidate.path == path.as_posix() and candidate.kind == kind
+                  and candidate.expression == expression)
+
+
+def persistence_policy_source_present(root: Path) -> bool:
+    """Distinguish true absence from any partial #318 persistence policy source family."""
+    return any((root / path).exists() for path in (
+        PERSISTENCE_POSTGRES_RESOLVER_PATH, PERSISTENCE_REGISTRY_POLICY_PATH,
+        PERSISTENCE_IN_MEMORY_POLICY_PATH, PERSISTENCE_MANAGED_STORE_PATH,
+    ))
+
+
+def persistence_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed persistence policy from typed declarations and executable consumers."""
+    paths = (
+        PERSISTENCE_POSTGRES_CONFIG_PATH, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+        PERSISTENCE_REGISTRY_POLICY_PATH, PERSISTENCE_IN_MEMORY_POLICY_PATH,
+        PERSISTENCE_SQLITE_CONFIG_PATH, PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
+        PERSISTENCE_QUERY_PATH, PERSISTENCE_MANAGED_STORE_PATH, PERSISTENCE_MANIFEST_PATH,
+        PERSISTENCE_BOOTSTRAP_PATH, PERSISTENCE_SERVER_MAIN_PATH,
+        PERSISTENCE_IN_MEMORY_REGISTRY_PATH, PERSISTENCE_SQLITE_REGISTRY_PATH,
+        PERSISTENCE_POSTGRES_REGISTRY_PATH, PERSISTENCE_SQLITE_ARTIFACT_PATH,
+        PERSISTENCE_SQLITE_EMBED_PATH, PERSISTENCE_SQLITE_EXECUTION_PATH,
+        PERSISTENCE_POSTGRES_EXECUTION_PATH, PERSISTENCE_OPERATIONAL_POLICY_PATH,
+        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_PATH,
+        PERSISTENCE_DEFAULT_APPLICATION_PATH,
+        Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+        Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java"),
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+        Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+        Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+        Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+        Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+    )
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except OSError:
+        return None
+    pg = sources[PERSISTENCE_POSTGRES_CONFIG_PATH]
+    resolver = sources[PERSISTENCE_POSTGRES_RESOLVER_PATH]
+    registry = sources[PERSISTENCE_REGISTRY_POLICY_PATH]
+    in_memory = sources[PERSISTENCE_IN_MEMORY_POLICY_PATH]
+    sqlite = sources[PERSISTENCE_SQLITE_CONFIG_PATH]
+    sqlite_connection = sources[PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH]
+    query = sources[PERSISTENCE_QUERY_PATH]
+    managed = sources[PERSISTENCE_MANAGED_STORE_PATH]
+    manifest = sources[PERSISTENCE_MANIFEST_PATH]
+    bootstrap = sources[PERSISTENCE_BOOTSTRAP_PATH]
+    server_main = sources[PERSISTENCE_SERVER_MAIN_PATH]
+    in_memory_registry = sources[PERSISTENCE_IN_MEMORY_REGISTRY_PATH]
+    sqlite_registry = sources[PERSISTENCE_SQLITE_REGISTRY_PATH]
+    postgres_registry = sources[PERSISTENCE_POSTGRES_REGISTRY_PATH]
+    sqlite_artifact = sources[PERSISTENCE_SQLITE_ARTIFACT_PATH]
+    sqlite_embed = sources[PERSISTENCE_SQLITE_EMBED_PATH]
+    sqlite_execution = sources[PERSISTENCE_SQLITE_EXECUTION_PATH]
+    postgres_execution = sources[PERSISTENCE_POSTGRES_EXECUTION_PATH]
+    operational_policy = sources[PERSISTENCE_OPERATIONAL_POLICY_PATH]
+    manifest_digest = sources[PERSISTENCE_MANIFEST_DIGEST_PATH]
+    manifest_resolver = sources[PERSISTENCE_MANIFEST_RESOLVER_PATH]
+    default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
+    pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
+                          in PERSISTENCE_POSTGRES_FIELDS)
+    if java_record_components(pg, "PostgresStoreConfig") != pg_components \
+            or java_record_components(in_memory, "InMemoryExecutionStorePolicy") != tuple(
+                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) \
+            or java_record_components(sqlite, "SqliteStoreConfig") != tuple(
+                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) \
+            or java_record_components(registry, "DeploymentRegistryPolicy") != ("commandRetention", "limits") \
+            or java_record_components(sqlite_connection, "SqliteConnectionPolicy") != ("busyTimeout",):
+        return None
+    resolver_components = java_record_components(pg, "PostgresStoreConfig")
+    contracts: list[dict[str, object]] = []
+    for setting, field, property_name, environment, helper, constraint, approved_default in PERSISTENCE_POSTGRES_FIELDS:
+        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field)
+        call = java_constructor_component_call(
+            resolver, "PostgresStoreConfiguration", "fromSources", "PostgresStoreConfig",
+            resolver_components, field)
+        if default_span is None or call is None \
+                or normalized(default_span[0]) != normalized(approved_default):
+            return None
+        argument = normalized(call[0])
+        suffix = "" if constraint is None else f", {constraint}"
+        expected_argument = normalized(
+            f'{helper}(properties, environment, "{property_name}", "{environment}", '
+            f'defaults.{field}(){suffix})')
+        if argument != expected_argument:
+            return None
+        property_ids = _exact_candidate_ids(discovered, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                                            "property-binding", property_name)
+        environment_ids = _exact_candidate_ids(discovered, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                                               "environment-binding", environment)
+        default_ids = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_POSTGRES_CONFIG_PATH, pg, default_span[1], default_span[2], discovered)
+        if len(property_ids) != 1 or len(environment_ids) != 1 or not default_ids:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_POSTGRES_CONFIG_PATH.as_posix()}#PostgresStoreConfig",
+            "field": field, "bindings": [property_name, environment],
+            "defaultExpression": normalized(default_span[0]),
+            "defaultCandidateIds": sorted(default_ids),
+            "candidateIds": sorted(default_ids + property_ids + environment_ids),
+            "resolverCallDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
+        })
+    for setting, field, approved_default in PERSISTENCE_IN_MEMORY_FIELDS:
+        span = java_record_default_expression_span(
+            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field)
+        if span is None or normalized(span[0]) != normalized(approved_default):
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_IN_MEMORY_POLICY_PATH.as_posix()}#InMemoryExecutionStorePolicy",
+            "field": field, "bindings": [], "defaultExpression": normalized(span[0]),
+            "defaultCandidateIds": sorted(numeric_candidate_ids_in_source_span(
+                PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
+            "candidateIds": sorted(numeric_candidate_ids_in_source_span(
+                PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
+        })
+    for setting, field, approved_default in PERSISTENCE_SQLITE_FIELDS:
+        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field)
+        if span is None or normalized(span[0]) != normalized(approved_default):
+            return None
+        default_ids = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_SQLITE_CONFIG_PATH, sqlite, span[1], span[2], discovered)
+        if field == "busyTimeout":
+            connection_default = java_record_default_expression_span(
+                sqlite_connection, "SqliteConnectionPolicy", "DEFAULTS", "busyTimeout")
+            if connection_default is None or normalized(span[0]) != \
+                    "SqliteConnectionPolicy.DEFAULTS.busyTimeout()" \
+                    or normalized(connection_default[0]) != "Duration.ofSeconds(5)":
+                return None
+            default_ids = numeric_candidate_ids_in_source_span(
+                PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH, sqlite_connection,
+                connection_default[1], connection_default[2], discovered)
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_SQLITE_CONFIG_PATH.as_posix()}#SqliteStoreConfig",
+            "field": field, "bindings": [], "defaultExpression": normalized(span[0]),
+            "defaultCandidateIds": sorted(default_ids), "candidateIds": sorted(default_ids),
+        })
+    registry_span = java_static_final_initializer(registry, "DeploymentRegistryPolicy", "DEFAULTS")
+    if registry_span is None:
+        return None
+    registry_expression = registry[registry_span[1]:registry_span[2]]
+    registry_code = strip_c_comments_and_literals(registry_expression)
+    policy_match = re.fullmatch(r"\s*new\s+DeploymentRegistryPolicy\s*\((.*)\)\s*",
+                                registry_code, re.DOTALL)
+    if policy_match is None:
+        return None
+    policy_open = registry_code.find("(")
+    policy_args = split_java_arguments(registry_expression, registry_code, policy_open)
+    if policy_args is None or len(policy_args[0]) != 2:
+        return None
+    _limits_normalized, limits_start, limits_end = policy_args[0][1]
+    limits_expression = registry_expression[limits_start:limits_end]
+    limits_code = strip_c_comments_and_literals(limits_expression)
+    limits_match = re.fullmatch(r"\s*new\s+DeploymentRegistry\.Limits\s*\((.*)\)\s*",
+                                limits_code, re.DOTALL)
+    if limits_match is None:
+        return None
+    limits_open = limits_code.find("(")
+    limits_args = split_java_arguments(limits_expression, limits_code, limits_open)
+    if limits_args is None or len(limits_args[0]) != 3:
+        return None
+    registry_settings = (
+        ("deployment.registry.command-retention", "commandRetention", policy_args[0][0],
+         "Duration.ofDays(7)", registry_span[1]),
+        ("deployment.registry.max-page-size", "limits", limits_args[0][0], "100",
+         registry_span[1] + limits_start),
+        ("deployment.registry.max-lease-ttl", "limits", limits_args[0][1],
+         "Duration.ofMinutes(5)", registry_span[1] + limits_start),
+        ("deployment.registry.max-clock-skew", "limits", limits_args[0][2],
+         "Duration.ofSeconds(5)", registry_span[1] + limits_start),
+    )
+    for setting, field, argument_span, expected_expression, base_offset in registry_settings:
+        expression, start, end = argument_span
+        if normalized(expression) != normalized(expected_expression):
+            return None
+        identifiers = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_REGISTRY_POLICY_PATH, registry, base_offset + start, base_offset + end,
+            discovered)
+        if len(identifiers) != 1:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_REGISTRY_POLICY_PATH.as_posix()}#DeploymentRegistryPolicy",
+            "field": field, "bindings": [], "defaultExpression": normalized(expression),
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+        })
+    query_default = java_static_final_initializer(query, "ProcessInventoryQuery", "DEFAULT_LIMIT")
+    query_ids = _exact_candidate_ids(discovered, PERSISTENCE_QUERY_PATH, "fixed-declaration", "50")
+    if query_default is None or normalized(query_default[0]) != "50" or len(query_ids) != 1:
+        return None
+    contracts.append({
+        "setting": "execution.inventory.default-page-size",
+        "owner": f"{PERSISTENCE_QUERY_PATH.as_posix()}#Builder", "field": "limit",
+        "bindings": ["ProcessInventoryQuery.Builder.limit(int)"], "defaultExpression": "50",
+        "defaultCandidateIds": query_ids, "candidateIds": query_ids,
+    })
+    # Each relation below is extracted from an executable method or direct field assignment.  Whole
+    # file digests are retained as provenance, but cannot by themselves approve a changed consumer.
+    selected_body = normalized(strip_c_comments(
+        resolver[slice(*java_method_span(resolver, "PostgresStoreConfiguration", "selected"))])) \
+        if java_method_span(resolver, "PostgresStoreConfiguration", "selected") is not None else ""
+    encode_span = java_method_span(operational_policy, "ResolvedOperationalPolicy", "encodeForManifest")
+    decode_span = java_method_span(operational_policy, "ResolvedOperationalPolicy", "decodeForManifest")
+    encode_body = normalized(strip_c_comments(operational_policy[slice(*encode_span)])) \
+        if encode_span is not None else ""
+    decode_body = normalized(strip_c_comments(operational_policy[slice(*decode_span)])) \
+        if decode_span is not None else ""
+    operational_components = java_record_components(
+        operational_policy, "ResolvedOperationalPolicy")
+    persistence_argument = java_constructor_component_call(
+        manifest_resolver, "ExecutionManifestResolver", "operationalPolicyFor",
+        "ResolvedOperationalPolicy", operational_components, "persistence")
+    digest_conditions = java_method_if_conditions(
+        manifest_digest, "ExecutionManifestDigest", "of")
+    expected_managed_authority_conditions = (
+        "!rows.next()",
+        "!authority.manifestDigest().value().equals(rows.getString(1)) || "
+        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+        "pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()",
+    )
+    expected_selected = normalized("""selected(Map<String, String> properties,
+            Map<String, String> environment, String property, String variable) {
+        String raw = properties.get(property);
+        if (!nonblank(raw)) raw = environment.get(variable);
+        return nonblank(raw) ? raw.trim() : null;
+    }""")
+    if selected_body != expected_selected \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "ai.ravenroot.server.persistence.ManagedExecutionStore.protect") != (
+                "executionStoreOwner.store()", "executionStoreOwner.executionManifestStore()") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresExecutionStore") != (
+                "pool.dataSource()", "clock", "storeConfig", "humanTaskPolicy") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresGraphDefinitionStore") != (
+                "pool.dataSource()", "clock",
+                "ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE",
+                "graphMlLimits.maxBytes()", "storeConfig") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresExecutionManifestStore") != (
+                "pool.dataSource()", "clock",
+                "ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE",
+                "configuration.manifestPinAttempts()", "storeConfig") \
+            or java_invocation_arguments(sqlite_artifact, "SqliteArtifactRegistry", "prepare",
+                                         "connectionPolicy.apply") != ("connection",) \
+            or java_invocation_arguments(sqlite_embed, "SqliteEmbedRegistrationStore", "prepare",
+                                         "connectionPolicy.apply") != ("opened",) \
+            or java_type_assignment_expressions(sqlite_registry, "SqliteDeploymentRegistry",
+                                                "commandRetention") != ("policy.commandRetention()",) \
+            or java_type_assignment_expressions(sqlite_registry, "SqliteDeploymentRegistry",
+                                                "limits") != ("policy.limits()",) \
+            or java_type_assignment_expressions(postgres_registry, "PostgresDeploymentRegistry",
+                                                "commandRetention") != ("policy.commandRetention()",) \
+            or java_type_assignment_expressions(postgres_registry, "PostgresDeploymentRegistry",
+                                                "limits") != ("policy.limits()",) \
+            or java_type_assignment_expressions(in_memory_registry, "InMemoryDeploymentRegistry",
+                                                "limits") != ("Objects.requireNonNull(limits, \"limits\")",) \
+            or java_constructor_delegation_arguments(
+                in_memory_registry, "InMemoryDeploymentRegistry", ("clock",)) != (
+                    "clock", "tenant -> DeploymentId.of(UUID.randomUUID().toString())",
+                    "DeploymentRegistryPolicy.inMemoryLimits()") \
+            or java_constructor_delegation_arguments(
+                in_memory_registry, "InMemoryDeploymentRegistry", ("clock", "ids")) != (
+                    "clock", "ids", "DeploymentRegistryPolicy.inMemoryLimits()") \
+            or java_constructor_delegation_arguments(
+                sqlite_registry, "SqliteDeploymentRegistry", ("databaseFile", "clock", "ids")) != (
+                    "SqliteStoreLocation.ofFile(databaseFile)", "clock", "ids",
+                    "DeploymentRegistryPolicy.DEFAULTS") \
+            or java_constructor_delegation_arguments(
+                postgres_registry, "PostgresDeploymentRegistry", ("dataSource", "clock", "ids")) != (
+                    "dataSource", "clock", "ids", "DeploymentRegistryPolicy.DEFAULTS",
+                    "PostgresStoreConfig.defaults()") \
+            or java_direct_return_expression(in_memory_registry, "InMemoryDeploymentRegistry", "limits") != "limits" \
+            or java_direct_return_expression(sqlite_registry, "SqliteDeploymentRegistry", "limits") != "limits" \
+            or java_direct_return_expression(postgres_registry, "PostgresDeploymentRegistry", "limits") != "limits" \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "applyManaged",
+                                         "applyInternal") != ("batch", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "applyManaged",
+                                         "applyInternal") != ("batch", "authority") \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "applyLocked",
+                                         "requireManagedAuthority") != ("key", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "applyLocked",
+                                         "requireManagedAuthority") != ("connection", "key", "authority") \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "claimManaged",
+                                         "requireManagedAuthority") != ("key", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "claimManaged",
+                                         "requireManagedAuthority") != ("connection", "key", "authority") \
+            or java_method_if_conditions(
+                sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority") \
+                != expected_managed_authority_conditions \
+            or java_method_if_conditions(
+                postgres_execution, "PostgresExecutionStore", "requireManagedAuthority") \
+                != expected_managed_authority_conditions \
+            or java_invocation_arguments(
+                sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority",
+                "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
+            or java_invocation_arguments(
+                postgres_execution, "PostgresExecutionStore", "requireManagedAuthority",
+                "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
+            or java_invocation_arguments(managed, "ManagedExecutionStore", "apply",
+                                         "delegate.applyManaged") != ("batch", "authority") \
+            or java_invocation_arguments(managed, "ManagedExecutionStore", "collectAuthorities",
+                                         "delegate.managedClaimCandidates") != (
+                "tenantId", "workerId", "pageSize", "ttl", "timersOnly", "scan.nextAfter()") \
+            or java_invocation_arguments(default_application, "DefaultRavenrootApplication",
+                                         "executionManifests",
+                                         "ai.ravenroot.core.manifest.ExecutionManifestResolver.completeManaged") != (
+                "engine", "executionStore.capabilities()", "resultPayloadBytes",
+                "executionStore.maxPayloadBytes()", "behaviors", "unknownBehaviors",
+                "graphExecutionLimits", "programRuntime") \
+            or java_invocation_arguments(default_application, "DefaultRavenrootApplication",
+                                         "executionManifests",
+                                         "executionStore.protectsManagedPersistence") != () \
+            or java_invocation_arguments(manifest_digest, "ExecutionManifestDigest", "of",
+                                         "manifest.operationalPolicy().encodeForManifest") != (
+                "manifest.formatVersion()",) \
+            or digest_conditions is None \
+            or normalized("manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_2 || "
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3") \
+                not in digest_conditions \
+            or persistence_argument is None \
+            or normalized(persistence_argument[0]) != normalized(
+                "java.util.Optional.ofNullable(maximumPersistencePayloadBytes)"
+                " .map(ResolvedOperationalPolicy.PersistenceLimits::new)") \
+            or encode_body != normalized("""encodeForManifest(int manifestFormatVersion) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()) {
+                    return encodeVersion(ENCODING_VERSION_1);
+                }
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3 && persistence.isPresent()) {
+                    return encodeVersion(ENCODING_VERSION_2);
+                }
+                throw new IllegalArgumentException("operational policy does not match manifest format");
+            }""") \
+            or decode_body != normalized("""decodeForManifest(String encoded, int manifestFormatVersion) {
+                return decodeVersion(encoded, switch (manifestFormatVersion) {
+                    case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
+                    case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;
+                    default -> throw new IllegalArgumentException("manifest format has no operational policy");
+                });
+            }""") \
+            or java_static_final_initializer(manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION") is None \
+            or normalized(java_static_final_initializer(
+                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_3" \
+            or any(java_static_final_initializer(manifest, "ExecutionManifest", field) is None
+                   or normalized(java_static_final_initializer(
+                       manifest, "ExecutionManifest", field)[0]) != value
+                   for field, value in (("FORMAT_VERSION_1", "1"), ("FORMAT_VERSION_2", "2"),
+                                        ("FORMAT_VERSION_3", "3"))):
+        return None
+    candidate_ids = sorted(identifier for contract in contracts for identifier in contract["candidateIds"])
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return None
+    test_paths = paths[-8:]
+    test_methods = (
+        (test_paths[0], "ExecutionStoreConfigurationTest", "postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound"),
+        (test_paths[0], "ExecutionStoreConfigurationTest", "everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily"),
+        (test_paths[1], "ManagedExecutionStoreTest", "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
+        (test_paths[1], "ManagedExecutionStoreTest", "boundedSweepsAdvancePastEightIncompatiblePages"),
+        (test_paths[1], "ManagedExecutionStoreTest", "everyExecutionStoreMethodHasAnExplicitManagedRoute"),
+        (test_paths[2], "DeploymentRegistryPolicyTest", "defaultsAreOneTypedDurableRegistryDecision"),
+        (test_paths[3], "InMemoryExecutionStorePolicyTest", "explicitPolicyControlsTheReferenceStoreWithoutClaimingManagedPersistence"),
+        (test_paths[4], "SqliteConnectionPolicyTest", "oneTypedPolicyControlsArtifactAndEmbedConnectionWaits"),
+        (test_paths[5], "ManagedExecutionStoreContract", "fencingThenMatchingReplayPrecedeAChangedLiveCapacityCheck"),
+        (test_paths[6], "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
+        (test_paths[6], "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
+        (test_paths[7], "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
+        (test_paths[7], "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+    )
+    test_evidence: list[dict[str, str]] = []
+    for path, type_symbol, method in test_methods:
+        source = sources[path]
+        digest = java_method_digest(source, type_symbol, method)
+        if digest is None or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            return None
+        test_evidence.append({"path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
+    return {
+        "kind": "java-persistence-policy-family-v1",
+        "contracts": contracts,
+        "candidateIds": candidate_ids,
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "testEvidence": test_evidence,
+    }
+
+
+def persistence_policy_authority_errors(root: Path, authorities: object,
+                                        entries: dict[str, dict[str, object]],
+                                        discovered: dict[str, Candidate]) -> list[str]:
+    """Require the complete source-derived #318 policy even when inventory markers are removed."""
+    if not persistence_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["persistence policy authority exists without its typed resolver source"])
+    expected = persistence_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["persistence policy source family is incomplete or unsupported"]
+    errors: list[str] = []
+    if not isinstance(authorities, dict) or set(authorities) != {PERSISTENCE_POLICY_AUTHORITY_ID} \
+            or authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID) != expected:
+        errors.append("persistence settings require the exact mandatory source-derived authority")
+    expected_by_id = {
+        str(identifier): contract for contract in expected["contracts"]
+        for identifier in contract["candidateIds"]
+    }
+    missing = set(expected_by_id) - set(entries)
+    if missing:
+        errors.append("persistence authority current source candidate set is incomplete")
+    reviewed_ids = {identifier for identifier in expected_by_id
+                    if entries.get(identifier, {}).get("status") != "pending-review"}
+    marked = {identifier: entry for identifier, entry in entries.items()
+              if entry.get("persistenceAuthority") is not None}
+    if set(marked) != reviewed_ids:
+        errors.append("persistence authority candidate partition is missing, duplicated, or foreign")
+    for identifier, contract in expected_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None:
+            continue
+        if entry.get("status") == "pending-review":
+            continue
+        if entry.get("persistenceAuthority") != PERSISTENCE_POLICY_AUTHORITY_ID \
+                or entry.get("setting") != contract["setting"]:
+            errors.append(f"{identifier}: persistence authority setting assignment has drifted")
+        default_evidence = entry.get("defaultEvidence")
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"] \
+                or entry.get("bindings") != contract["bindings"] \
+                or not isinstance(default_evidence, list) \
+                or sorted(str(item) for item in default_evidence) != contract["defaultCandidateIds"]:
+            errors.append(f"{identifier}: persistence owner, binding, or default evidence has drifted")
+    return errors
+
+
 MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
 MANIFEST_PIN_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
@@ -4343,64 +5017,60 @@ MANIFEST_PIN_STORE_PATH = Path(
 def manifest_pin_attempt_authorities(root: Path,
                                      discovered: dict[str, Candidate]) -> dict[str, object] | None:
     """Derive the closed nested Shared-setting authority from its exact executable source."""
-    configuration = (root / MANIFEST_PIN_CONFIGURATION_PATH).read_text(encoding="utf-8")
-    bootstrap = (root / MANIFEST_PIN_BOOTSTRAP_PATH).read_text(encoding="utf-8")
-    store = (root / MANIFEST_PIN_STORE_PATH).read_text(encoding="utf-8")
-    if java_record_components(configuration, "Shared") != ("connection", "manifestPinAttempts") \
-            or not exact_import_identity(
-                configuration,
-                "ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore"):
+    try:
+        configuration = (root / MANIFEST_PIN_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        bootstrap = (root / MANIFEST_PIN_BOOTSTRAP_PATH).read_text(encoding="utf-8")
+        store = (root / MANIFEST_PIN_STORE_PATH).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    components = ("connection", "manifestPinAttempts", "storeConfig")
+    if java_record_components(configuration, "Shared") != components or not exact_import_identity(
+            configuration, "ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore"):
         return None
     call = java_constructor_component_call(
-        configuration, "ExecutionStoreConfiguration", "fromEnvironment", "Shared",
-        ("connection", "manifestPinAttempts"), "manifestPinAttempts")
-    expected_call = (
-        "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, "
-        "DEFAULT_MANIFEST_PIN_ATTEMPTS)")
-    if call is None or normalized(call[0]) != normalized(expected_call):
-        return None
+        configuration, "ExecutionStoreConfiguration", "fromSources", "Shared",
+        components, "manifestPinAttempts")
+    expected_call = "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, DEFAULT_MANIFEST_PIN_ATTEMPTS)"
     helper_span = java_method_span(configuration, "ExecutionStoreConfiguration", "positiveInt")
-    expected_helper = """
-        positiveInt(Map<String, String> environment, String variable, int fallback) {
-            String raw = environment.get(variable);
-            if (raw == null || raw.isBlank()) return fallback;
-            try {
-                int value = Integer.parseInt(raw.trim());
-                if (value < 1) throw new NumberFormatException();
-                return value;
-            } catch (NumberFormatException invalid) {
-                throw new IllegalArgumentException(variable + " must be a positive integer");
-            }
-        }
-    """
     compact_span = java_compact_constructor_span(configuration, "Shared")
-    expected_compact = """
-        Shared {
-            Objects.requireNonNull(connection, "connection");
-            if (manifestPinAttempts < 1) {
-                throw new IllegalArgumentException("manifestPinAttempts must be positive");
-            }
+    if call is None or normalized(call[0]) != normalized(expected_call) \
+            or helper_span is None or compact_span is None:
+        return None
+    helper_code = normalized(strip_c_comments(configuration[slice(*helper_span)]))
+    compact_code = normalized(strip_c_comments(configuration[slice(*compact_span)]))
+    expected_helper = normalized("""positiveInt(Map<String, String> environment, String variable, int fallback) {
+        String raw = environment.get(variable);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) throw new NumberFormatException();
+            return value;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException(variable + " must be a positive integer");
         }
-    """
-    if java_method_header(configuration, "ExecutionStoreConfiguration", "fromEnvironment") != \
-            "static ExecutionStoreConfiguration fromEnvironment(Map<String, String> environment)" \
+    }""")
+    expected_compact = normalized("""Shared {
+        Objects.requireNonNull(connection, "connection");
+        Objects.requireNonNull(storeConfig, "storeConfig");
+        if (manifestPinAttempts < 1) {
+            throw new IllegalArgumentException("manifestPinAttempts must be positive");
+        }
+    }""")
+    if java_method_header(configuration, "ExecutionStoreConfiguration", "fromSources") != \
+            "private static ExecutionStoreConfiguration fromSources(Map<String, String> properties, Map<String, String> environment)" \
             or java_method_header(configuration, "ExecutionStoreConfiguration", "positiveInt") != \
             "private static int positiveInt(Map<String, String> environment, String variable, int fallback)" \
-            or helper_span is None or compact_span is None \
-            or normalized(strip_c_comments(configuration[slice(*helper_span)])) != normalized(expected_helper) \
-            or normalized(strip_c_comments(configuration[slice(*compact_span)])) != normalized(expected_compact):
+            or helper_code != expected_helper or compact_code != expected_compact:
         return None
     environment = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"
-    environment_candidates = sorted(
-        candidate.id for candidate in discovered.values()
-        if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
-        and candidate.kind == "environment-binding" and candidate.expression == environment)
-    declaration_candidates = sorted(
-        candidate.id for candidate in discovered.values()
-        if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
-        and candidate.kind == "operational-declaration"
-        and candidate.role == "MANIFEST_PIN_ATTEMPTS_VARIABLE"
-        and candidate.expression == f'"{environment}"')
+    def ids(kind: str, expression: str, role: str | None = None) -> list[str]:
+        return sorted(candidate.id for candidate in discovered.values()
+                      if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
+                      and candidate.kind == kind and candidate.expression == expression
+                      and (role is None or candidate.role == role))
+    environment_candidates = ids("environment-binding", environment)
+    declaration_candidates = ids("operational-declaration", f'"{environment}"',
+                                "MANIFEST_PIN_ATTEMPTS_VARIABLE")
     terminal_candidates = sorted(
         candidate.id for candidate in discovered.values()
         if candidate.path == MANIFEST_PIN_STORE_PATH.as_posix()
@@ -4408,22 +5078,19 @@ def manifest_pin_attempt_authorities(root: Path,
         and candidate.role == "DEFAULT_MAX_PIN_ATTEMPTS" and candidate.expression == "3")
     terminal = java_static_final_initializer(store, "PostgresExecutionManifestStore",
                                              "DEFAULT_MAX_PIN_ATTEMPTS")
-    alias = re.findall(
-        r"\bint\s+DEFAULT_MANIFEST_PIN_ATTEMPTS\s*=\s*"
-        r"PostgresExecutionManifestStore\.DEFAULT_MAX_PIN_ATTEMPTS\s*;",
-        strip_c_comments(configuration))
-    if len(environment_candidates) != 1 or len(declaration_candidates) != 1 \
-            or len(terminal_candidates) != 1 or terminal is None \
-            or normalized(terminal[0]) != "3" or len(alias) != 1:
+    alias = re.findall(r"\bint\s+DEFAULT_MANIFEST_PIN_ATTEMPTS\s*=\s*"
+                       r"PostgresExecutionManifestStore\.DEFAULT_MAX_PIN_ATTEMPTS\s*;",
+                       strip_c_comments(configuration))
+    if any(len(group) != 1 for group in (environment_candidates, declaration_candidates,
+                                         terminal_candidates)) \
+            or terminal is None or normalized(terminal[0]) != "3" or len(alias) != 1:
         return None
     bootstrap_span = java_method_span(bootstrap, "ExecutionStoreBootstrap", "openShared")
     bootstrap_code = normalized(strip_c_comments(
         bootstrap[slice(*bootstrap_span)] if bootstrap_span is not None else ""))
-    expected_bootstrap_call = normalized("""
-        new PostgresExecutionManifestStore(pool.dataSource(), clock,
-            ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
-            configuration.manifestPinAttempts())
-    """)
+    expected_bootstrap_call = normalized("""new PostgresExecutionManifestStore(pool.dataSource(), clock,
+        ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
+        configuration.manifestPinAttempts(), storeConfig)""")
     if bootstrap_span is None or bootstrap_code.count(expected_bootstrap_call) != 1:
         return None
     tests = (
@@ -4439,29 +5106,28 @@ def manifest_pin_attempt_authorities(root: Path,
     )
     test_evidence: list[dict[str, object]] = []
     for role, path, type_symbol, method in tests:
-        source = (root / path).read_text(encoding="utf-8")
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            return None
         digest = java_method_digest(source, type_symbol, method)
         if digest is None:
             return None
-        test_evidence.append({
-            "role": role, "path": path.as_posix(), "type": type_symbol,
-            "method": method, "methodDigest": digest,
-        })
+        test_evidence.append({"role": role, "path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
     owner = f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared"
     binding = {
         "kind": "java-shared-manifest-pin-attempts-v1",
         "sourceOwner": owner,
         "factoryOwner": f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
-        "method": "fromEnvironment", "constructorType": "Shared",
+        "method": "fromSources", "constructorType": "Shared",
         "component": "manifestPinAttempts", "componentIndex": 1,
         "helper": "positiveInt", "environmentSymbol": "MANIFEST_PIN_ATTEMPTS_VARIABLE",
         "environment": environment, "environmentCandidateId": environment_candidates[0],
         "declarationCandidateIds": declaration_candidates,
         "callDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
-        "factoryBodyDigest": java_method_digest(
-            configuration, "ExecutionStoreConfiguration", "fromEnvironment"),
-        "helperBodyDigest": java_method_digest(
-            configuration, "ExecutionStoreConfiguration", "positiveInt"),
+        "factoryBodyDigest": java_method_digest(configuration, "ExecutionStoreConfiguration", "fromSources"),
+        "helperBodyDigest": java_method_digest(configuration, "ExecutionStoreConfiguration", "positiveInt"),
         "compactConstructorDigest": java_span_digest(configuration, compact_span),
         "bootstrapBodyDigest": java_method_digest(bootstrap, "ExecutionStoreBootstrap", "openShared"),
         "tests": test_evidence,
@@ -4477,9 +5143,9 @@ def manifest_pin_attempt_authorities(root: Path,
         "terminalField": "DEFAULT_MAX_PIN_ATTEMPTS", "terminalSourceExpression": "3",
         "evaluatedDefault": {"kind": "integer", "value": 3},
     }
+    all_ids = environment_candidates + declaration_candidates + terminal_candidates
     return {"bindingAuthority": binding, "defaultAuthority": default,
-            "candidateIds": sorted(environment_candidates + declaration_candidates + terminal_candidates)}
-
+            "candidateIds": sorted(all_ids)}
 
 def manifest_pin_attempt_authority_errors(root: Path, setting: str,
                                           contract: dict[str, object],
@@ -6818,6 +7484,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if helm_authority != HELM_AUTHORITY_ID \
                             or not owner.startswith(HELM_VALUES_PATH + "#"):
                         errors.append(f"{identifier}: unsupported Helm authority owner: {owner}")
+                elif entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+                    pass
                 elif current_source_owner(root, owner) is None:
                     errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
                 elif not current_source_field(root, owner, str(entry.get("field", ""))):
@@ -6966,6 +7634,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             json.dumps(entry.get("coverageEvidence"), sort_keys=True),
             json.dumps(entry.get("carrierEvidence"), sort_keys=True),
             entry.get("helmAuthority"),
+            entry.get("persistenceAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -7022,6 +7691,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(helm_authority_errors(
         root, document.get("helmAuthorities"), entries, candidates,
     ))
+    errors.extend(persistence_policy_authority_errors(
+        root, document.get("persistencePolicyAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -7040,6 +7712,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                         if evidence_id not in setting_ids:
                             errors.append(
                                 f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
+            continue
+        if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -7231,6 +7905,27 @@ def render_report(document: dict[str, object]) -> str:
                 coverage=entry.get("coverage", "")))
     else:
         lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
+    persistence_authorities = document.get("persistencePolicyAuthorities", {})
+    persistence_authority = (persistence_authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID)
+                             if isinstance(persistence_authorities, dict) else None)
+    persistence_contracts = (persistence_authority.get("contracts", [])
+                             if isinstance(persistence_authority, dict) else [])
+    lines.extend(("", "## Source-proven persistence policy", "",
+                  "The closed roster includes typed programmatic fields even when the lexical scanner finds",
+                  "no candidate atom for that field. Candidate counts therefore describe inventory evidence,",
+                  "not the number of supported policy fields.", "",
+                  "| Setting | Typed owner | Field | Bindings | Default source | Inventory candidates |",
+                  "|---|---|---|---|---|---:|"))
+    if isinstance(persistence_contracts, list) and persistence_contracts:
+        for contract in sorted(persistence_contracts, key=lambda item: str(item.get("setting", ""))):
+            bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", [])) or "none"
+            lines.append(
+                f"| {contract.get('setting', '')} | `{contract.get('owner', '')}` | "
+                f"`{contract.get('field', '')}` | {bindings} | "
+                f"`{contract.get('defaultExpression', '')}` | "
+                f"{len(contract.get('candidateIds', []))} |")
+    else:
+        lines.append("| _No source-proven persistence policy_ |  |  |  |  |  |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
     deferred_entries = sorted(
         (entry for entry in typed if entry.get("status") == "deferred"),

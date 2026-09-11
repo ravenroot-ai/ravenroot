@@ -112,8 +112,31 @@ the legacy store digest proves durable results were disabled, and trusted behavi
 that its graph cannot call any operationally bounded external I/O, including the core HTTP behavior.
 If either newly required numeric policy could matter, the
 runtime returns `LEGACY_OPERATIONAL_POLICY_UNAVAILABLE`; it does not fill the missing value from the
-current environment and does not overwrite the write-once format 1 row with format 2. New process
-instances always pin format 2.
+current environment and does not overwrite the write-once format 1 row with format 2.
+
+### Generic persistence capacity format 3
+
+Manifest format 3 adds the execution store's generic maximum payload size as a separate persisted
+value. It is deliberately distinct from the durable-result limit: results may be disabled, and a
+custom result accessor may impose a different maximum from the store that persists process events,
+timers, approvals and authority budgets. A server-managed process therefore snapshots the actual
+composed execution store capacity at acceptance. The managed store verifies the pinned manifest
+identity and capacity atomically with the first process write, and requires the immutable live store
+capacity to equal the pin before later new writes or claims. A higher current capacity cannot widen
+the accepted policy, and a lower one cannot silently make only some continuations writable.
+
+Fencing and matching idempotent replay retain their existing precedence. A matching committed replay
+returns its recorded result without creating a new fold even when the current capacity differs;
+stale fencing still refuses. Candidate discovery is read-only, but pending-work and timer claims are
+restricted transactionally to keys whose format 3 manifest and generic capacity were verified. Live
+authorization and tenant isolation remain independent checks.
+
+Formats 1 and 2 remain byte-for-byte readable with their original digests. They did not record a
+generic persistence capacity, and the durable-result field cannot establish it. Server-managed paths
+therefore refuse new writes and claims for those rows with a typed missing-policy outcome rather than
+inventing a historical value. Unmanaged adapter compositions keep their format 2 contract. New
+process instances pin format 3 only when the composed execution store provides the managed atomic
+manifest/process boundary; other compositions continue to pin format 2.
 
 A comparison covers the dependency profile and the node packages. It does not cover the graph content
 address or the logical graph identity, because a caller obtains the "current" side by describing the
@@ -168,3 +191,8 @@ substitution this record exists to prevent.
 - Identity and compatibility comparisons remain intolerant. Changing an engine capability or a used
   package version refuses retained work. Changing a current numeric default does not alter a format 2
   execution; format 1 still requires its original graph-limit digest to match exactly.
+- Format 3 makes generic persistence capacity an explicit compatibility boundary for managed server
+  execution. Increasing or decreasing that deployment value refuses new managed effects for an
+  existing process, while an already committed matching replay remains observable. Formats 1 and 2
+  are retained but cannot authorize managed persistence after upgrade because neither format proves
+  the historical generic capacity.

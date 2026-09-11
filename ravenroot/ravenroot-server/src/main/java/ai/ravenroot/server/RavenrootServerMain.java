@@ -97,7 +97,7 @@ public final class RavenrootServerMain {
         // closed; the shared branch has no such lease and must not have one, because excluding a
         // second process is the guarantee it exists to remove. See ExecutionStoreBootstrap.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
-                .fromEnvironment(System.getenv());
+                .fromSystem(System.getProperties(), System.getenv());
         // Every combination of replica count, store selection and still-per-replica authority that
         // this build cannot honour, refused before anything durable is opened. Evaluated here rather
         // than beside the embed check at the top of run because it needs the parsed store selection,
@@ -106,17 +106,20 @@ public final class RavenrootServerMain {
         // Who this replica is to the store and how long it claims for. Read here because core has no
         // configuration channel; checked against the store's own published bounds once it is open.
         var executionOwnershipConfiguration = ai.ravenroot.server.persistence
-                .ExecutionOwnershipConfiguration.fromEnvironment(System.getenv());
+                .ExecutionOwnershipConfiguration.fromSystem(System.getProperties(), System.getenv());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
                 humanTaskPolicy);
         try (var startupGuard = executionStoreOwner.startupGuard()) {
+        ai.ravenroot.api.persistence.ExecutionStore managedExecutionStore = executionStoreOwner.store() == null
+                ? null : ai.ravenroot.server.persistence.ManagedExecutionStore.protect(
+                        executionStoreOwner.store(), executionStoreOwner.executionManifestStore());
         // Inside the guard, not before it. This check can refuse — a lease time-to-live outside what
         // the composed store publishes — and a refusal raised between opening the store and entering
         // the guard would leave the store owner unclosed, skipping the checkpoint and the lock release
         // the guard exists to make unskippable. It has to be here rather than earlier because the
         // bound it checks against is the store's own, readable only once the store is open.
-        executionOwnershipConfiguration.requireCompatible(executionStoreOwner.store());
+        executionOwnershipConfiguration.requireCompatible(managedExecutionStore);
         var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
             case "graalvm" -> GraalVmProgramRuntime.fromEnvironment();
@@ -189,7 +192,7 @@ public final class RavenrootServerMain {
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
         var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
-        ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.api.persistence.ExecutionStore approvalStore = managedExecutionStore;
         ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
                 ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
@@ -257,8 +260,7 @@ public final class RavenrootServerMain {
                 System.getenv());
         // The composition root chooses the adapter. Core names only the port; the concrete adapter
         // appears here and nowhere else so the primary path has a store to write through.
-        ai.ravenroot.api.persistence.ExecutionStore executionStore =
-                executionStoreOwner.store();
+        ai.ravenroot.api.persistence.ExecutionStore executionStore = managedExecutionStore;
         // The composition root also chooses the SEC-09 mode. Core holds the seam and deliberately no
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.

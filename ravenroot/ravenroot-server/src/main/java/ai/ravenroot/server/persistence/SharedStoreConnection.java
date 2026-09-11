@@ -84,8 +84,6 @@ public record SharedStoreConnection(String url, Optional<String> user, Optional<
      * database. The operator documentation states this as guidance; enforcing it turns the guidance
      * into something a deployment cannot quietly get wrong.</p>
      */
-    private static final Duration MAX_POOL_TIMEOUT = PostgresStoreConfig.defaults().statementTimeout();
-
     public SharedStoreConnection {
         Objects.requireNonNull(url, "url");
         Objects.requireNonNull(user, "user");
@@ -97,9 +95,8 @@ public record SharedStoreConnection(String url, Optional<String> user, Optional<
         if (poolSize < 1 || poolSize > MAX_POOL_SIZE) {
             throw new IllegalArgumentException("poolSize must be between 1 and " + MAX_POOL_SIZE);
         }
-        if (poolTimeout.compareTo(MIN_POOL_TIMEOUT) < 0 || poolTimeout.compareTo(MAX_POOL_TIMEOUT) >= 0) {
-            throw new IllegalArgumentException("poolTimeout must be at least " + MIN_POOL_TIMEOUT
-                    + " and shorter than " + MAX_POOL_TIMEOUT);
+        if (poolTimeout.compareTo(MIN_POOL_TIMEOUT) < 0) {
+            throw new IllegalArgumentException("poolTimeout must be at least " + MIN_POOL_TIMEOUT);
         }
     }
 
@@ -111,7 +108,15 @@ public record SharedStoreConnection(String url, Optional<String> user, Optional<
      * @throws IllegalArgumentException when a required setting is absent or a supplied one is malformed.
      */
     public static SharedStoreConnection fromEnvironment(Map<String, String> environment) {
+        return fromSources(Map.of(), environment, PostgresStoreConfig.defaults());
+    }
+
+    static SharedStoreConnection fromSources(Map<String, String> properties,
+                                             Map<String, String> environment,
+                                             PostgresStoreConfig storeConfig) {
+        Objects.requireNonNull(properties, "properties");
         Objects.requireNonNull(environment, "environment");
+        Objects.requireNonNull(storeConfig, "storeConfig");
         String url = trimmed(environment, ExecutionStoreConfiguration.URL_VARIABLE)
                 .orElseThrow(() -> new IllegalArgumentException(
                         ExecutionStoreConfiguration.URL_VARIABLE + " is required when "
@@ -121,14 +126,21 @@ public record SharedStoreConnection(String url, Optional<String> user, Optional<
             throw new IllegalArgumentException(ExecutionStoreConfiguration.URL_VARIABLE
                     + " must be a '" + REQUIRED_URL_PREFIX + "' URL");
         }
-        return new SharedStoreConnection(url,
+        SharedStoreConnection connection = new SharedStoreConnection(url,
                 trimmed(environment, ExecutionStoreConfiguration.USER_VARIABLE),
                 // Not trimmed and not rejected when blank: a password is opaque, and a deployment
                 // whose secret legitimately begins or ends with whitespace must not have it silently
                 // altered on the way to the database. The other three settings are identifiers, where
                 // trimming a stray newline from a mounted file is a kindness rather than a corruption.
                 Optional.ofNullable(environment.get(ExecutionStoreConfiguration.PASSWORD_VARIABLE)),
-                poolSize(environment), poolTimeout(environment));
+                poolSize(properties, environment), poolTimeout(properties, environment,
+                        storeConfig.statementTimeout()));
+        if (connection.poolTimeout().compareTo(storeConfig.statementTimeout()) >= 0) {
+            throw new IllegalArgumentException(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE + " / "
+                    + ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY
+                    + " must be shorter than the configured PostgreSQL statement timeout");
+        }
+        return connection;
     }
 
     /**
@@ -148,8 +160,10 @@ public record SharedStoreConnection(String url, Optional<String> user, Optional<
         return raw == null || raw.isBlank() ? Optional.empty() : Optional.of(raw.trim());
     }
 
-    private static int poolSize(Map<String, String> environment) {
-        Optional<String> raw = trimmed(environment, ExecutionStoreConfiguration.POOL_SIZE_VARIABLE);
+    private static int poolSize(Map<String, String> properties, Map<String, String> environment) {
+        Optional<String> raw = selected(properties, environment,
+                ExecutionStoreConfiguration.POOL_SIZE_PROPERTY,
+                ExecutionStoreConfiguration.POOL_SIZE_VARIABLE);
         if (raw.isEmpty()) {
             return DEFAULT_POOL_SIZE;
         }
@@ -165,21 +179,33 @@ public record SharedStoreConnection(String url, Optional<String> user, Optional<
         }
     }
 
-    private static Duration poolTimeout(Map<String, String> environment) {
-        Optional<String> raw = trimmed(environment, ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE);
+    private static Duration poolTimeout(Map<String, String> properties, Map<String, String> environment,
+                                        Duration statementTimeout) {
+        Optional<String> raw = selected(properties, environment,
+                ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY,
+                ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE);
         if (raw.isEmpty()) {
             return DEFAULT_POOL_TIMEOUT;
         }
         try {
             Duration value = Duration.ofMillis(Long.parseLong(raw.get()));
-            if (value.compareTo(MIN_POOL_TIMEOUT) < 0 || value.compareTo(MAX_POOL_TIMEOUT) >= 0) {
+            if (value.compareTo(MIN_POOL_TIMEOUT) < 0 || value.compareTo(statementTimeout) >= 0) {
                 throw new NumberFormatException();
             }
             return value;
         } catch (NumberFormatException invalid) {
             throw new IllegalArgumentException(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE
                     + " must be a whole number of milliseconds, at least " + MIN_POOL_TIMEOUT.toMillis()
-                    + " and below the store's own statement timeout of " + MAX_POOL_TIMEOUT.toMillis());
+                    + " and below the store's configured statement timeout of "
+                    + statementTimeout.toMillis());
         }
+    }
+
+    private static Optional<String> selected(Map<String, String> properties,
+                                             Map<String, String> environment,
+                                             String property, String variable) {
+        String raw = properties.get(property);
+        if (raw != null && !raw.isBlank()) return Optional.of(raw.trim());
+        return trimmed(environment, variable);
     }
 }

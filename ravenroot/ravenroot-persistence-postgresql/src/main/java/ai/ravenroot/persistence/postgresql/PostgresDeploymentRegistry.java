@@ -3,6 +3,7 @@ package ai.ravenroot.persistence.postgresql;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryPolicy;
 import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 
@@ -152,7 +153,6 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      */
     private static final String CURSOR_VERSION = "rr1";
 
-    private static final Duration DEFAULT_COMMAND_RETENTION = Duration.ofDays(7);
 
     /**
      * The bounds this registry publishes, chosen to equal the single-host adapter's so that a
@@ -171,7 +171,6 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      * deployment listing page is not an inventory page, so reading them from the store config would
      * make an adopter widening one silently move the other.</p>
      */
-    private static final Limits LIMITS = new Limits(100, Duration.ofMinutes(5), Duration.ofSeconds(5));
 
     /**
      * The ledger slot a command key is recorded under.
@@ -213,6 +212,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
     private final Clock clock;
     private final DeploymentIdSource ids;
     private final Duration commandRetention;
+    private final Limits limits;
     private final Transactions transactions;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -236,7 +236,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      * @param ids server-side seam that mints a stable identity for each newly created deployment.
      */
     public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids) {
-        this(dataSource, clock, ids, DEFAULT_COMMAND_RETENTION);
+        this(dataSource, clock, ids, DeploymentRegistryPolicy.DEFAULTS, PostgresStoreConfig.defaults());
     }
 
     /**
@@ -256,7 +256,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      */
     public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
                                       Duration commandRetention) {
-        this(dataSource, clock, ids, commandRetention, PostgresStoreConfig.defaults());
+        this(dataSource, clock, ids,
+                DeploymentRegistryPolicy.DEFAULTS.withCommandRetention(commandRetention),
+                PostgresStoreConfig.defaults());
     }
 
     /**
@@ -291,15 +293,20 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      */
     public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
                                       Duration commandRetention, PostgresStoreConfig config) {
+        this(dataSource, clock, ids,
+                DeploymentRegistryPolicy.DEFAULTS.withCommandRetention(commandRetention), config);
+    }
+
+    /** Opens the durable registry with its policy and the shared PostgreSQL contention policy. */
+    public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
+                                      DeploymentRegistryPolicy policy, PostgresStoreConfig config) {
         Objects.requireNonNull(dataSource, "dataSource");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
-        Objects.requireNonNull(commandRetention, "commandRetention");
+        policy = Objects.requireNonNull(policy, "policy");
         Objects.requireNonNull(config, "config");
-        if (commandRetention.isNegative() || commandRetention.isZero()) {
-            throw new IllegalArgumentException("commandRetention must be positive");
-        }
-        this.commandRetention = commandRetention;
+        this.commandRetention = policy.commandRetention();
+        this.limits = policy.limits();
         this.transactions = new Transactions(dataSource, config, CommitBoundary.NONE);
         // Named and daemon so a thread dump says which registry is blocked and a forgotten close cannot
         // hold the JVM open. Unbounded because the DataSource is the real bound: a task that cannot get
@@ -324,7 +331,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     @Override
     public Limits limits() {
-        return LIMITS;
+        return limits;
     }
 
     // ---------------------------------------------------------------- mutations
@@ -760,7 +767,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
     @Override
     public CompletionStage<Page> list(String tenantId, String cursor, int limit) {
         return async(() -> {
-            if (tenantId == null || tenantId.isBlank() || limit < 1 || limit > LIMITS.maximumPageSize()) {
+            if (tenantId == null || tenantId.isBlank() || limit < 1 || limit > limits.maximumPageSize()) {
                 throw invalid("limit or tenant");
             }
             String after = decodeCursor(tenantId, cursor);
@@ -915,7 +922,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     private void ttl(Duration value) {
         if (value == null || value.isNegative() || value.isZero()
-                || value.compareTo(LIMITS.maximumLeaseTtl()) > 0) {
+                || value.compareTo(limits.maximumLeaseTtl()) > 0) {
             throw invalid("ttl");
         }
     }

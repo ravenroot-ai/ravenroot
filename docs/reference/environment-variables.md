@@ -258,6 +258,17 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | PostgreSQL-only positive lost-race repair bound; unset defaults to `3` |
+| `RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS` | PostgreSQL lock wait in positive whole milliseconds; default `5000` |
+| `RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS` | PostgreSQL statement bound in positive whole milliseconds; default `30000` and no shorter than lock timeout |
+| `RAVENROOT_POSTGRES_SERIALIZATION_RETRIES` | PostgreSQL serialization/deadlock retry count; default `3`, zero allowed |
+| `RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS` | PostgreSQL execution-store lease ceiling; default `300` seconds |
+| `RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES` | PostgreSQL generic payload capacity; default `1048576` bytes and pinned for new managed executions |
+| `RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS` | PostgreSQL lease clock-skew budget; default `5` seconds, zero allowed |
+| `RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS` | PostgreSQL journal retention; default `86400` seconds |
+| `RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE` | PostgreSQL inventory page ceiling; default `100` rows |
+| `RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS` | PostgreSQL terminal-process retention; default `604800` seconds |
+| `RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS` | PostgreSQL durable-result retention; default `604800` seconds |
+| `RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS` | PostgreSQL definition insert/removal race attempts; default `3` |
 | `RAVENROOT_EXECUTION_STORE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_ENABLED` | See the linked contract for exact type, default, and applicability. |

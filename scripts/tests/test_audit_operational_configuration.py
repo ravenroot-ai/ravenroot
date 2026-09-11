@@ -820,6 +820,260 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
                             and "partition" in error for error in errors), errors)
 
+    def test_persistence_policy_authority_is_closed_over_source_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.persistence_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        entries = {}
+        contracts = {identifier: contract for contract in expected["contracts"]
+                     for identifier in contract["candidateIds"]}
+        for identifier, contract in contracts.items():
+            entry = discovered[identifier].inventory_entry()
+            entry.update(
+                status="already-centralized", classification="operator-configurable",
+                setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                bindings=contract["bindings"], default="source-derived typed default",
+                defaultEvidence=contract["defaultCandidateIds"],
+                validation="The typed policy validates this value before work.",
+                scope="One explicitly composed adapter or caller.",
+                pinning="Resolved before managed work where replay can observe it.",
+                coverage="Source-derived owner, default, binding, consumer and test evidence.",
+                rationale="The closed persistence policy is the source authority.",
+                persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+            )
+            entries[identifier] = entry
+        authorities = {audit.PERSISTENCE_POLICY_AUTHORITY_ID: expected}
+        self.assertEqual([], audit.persistence_policy_authority_errors(
+            ROOT, authorities, entries, discovered))
+
+        missing = copy.deepcopy(authorities)
+        missing.clear()
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, missing, entries, discovered))
+        relabelled = copy.deepcopy(entries)
+        for entry in relabelled.values():
+            entry.pop("persistenceAuthority")
+            entry.update(status="retained", classification="protocol-or-format-invariant")
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, relabelled, discovered)))
+        malformed = copy.deepcopy(entries)
+        first = next(iter(malformed.values()))
+        first["defaultEvidence"] = "not-an-array"
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, authorities, malformed, discovered))
+        missing_entry = copy.deepcopy(entries)
+        missing_entry.pop(next(iter(missing_entry)))
+        self.assertTrue(any("current source candidate set is incomplete" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, missing_entry, discovered)))
+        foreign = copy.deepcopy(entries)
+        outsider = next(candidate for candidate in candidates if candidate.id not in contracts)
+        foreign[outsider.id] = {
+            **outsider.inventory_entry(), "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Unrelated fixed vocabulary.",
+            "persistenceAuthority": audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+        }
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, foreign, discovered)))
+
+    def test_inventory_routes_mandatory_persistence_authority_without_markers(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        authority = audit.persistence_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(authority)
+        entries = []
+        protected = set(authority["candidateIds"])
+        for candidate in candidates:
+            entry = candidate.inventory_entry()
+            if candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture",
+                             rationale="Executable audit fixture.")
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                for candidate in candidates},
+            "persistencePolicyAuthorities": {
+                audit.PERSISTENCE_POLICY_AUTHORITY_ID: authority,
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("persistence policy" in error or "persistence authority" in error
+                             for error in errors), errors)
+
+        removed = copy.deepcopy(document)
+        removed.pop("persistencePolicyAuthorities")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error for error in errors))
+
+        relabelled = copy.deepcopy(document)
+        for entry in relabelled["entries"]:
+            if entry["id"] in protected:
+                entry.update(status="retained", classification="protocol-or-format-invariant",
+                             rationale="Incorrectly hidden as a fixed protocol value.")
+        errors = audit.inventory_errors(ROOT, relabelled, candidates)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+    def test_persistence_policy_authority_rejects_partial_or_drifted_source(self) -> None:
+        paths = (
+            audit.PERSISTENCE_POSTGRES_CONFIG_PATH, audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+            audit.PERSISTENCE_REGISTRY_POLICY_PATH, audit.PERSISTENCE_IN_MEMORY_POLICY_PATH,
+            audit.PERSISTENCE_SQLITE_CONFIG_PATH, audit.PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
+            audit.PERSISTENCE_QUERY_PATH, audit.PERSISTENCE_MANAGED_STORE_PATH,
+            audit.PERSISTENCE_MANIFEST_PATH, audit.PERSISTENCE_BOOTSTRAP_PATH,
+            audit.PERSISTENCE_SERVER_MAIN_PATH, audit.PERSISTENCE_IN_MEMORY_REGISTRY_PATH,
+            audit.PERSISTENCE_SQLITE_REGISTRY_PATH, audit.PERSISTENCE_POSTGRES_REGISTRY_PATH,
+            audit.PERSISTENCE_SQLITE_ARTIFACT_PATH, audit.PERSISTENCE_SQLITE_EMBED_PATH,
+            audit.PERSISTENCE_SQLITE_EXECUTION_PATH, audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+            audit.PERSISTENCE_OPERATIONAL_POLICY_PATH, audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
+            audit.PERSISTENCE_MANIFEST_RESOLVER_PATH, audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java"),
+            Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+            Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+            Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+            Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+            Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+            Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+            discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+            self.assertIsNotNone(audit.persistence_policy_authority_from_source(root, discovered))
+
+            resolver = root / audit.PERSISTENCE_POSTGRES_RESOLVER_PATH
+            original = resolver.read_text(encoding="utf-8")
+            resolver.write_text(original.replace(
+                "String raw = properties.get(property);",
+                "String raw = environment.get(variable);", 1), encoding="utf-8")
+            changed = {candidate.id: candidate for candidate in audit.discover(root)}
+            self.assertIsNone(audit.persistence_policy_authority_from_source(root, changed))
+            resolver.write_text(original, encoding="utf-8")
+
+            def rejects(relative: Path, before: str, after: str) -> None:
+                target = root / relative
+                source = target.read_text(encoding="utf-8")
+                self.assertEqual(1, source.count(before), (relative, before))
+                target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                try:
+                    current = {candidate.id: candidate for candidate in audit.discover(root)}
+                    self.assertIsNone(audit.persistence_policy_authority_from_source(root, current),
+                                      relative)
+                finally:
+                    target.write_text(source, encoding="utf-8")
+
+            rejects(audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                    "defaults.maxClockSkew(), true)", "defaults.maxClockSkew(), false)")
+            rejects(audit.PERSISTENCE_POSTGRES_CONFIG_PATH,
+                    "Duration.ofSeconds(30), 3", "Duration.ofSeconds(31), 3")
+            rejects(audit.PERSISTENCE_REGISTRY_POLICY_PATH,
+                    "Duration.ofMinutes(5)", "Duration.ofSeconds(5)")
+            rejects(audit.PERSISTENCE_BOOTSTRAP_PATH,
+                    "configuration.manifestPinAttempts(), storeConfig)",
+                    "configuration.manifestPinAttempts(), PostgresStoreConfig.defaults())")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "executionStoreOwner.store(), executionStoreOwner.executionManifestStore())",
+                    "executionStoreOwner.store(), null)")
+            rejects(audit.PERSISTENCE_SQLITE_ARTIFACT_PATH,
+                    "connectionPolicy.apply(connection);", "SqliteConnectionPolicy.DEFAULTS.apply(connection);")
+            rejects(audit.PERSISTENCE_SQLITE_EMBED_PATH,
+                    "connectionPolicy.apply(opened);", "SqliteConnectionPolicy.DEFAULTS.apply(opened);")
+            rejects(audit.PERSISTENCE_SQLITE_REGISTRY_PATH,
+                    "this.limits = policy.limits();", "this.limits = DeploymentRegistryPolicy.DEFAULTS.limits();")
+            rejects(audit.PERSISTENCE_POSTGRES_REGISTRY_PATH,
+                    "this.commandRetention = policy.commandRetention();",
+                    "this.commandRetention = DeploymentRegistryPolicy.DEFAULTS.commandRetention();")
+            rejects(audit.PERSISTENCE_IN_MEMORY_REGISTRY_PATH,
+                    "this.limits = Objects.requireNonNull(limits, \"limits\");",
+                    "this.limits = DeploymentRegistryPolicy.inMemoryLimits();")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    "return applyInternal(batch, authority);", "return apply(batch);")
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    "if (authority != null) {\n            requireManagedAuthority(connection, key, authority);\n            requireBatchPayloads(batch);\n        }",
+                    "if (authority != null) {\n            requireManagedAuthority(connection, key, ExecutionPersistenceAuthority.from(null));\n            requireBatchPayloads(batch);\n        }")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+                    "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_2")
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    "pinned != config.maxPayloadBytes()",
+                    "pinned < config.maxPayloadBytes()")
+            rejects(audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+                    "ExecutionManifestResolver.completeManaged(engine,",
+                    "ExecutionManifestResolver.complete(engine,")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    ".map(ResolvedOperationalPolicy.PersistenceLimits::new)",
+                    ".map(ignored -> new ResolvedOperationalPolicy.PersistenceLimits(1))")
+            rejects(audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
+                    "|| manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3",
+                    "&& manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3")
+            rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
+                    "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;",
+                    "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_1;")
+
+            test_path = root / Path(
+                "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
+            test_bytes = test_path.read_bytes()
+            test_path.unlink()
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+            test_path.write_bytes(test_bytes)
+            resolver.unlink()
+            self.assertTrue(audit.persistence_policy_source_present(root))
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+
+    def test_manifest_pin_authority_rejects_behavior_changes_that_keep_old_markers(self) -> None:
+        paths = (
+            audit.MANIFEST_PIN_CONFIGURATION_PATH, audit.MANIFEST_PIN_BOOTSTRAP_PATH,
+            audit.MANIFEST_PIN_STORE_PATH,
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/SharedExecutionStoreBootstrapSmokeTest.java"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+
+            def authority() -> object:
+                discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+                return audit.manifest_pin_attempt_authorities(root, discovered)
+
+            self.assertIsNotNone(authority())
+            configuration = root / audit.MANIFEST_PIN_CONFIGURATION_PATH
+            original = configuration.read_text(encoding="utf-8")
+            mutations = (
+                ("if (raw == null || raw.isBlank()) return fallback;",
+                 "if (raw == null) return fallback; if (raw.isBlank()) return 1;"),
+                ("return value;\n        } catch", "return fallback;\n        } catch"),
+                ("throw new IllegalArgumentException(variable + \" must be a positive integer\");",
+                 "return fallback;"),
+                ("if (manifestPinAttempts < 1) {",
+                 "if (false && manifestPinAttempts < 1) {"),
+            )
+            for before, after in mutations:
+                with self.subTest(before=before):
+                    self.assertEqual(1, original.count(before))
+                    configuration.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    self.assertIsNone(authority())
+                    configuration.write_text(original, encoding="utf-8")
     def route_table_authority_fixture(self, root: Path):
         paths = (
             audit.ROUTE_TABLE_PATH, audit.ROUTE_DESCRIPTOR_PATH, audit.OPENAPI_GENERATOR_PATH,

@@ -3,6 +3,7 @@ package ai.ravenroot.persistence.sqlite;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryPolicy;
 import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 
@@ -102,8 +103,6 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     private static final int SQLITE_NOTADB = 26;
 
     private static final String CURSOR_VERSION = "rr1";
-    private static final Duration DEFAULT_COMMAND_RETENTION = Duration.ofDays(7);
-    private static final Limits LIMITS = new Limits(100, Duration.ofMinutes(5), Duration.ofSeconds(5));
 
     private enum Action { CREATE, APPEND, COMMAND, OBSERVE, FAIL, TOMBSTONE, ACQUIRE, RENEW, RELEASE }
 
@@ -112,13 +111,14 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     private final Clock clock;
     private final DeploymentIdSource ids;
     private final Duration commandRetention;
+    private final Limits limits;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Connection connection;
 
     /**
      * Opens the registry over an existing execution-store database file, minting deployment ids as
-     * random UUIDs and retaining ledger rows for {@link #DEFAULT_COMMAND_RETENTION}.
+     * random UUIDs and retaining ledger rows for {@link DeploymentRegistryPolicy#DEFAULTS}.
      *
      * @param databaseFile the execution store database this adapter shares.
      * @param clock time authority for every instant this registry records or evaluates expiry against.
@@ -129,14 +129,14 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     /**
      * Opens the registry with an explicit id source, retaining ledger rows for
-     * {@link #DEFAULT_COMMAND_RETENTION}.
+     * {@link DeploymentRegistryPolicy#DEFAULTS}.
      *
      * @param databaseFile the execution store database this adapter shares.
      * @param clock time authority for every instant this registry records or evaluates expiry against.
      * @param ids server-side seam that mints a stable identity for each newly created deployment.
      */
     public SqliteDeploymentRegistry(Path databaseFile, Clock clock, DeploymentIdSource ids) {
-        this(databaseFile, clock, ids, DEFAULT_COMMAND_RETENTION);
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, ids, DeploymentRegistryPolicy.DEFAULTS);
     }
 
     /**
@@ -151,7 +151,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
      */
     public SqliteDeploymentRegistry(Path databaseFile, Clock clock, DeploymentIdSource ids,
                                     Duration commandRetention) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, ids, commandRetention);
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, ids,
+                DeploymentRegistryPolicy.DEFAULTS.withCommandRetention(commandRetention));
     }
 
     /**
@@ -166,15 +167,20 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
      */
     public SqliteDeploymentRegistry(SqliteStoreLocation location, Clock clock, DeploymentIdSource ids,
                                     Duration commandRetention) {
+        this(location, clock, ids,
+                DeploymentRegistryPolicy.DEFAULTS.withCommandRetention(commandRetention));
+    }
+
+    /** Opens the durable registry with one explicit typed policy. */
+    public SqliteDeploymentRegistry(SqliteStoreLocation location, Clock clock, DeploymentIdSource ids,
+                                    DeploymentRegistryPolicy policy) {
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
-        Objects.requireNonNull(commandRetention, "commandRetention");
-        if (commandRetention.isNegative() || commandRetention.isZero()) {
-            throw new IllegalArgumentException("commandRetention must be positive");
-        }
-        this.commandRetention = commandRetention;
+        policy = Objects.requireNonNull(policy, "policy");
+        this.commandRetention = policy.commandRetention();
+        this.limits = policy.limits();
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-deployment-registry-"
                     + this.databaseFile.getFileName());
@@ -191,7 +197,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     @Override
     public Limits limits() {
-        return LIMITS;
+        return limits;
     }
 
     @Override
@@ -423,7 +429,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     @Override
     public CompletionStage<Page> list(String tenantId, String cursor, int limit) {
         return async(() -> inReadTransaction(() -> {
-            if (tenantId == null || tenantId.isBlank() || limit < 1 || limit > LIMITS.maximumPageSize()) {
+            if (tenantId == null || tenantId.isBlank() || limit < 1 || limit > limits.maximumPageSize()) {
                 throw invalid("limit or tenant");
             }
             String after = decodeCursor(tenantId, cursor);
@@ -660,7 +666,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
     }
 
     private void ttl(Duration value) {
-        if (value == null || value.isNegative() || value.isZero() || value.compareTo(LIMITS.maximumLeaseTtl()) > 0) {
+        if (value == null || value.isNegative() || value.isZero()
+                || value.compareTo(limits.maximumLeaseTtl()) > 0) {
             throw invalid("ttl");
         }
     }

@@ -54,8 +54,9 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
 
     public static final int FORMAT_VERSION_1 = 1;
     public static final int FORMAT_VERSION_2 = 2;
+    public static final int FORMAT_VERSION_3 = 3;
     /** The layout this build writes. */
-    public static final int CURRENT_FORMAT_VERSION = FORMAT_VERSION_2;
+    public static final int CURRENT_FORMAT_VERSION = FORMAT_VERSION_3;
 
     /**
      * The largest number of node packages one manifest may pin.
@@ -68,7 +69,8 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
 
     /** Rejects a manifest that could not stably identify what an execution was admitted against. */
     public ExecutionManifest {
-        if (formatVersion != FORMAT_VERSION_1 && formatVersion != FORMAT_VERSION_2) {
+        if (formatVersion != FORMAT_VERSION_1 && formatVersion != FORMAT_VERSION_2
+                && formatVersion != FORMAT_VERSION_3) {
             throw new IllegalArgumentException("unsupported execution manifest format version");
         }
         Objects.requireNonNull(key, "key");
@@ -95,7 +97,7 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
         if (formatVersion == FORMAT_VERSION_1 && operationalPolicy != null) {
             throw new IllegalArgumentException("format version 1 cannot carry operational policy");
         }
-        if (formatVersion == FORMAT_VERSION_2) {
+        if (formatVersion == FORMAT_VERSION_2 || formatVersion == FORMAT_VERSION_3) {
             Objects.requireNonNull(operationalPolicy, "operationalPolicy");
             if (!operationalPolicy.nodePackages().stream().map(
                     ResolvedOperationalPolicy.PackageCapacity::packageId).toList()
@@ -103,6 +105,12 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
                 throw new IllegalArgumentException(
                         "operational package capacities must match pinned node packages");
             }
+        }
+        if (formatVersion == FORMAT_VERSION_2 && operationalPolicy.persistence().isPresent()) {
+            throw new IllegalArgumentException("format version 2 cannot carry generic persistence capacity");
+        }
+        if (formatVersion == FORMAT_VERSION_3 && operationalPolicy.persistence().isEmpty()) {
+            throw new IllegalArgumentException("format version 3 requires generic persistence capacity");
         }
     }
 

@@ -2,6 +2,7 @@ package ai.ravenroot.api.persistence;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -63,6 +64,15 @@ import java.util.concurrent.CompletionStage;
  * successor, the runtime, CORE-03 and PERS-04 respectively.</p>
  */
 public interface ExecutionStore extends AutoCloseable {
+
+    /**
+     * Whether this view routes every managed mutation through the format-3 manifest authority.
+     * Raw adapters return {@code false}; a composition boundary may return {@code true} only when it
+     * also refuses unsupported atomic adapter seams instead of falling back to raw mutations.
+     */
+    default boolean protectsManagedPersistence() {
+        return false;
+    }
 
     /**
      * Facilities this adapter honours. Static self-description, therefore synchronous;
@@ -150,6 +160,23 @@ public interface ExecutionStore extends AutoCloseable {
     CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch);
 
     /**
+     * Applies managed work under an exact, durably pinned persistence authority.
+     *
+     * <p>The authority belongs to {@link ExecutionBatch#key()} and identifies both the manifest
+     * digest and the generic payload capacity accepted for that execution. For creation, an adapter
+     * must validate the manifest and insert the process in the same transaction, so orphan cleanup
+     * cannot remove the manifest between those acts. For an existing process, fencing and a matching
+     * committed idempotency replay take precedence; before any new fold or effect, the adapter must
+     * validate the authority and require its capacity to equal the adapter's immutable live
+     * capacity. Implementations that cannot provide those guarantees must retain the default
+     * fail-closed response.</p>
+     */
+    default CompletionStage<StoredProcessInstance> applyManaged(
+            ExecutionBatch batch, ExecutionPersistenceAuthority authority) {
+        return unsupportedManagedOperation();
+    }
+
+    /**
      * Loads an already-validated aggregate.
      *
      * <p>Fails with {@link ExecutionStoreFailure.NotFound} when the instance is absent <em>or</em>
@@ -173,6 +200,15 @@ public interface ExecutionStore extends AutoCloseable {
  * @return acquired lease, or empty when another worker already owns it.
      */
     CompletionStage<LeaseHandle> claim(ExecutionKey key, String workerId, Duration ttl);
+
+    /**
+     * Claims one managed execution only after atomically validating the exact manifest authority
+     * for {@code key} and its equality with the adapter's immutable live capacity.
+     */
+    default CompletionStage<LeaseHandle> claimManaged(ExecutionKey key, String workerId, Duration ttl,
+                                                      ExecutionPersistenceAuthority authority) {
+        return unsupportedManagedOperation();
+    }
 
 /**
  * Extends a held lease. Fails with {@link ExecutionStoreFailure.LeaseLost} if it was already lost.
@@ -239,6 +275,19 @@ public interface ExecutionStore extends AutoCloseable {
                                                         Duration leaseTtl);
 
     /**
+     * Atomically claims pending work only among the explicitly verified execution keys.
+     *
+     * <p>Every map key must belong to {@code tenantId}. The adapter revalidates each authority in
+     * the claim transaction. An empty map means that no key is eligible and must return an empty
+     * result; it must never fall through to an unfiltered claim.</p>
+     */
+    default CompletionStage<List<PendingWork>> claimPendingWorkAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            Map<ExecutionKey, ExecutionPersistenceAuthority> verified) {
+        return unsupportedManagedOperation();
+    }
+
+    /**
      * Claims up to {@code limit} timers of {@code tenantId} that are due on the <em>store's</em> clock.
      *
      * <p>There is deliberately no {@code dueTimers(now, limit)}: a caller-supplied clock would
@@ -259,6 +308,36 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<List<PendingWork.TimerDue>> claimDueTimers(String tenantId, String workerId, int limit,
                                                                Duration leaseTtl);
+
+    /**
+     * Atomically claims due timers only among the explicitly verified execution keys, with the
+     * same tenant, authority-revalidation, and empty-map semantics as
+     * {@link #claimPendingWorkAmong(String, String, int, Duration, Map)}.
+     */
+    default CompletionStage<List<PendingWork.TimerDue>> claimDueTimersAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            Map<ExecutionKey, ExecutionPersistenceAuthority> verified) {
+        return unsupportedManagedOperation();
+    }
+
+    /**
+     * Reads one bounded, deterministic page of keys that may yield claimable work, without claiming
+     * it. The page is tenant-scoped and ordered by process UUID. The cursor is the last process UUID
+     * inspected; callers pass it back to make progress past incompatible executions. An empty
+     * {@link ManagedClaimCandidatePage#nextAfter()} means the scan reached the end. Keys that appear
+     * after a page is read wait for a later sweep, and a subsequent atomic {@code claim*Among} call
+     * rechecks authority, eligibility, lease, and timer conditions.
+     */
+    default CompletionStage<ManagedClaimCandidatePage> managedClaimCandidates(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            boolean timersOnly, java.util.Optional<UUID> after) {
+        return unsupportedManagedOperation();
+    }
+
+    private static <T> CompletionStage<T> unsupportedManagedOperation() {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                ExecutionStoreFailure.invalid("this adapter does not support managed persistence authority")));
+    }
 
     /**
      * Acknowledges a claimed work item so it is not redelivered. This is the write-back half of the

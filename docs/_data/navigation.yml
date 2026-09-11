@@ -117,6 +117,8 @@
       url: /reference/human-tasks.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
+    - title: Interaction WebSocket protocol
+      url: /reference/interactions-websocket.html
     - title: HTTP API and CLI
       url: /reference/api-cli.html
     - title: Command-line tools

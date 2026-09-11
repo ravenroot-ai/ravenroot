@@ -1,5 +1,6 @@
 package ai.ravenroot.cli;
 
+import ai.ravenroot.core.audit.AuditTrailDirectory;
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
 
 import java.nio.file.Path;
@@ -17,16 +18,13 @@ import java.util.Properties;
  * has a fixed, well-defined meaning for ({@link SqliteStoreLocation}, {@code FileAuditTrail}'s
  * directory), not a new configuration surface.
  *
- * <p>Neither variable is wired into {@code RavenrootServerMain} or {@code RavenrootCliMain}'s
- * ordinary startup path today -- {@code RAVENROOT_AUDIT_DIR} is (default {@code ./data/audit},
- * {@code RavenrootServerMain.java}), reused verbatim here so a backup taken against the default
- * server deployment finds the same directory without extra configuration; the execution-store
- * directory has no existing default to match, because no {@code ExecutionStore} is composed into
- * either composition root today (PLAT-02).</p>
+ * <p>The server and this offline tool intentionally share the same typed audit-directory resolver
+ * and the same single-host execution-store directory rule. A backup taken against an unconfigured
+ * server therefore finds the same stores without a second deployment decision.</p>
  */
 public record BackupRestoreConfiguration(Path auditDirectory, SqliteStoreLocation executionStoreLocation) {
 
-    public static final String AUDIT_DIR_VARIABLE = "RAVENROOT_AUDIT_DIR";
+    public static final String AUDIT_DIR_VARIABLE = AuditTrailDirectory.ENVIRONMENT_VARIABLE;
     public static final String EXECUTION_STORE_DIR_VARIABLE = "RAVENROOT_EXECUTION_STORE_DIR";
 
     /**
@@ -43,9 +41,6 @@ public record BackupRestoreConfiguration(Path auditDirectory, SqliteStoreLocatio
     /** The selector value naming the shared store; likewise spelled the same as the server's. */
     public static final String SHARED_STORE_SELECTOR = "postgresql";
 
-    private static final String DEFAULT_AUDIT_DIR = "./data/audit";
-    private static final String DEFAULT_EXECUTION_STORE_DIR = "./data/execution-store";
-
     public BackupRestoreConfiguration {
         Objects.requireNonNull(auditDirectory, "auditDirectory");
         Objects.requireNonNull(executionStoreLocation, "executionStoreLocation");
@@ -53,10 +48,10 @@ public record BackupRestoreConfiguration(Path auditDirectory, SqliteStoreLocatio
 
     public static BackupRestoreConfiguration fromEnvironment(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
-        Path auditDirectory = Path.of(nonBlankOrDefault(environment, AUDIT_DIR_VARIABLE, DEFAULT_AUDIT_DIR));
-        Path executionStoreDirectory = Path.of(
-                nonBlankOrDefault(environment, EXECUTION_STORE_DIR_VARIABLE, DEFAULT_EXECUTION_STORE_DIR));
-        return new BackupRestoreConfiguration(auditDirectory, SqliteStoreLocation.underDirectory(executionStoreDirectory));
+        Path auditDirectory = AuditTrailDirectory.resolve(environment.get(AUDIT_DIR_VARIABLE)).path();
+        SqliteStoreLocation executionStoreLocation = SqliteStoreLocation.underConfiguredDirectory(
+                environment.get(EXECUTION_STORE_DIR_VARIABLE));
+        return new BackupRestoreConfiguration(auditDirectory, executionStoreLocation);
     }
 
     /**
@@ -87,8 +82,4 @@ public record BackupRestoreConfiguration(Path auditDirectory, SqliteStoreLocatio
         return raw != null && SHARED_STORE_SELECTOR.equals(raw.trim().toLowerCase(java.util.Locale.ROOT));
     }
 
-    private static String nonBlankOrDefault(Map<String, String> environment, String variable, String fallback) {
-        String raw = environment.get(variable);
-        return raw == null || raw.isBlank() ? fallback : raw.trim();
-    }
 }

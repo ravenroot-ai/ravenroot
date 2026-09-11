@@ -4484,6 +4484,12 @@ PERSISTENCE_EXECUTION_OWNERSHIP_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionOwnership.java")
 PERSISTENCE_BACKUP_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/BackupRestoreConfiguration.java")
+PERSISTENCE_AUDIT_DIRECTORY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/audit/AuditTrailDirectory.java")
+PERSISTENCE_AUDIT_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/audit/AuditTrailConfiguration.java")
+PERSISTENCE_SQLITE_LOCATION_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreLocation.java")
 PERSISTENCE_REGISTRY_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicy.java")
 PERSISTENCE_IN_MEMORY_POLICY_PATH = Path(
@@ -4532,6 +4538,14 @@ PERSISTENCE_MANAGED_STORE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
 PERSISTENCE_CLI_SELECTOR_TEST_PATH = Path(
     "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/cli/SharedStoreBundleRefusalTest.java")
+PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/audit/AuditTrailDirectoryTest.java")
+PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/audit/AuditTrailConfigurationTest.java")
+PERSISTENCE_DIRECTORY_PARITY_TEST_PATH = Path(
+    "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/server/persistence/BackupRestoreDirectoryParityTest.java")
+PERSISTENCE_SQLITE_LOCATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteBackupRestoreTest.java")
 
 PERSISTENCE_POSTGRES_FIELDS = (
     ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
@@ -4597,6 +4611,8 @@ def persistence_policy_source_present(root: Path) -> bool:
     return any((root / path).exists() for path in (
         PERSISTENCE_POSTGRES_RESOLVER_PATH, PERSISTENCE_REGISTRY_POLICY_PATH,
         PERSISTENCE_IN_MEMORY_POLICY_PATH, PERSISTENCE_MANAGED_STORE_PATH,
+        PERSISTENCE_AUDIT_DIRECTORY_PATH, PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+        PERSISTENCE_SQLITE_LOCATION_PATH,
     ))
 
 
@@ -4608,7 +4624,8 @@ def persistence_policy_authority_from_source(
         PERSISTENCE_STORE_CONFIGURATION_PATH, PERSISTENCE_SHARED_CONNECTION_PATH,
         PERSISTENCE_SHARED_DATASOURCE_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
         PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
-        PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+        PERSISTENCE_BACKUP_CONFIGURATION_PATH, PERSISTENCE_AUDIT_DIRECTORY_PATH,
+        PERSISTENCE_AUDIT_CONFIGURATION_PATH, PERSISTENCE_SQLITE_LOCATION_PATH,
         PERSISTENCE_REGISTRY_POLICY_PATH, PERSISTENCE_IN_MEMORY_POLICY_PATH,
         PERSISTENCE_SQLITE_CONFIG_PATH, PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
         PERSISTENCE_QUERY_PATH, PERSISTENCE_MANAGED_STORE_PATH, PERSISTENCE_MANIFEST_PATH,
@@ -4621,6 +4638,8 @@ def persistence_policy_authority_from_source(
         PERSISTENCE_DEFAULT_APPLICATION_PATH,
         PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
         PERSISTENCE_MANAGED_STORE_TEST_PATH, PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+        PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
+        PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
         Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
         Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
         Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -4640,6 +4659,9 @@ def persistence_policy_authority_from_source(
     ownership_configuration = sources[PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH]
     execution_ownership = sources[PERSISTENCE_EXECUTION_OWNERSHIP_PATH]
     backup_configuration = sources[PERSISTENCE_BACKUP_CONFIGURATION_PATH]
+    audit_directory = sources[PERSISTENCE_AUDIT_DIRECTORY_PATH]
+    audit_configuration = sources[PERSISTENCE_AUDIT_CONFIGURATION_PATH]
+    sqlite_location = sources[PERSISTENCE_SQLITE_LOCATION_PATH]
     registry = sources[PERSISTENCE_REGISTRY_POLICY_PATH]
     in_memory = sources[PERSISTENCE_IN_MEMORY_POLICY_PATH]
     sqlite = sources[PERSISTENCE_SQLITE_CONFIG_PATH]
@@ -4840,7 +4862,21 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "c2851473a359b2e420d1de38789179322df8b2a6cd5e5ddce8daa086d6654d13"),
+         "e6cd6a703f6daa7ed4e4f9ce498f5e33cb6bc77fbbf34f7415da44b27e8e1b62"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
+         "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
+         "4cf8be7a3951a412f80bd9937287b876fbd4cc2bea77de3dd100164dfbad9378"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "SqliteStoreLocation", "underConfiguredDirectory",
+         "46fed5770f116f2dc9298d7b678394b542cd53146db93d8657c0e90878763e22"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "SqliteStoreLocation", "underDirectory",
+         "41bf3e1968896c4dcf8bfac8744c432da1cd510ed983282cc838b6648c2c9f69"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "BackupRestoreConfiguration", "fromEnvironment",
+         "2382822498bda441f9bb5b63b50c36ec1a4bea3db64d67bb3b790619dce63513"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "singleHostLocation",
+         "10b29a815f02ec4ce915c796bbb7091b06f6b7687e240a13659fb8f2feccace3"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "enabledIn",
+         "74463214e4492883e9ee06d84def326ddc9e575788ab317b6cb841d8e7690abe"),
     )
     if any(java_method_digest(sources[path], type_symbol, method) != digest
            for path, type_symbol, method, digest in approved_method_digests):
@@ -4856,7 +4892,7 @@ def persistence_policy_authority_from_source(
     if compact is None or java_span_digest(shared_connection, compact) != \
             "def1d81068a369cafbe90d4975eb1fc57067f20be43bdf211a45e059dd95c864" \
             or _source_digest(backup_configuration) != \
-            "1135a6c722286014f9c3a43f8b8d015b4ab1eaab5cd55f03bea43558542a7ef6" \
+            "e7992790f1a312a57ea9d888b8ca8e0107877965e2eedf3b80589812f7ca3fe0" \
             or not selector_constants_exact \
             or java_static_final_initializer(
                 shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX") is None \
@@ -5058,6 +5094,72 @@ def persistence_policy_authority_from_source(
             "sourceSemantics": "Property overrides environment; blank delegates to 30 seconds; positive whole seconds, above store skew and no greater than store max lease; used by runtime and recovery claims.",
         },
     ))
+    audit_ids = exact_ids((
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "environment-binding",
+         "RAVENROOT_AUDIT_DIR", "RAVENROOT_AUDIT_DIR"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "fixed-declaration",
+         '"RAVENROOT_AUDIT_DIR"', "ENVIRONMENT_VARIABLE"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "fixed-declaration",
+         '"./data/audit"', "DEFAULT_DIRECTORY"),
+    ))
+    execution_directory_ids = exact_ids((
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_DIR"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_STORE_DIR"', "EXECUTION_STORE_DIR_VARIABLE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_DIR"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_DIR"', "DIRECTORY_VARIABLE"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "fixed-declaration",
+         '"./data/execution-store"', "DEFAULT_DIRECTORY"),
+    ))
+    enabled_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_ENABLED", "RAVENROOT_EXECUTION_STORE_ENABLED"),
+    ))
+    if audit_ids is None or execution_directory_ids is None or enabled_ids is None:
+        return None
+    contracts.extend((
+        {
+            "setting": "deployment.audit-directory",
+            "owner": f"{PERSISTENCE_AUDIT_DIRECTORY_PATH.as_posix()}#AuditTrailDirectory",
+            "field": "path", "bindings": ["RAVENROOT_AUDIT_DIR"],
+            "defaultExpression": '"./data/audit"', "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [audit_ids[2]], "candidateIds": sorted(audit_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_AUDIT_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+            ],
+            "sourceSemantics": "Server and offline CLI read the same environment variable; absent or blank delegates to ./data/audit, nonblank is trimmed, malformed paths are refused without disclosure, and server retention remains 24 hours.",
+        },
+        {
+            "setting": "execution.store.directory",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#SingleHost",
+            "field": "location", "bindings": ["RAVENROOT_EXECUTION_STORE_DIR"],
+            "defaultExpression": '"./data/execution-store"',
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [execution_directory_ids[4]],
+            "candidateIds": sorted(execution_directory_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#singleHostLocation",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+                f"{PERSISTENCE_SQLITE_LOCATION_PATH.as_posix()}#underConfiguredDirectory",
+            ],
+            "sourceSemantics": "Server and offline CLI share one SQLite directory default and resolver; absent or blank delegates, nonblank is trimmed, malformed paths are refused without disclosure, and underDirectory supplies the fixed database filename.",
+        },
+        {
+            "setting": "execution.store.enabled",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+            "field": "enabled", "bindings": ["RAVENROOT_EXECUTION_STORE_ENABLED"],
+            "defaultExpression": "enabled when absent or blank",
+            "defaultKind": "closed-variant-fallback", "defaultCandidateIds": [],
+            "candidateIds": enabled_ids,
+            "consumerEvidence": [f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#fromSources"],
+            "sourceSemantics": "Absent or blank and canonical true enable the selected store; false, off, 0 and no select Disabled with the same maintenance directory; every other value is refused before composition.",
+        },
+    ))
     # Each relation below is extracted from an executable method or direct field assignment.  Whole
     # file digests are retained as provenance, but cannot by themselves approve a changed consumer.
     selected_body = normalized(strip_c_comments(
@@ -5099,9 +5201,46 @@ def persistence_policy_authority_from_source(
         return PostgresStoreConfiguration.anyConfigured(properties, environment)
                 || isConfigured(properties, POOL_SIZE_PROPERTY)
                 || isConfigured(properties, POOL_TIMEOUT_PROPERTY);
-    }""")
+        }""")
+    audit_environment = java_static_final_initializer(
+        audit_directory, "AuditTrailDirectory", "ENVIRONMENT_VARIABLE")
+    audit_default = java_static_final_initializer(
+        audit_directory, "AuditTrailDirectory", "DEFAULT_DIRECTORY")
+    audit_configuration_variable = java_static_final_initializer(
+        audit_configuration, "AuditTrailConfiguration", "DIRECTORY_VARIABLE")
+    backup_audit_variable = java_static_final_initializer(
+        backup_configuration, "BackupRestoreConfiguration", "AUDIT_DIR_VARIABLE")
+    backup_store_variable = java_static_final_initializer(
+        backup_configuration, "BackupRestoreConfiguration", "EXECUTION_STORE_DIR_VARIABLE")
+    sqlite_directory_default = java_static_final_initializer(
+        sqlite_location, "SqliteStoreLocation", "DEFAULT_DIRECTORY")
+    sqlite_file_name = java_static_final_initializer(
+        sqlite_location, "SqliteStoreLocation", "DEFAULT_FILE_NAME")
+    configuration_constants_exact = all(len(re.findall(
+        rf'\bString\s+{field}\s*=\s*{re.escape(value)}\s*;', configuration_type)) == 1
+        for field, value in (
+            ("ENABLED_VARIABLE", '"RAVENROOT_EXECUTION_STORE_ENABLED"'),
+            ("DIRECTORY_VARIABLE", '"RAVENROOT_EXECUTION_STORE_DIR"'),
+            ("DEFAULT_DIRECTORY", "SqliteStoreLocation.DEFAULT_DIRECTORY"),
+        ))
     if selected_body != expected_selected \
             or postgres_only_body != expected_postgres_only_body \
+            or java_record_components(audit_directory, "AuditTrailDirectory") != ("path",) \
+            or java_record_components(audit_configuration, "AuditTrailConfiguration") != ("directory",) \
+            or audit_environment is None or normalized(audit_environment[0]) != '"RAVENROOT_AUDIT_DIR"' \
+            or audit_default is None or normalized(audit_default[0]) != '"./data/audit"' \
+            or audit_configuration_variable is None \
+            or normalized(audit_configuration_variable[0]) != \
+                "AuditTrailDirectory.ENVIRONMENT_VARIABLE" \
+            or backup_audit_variable is None or normalized(backup_audit_variable[0]) != \
+                "AuditTrailDirectory.ENVIRONMENT_VARIABLE" \
+            or backup_store_variable is None or normalized(backup_store_variable[0]) != \
+                '"RAVENROOT_EXECUTION_STORE_DIR"' \
+            or sqlite_directory_default is None \
+            or normalized(sqlite_directory_default[0]) != '"./data/execution-store"' \
+            or sqlite_file_name is None \
+            or normalized(sqlite_file_name[0]) != '"ravenroot-execution-store.db"' \
+            or not configuration_constants_exact \
             or store_selection_conditions is None \
             or normalized("!POSTGRESQL_SELECTOR.equals(selector) && "
                           "postgresqlOnlyPolicyConfigured(properties, environment)") \
@@ -5109,6 +5248,25 @@ def persistence_policy_authority_from_source(
             or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
                                          "ai.ravenroot.server.persistence.ManagedExecutionStore.protect") != (
                 "executionStoreOwner.store()", "executionStoreOwner.executionManifestStore()") \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "AuditTrailConfiguration.fromEnvironment") != ("System.getenv()",) \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "new FileAuditTrail") != (
+                "auditDirectory.path()", "java.time.Clock.systemUTC()", "Duration.ofHours(24)") \
+            or java_invocation_arguments(audit_configuration, "AuditTrailConfiguration",
+                                         "fromEnvironment", "AuditTrailDirectory.resolve") != (
+                "environment.get(DIRECTORY_VARIABLE)",) \
+            or java_invocation_arguments(backup_configuration, "BackupRestoreConfiguration",
+                                         "fromEnvironment", "AuditTrailDirectory.resolve") != (
+                "environment.get(AUDIT_DIR_VARIABLE)",) \
+            or java_invocation_arguments(backup_configuration, "BackupRestoreConfiguration",
+                                         "fromEnvironment",
+                                         "SqliteStoreLocation.underConfiguredDirectory") != (
+                "environment.get(EXECUTION_STORE_DIR_VARIABLE)",) \
+            or java_invocation_arguments(store_configuration, "ExecutionStoreConfiguration",
+                                         "singleHostLocation",
+                                         "SqliteStoreLocation.underConfiguredDirectory") != (
+                "environment.get(DIRECTORY_VARIABLE)",) \
             or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
                                          "new PostgresExecutionStore") != (
                 "pool.dataSource()", "clock", "storeConfig", "humanTaskPolicy") \
@@ -5270,6 +5428,34 @@ def persistence_policy_authority_from_source(
          "selectorPropertyOverridesEnvironmentForBundleRefusal"),
         (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
          "backupAndRestoreAreRefusedUnderTheSharedStore"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "absentAndBlankValuesResolveToTheSoleDefault"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "aConfiguredPathIsTrimmedOnceBeforeParsing"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "anInvalidPathIsRefusedWithoutRepeatingIt"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH, "AuditTrailConfigurationTest",
+         "serverCompositionUsesTheSharedDefaultBlankAndTrimRules"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH, "AuditTrailConfigurationTest",
+         "malformedServerAuditDirectoryIsRefusedBeforeOpeningTheTrail"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "bothCompositionRootsRefuseTheSameMalformedPaths"),
+        (PERSISTENCE_SQLITE_LOCATION_TEST_PATH, "SqliteBackupRestoreTest",
+         "configuredDirectoriesShareOneDefaultAndBlankTrimRule"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "malformedEnabledValueIsRejectedWithoutEchoOrCause"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "disabledKeepsTheConfiguredDirectoryAsTheMaintenanceAuthority"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "malformedDirectoryIsRejectedWithoutRepeatingTheEnvironmentValue"),
         (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
          "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
         (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
@@ -5318,6 +5504,20 @@ def persistence_policy_authority_from_source(
         "theSelectorSpellingMatchesTheServersOwn": "caf7902ec0f9f11a8c1706b22f294aa828ea5716c6463717fed7a10a0e30165e",
         "selectorPropertyOverridesEnvironmentForBundleRefusal": "21355efcd75acec2071f4be9c8c2c65499afc6f12d987d14678efc04e03b6745",
         "backupAndRestoreAreRefusedUnderTheSharedStore": "6adff2e480e35b2fec11c2433462ea2d442e71f81e6537628912ede299e9dcd0",
+        "absentAndBlankValuesResolveToTheSoleDefault": "723506176b197283fe82f3bda91fcad41dc46e68c720b240c31362d2ccbc0875",
+        "aConfiguredPathIsTrimmedOnceBeforeParsing": "b01243e10c701e9d2aabe2b1f4395eb4be023e5e2d0dbc1f7a694293d7c55dea",
+        "anInvalidPathIsRefusedWithoutRepeatingIt": "11a0afb17c679f68c8b79adb58372a0465c47a19d9f81a36132d407b6fb4e5ee",
+        "serverCompositionUsesTheSharedDefaultBlankAndTrimRules": "8d3e9493c705f53d33dcef1789c71ff74f2a96407332f72ff966afcb374f3d04",
+        "malformedServerAuditDirectoryIsRefusedBeforeOpeningTheTrail": "bc0d93dadcf86d2b7ac71f5e60e49ad14a9a27a6d5dbf4103d04ef0feeadcb02",
+        "auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer": "9f11784459d8ee120a9599fe081391d67446c84e48060fae8b272478954e995b",
+        "executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer": "b08e6b5417fd6a9aa66c3a8c36db5513d5b87bedfa5e089b60628ebb7f65f01d",
+        "bothCompositionRootsRefuseTheSameMalformedPaths": "14f23154a56a7ece244059662c587c9b4f7046e066f35d96c12df60d972f24b9",
+        "configuredDirectoriesShareOneDefaultAndBlankTrimRule": "8c6e524f4734caa56fb87dea79ce57382a264dd383c67bd5d24d5e1fa5d4ab67",
+        "absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule": "1dd9d27888784f7258ddb392c04b08b25a6512b6a3309fe72f67f6740090478f",
+        "acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases": "b42172c272bc28a45e40990f643b9f02f9e717334992efd5ac22dd1be9e53037",
+        "malformedEnabledValueIsRejectedWithoutEchoOrCause": "29cba941a77b6eb7dc66fc8b9c78fa102dac12cc42fae36c8d0b51e9c1c2871e",
+        "disabledKeepsTheConfiguredDirectoryAsTheMaintenanceAuthority": "eb981d95c3160561bd00b421ec5d6ff27aa0bfc060afb3af81bc656ac518f3f8",
+        "malformedDirectoryIsRejectedWithoutRepeatingTheEnvironmentValue": "5e496c8c8a9c25e4461c54aa23fc322c4027e5aecaf7a5e540a086bf73817441",
     }
     test_evidence: list[dict[str, str]] = []
     for path, type_symbol, method in test_methods:

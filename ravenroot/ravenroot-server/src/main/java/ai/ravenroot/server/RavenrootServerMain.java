@@ -24,6 +24,7 @@ import ai.ravenroot.api.plugin.PluginActivationEvent;
 import ai.ravenroot.plugin.bundle.PluginBundleException;
 import ai.ravenroot.plugin.bundle.PluginManifest;
 import ai.ravenroot.server.audit.AuditTrailArtifactLifecycleSink;
+import ai.ravenroot.server.audit.AuditTrailConfiguration;
 import ai.ravenroot.core.audit.AuditTrailAuthorizationSink;
 import ai.ravenroot.server.audit.AuditTrailExecutionControlSink;
 import ai.ravenroot.server.audit.AuditTrailPluginActivationSink;
@@ -168,8 +169,8 @@ public final class RavenrootServerMain {
         // Security audit (access, decisions, artifact/version lifecycle) is durable and
         // tamper-evident, separate from the operational stdout logs the server also writes. See ADR
         // 0013 and ai.ravenroot.api.audit.AuditTrail for what this does and does not defend against.
-        String auditDir = System.getenv().getOrDefault("RAVENROOT_AUDIT_DIR", "./data/audit");
-        var auditTrail = new FileAuditTrail(Path.of(auditDir), java.time.Clock.systemUTC(),
+        var auditDirectory = AuditTrailConfiguration.fromEnvironment(System.getenv()).directory();
+        var auditTrail = new FileAuditTrail(auditDirectory.path(), java.time.Clock.systemUTC(),
                 Duration.ofHours(24));
         try (auditTrail) {
         var rateLimiter = new RateLimiter(RateLimitConfiguration.fromEnvironment(System.getenv()),

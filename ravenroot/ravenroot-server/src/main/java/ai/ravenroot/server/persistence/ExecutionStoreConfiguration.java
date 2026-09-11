@@ -90,7 +90,7 @@ public sealed interface ExecutionStoreConfiguration {
     String POSTGRESQL_SELECTOR = "postgresql";
 
     /** The single-host directory used when {@link #DIRECTORY_VARIABLE} is unset. */
-    String DEFAULT_DIRECTORY = "./data/execution-store";
+    String DEFAULT_DIRECTORY = SqliteStoreLocation.DEFAULT_DIRECTORY;
 
     /**
      * No execution store at all, with a single-host location retained as maintenance-lock authority.
@@ -232,16 +232,7 @@ public sealed interface ExecutionStoreConfiguration {
     }
 
     private static SqliteStoreLocation singleHostLocation(Map<String, String> environment) {
-        String raw = environment.get(DIRECTORY_VARIABLE);
-        Path directory;
-        try {
-            directory = Path.of(raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim());
-        } catch (RuntimeException invalidPath) {
-            // Do not retain the cause: an uncaught InvalidPathException repeats the raw environment
-            // value in its message, while the only useful startup answer is that this setting is invalid.
-            throw new IllegalArgumentException("Invalid execution store directory configuration");
-        }
-        return SqliteStoreLocation.underDirectory(directory);
+        return SqliteStoreLocation.underConfiguredDirectory(environment.get(DIRECTORY_VARIABLE));
     }
 
     /**

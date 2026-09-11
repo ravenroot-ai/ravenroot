@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import io
 import copy
 import shutil
@@ -825,15 +826,23 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         discovered = {candidate.id: candidate for candidate in candidates}
         expected = audit.persistence_policy_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(expected)
-        self.assertEqual(40, len(expected["contracts"]))
-        self.assertEqual(87, len(expected["candidateIds"]))
+        self.assertEqual(43, len(expected["contracts"]))
+        self.assertEqual(96, len(expected["candidateIds"]))
+        self.assertEqual(
+            "471891f10e915939b5d29ae276a5ece19c8ada9abc8513f2ccf24beef9872e83",
+            hashlib.sha256(json.dumps(expected["contracts"][:40], sort_keys=True,
+                                      separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "the accepted 40-contract prefix must not be rewritten to add the new path policies",
+        )
         self.assertEqual(
             {
                 "execution.store.selector", "execution.store.url", "execution.store.user",
                 "execution.store.password", "execution.store.pool-size",
                 "execution.store.pool-timeout", "execution.worker-id", "execution.lease-ttl",
+                "deployment.audit-directory", "execution.store.directory",
+                "execution.store.enabled",
             },
-            {contract["setting"] for contract in expected["contracts"][-8:]},
+            {contract["setting"] for contract in expected["contracts"][-11:]},
         )
         entries = {}
         contracts = {identifier: contract for contract in expected["contracts"]
@@ -855,6 +864,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             entries[identifier] = entry
         hikari_minimum = "oc-0c1ca37de0bb555b5298"
         self.assertNotIn(hikari_minimum, expected["candidateIds"])
+        sqlite_file_name = [candidate.id for candidate in candidates
+                            if candidate.path == audit.PERSISTENCE_SQLITE_LOCATION_PATH.as_posix()
+                            and candidate.kind == "fixed-declaration"
+                            and candidate.expression == '"ravenroot-execution-store.db"']
+        self.assertEqual(1, len(sqlite_file_name))
+        self.assertNotIn(sqlite_file_name[0], expected["candidateIds"])
         minimum_entry = discovered[hikari_minimum].inventory_entry()
         minimum_entry.update(
             status="retained", classification="protocol-or-format-invariant",
@@ -957,6 +972,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
             audit.PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
             audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+            audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+            audit.PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+            audit.PERSISTENCE_SQLITE_LOCATION_PATH,
             audit.PERSISTENCE_REGISTRY_POLICY_PATH, audit.PERSISTENCE_IN_MEMORY_POLICY_PATH,
             audit.PERSISTENCE_SQLITE_CONFIG_PATH, audit.PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
             audit.PERSISTENCE_QUERY_PATH, audit.PERSISTENCE_MANAGED_STORE_PATH,
@@ -971,6 +989,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
             audit.PERSISTENCE_MANAGED_STORE_TEST_PATH,
             audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+            audit.PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH,
+            audit.PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+            audit.PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
             Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
             Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
             Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -1145,6 +1167,66 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
                     "@Test\n    void theSelectorSpellingMatchesTheServersOwn()",
                     "void theSelectorSpellingMatchesTheServersOwn()")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    'public static final String ENVIRONMENT_VARIABLE = "RAVENROOT_AUDIT_DIR";',
+                    'public static final String ENVIRONMENT_VARIABLE = "RAVENROOT_AUDIT_PATH";')
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    'public static final String DEFAULT_DIRECTORY = "./data/audit";',
+                    'public static final String DEFAULT_DIRECTORY = "./audit";')
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim()",
+                    "raw == null ? DEFAULT_DIRECTORY : raw.trim()")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "DEFAULT_DIRECTORY : raw.trim()",
+                    "DEFAULT_DIRECTORY : raw")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "return new AuditTrailDirectory(Path.of(selected));",
+                    "return new AuditTrailDirectory(Path.of(DEFAULT_DIRECTORY));")
+            rejects(audit.PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+                    "AuditTrailDirectory.resolve(environment.get(DIRECTORY_VARIABLE))",
+                    "AuditTrailDirectory.resolve(null)")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "AuditTrailConfiguration.fromEnvironment(System.getenv()).directory()",
+                    "AuditTrailConfiguration.fromEnvironment(Map.of()).directory()")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "new FileAuditTrail(auditDirectory.path(), java.time.Clock.systemUTC(),",
+                    "new FileAuditTrail(Path.of(\"./data/audit\"), java.time.Clock.systemUTC(),")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "AuditTrailDirectory.resolve(environment.get(AUDIT_DIR_VARIABLE)).path()",
+                    "AuditTrailDirectory.resolve(null).path()")
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    'public static final String DEFAULT_DIRECTORY = "./data/execution-store";',
+                    'public static final String DEFAULT_DIRECTORY = "./execution-store";')
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    "raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim()",
+                    "raw == null ? DEFAULT_DIRECTORY : raw.trim()")
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    "return underDirectory(Path.of(selected));",
+                    "return underDirectory(Path.of(DEFAULT_DIRECTORY));")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "SqliteStoreLocation.underConfiguredDirectory(environment.get(DIRECTORY_VARIABLE))",
+                    "SqliteStoreLocation.underConfiguredDirectory(null)")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "SqliteStoreLocation.underConfiguredDirectory(\n                environment.get(EXECUTION_STORE_DIR_VARIABLE))",
+                    "SqliteStoreLocation.underConfiguredDirectory(\n                null)")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "case \"false\", \"off\", \"0\", \"no\" -> false;",
+                    "case \"false\", \"off\", \"0\" -> false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "if (raw == null || raw.isBlank()) {\n            return true;",
+                    "if (raw == null || raw.isBlank()) {\n            return false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "default -> throw new IllegalArgumentException(ENABLED_VARIABLE",
+                    "default -> throw new UnsupportedOperationException(ENABLED_VARIABLE")
+            rejects(audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+                    "@Test\n    void auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()",
+                    "void auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()")
+            rejects(audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+                    "@Test\n    void executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()",
+                    "void executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases()",
+                    "void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases()")
 
             test_path = root / Path(
                 "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")

@@ -51,6 +51,27 @@ class ExecutionStoreConfigurationTest {
     }
 
     @Test
+    void absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule() {
+        var defaultLocation = ((ExecutionStoreConfiguration.SingleHost)
+                ExecutionStoreConfiguration.fromEnvironment(Map.of())).location();
+        assertEquals(java.nio.file.Path.of(
+                        ai.ravenroot.persistence.sqlite.SqliteStoreLocation.DEFAULT_DIRECTORY)
+                        .toAbsolutePath().normalize(),
+                defaultLocation.directory());
+        for (String blank : new String[] {"", "  ", "\t"}) {
+            var location = ((ExecutionStoreConfiguration.SingleHost)
+                    ExecutionStoreConfiguration.fromEnvironment(Map.of(
+                            ExecutionStoreConfiguration.DIRECTORY_VARIABLE, blank))).location();
+            assertEquals(defaultLocation, location);
+        }
+        var configured = ((ExecutionStoreConfiguration.SingleHost)
+                ExecutionStoreConfiguration.fromEnvironment(Map.of(
+                        ExecutionStoreConfiguration.DIRECTORY_VARIABLE,
+                        "  /srv/ravenroot/store  "))).location();
+        assertTrue(configured.databaseFile().startsWith("/srv/ravenroot/store"));
+    }
+
+    @Test
     void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases() {
         for (String off : new String[] {"false", "off", "0", "no", "FALSE", " Off "}) {
             assertInstanceOf(ExecutionStoreConfiguration.Disabled.class,

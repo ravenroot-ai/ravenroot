@@ -546,14 +546,17 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 if (!rows.next()) throw failure(ExecutionStoreFailure.invalid(
                         "managed execution has no pinned persistence authority"));
                 if (!authority.manifestDigest().value().equals(rows.getString(1))
-                        || rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3) {
+                        || (rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3
+                        && rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_4)) {
                     throw failure(ExecutionStoreFailure.invalid(
                             "managed execution persistence authority does not match its manifest"));
                 }
                 try {
                     var policy = ai.ravenroot.api.persistence.ResolvedOperationalPolicy
                             .decodeForManifest(rows.getString(3), rows.getInt(2));
-                    int pinned = policy.persistence().orElseThrow().maximumPayloadBytes();
+                    int pinned = policy.persistence().orElseThrow(
+                            () -> new IllegalArgumentException("persistence capacity is absent"))
+                            .maximumPayloadBytes();
                     if (pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()) {
                         throw failure(ExecutionStoreFailure.invalid(
                                 "managed execution persistence capacity is incompatible"));

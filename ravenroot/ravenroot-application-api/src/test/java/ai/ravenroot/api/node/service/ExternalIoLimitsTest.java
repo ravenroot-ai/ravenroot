@@ -13,6 +13,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ExternalIoLimitsTest {
     @Test
+    void compatibilityFactoriesShareOneFiniteHttpLifetimeAndCooperativeCancellationRequest() {
+        assertEquals(Duration.ofSeconds(30), ExternalIoLimits.DEFAULT_MANAGED_HTTP_DURATION);
+        assertEquals(Duration.ofSeconds(2), ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND);
+        assertEquals(ExternalIoLimits.DEFAULT_MANAGED_HTTP_DURATION,
+                ExternalIoLimits.MANAGED_HTTP_DEFAULTS.maximumDuration());
+        assertEquals(ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND,
+                ExternalIoLimits.MANAGED_HTTP_DEFAULTS.cancellationBound());
+        assertEquals(ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND,
+                ExternalIoLimits.http(1, 1, Duration.ofSeconds(1), Set.of()).cancellationBound());
+        assertEquals(ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND,
+                ExternalIoLimits.compressedHttp(1, 1, 1, 1, 1,
+                        Duration.ofSeconds(1), Set.of()).cancellationBound());
+    }
+
+    @Test
     void intersectionCanOnlyNarrowEveryResourceDimension() {
         ExternalIoLimits caller = new ExternalIoLimits(100, 200, 300, 150, 20,
                 Duration.ofSeconds(10), Duration.ofSeconds(2), Set.of("application/json"),

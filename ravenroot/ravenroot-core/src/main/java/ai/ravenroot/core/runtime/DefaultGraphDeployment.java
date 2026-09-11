@@ -1295,7 +1295,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             openedDomain = engine.openDomain(id.value());
             openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl), graphExecutionLimits.graphMl());
             builtRunner = new GraphRunner(openedManager, engine, openedDomain, behaviors, monitor,
-                    identitySource, runnerShutdownStepBound, graphExecutionLimits);
+                    identitySource, runnerShutdownStepBound, graphExecutionLimits,
+                    executionManifests != null);
             // Sources are discovered and started here -- while this graph's nodes are being spawned,
             // never earlier -- and only after the runner itself is built, so a source's start failure
             // rolls back a fully-formed runner rather than a half-built one.
@@ -1389,25 +1390,43 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             String packageId = behaviors.catalogSources().get(node.behavior()).bundleId();
             IngressRouteOwner owner = managedIngress == null ? null : new IngressRouteOwner(packageId,
                     security.tenantId(), id.value(), node.id(), generation);
-            InboundSourceContext context = new SourceContext(node.id(), security, owner);
+            SourceContext context = new SourceContext(node.id(), security, owner, generation);
+            BehaviorRegistry.SourceRegistration packageAuthority = behaviors.registerSourceAuthority(
+                    context, packageId, id, node.id(), generation, security);
+            BehaviorRegistry.SourceRegistration sourceAuthority = context.bind(packageAuthority);
+            InboundSource source = null;
+            boolean recorded = false;
             try {
-                InboundSource source = capableFactory.get().createSource(node, context);
+                source = capableFactory.get().createSource(node, context);
                 if (source == null) {
                     throw new IllegalStateException("Behavior '" + node.behavior()
                             + "' returned no inbound source for node '" + node.id() + "'");
                 }
+                sourceAuthority.activate();
                 joinSourceStart(source.start(context));
                 // From this point the source owns live resources. Record it before managed route
                 // activation so an acquisition failure rolls back this source and retires any lease
                 // it obtained before completing exceptionally, not only earlier siblings.
-                started.add(new SourceHandle(node.id(), source, owner));
+                started.add(new SourceHandle(node.id(), source, owner, sourceAuthority));
+                recorded = true;
                 if (source instanceof ManagedIngressSource ingressSource) {
                     IngressRouteAuthority authority = context.ingressRoutes().orElseThrow(() ->
                             new IllegalStateException("managed ingress is unavailable for source"));
                     joinSourceStart(ingressSource.activateManagedIngress(authority));
                 }
             } catch (RuntimeException | Error failure) {
-                rollbackSources(started);
+                // Before ownership transfers to started, this attempt must release the current
+                // source directly. Afterwards rollbackSources owns it and invokes its callback
+                // exactly once along with the earlier siblings.
+                if (!recorded) {
+                    retireIngress(owner);
+                    sourceAuthority.close();
+                    revokeSources(started);
+                    if (source != null) stopSourceBounded(source::rollback);
+                    rollbackSourceCallbacks(started);
+                } else {
+                    rollbackSources(started);
+                }
                 throw failure;
             }
         }
@@ -1416,9 +1435,20 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
 
     /** Rolls back every source in {@code handles}, individually bounded and best-effort. */
     private void rollbackSources(List<SourceHandle> handles) {
+        revokeSources(handles);
+        rollbackSourceCallbacks(handles);
+    }
+
+    private void revokeSources(List<SourceHandle> handles) {
         for (SourceHandle handle : handles) {
             retireIngress(handle);
-            joinSourceStopBounded(handle.source().rollback());
+            handle.sourceAuthority().close();
+        }
+    }
+
+    private void rollbackSourceCallbacks(List<SourceHandle> handles) {
+        for (SourceHandle handle : handles) {
+            stopSourceBounded(handle.source()::rollback);
         }
     }
 
@@ -1510,11 +1540,16 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         // GraphDeployment.stop() still makes in its own Javadoc ("Closes admission, drains, releases
         // resources"). That sentence is a public contract and is deliberately not edited from here;
         // the divergence is documented explicitly rather than left to be discovered.
+        // Revoke the entire generation before entering any package callback. A hostile or blocked
+        // first callback must not leave a later sibling authorized to open new external I/O.
         for (SourceHandle handle : sourcesToStop) {
             retireIngress(handle);
-            joinSourceStopBounded(release == SourceRelease.SHUTDOWN
-                    ? handle.source().shutdown()
-                    : handle.source().stop());
+            handle.sourceAuthority().close();
+        }
+        for (SourceHandle handle : sourcesToStop) {
+            stopSourceBounded(release == SourceRelease.SHUTDOWN
+                    ? handle.source()::shutdown
+                    : handle.source()::stop);
         }
         try {
             if (runnerToClose != null) {
@@ -1555,9 +1590,12 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
-    private void reportSourceDegraded(String nodeId, String sanitizedReason) {
+    private void reportSourceDegraded(String nodeId, long generation, String sanitizedReason) {
         lock.lock();
         try {
+            if (activationGeneration != generation || (status.state() != DeploymentState.STARTING
+                    && status.state() != DeploymentState.READY
+                    && status.state() != DeploymentState.DEGRADED)) return;
             boolean wasEmpty = degradedSources.isEmpty();
             degradedSources.add(nodeId);
             // Only a READY deployment moves to DEGRADED here: a report arriving while this deployment
@@ -1574,9 +1612,12 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
-    private void reportSourceHealthy(String nodeId) {
+    private void reportSourceHealthy(String nodeId, long generation) {
         lock.lock();
         try {
+            if (activationGeneration != generation || (status.state() != DeploymentState.STARTING
+                    && status.state() != DeploymentState.READY
+                    && status.state() != DeploymentState.DEGRADED)) return;
             degradedSources.remove(nodeId);
             if (degradedSources.isEmpty() && status.state() == DeploymentState.DEGRADED) {
                 status = DeploymentStatus.of(id, DeploymentState.READY);
@@ -1649,12 +1690,26 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
-    /** One node's inbound source, paired with the node id for diagnostics and individual stop/rollback. */
-    private void retireIngress(SourceHandle handle) {
-        if (managedIngress != null && handle.owner() != null) managedIngress.retire(handle.owner());
+    private static void stopSourceBounded(java.util.function.Supplier<CompletionStage<Void>> stop) {
+        try {
+            joinSourceStopBounded(stop.get());
+        } catch (RuntimeException ignored) {
+            // A source is already being retired; one synchronous cleanup failure must not strand
+            // sibling sources or replace the startup failure that selected this cleanup path.
+        }
     }
 
-    private record SourceHandle(String nodeId, InboundSource source, IngressRouteOwner owner) {
+    /** One node's inbound source, paired with the node id for diagnostics and individual stop/rollback. */
+    private void retireIngress(SourceHandle handle) {
+        retireIngress(handle.owner());
+    }
+
+    private void retireIngress(IngressRouteOwner owner) {
+        if (managedIngress != null && owner != null) managedIngress.retire(owner);
+    }
+
+    private record SourceHandle(String nodeId, InboundSource source, IngressRouteOwner owner,
+                                BehaviorRegistry.SourceRegistration sourceAuthority) {
     }
 
     /**
@@ -1665,15 +1720,51 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final class SourceContext implements InboundSourceContext {
         private final String nodeId;
         private final SecurityContext identity;
-
         private final IngressRouteOwner ingressOwner;
+        private final long generation;
+        private final TrustedIngress sourceIngress;
         private final RequestReplyIngress requestReplies;
-        SourceContext(String nodeId, SecurityContext identity, IngressRouteOwner ingressOwner) {
+        private int lifecycle; // 0 provisional, 1 active, 2 retired
+
+        SourceContext(String nodeId, SecurityContext identity, IngressRouteOwner ingressOwner, long generation) {
             this.nodeId = nodeId;
             this.identity = identity;
             this.ingressOwner = ingressOwner;
-            this.requestReplies = new SourceRequestReplyView(nodeId, ingressOwner == null
-                    ? activationGeneration : ingressOwner.graphGeneration());
+            this.generation = generation;
+            this.sourceIngress = new SourceIngressView(this);
+            this.requestReplies = new SourceRequestReplyView(nodeId, generation);
+        }
+
+        BehaviorRegistry.SourceRegistration bind(BehaviorRegistry.SourceRegistration packageAuthority) {
+            return new BehaviorRegistry.SourceRegistration() {
+                private final java.util.concurrent.atomic.AtomicBoolean closed =
+                        new java.util.concurrent.atomic.AtomicBoolean();
+                @Override public void activate() {
+                    packageAuthority.activate();
+                    synchronized (SourceContext.this) {
+                        if (lifecycle != 0) throw new IllegalStateException("source authority is not provisional");
+                        lifecycle = 1;
+                    }
+                }
+                @Override public void close() {
+                    if (!closed.compareAndSet(false, true)) return;
+                    synchronized (SourceContext.this) { lifecycle = 2; }
+                    packageAuthority.close();
+                }
+            };
+        }
+
+        private synchronized boolean active() {
+            if (lifecycle != 1) return false;
+            lock.lock();
+            try {
+                return activationGeneration == generation
+                        && status.state() != DeploymentState.STOPPING
+                        && status.state() != DeploymentState.STOPPED
+                        && status.state() != DeploymentState.FAILED;
+            } finally {
+                lock.unlock();
+            }
         }
 
         @Override
@@ -1693,7 +1784,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
 
         @Override
         public TrustedIngress ingress() {
-            return ingress;
+            return sourceIngress;
         }
 
         @Override
@@ -1708,13 +1799,60 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
 
         @Override
         public void reportDegraded(String sanitizedReason) {
-            reportSourceDegraded(nodeId, sanitizedReason);
+            synchronized (this) {
+                if (lifecycle == 1) reportSourceDegraded(nodeId, generation, sanitizedReason);
+            }
         }
 
         @Override
         public void reportHealthy() {
-            reportSourceHealthy(nodeId);
+            synchronized (this) {
+                if (lifecycle == 1) reportSourceHealthy(nodeId, generation);
+            }
         }
+    }
+
+    /** Every source ingress method is fenced by the exact context object and activation lifetime. */
+    private final class SourceIngressView implements TrustedIngress {
+        private final SourceContext context;
+
+        private SourceIngressView(SourceContext context) {
+            this.context = context;
+        }
+
+        @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
+            synchronized (context) {
+                return context.active() ? ingress.offer(security, target, payload)
+                        : IngressDisposition.REJECTED_ADMISSION_CLOSED;
+            }
+        }
+
+        @Override public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
+                IngressTarget target, Object payload, String sourceId, String idempotentKey) {
+            synchronized (context) {
+                return context.active() ? ingress.offerDurably(security, target, payload, sourceId, idempotentKey)
+                        : new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+            }
+        }
+
+        @Override public CompletionStage<JournalCursor> sourceCheckpoint(SecurityContext security,
+                                                                          String sourceId) {
+            synchronized (context) {
+                return context.active() ? ingress.sourceCheckpoint(security, sourceId)
+                        : CompletableFuture.failedFuture(new IllegalStateException("source authority is retired"));
+            }
+        }
+
+        @Override public CompletionStage<JournalCursor> advanceSourceCheckpoint(JournalCursor expected,
+                                                                                 long throughPosition) {
+            synchronized (context) {
+                return context.active() ? ingress.advanceSourceCheckpoint(expected, throughPosition)
+                        : CompletableFuture.failedFuture(new IllegalStateException("source authority is retired"));
+            }
+        }
+
+        @Override public int bufferCapacity() { return ingress.bufferCapacity(); }
+        @Override public IngressOverflowPolicy overflowPolicy() { return ingress.overflowPolicy(); }
     }
 
     /** Dynamic composition-root view: every call resolves the currently ready generation. */
@@ -1989,11 +2127,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         ai.ravenroot.api.persistence.ExecutionKey key = new ai.ravenroot.api.persistence.ExecutionKey(
                 security.tenantId(), processInstanceId);
         var executionOperationalPolicy = executionManifests == null ? null
-                : executionManifests.resolvePolicy(key,
+                : executionManifests.resolvePolicyForNodes(key,
                         ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
-                        manager.definition().nodes().stream()
-                                .map(ai.ravenroot.core.graph.GraphNode::behavior)
-                                .filter(java.util.Objects::nonNull).toList());
+                        manager.definition().nodes());
         AutoCloseable budgetBinding = null;
         AutoCloseable humanTaskBinding = null;
         try {

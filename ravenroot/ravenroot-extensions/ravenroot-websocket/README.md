@@ -9,6 +9,16 @@ Receive emits `websocket.receive.event.v1`, is process-local and non-replayable,
 
 `maxConcurrency` is one shared ceiling per trusted tenant and operator profile across every send and receive behavior instance in this process. A receive holds its permit for its whole connection generation; a send holds it through managed transport settlement, even when the graph-visible write result has already completed. Different tenants have independent gates. Process-local receive sessions are intentionally neither durable nor replica-coordinated.
 
+For a new durable execution, `websocket.send` snapshots the profile's message bytes, fragments,
+timeout and concurrency under the exact graph node, package and behavior binding. The runtime reuses
+that one resolved snapshot for manifest format 4 and action construction. Recovery therefore keeps
+the admitted numeric envelope even after the live profile changes, while destination, headers,
+subprotocols and credential authorization are resolved again and may revoke the send. Existing
+format 2 or 3 executions with a non-bypassed `websocket.send` node did not record this envelope and are
+refused rather than filled from today's profile. Graphs without a pin-capable node keep their prior
+recovery behavior. Receive reconnect backoff, buffered-event capacity and shared source concurrency
+remain deployment-lifecycle settings because a receive session has no execution key to pin.
+
 The managed runtime supplies automatic Pong and validates the profile-requested message and fragment ceilings. The fragment ceiling counts buffers delivered by the JDK listener, not necessarily wire frames.
 
 The managed runtime resolves the credential once per connection generation. It never appears in GraphML, results, ingress events, readiness/degraded reasons or package diagnostics; only the authorized remote peer receives it. Those reasons are fixed low-cardinality codes, and the package emits no additional metrics or telemetry containing tenant, deployment, profile, header, body, frame or credential values.

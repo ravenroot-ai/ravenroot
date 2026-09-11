@@ -26,6 +26,11 @@ grant another. Zone identifiers are exact and case-sensitive, while URI `%25` is
 zone delimiter. Restart the process after changing the environment so every immutable connector
 snapshot and the DNS guard receive the same policy.
 
+Unset or blank configuration preserves the shipped localhost-only exception
+`localhost:LOOPBACK`; it does not authorize other loopback names or addresses. The development
+benchmark harness may export a broader named exception set when its variable is absent. That
+harness-only value is separate from the production default and is never inferred by the server.
+
 ## Authority
 
 The operator grants deployment-level availability. Callers may use only resources they own, and GraphML may carry references but never secret values or new network rights.

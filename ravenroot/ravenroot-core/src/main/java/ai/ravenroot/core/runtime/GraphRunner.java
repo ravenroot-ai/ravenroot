@@ -135,6 +135,9 @@ public final class GraphRunner implements AutoCloseable {
     private final ExecutionIdentitySource identitySource;
     private final Duration shutdownBound;
     private final GraphExecutionLimits executionLimits;
+    private final Map<String, ai.ravenroot.api.node.service.NodeExternalIoCapacity> nodeExternalIo;
+    /** Hosted durable deployments materialize pin-capable actions once per live traversal. */
+    private final boolean executionScopedExternalIo;
 
     /**
      * The immutable runtime definition of every graph node (ADR 0024 §1/§3).
@@ -649,6 +652,16 @@ public final class GraphRunner implements AutoCloseable {
                 NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits);
     }
 
+    /** Shared deployment runner whose durable executions supply their own external-I/O snapshots. */
+    GraphRunner(GraphManager graphManager, ExecutionEngine engine, ExecutionDomain domain,
+                BehaviorRegistry behaviors, ExecutionMonitor monitor,
+                ExecutionIdentitySource identitySource, Duration shutdownBound,
+                GraphExecutionLimits executionLimits, boolean executionScopedExternalIo) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
+                UnknownBehaviorPolicy.passThrough(), domain, null, ExecutionPolicy.STANDARD,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits, null, null, executionScopedExternalIo);
+    }
+
     /**
      * The one constructor that assigns state; every other overload delegates here.
      *
@@ -836,6 +849,20 @@ public final class GraphRunner implements AutoCloseable {
                        Runnable timeoutRelinquishedObserver, GraphExecutionLimits executionLimits,
                        String completedHumanTaskNode,
                        ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
+        this(graphManager, engine, behaviors, monitor, identitySource, joinStore, clock, shutdownBound,
+                unknownBehaviors, domain, snapshot, executionPolicy, timeoutRelinquishedObserver,
+                executionLimits, completedHumanTaskNode, operationalPolicy, false);
+    }
+
+    private GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                       ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                       JoinStore joinStore, Clock clock, Duration shutdownBound,
+                       UnknownBehaviorPolicy unknownBehaviors, ExecutionDomain domain,
+                       GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy,
+                       Runnable timeoutRelinquishedObserver, GraphExecutionLimits executionLimits,
+                       String completedHumanTaskNode,
+                       ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy,
+                       boolean executionScopedExternalIo) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.executionPolicy = java.util.Objects.requireNonNull(executionPolicy, "executionPolicy");
         this.executionLimits = java.util.Objects.requireNonNull(executionLimits, "executionLimits");
@@ -848,11 +875,33 @@ public final class GraphRunner implements AutoCloseable {
                 : requireDescribes(snapshot, submitted);
         this.graph = pinned.definition();
         this.behaviors = java.util.Objects.requireNonNull(behaviors, "behaviors");
-        this.operationalPolicy = operationalPolicy == null
-                ? this.behaviors.unpinnedOperationalPolicy(this.executionLimits) : operationalPolicy;
+        this.executionScopedExternalIo = executionScopedExternalIo;
         this.completedHumanTaskNode = validateCompletedHumanTaskNode(this.graph, completedHumanTaskNode);
+        validateGraphAdmission(this.graph, this.behaviors, executionPolicy, this.executionLimits,
+                this.completedHumanTaskNode);
         validateAdmittedCommands(this.graph, this.behaviors, executionPolicy);
         this.operationallyReachableNodes = operationallyReachableNodes(this.graph, executionPolicy);
+        if (operationalPolicy == null) {
+            var live = this.behaviors.unpinnedOperationalPolicy(this.executionLimits);
+            this.operationalPolicy = new ai.ravenroot.api.persistence.ResolvedOperationalPolicy(
+                    live.graph(), live.results(), live.builtInHttp(), live.nodePackages(), live.persistence(),
+                    executionScopedExternalIo ? java.util.List.of()
+                            : this.behaviors.nodeExternalIoCapacitiesFor(this.graph.nodes()));
+        } else {
+            this.operationalPolicy = operationalPolicy;
+        }
+        var externalIo = new java.util.LinkedHashMap<String,
+                ai.ravenroot.api.node.service.NodeExternalIoCapacity>();
+        for (var entry : this.operationalPolicy.nodeExternalIo()) {
+            externalIo.put(entry.bindingDigest(), entry.capacity());
+        }
+        var expectedExternalIo = this.graph.nodes().stream()
+                .filter(this.behaviors::requiresExternalIoCapacity)
+                .map(this.behaviors::externalIoBindingDigest).collect(java.util.stream.Collectors.toSet());
+        if (!executionScopedExternalIo && !externalIo.keySet().equals(expectedExternalIo)) {
+            throw new IllegalArgumentException("external-I/O capacities do not match pin-capable graph nodes");
+        }
+        this.nodeExternalIo = java.util.Map.copyOf(externalIo);
         this.pin = GraphExecutionPin.from(pinned);
         this.engine = engine;
         this.spawner = domain != null ? domain::spawn : engine::spawn;
@@ -867,33 +916,6 @@ public final class GraphRunner implements AutoCloseable {
         if (shutdownBound.isNegative() || shutdownBound.isZero()) {
             throw new IllegalArgumentException("shutdownBound must be positive: " + shutdownBound);
         }
-        // The whole graph is checked against the trusted catalog before a single actor is
-        // spawned. Validating later would let a graph with a malformed operative property be
-        // accepted, hashed, recorded and partly executed before the faulty node was reached, so the
-        // failure would arrive after upstream nodes had already produced their effects.
-        java.util.function.Predicate<GraphNode> requiresCurrentAdmission =
-                node -> !node.id().equals(this.completedHumanTaskNode);
-        new BehaviorPropertySchema(behaviors).validate(graph, requiresCurrentAdmission);
-        new BehaviorCapabilityPreflight(behaviors).validate(graph, requiresCurrentAdmission);
-        // ADR 0024 §2: the declared runtime nature is checked on the same fail-first path and
-        // for a stronger reason -- a nature is a privilege, so a graph that claims one the catalog
-        // withheld must be refused before anything it could affect exists. Deliberately a separate
-        // validator rather than another rule inside BehaviorPropertySchema: that class returns early
-        // for non-behavior nodes and for uncatalogued behaviors, and both early returns would be holes
-        // here. This also runs before DefaultGraphDeployment starts any inbound source, because the
-        // runner is built first.
-        new NodeRuntimeNatureValidator(behaviors).validate(graph);
-        // The authored bypass flag joins the same fail-first group, and is a separate validator
-        // for the same reason the nature is -- BehaviorPropertySchema returns early on exactly the
-        // node kinds this rule is about (START, END, ERROR), where the flag names a behaviour that
-        // does not exist. Unlike the nature it does NOT refuse an uncatalogued behavior: a bypass
-        // subtracts execution rather than granting a privilege, and a node the deployment cannot
-        // provision is precisely the case this bypass supports. See NodeBypassValidator.
-        new NodeBypassValidator().validate(graph);
-        new NodeRuntimeConcurrencyValidator(behaviors).validate(graph);
-        // Complexity admission is deliberately before runtime composition and the resident spawn
-        // loop. A graph bomb therefore cannot create an actor or allocate per-node runtime state.
-        new GraphComplexityAdmission(behaviors, executionLimits).validate(graph);
         // Read once, here, from the same pinned definition every other precomputation reads. A run in
         // flight therefore cannot observe the flag changing, the way it cannot observe the topology
         // changing -- see the `graphManager.definition()` comment at the top of this constructor.
@@ -1098,7 +1120,8 @@ public final class GraphRunner implements AutoCloseable {
         }
         try {
             behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
-                    security.tenantId(), processInstanceId), traversalId, executionOperationalPolicy);
+                    security.tenantId(), processInstanceId), traversalId, executionOperationalPolicy,
+                    graph.nodes(), executionScopedExternalIo);
         } catch (RuntimeException refused) {
             coordinators.remove(traversalId, coordinator);
             rootHop.close();
@@ -1242,7 +1265,8 @@ public final class GraphRunner implements AutoCloseable {
         }
         try {
             behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
-                    security.tenantId(), processInstanceId), traversalId, operationalPolicy);
+                    security.tenantId(), processInstanceId), traversalId, operationalPolicy,
+                    graph.nodes(), executionScopedExternalIo);
         } catch (RuntimeException refused) {
             coordinators.remove(traversalId, coordinator);
             resumedHop.close();
@@ -1383,7 +1407,8 @@ public final class GraphRunner implements AutoCloseable {
         }
         try {
             behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
-                    security.tenantId(), processInstanceId), traversalId, operationalPolicy);
+                    security.tenantId(), processInstanceId), traversalId, operationalPolicy,
+                    graph.nodes(), executionScopedExternalIo);
         } catch (RuntimeException refused) {
             coordinators.remove(traversalId, coordinator);
             resumedHop.close();
@@ -1533,7 +1558,8 @@ public final class GraphRunner implements AutoCloseable {
         }
         try {
             behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
-                    security.tenantId(), processInstanceId), traversalId, operationalPolicy);
+                    security.tenantId(), processInstanceId), traversalId, operationalPolicy,
+                    graph.nodes(), executionScopedExternalIo);
         } catch (RuntimeException refused) {
             coordinators.remove(traversalId, coordinator);
             resumedHop.close();
@@ -4062,12 +4088,15 @@ public final class GraphRunner implements AutoCloseable {
         // passThroughNodes and would report it as NODE_DEFAULTED. See authoredBypassNodes for why
         // that fact must not be merged with this one.
         boolean authoredBypass = authoredBypassNodes.contains(node.id());
+        boolean executionScopedHandler = executionScopedExternalIo
+                && behaviors.requiresExternalIoCapacity(node);
         // Preserve composition-time snapshots for operational graphs while never creating a factory
         // for a node whose every possible arrival is under the sticky passthrough ceiling.
         NodeHandler composed = node.kind() == NodeKind.BEHAVIOR && !authoredBypass
                 && !node.id().equals(completedHumanTaskNode)
                 && operationallyReachableNodes.contains(node.id())
-                ? behaviors.create(node).orElseGet(() -> fallback(node))
+                && !executionScopedHandler
+                ? behaviors.create(node, externalIoFor(node)).orElseGet(() -> fallback(node))
                 : null;
         return new RavenNode() {
             private volatile NodeHandler operational = composed;
@@ -4111,15 +4140,18 @@ public final class GraphRunner implements AutoCloseable {
                                 new NodeCommandAdmissionException(node.id(), message.command().name()));
                     }
                 }
-                return operational().handle(message, context.cancellation());
+                return operational(message).handle(message, context.cancellation());
             }
 
-            private NodeHandler operational() {
+            private NodeHandler operational(NodeMessage message) {
+                if (executionScopedHandler) {
+                    return behaviors.executionIoHandler(node, message);
+                }
                 NodeHandler ready = operational;
                 if (ready != null) return ready;
                 synchronized (this) {
                     if (operational == null) {
-                        operational = behaviors.create(node).orElseGet(() -> fallback(node));
+                        operational = behaviors.create(node, externalIoFor(node)).orElseGet(() -> fallback(node));
                     }
                     return operational;
                 }
@@ -4127,11 +4159,35 @@ public final class GraphRunner implements AutoCloseable {
         };
     }
 
+    private java.util.Optional<ai.ravenroot.api.node.service.NodeExternalIoCapacity>
+            externalIoFor(GraphNode node) {
+        if (!behaviors.requiresExternalIoCapacity(node)) return java.util.Optional.empty();
+        return java.util.Optional.ofNullable(nodeExternalIo.get(behaviors.externalIoBindingDigest(node)));
+    }
+
     private static String requireCompletedHumanTaskNode(String nodeId) {
         if (nodeId == null || nodeId.isBlank()) {
             throw new IllegalArgumentException("completedHumanTaskNode cannot be blank");
         }
         return nodeId;
+    }
+
+    /** Runs every graph/package check before a package capacity callback or action can run. */
+    static void validateGraphAdmission(GraphDefinition graph, BehaviorRegistry behaviors,
+                                       ExecutionPolicy executionPolicy, GraphExecutionLimits executionLimits,
+                                       String completedHumanTaskNode) {
+        java.util.Objects.requireNonNull(graph, "graph");
+        java.util.Objects.requireNonNull(behaviors, "behaviors");
+        java.util.Objects.requireNonNull(executionPolicy, "executionPolicy");
+        java.util.Objects.requireNonNull(executionLimits, "executionLimits");
+        java.util.function.Predicate<GraphNode> requiresCurrentAdmission =
+                node -> !node.id().equals(completedHumanTaskNode);
+        new BehaviorPropertySchema(behaviors).validate(graph, requiresCurrentAdmission);
+        new BehaviorCapabilityPreflight(behaviors).validate(graph, requiresCurrentAdmission);
+        new NodeRuntimeNatureValidator(behaviors).validate(graph);
+        new NodeBypassValidator().validate(graph);
+        new NodeRuntimeConcurrencyValidator(behaviors).validate(graph);
+        new GraphComplexityAdmission(behaviors, executionLimits).validate(graph);
     }
 
     private static String validateCompletedHumanTaskNode(GraphDefinition graph, String nodeId) {

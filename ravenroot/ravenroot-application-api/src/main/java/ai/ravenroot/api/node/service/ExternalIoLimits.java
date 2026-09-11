@@ -36,10 +36,16 @@ public record ExternalIoLimits(
         Set<String> acceptedMediaTypes,
         Set<String> acceptedContentEncodings) {
 
+    /** Compatibility lifetime for managed HTTP requests that predate explicit caller limits. */
+    public static final Duration DEFAULT_MANAGED_HTTP_DURATION = Duration.ofSeconds(30);
+    /** Cooperative cancellation request used by managed HTTP helpers and bounded body handlers. */
+    public static final Duration COOPERATIVE_CANCELLATION_BOUND = Duration.ofSeconds(2);
+
     /** Finite compatibility limits used by legacy managed HTTP request constructors. */
     public static final ExternalIoLimits MANAGED_HTTP_DEFAULTS = new ExternalIoLimits(
             1024L * 1024, 8L * 1024 * 1024, 8L * 1024 * 1024, 8L * 1024 * 1024, 1,
-            Duration.ofSeconds(30), Duration.ofSeconds(2), Set.of(), Set.of("identity"));
+            DEFAULT_MANAGED_HTTP_DURATION, COOPERATIVE_CANCELLATION_BOUND,
+            Set.of(), Set.of("identity"));
 
     /** Creates validated finite limits. */
     public ExternalIoLimits {
@@ -97,7 +103,7 @@ public record ExternalIoLimits(
     public static ExternalIoLimits http(long requestBytes, long responseBytes, Duration duration,
                                         Set<String> mediaTypes) {
         return new ExternalIoLimits(requestBytes, responseBytes, responseBytes, responseBytes, 1, duration,
-                Duration.ofSeconds(2), mediaTypes, Set.of("identity"));
+                COOPERATIVE_CANCELLATION_BOUND, mediaTypes, Set.of("identity"));
     }
 
     /**
@@ -115,7 +121,7 @@ public record ExternalIoLimits(
                                                    long decodedResponseBytes, long outputBytes,
                                                    int ratio, Duration duration, Set<String> mediaTypes) {
         return new ExternalIoLimits(requestBytes, encodedResponseBytes, decodedResponseBytes,
-                outputBytes, ratio, duration, Duration.ofSeconds(2), mediaTypes,
+                outputBytes, ratio, duration, COOPERATIVE_CANCELLATION_BOUND, mediaTypes,
                 Set.of("identity", "gzip"));
     }
 

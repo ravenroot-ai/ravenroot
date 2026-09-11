@@ -163,7 +163,7 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
                             .graphExecutionLimits(parsingPolicy).graphMl();
             ParsedDefinition definition = parsedDefinition(definitionKey(key, pin), limits);
             if (manifests != null) {
-                manifests.resolvePolicy(key, ExecutionPolicy.STANDARD, definition.behaviorNames());
+                manifests.resolvePolicyForNodes(key, ExecutionPolicy.STANDARD, definition.nodes());
             }
             return new RecoveryClassification.Rehydratable(key);
         } catch (ai.ravenroot.core.manifest.ExecutionManifestResolutionException unavailable) {
@@ -266,7 +266,7 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
                             .graphExecutionLimits(parsingPolicy).graphMl();
             ParsedDefinition definition = parsedDefinition(definitionKey(key, pin), limits);
             if (manifests != null) {
-                manifests.resolvePolicy(key, ExecutionPolicy.STANDARD, definition.behaviorNames());
+                manifests.resolvePolicyForNodes(key, ExecutionPolicy.STANDARD, definition.nodes());
             }
             return definition.declarations().declaredFor(nodeId);
         } catch (RuntimeException unreadable) {
@@ -301,8 +301,7 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
                 new ByteArrayInputStream(stored.canonical().bytes()), limits)) {
             var nodes = manager.definition().nodes();
             snapshot = new ParsedDefinition(RepeatabilityDeclarations.fromGraph(nodes, descriptors),
-                    nodes.stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
-                            .filter(java.util.Objects::nonNull).toList());
+                    java.util.List.copyOf(nodes));
         }
         synchronized (parsed) {
             parsed.putIfAbsent(key, snapshot);
@@ -312,7 +311,7 @@ public final class PinnedGraphRecoveryAuthority implements RepeatabilityDeclarat
 
     private record ParsedKey(GraphDefinitionKey definition, GraphMlLimits limits) { }
     private record ParsedDefinition(RepeatabilityDeclarations declarations,
-                                    java.util.List<String> behaviorNames) { }
+                                    java.util.List<ai.ravenroot.core.graph.GraphNode> nodes) { }
 
     /** Reports a refusal once, at the boundary that decided it, so it is not lost inside a boolean. */
     void report(RecoveryClassification.Refused refused) {

@@ -401,10 +401,9 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                     new GraphVersionKey(stored.identity().graphId(), stored.identity().versionId()),
                     manager.definition());
             manager.definition().node(task.request().nodeId());
-            var policy = manifests == null ? null : manifests.resolvePolicy(task.key(),
+            var policy = manifests == null ? null : manifests.resolvePolicyForNodes(task.key(),
                     ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
-                    manager.definition().nodes().stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
-                            .filter(java.util.Objects::nonNull).toList());
+                    manager.definition().nodes());
             return new Prepared(manager, snapshot, pinnedLimits, policy);
         } catch (RuntimeException failure) {
             manager.close();

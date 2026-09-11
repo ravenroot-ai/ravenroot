@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Managed source for Teams Outgoing Webhook activities forwarded by a trusted tenant relay. */
 public final class TeamsOutgoingWebhookSourceBehavior implements NodeBehavior, InboundSourceCapable {
-    private static final Duration HARD_ACK_BUDGET = Duration.ofMillis(4_500);
+    private static final Duration HARD_ACK_BUDGET = Duration.ofMillis(TeamsProfile.MAX_ACK_TIMEOUT_MS);
     private static final byte[] ACCEPTED = TeamsValues.jsonBytes(Map.of("type", "message", "text", "Accepted."));
     private final TeamsRuntime runtime;
 

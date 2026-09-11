@@ -15,6 +15,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Collection;
+import java.util.List;
+import ai.ravenroot.core.graph.GraphNode;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
@@ -92,6 +94,21 @@ public final class ExecutionManifestService {
         return resolver.operationalPolicyFor(behaviorNames);
     }
 
+    /** Resolves one immutable package and per-node policy snapshot for admission. */
+    public ResolvedOperationalPolicy policyForNodeAdmission(Collection<GraphNode> nodes) {
+        return resolver.operationalPolicyForNodes(nodes);
+    }
+
+    /** Persists the exact policy snapshot already supplied to runtime construction. */
+    public StoredExecutionManifest pinResolved(ExecutionKey key, GraphContentId graphContentId,
+                                               GraphDefinitionIdentity graphIdentity,
+                                               ExecutionPolicy policy,
+                                               ResolvedOperationalPolicy operationalPolicy) {
+        ExecutionManifest manifest = resolver.manifestForResolved(key, graphContentId, graphIdentity,
+                policy, Instant.now(clock), operationalPolicy);
+        return await(store.pin(manifest));
+    }
+
     /** Pins v2 policy for exactly the behavior names referenced by the accepted graph. */
     public StoredExecutionManifest pin(ExecutionKey key, GraphContentId graphContentId,
                                        GraphDefinitionIdentity graphIdentity, ExecutionPolicy policy,
@@ -135,6 +152,13 @@ public final class ExecutionManifestService {
                                                    Collection<String> behaviorNames) {
         StoredExecutionManifest stored = await(store.load(key));
         return resolver.resolvePolicy(stored.manifest(), policy, behaviorNames);
+    }
+
+    /** Resolves policy with exact graph-node proof for versioned external-I/O snapshots. */
+    public ResolvedOperationalPolicy resolvePolicyForNodes(ExecutionKey key, ExecutionPolicy policy,
+                                                           Collection<GraphNode> nodes) {
+        StoredExecutionManifest stored = await(store.load(key));
+        return resolver.resolvePolicyForNodes(stored.manifest(), policy, nodes);
     }
 
     /** Restores verified graph limits before the pinned graph is parsed for full policy proof. */

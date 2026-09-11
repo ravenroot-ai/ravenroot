@@ -169,7 +169,7 @@ class ExecutionOperationalPolicyAuthorityTest {
         var graph = new ResolvedOperationalPolicy.GraphLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
         var capacity = NodePackageEgressCapacityProfile.bounded(requestBytes, 4096, 4096,
-                4, 4, 4, 4, Duration.ofSeconds(1), Duration.ofSeconds(2),
+                4, 4, 4, 4, 100, Duration.ofSeconds(1), Duration.ofSeconds(2),
                 Duration.ofSeconds(1));
         return new ResolvedOperationalPolicy(graph,
                 new ResolvedOperationalPolicy.ResultLimits(false, 4096),

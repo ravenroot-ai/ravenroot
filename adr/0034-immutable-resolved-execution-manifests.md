@@ -134,9 +134,47 @@ authorization and tenant isolation remain independent checks.
 Formats 1 and 2 remain byte-for-byte readable with their original digests. They did not record a
 generic persistence capacity, and the durable-result field cannot establish it. Server-managed paths
 therefore refuse new writes and claims for those rows with a typed missing-policy outcome rather than
-inventing a historical value. Unmanaged adapter compositions keep their format 2 contract. New
-process instances pin format 3 only when the composed execution store provides the managed atomic
-manifest/process boundary; other compositions continue to pin format 2.
+inventing a historical value. Before format 4, unmanaged adapter compositions kept their format 2
+contract, and new process instances pinned format 3 only when the composed execution store provided
+the managed atomic manifest/process boundary. Format 4 changes the new-admission representation as
+described below without changing those stored rows.
+
+### External-I/O execution envelope format 4
+
+Manifest format 4 adds the decompression-ratio component of each used node package's capacity and
+the quantitative envelope of each non-bypassed pin-capable graph node. A node entry contains a
+canonical digest of its graph node, package and behavior binding together with message bytes,
+fragment count, timeout and concurrency. It does not contain the profile destination, headers,
+subprotocols, credential reference or secret. Those remain live authorization and can revoke a
+recovered operation.
+
+The runtime validates the graph before calling package capacity code, resolves the quantitative
+values once for admission, and reuses that exact snapshot for the manifest and handler construction.
+A hosted deployment materializes pin-capable handlers once per active traversal, selected by the
+runtime's process, traversal and node identity; overlapping executions accepted under different
+profile revisions therefore keep their own bounds. Their sends still compete in the same
+tenant-and-profile admission counter, with each operation applying its own pinned maximum.
+
+Format 4 represents generic persistence capacity separately and explicitly. A server-managed
+execution carries the capacity and retains format 3's atomic first-write and claim checks. An
+unmanaged embedded composition carries an absent persistence disposition rather than inventing a
+store limit, while still pinning external-I/O values. Managed writes continue to refuse that absent
+authority.
+
+Formats 1 through 3 keep their original bytes and digests. The historical package policy admitted
+caller decompression ratios through the fixed platform ceiling of 1000, so decoding a format 2 or 3
+package record restores exactly 1000 rather than the new-admission default of 100. Older manifests
+did not carry node-bound I/O. Recovery therefore refuses an older row when its graph contains a
+non-bypassed pin-capable node, and does not fill the missing values from today's profile. An authored
+bypass remains a structural statement that the behavior is neither resolved nor constructed.
+
+Inbound sources have no execution key and do not put their receive-loop settings into a manifest.
+Their core-issued context is instead bound to one deployment activation generation. Construction is
+deny-only, activation occurs immediately before start, and rollback, stop, restart or undeploy revoke
+ingress, health reporting, credential lookups, new transport calls and handed-off managed sessions
+before package cleanup callbacks run. Cancellation requests are cooperative; admission remains held
+until the managed resource actually settles, rather than claiming that arbitrary plugin or JDK work
+has stopped within a fixed wall-clock duration.
 
 A comparison covers the dependency profile and the node packages. It does not cover the graph content
 address or the logical graph identity, because a caller obtains the "current" side by describing the
@@ -196,3 +234,10 @@ substitution this record exists to prevent.
   existing process, while an already committed matching replay remains observable. Formats 1 and 2
   are retained but cannot authorize managed persistence after upgrade because neither format proves
   the historical generic capacity.
+- Format 4 makes quantitative package decompression and pin-capable node I/O reproducible without
+  freezing destinations or credentials. Existing format 2 and 3 rows remain recoverable when the
+  graph has no non-bypassed pin-capable node; affected rows refuse rather than inheriting current
+  profile values.
+- Source receive loops keep deployment-lifecycle settings rather than execution-manifest settings.
+  Their authority is narrower in a different dimension: a retained context cannot mutate ingress,
+  health, credentials or managed transport after its activation generation is retired.

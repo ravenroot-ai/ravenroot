@@ -2673,6 +2673,17 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] == "contracts" and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "externalIoPolicyAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "externalIoPolicyAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
+    if len(path) == 6 and path[0] == "externalIoPolicyAuthorities" \
+            and path[2] == "semanticPartitions" and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -2805,6 +2816,21 @@ def remap_declared_candidate_references(document: dict[str, object],
                 for contract in contracts:
                     remap_list(contract, "candidateIds")
                     remap_list(contract, "defaultCandidateIds")
+    external_io_authorities = document.get("externalIoPolicyAuthorities")
+    if isinstance(external_io_authorities, dict):
+        for authority in external_io_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultCandidateIds")
+            partitions = authority.get("semanticPartitions")
+            if isinstance(partitions, list):
+                for partition in partitions:
+                    remap_list(partition, "candidateIds")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -3023,6 +3049,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             return None, ["cannot derive the closed persistence policy authority from current source"]
         refreshed["persistencePolicyAuthorities"] = {
             PERSISTENCE_POLICY_AUTHORITY_ID: persistence_authority,
+        }
+    if external_io_policy_source_present(root):
+        external_io_authority = external_io_policy_authority_from_source(root, current)
+        if external_io_authority is None:
+            return None, ["cannot derive the closed external-I/O policy authority from current source"]
+        refreshed["externalIoPolicyAuthorities"] = {
+            EXTERNAL_IO_POLICY_AUTHORITY_ID: external_io_authority,
         }
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
@@ -4468,6 +4501,313 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
 
 
 PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
+EXTERNAL_IO_POLICY_AUTHORITY_ID = "ravenroot-external-io-policy-v1"
+EXTERNAL_IO_LIMITS_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/ExternalIoLimits.java")
+EXTERNAL_IO_RESERVED_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java")
+EXTERNAL_IO_OUTBOUND_HTTP_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java")
+EXTERNAL_IO_PACKAGE_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/NodePackageEgressPolicy.java")
+EXTERNAL_IO_MANAGED_SERVICES_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/ManagedNodePackageServices.java")
+EXTERNAL_IO_NODE_CAPACITY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/NodeExternalIoCapacity.java")
+EXTERNAL_IO_CAPACITY_CAPABLE_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/ExecutionIoCapacityCapable.java")
+EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java")
+EXTERNAL_IO_GRAPH_RUNNER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java")
+EXTERNAL_IO_NODE_PACKAGES_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/NodePackages.java")
+EXTERNAL_IO_DEPLOYMENT_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultGraphDeployment.java")
+EXTERNAL_IO_APPLICATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+EXTERNAL_IO_SERVER_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+EXTERNAL_IO_GRANTS_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/plugin/EnvironmentNodePackageServiceGrants.java")
+EXTERNAL_IO_WS_PROFILE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketProfile.java")
+EXTERNAL_IO_WS_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/EnvironmentWebSocketProfileResolver.java")
+EXTERNAL_IO_WS_SEND_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketSendNodeBehavior.java")
+EXTERNAL_IO_WS_ADMISSION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketAdmissionRegistry.java")
+EXTERNAL_IO_TEAMS_PROFILE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsProfile.java")
+EXTERNAL_IO_TEAMS_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsConfiguration.java")
+EXTERNAL_IO_TEAMS_SOURCE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsOutgoingWebhookSourceBehavior.java")
+EXTERNAL_IO_MATTERMOST_PROFILE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostProfile.java")
+EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostConfiguration.java")
+EXTERNAL_IO_MATTERMOST_SOURCE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostOutgoingWebhookSourceBehavior.java")
+
+# These files are dedicated to the external-I/O policy family, so every lexical candidate in them
+# belongs to the closed #319 cohort. Shared composition and service files use the narrower selectors
+# in external_io_policy_cohort_candidate_ids(). This lets the source proof reject a newly introduced
+# unclassified family candidate without claiming unrelated settings from large shared files.
+EXTERNAL_IO_CLOSED_COHORT_PATHS = frozenset({
+    EXTERNAL_IO_LIMITS_PATH.as_posix(),
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundHttpRequest.java",
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundWebSocketRequest.java",
+    EXTERNAL_IO_RESERVED_POLICY_PATH.as_posix(),
+    EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix(),
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java",
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java",
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressHttpClients.java",
+    EXTERNAL_IO_PACKAGE_POLICY_PATH.as_posix(),
+    EXTERNAL_IO_MATTERMOST_SOURCE_PATH.as_posix(),
+    EXTERNAL_IO_MATTERMOST_PROFILE_PATH.as_posix(),
+    EXTERNAL_IO_TEAMS_SOURCE_PATH.as_posix(),
+    EXTERNAL_IO_TEAMS_PROFILE_PATH.as_posix(),
+    EXTERNAL_IO_WS_RESOLVER_PATH.as_posix(),
+    EXTERNAL_IO_WS_PROFILE_PATH.as_posix(),
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketReceiveNodeBehavior.java",
+    EXTERNAL_IO_WS_SEND_PATH.as_posix(),
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketSettings.java",
+})
+
+
+def external_io_policy_cohort_candidate_ids(
+        discovered: dict[str, Candidate]) -> set[str]:
+    """Derive the complete scanner-visible #319 family without sweeping shared modules."""
+    result: set[str] = set()
+    reserved_carriers = {
+        "compose.yaml", "dev.sh", "docs/examples/assistant/compose.override.yaml",
+        "ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java",
+        EXTERNAL_IO_SERVER_MAIN_PATH.as_posix(), "scripts/publish_environment_reference.py",
+    }
+    for candidate in discovered.values():
+        if candidate.path in EXTERNAL_IO_CLOSED_COHORT_PATHS:
+            result.add(candidate.id)
+        elif candidate.path in reserved_carriers \
+                and candidate.expression in {
+                    "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS", "RAVENROOT_WEBSOCKET_"}:
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_SERVER_MAIN_PATH.as_posix() \
+                and candidate.kind == "environment-binding" \
+                and candidate.expression in {
+                    "RAVENROOT_HTTP_ALLOWED_HOSTS", "RAVENROOT_HTTP_ALLOWED_PORTS",
+                    "RAVENROOT_HTTP_MAX_RESPONSE_BYTES", "RAVENROOT_HTTP_MAX_REQUEST_BYTES",
+                }:
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_GRANTS_PATH.as_posix() \
+                and candidate.role == "LIMIT_KEYS":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_MANAGED_SERVICES_PATH.as_posix() \
+                and candidate.role == "MAX_WEBSOCKET_CONTROL_PAYLOAD_BYTES":
+            result.add(candidate.id)
+        elif candidate.path in {
+                EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH.as_posix(),
+                EXTERNAL_IO_TEAMS_CONFIGURATION_PATH.as_posix(),
+        } and candidate.symbol == "authority":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH.as_posix() \
+                and (candidate.role == "ravenroot.node-external-io-binding.v1"
+                     or (candidate.symbol == "State"
+                         and candidate.role in {"packageId", "capacity"})):
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_GRAPH_RUNNER_PATH.as_posix() \
+                and candidate.role == "timeoutRelinquishedObserver":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_NODE_PACKAGES_PATH.as_posix() \
+                and candidate.role == "capacity":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_WS_ADMISSION_PATH.as_posix() \
+                and candidate.role == "references":
+            result.add(candidate.id)
+        elif candidate.path.endswith((
+                "/MattermostBehaviorDescriptors.java", "/TeamsBehaviorDescriptors.java")) \
+                and candidate.role == "OUTGOING_WEBHOOK":
+            result.add(candidate.id)
+    return result
+EXTERNAL_IO_RETAINED_PARTITION_IDS: dict[str, tuple[str, ...]] = {
+    'derived': ('oc-00249e779f14b6185363',
+ 'oc-496395e2d50c9dea517e',
+ 'oc-68303c3c9f98cdc9dd10',
+ 'oc-87eda8644338867d5958',
+ 'oc-a9a220e1100854479b64',
+ 'oc-affa4fe6bbb709fe7623',
+ 'oc-bd80cbbfd4b53b210f09',
+ 'oc-cc296544449299680e39',
+ 'oc-ee6b4ee3971d4678ac14',
+ 'oc-fbdf6700bae13ed9d57a'),
+    'presentation-text': ('oc-02657e1fdc1359975cdf',
+ 'oc-254c4a89bc0b1567ab3d',
+ 'oc-341179e6501ed94cc8c0',
+ 'oc-491f47559d807be2ce3d',
+ 'oc-4a8f8db7f276dd955d8b',
+ 'oc-51fa31bb88453e646f24',
+ 'oc-6a15de0bcb65eeef70bd',
+ 'oc-6b0ca399c1b31afb6763',
+ 'oc-8e393f6ef5b395b9dfd5',
+ 'oc-96c609db5a27afdd9064',
+ 'oc-b76b0d8414eaab44f7e7',
+ 'oc-dab19378235db06109da',
+ 'oc-dfafdd1e31d7c6d7579d',
+ 'oc-e1feb24f65b04e327e31',
+ 'oc-e3fff31616750bd17df6',
+ 'oc-f3f4069dd38b9ad611a0'),
+    'protocol-or-format-invariant': ('oc-018dbc014e462bbe931a',
+ 'oc-01ff4a23b167bfcc1c4b',
+ 'oc-02b47a95332d7a6c4066',
+ 'oc-02eb66f56fcfbffb2e6a',
+ 'oc-09ba3eace14b9a7ca77c',
+ 'oc-0dcf634f486dbb772fa5',
+ 'oc-12dd659827b1e7b02a5e',
+ 'oc-1d535af115d5f4737042',
+ 'oc-1d76c972ce9dd286b88c',
+ 'oc-24f33f27fb0b5e1022e8',
+ 'oc-2fe5d7eee27ca07e8480',
+ 'oc-34ff104aea35a3ceea57',
+ 'oc-38cd58ad356453a3bc31',
+ 'oc-3cd31adcd3cf6fdab425',
+ 'oc-3ed2a31542708e0c68da',
+ 'oc-43b904f64db4cc06fb30',
+ 'oc-45eda4bdfa4447c8ec5d',
+ 'oc-46c78451e818905e8cd3',
+ 'oc-4708827da6ffa499fece',
+ 'oc-4fd470c4936a1e1bd17d',
+ 'oc-508dee15bc3536687308',
+ 'oc-5377ddf897e4b83ce9a4',
+ 'oc-5a3108a9a96d98c4c5bc',
+ 'oc-6298831bdba1ab695de3',
+ 'oc-68dcb5ced589ea6cdc0d',
+ 'oc-6e63b93a68ec52b3ae12',
+ 'oc-6f62b6f844024fd4c0f2',
+ 'oc-7190403ca4bb99ad60f0',
+ 'oc-72d151d529809b0941fd',
+ 'oc-75c0884a0070e4e0b758',
+ 'oc-7bc6ae21b86028a069c5',
+ 'oc-7d55666c068b815f7061',
+ 'oc-8398b7441076f3a3b7ce',
+ 'oc-874f0bc86b944a589827',
+ 'oc-88cecb269f31817b544e',
+ 'oc-8913bc5d6d00227ef4b9',
+ 'oc-8de139d187313f74296e',
+ 'oc-8e999ff677f2824964ff',
+ 'oc-8ed3ba70cf48eabff474',
+ 'oc-9309ed8636e6449208e5',
+ 'oc-957b0d6d525ce2604c49',
+ 'oc-991a60a25ea923610c1d',
+ 'oc-99592977fda43f9f71db',
+ 'oc-9cca3e22d2f2f50fc18d',
+ 'oc-a2de4de099d660779d1a',
+ 'oc-a6f7f87b522646fbd7b9',
+ 'oc-a9157143af5fd69d63d6',
+ 'oc-a9bc79241b4f274fa293',
+ 'oc-ac9a388816d54e615151',
+ 'oc-ae62ba216098ff0283e8',
+ 'oc-afab6b07c5946d8696b4',
+ 'oc-afbc60a6536a40ef07af',
+ 'oc-b15855ce09072c5ff57f',
+ 'oc-b5e89a5d5fa625353667',
+ 'oc-b95ef5162376476a96c6',
+ 'oc-bc4fee5bd663795bd000',
+ 'oc-bdd7327c3f56df3f68e1',
+ 'oc-bee16de038ab2c151cee',
+ 'oc-bf04f402b1cf4997f142',
+ 'oc-c3421ecd2a1eb524d034',
+ 'oc-c45c8738341b6c992006',
+ 'oc-c590bbac0824ce64fded',
+ 'oc-dd56946dd3e1c6b3e225',
+ 'oc-e0670dea83a672b315a2',
+ 'oc-ea3215852714b90b08a0',
+ 'oc-f0a87f0c380cfff84f58',
+ 'oc-f204fd56af4db4ce4df2',
+ 'oc-face4282022761d7eb7d',
+ 'oc-fad38befb3e4c14b5180'),
+    'published-contract-description': ('oc-37a33ab43680907b6f2b', 'oc-8917781ba9e5e0fd3262'),
+    'security-ceiling-or-default': ('oc-03097ed713566a0f9a2d',
+ 'oc-04e68dc084451818e3e2',
+ 'oc-0c79686802c8f5a9f5ec',
+ 'oc-0c88aaef732f7339e6dc',
+ 'oc-0e2fb2b38a5794fbf284',
+ 'oc-1af3b58afc89d0250607',
+ 'oc-22ada0d126e70a33d227',
+ 'oc-2a24e11d9463ab9991c4',
+ 'oc-2bfa29e2a87203574ebf',
+ 'oc-327459e2c6a5446f1820',
+ 'oc-3a8b07001cd918037a80',
+ 'oc-3dbbc46d71be59c34a4c',
+ 'oc-3ea50685d66f0d89553a',
+ 'oc-4088e843b7b7e3e0560a',
+ 'oc-452952dbdf375e41fe36',
+ 'oc-56d6f0690cccbb7975f8',
+ 'oc-63f6e84f7d1bf129abca',
+ 'oc-6f3bf08057bc9eaaa644',
+ 'oc-732f25736ca294badb82',
+ 'oc-7e3b5f3c01bcb0471000',
+ 'oc-7f17c8f6bba3e51ff9e0',
+ 'oc-805fbcf42b726d7b988a',
+ 'oc-8694fd6590e69a715c08',
+ 'oc-8db9ab14683ef18bee72',
+ 'oc-92a7e7a387efac00528e',
+ 'oc-9bbe64c54001b5a2d45c',
+ 'oc-9d87343583f1667cc121',
+ 'oc-a1c1c4d8f26d64de5529',
+ 'oc-a960b7a17dbf9b412943',
+ 'oc-aa18ab15640b60ed85f5',
+ 'oc-aa7be24706f1ea823752',
+ 'oc-b376ce7e0f2ad8d7d954',
+ 'oc-bd5fd856cf03be08b254',
+ 'oc-c8f663c9728cd2664eb0',
+ 'oc-ce731262ee59dcfd729d',
+ 'oc-e0f58e9fb2df6fd827ab',
+ 'oc-e4009dbd332027b5eeac',
+ 'oc-e4ec20dd7cec0fe6d5b4',
+ 'oc-e6692248a8e5d394c6b9',
+ 'oc-eca57fbb104a765fbe93',
+ 'oc-efcbaee5017796ec2968',
+ 'oc-f318d298d21c31b58b7f',
+ 'oc-f4f5f28d0a1cedc03451',
+ 'oc-ffbc00e2c6f381b91688'),
+}
+EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS: dict[str, tuple[str, ...]] = {
+    "derived": ("oc-388ee6f97231765ed07c",),
+    "presentation-text": (
+        "oc-bee21f38b846252317a5", "oc-5fae2344a14cd331ba13",
+        "oc-adcfda23d27a8dcdb683", "oc-ce6fde7667c2906bed69",
+        "oc-adbe50a903508b508994", "oc-c9671b1923531eb6a1d7",
+        "oc-07f0b69b06c3b7632bc2", "oc-38056d4a49f7ec2b627e",
+        "oc-36f411cc96f93a83d4c8", "oc-be1c77e0b3334cec1c3e",
+        "oc-5415279369ee7558530f", "oc-dcd6ed4eb178c7214e04",
+        "oc-e42c41c9ab2cb20c804d", "oc-94a181b3f8d7f8b05af2",
+        "oc-f3f36606d72e5b6ce4e3", "oc-8784c1320f8c665dd9bc",
+        "oc-6909f620153d4088d035", "oc-1c057cf1c557104d6b82",
+        "oc-723bff59bc3dfe7d3129", "oc-26a83bfe4581de3a9dbc",
+        "oc-b9fbaeda2087c25302e2", "oc-9a2df68f7eb65855f0da",
+    ),
+    "protocol-or-format-invariant": ("oc-1cf23e723f844709e0ea",),
+    "security-ceiling-or-default": (
+        "oc-8b95f2348c416ec92e84", "oc-19d6cb049c59ad45f369",
+        "oc-b8d9052b4652a6a79b2b", "oc-33335576c3b015d33f3f",
+        "oc-48e57aee851a1071083a", "oc-dead383003f1a781723a",
+        "oc-90a125e176360d8f0532", "oc-116e8d6a0e8dd0a90d93",
+        "oc-44edabe3e285bb329ac3", "oc-4c949556383c87def51a",
+        "oc-48cdcc455eb5fbf9ebd5", "oc-645097fe95e373f6d49c",
+        "oc-9127586cddcb79edf0cc", "oc-5a00148a240c7170e232",
+        "oc-7a4ab22fcf63391380cd", "oc-2b6193e681ee3d5b965e",
+        "oc-4b1c778e90588908f015", "oc-fe191b3ad7e06e6b5ba5",
+        "oc-67f205758b533aace8a4", "oc-3ff3ad79c8e98cb69363",
+        "oc-337d7a8a97f4563f017c", "oc-c6ae26f57ab1336642b1",
+        "oc-0dca049b8f429fc6a66f", "oc-653c922a8a8d7d946f2b",
+        "oc-da60ca53395e2a9a2ccb", "oc-d185874bf5e9b7eb0e36",
+        "oc-9dfc5d4be1cee326f312", "oc-018302ebd6fcd8b3ee0b",
+        "oc-afd5b25bd087541579a0", "oc-417ef74f91f0fb611089",
+        "oc-c7ac4088cb64f659d38e", "oc-583dcbf62b31cad60e3d",
+        "oc-1bd4b76dfe0ce3e1d2f7", "oc-b1caeccf5cbd3aaff355",
+    ),
+}
 PERSISTENCE_POSTGRES_CONFIG_PATH = Path(
     "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java")
 PERSISTENCE_POSTGRES_RESOLVER_PATH = Path(
@@ -4508,6 +4848,8 @@ PERSISTENCE_OPERATIONAL_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicy.java")
 PERSISTENCE_MANIFEST_DIGEST_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifestDigest.java")
+PERSISTENCE_AUTHORITY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionPersistenceAuthority.java")
 PERSISTENCE_MANIFEST_RESOLVER_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java")
 PERSISTENCE_DEFAULT_APPLICATION_PATH = Path(
@@ -4546,6 +4888,12 @@ PERSISTENCE_DIRECTORY_PARITY_TEST_PATH = Path(
     "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/server/persistence/BackupRestoreDirectoryParityTest.java")
 PERSISTENCE_SQLITE_LOCATION_TEST_PATH = Path(
     "ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteBackupRestoreTest.java")
+PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java")
+PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java")
+PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationExecutionManifestTest.java")
 
 PERSISTENCE_POSTGRES_FIELDS = (
     ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
@@ -4634,12 +4982,15 @@ def persistence_policy_authority_from_source(
         PERSISTENCE_POSTGRES_REGISTRY_PATH, PERSISTENCE_SQLITE_ARTIFACT_PATH,
         PERSISTENCE_SQLITE_EMBED_PATH, PERSISTENCE_SQLITE_EXECUTION_PATH,
         PERSISTENCE_POSTGRES_EXECUTION_PATH, PERSISTENCE_OPERATIONAL_POLICY_PATH,
-        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_PATH,
+        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_AUTHORITY_PATH,
+        PERSISTENCE_MANIFEST_RESOLVER_PATH,
         PERSISTENCE_DEFAULT_APPLICATION_PATH,
         PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
         PERSISTENCE_MANAGED_STORE_TEST_PATH, PERSISTENCE_CLI_SELECTOR_TEST_PATH,
         PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
         PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+        PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH,
+        PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
         Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
         Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
         Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
@@ -4680,6 +5031,7 @@ def persistence_policy_authority_from_source(
     postgres_execution = sources[PERSISTENCE_POSTGRES_EXECUTION_PATH]
     operational_policy = sources[PERSISTENCE_OPERATIONAL_POLICY_PATH]
     manifest_digest = sources[PERSISTENCE_MANIFEST_DIGEST_PATH]
+    persistence_authority = sources[PERSISTENCE_AUTHORITY_PATH]
     manifest_resolver = sources[PERSISTENCE_MANIFEST_RESOLVER_PATH]
     default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
     pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
@@ -4862,7 +5214,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "e6cd6a703f6daa7ed4e4f9ce498f5e33cb6bc77fbbf34f7415da44b27e8e1b62"),
+         "e0ddeb698b2f2755b9fcd57f393473609859851814d4c494d4ee0aa8209fc078"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -5176,6 +5528,21 @@ def persistence_policy_authority_from_source(
         if encode_span is not None else ""
     decode_body = normalized(strip_c_comments(operational_policy[slice(*decode_span)])) \
         if decode_span is not None else ""
+    authority_from_span = java_method_span(
+        persistence_authority, "ExecutionPersistenceAuthority", "from")
+    authority_from_body = normalized(strip_c_comments(
+        persistence_authority[slice(*authority_from_span)])) \
+        if authority_from_span is not None else ""
+    policy_for_nodes_span = java_method_span(
+        manifest_resolver, "ExecutionManifestResolver", "operationalPolicyForNodes")
+    policy_for_nodes_body = normalized(strip_c_comments(
+        manifest_resolver[slice(*policy_for_nodes_span)])) \
+        if policy_for_nodes_span is not None else ""
+    manifest_for_resolved_span = java_method_span(
+        manifest_resolver, "ExecutionManifestResolver", "manifestForResolved")
+    manifest_for_resolved_body = normalized(strip_c_comments(
+        manifest_resolver[slice(*manifest_for_resolved_span)])) \
+        if manifest_for_resolved_span is not None else ""
     operational_components = java_record_components(
         operational_policy, "ResolvedOperationalPolicy")
     persistence_argument = java_constructor_component_call(
@@ -5192,9 +5559,23 @@ def persistence_policy_authority_from_source(
     expected_managed_authority_conditions = (
         "!rows.next()",
         "!authority.manifestDigest().value().equals(rows.getString(1)) || "
-        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+        "(rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3 && "
+        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_4)",
         "pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()",
     )
+    explicit_absent_capacity_refusal = normalized('''policy.persistence().orElseThrow(
+            () -> new IllegalArgumentException("persistence capacity is absent"))
+            .maximumPayloadBytes()''')
+    sqlite_managed_authority_span = java_method_span(
+        sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority")
+    postgres_managed_authority_span = java_method_span(
+        postgres_execution, "PostgresExecutionStore", "requireManagedAuthority")
+    sqlite_managed_authority_body = normalized(strip_c_comments(
+        sqlite_execution[slice(*sqlite_managed_authority_span)])) \
+        if sqlite_managed_authority_span is not None else ""
+    postgres_managed_authority_body = normalized(strip_c_comments(
+        postgres_execution[slice(*postgres_managed_authority_span)])) \
+        if postgres_managed_authority_span is not None else ""
     expected_selected = normalized("""selected(Map<String, String> properties,
             Map<String, String> environment, String property, String variable) {
         String raw = properties.get(property);
@@ -5335,6 +5716,8 @@ def persistence_policy_authority_from_source(
             or java_method_if_conditions(
                 postgres_execution, "PostgresExecutionStore", "requireManagedAuthority") \
                 != expected_managed_authority_conditions \
+            or explicit_absent_capacity_refusal not in sqlite_managed_authority_body \
+            or explicit_absent_capacity_refusal not in postgres_managed_authority_body \
             or java_invocation_arguments(
                 sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority",
                 "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
@@ -5360,18 +5743,62 @@ def persistence_policy_authority_from_source(
                 "manifest.formatVersion()",) \
             or digest_conditions is None \
             or normalized("manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_2 || "
-                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3") \
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3 || "
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_4") \
                 not in digest_conditions \
+            or authority_from_body != normalized("""from(StoredExecutionManifest stored) {
+                Objects.requireNonNull(stored, "stored");
+                ExecutionManifest manifest = stored.manifest();
+                if ((manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3
+                        && manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_4)
+                        || manifest.operationalPolicy() == null
+                        || manifest.operationalPolicy().persistence().isEmpty()) {
+                    throw new IllegalArgumentException("execution manifest has no generic persistence capacity");
+                }
+                return new ExecutionPersistenceAuthority(stored.digest(), manifest.operationalPolicy()
+                        .persistence().orElseThrow().maximumPayloadBytes());
+            }""") \
+            or policy_for_nodes_body != normalized("""operationalPolicyForNodes(Collection<GraphNode> nodes) {
+                Objects.requireNonNull(nodes, "nodes");
+                var behaviorNames = nodes.stream().filter(node -> node.behavior() != null)
+                        .map(GraphNode::behavior).collect(java.util.stream.Collectors.toSet());
+                ResolvedOperationalPolicy base = operationalPolicyFor(behaviorNames);
+                return new ResolvedOperationalPolicy(base.graph(), base.results(), base.builtInHttp(),
+                        base.nodePackages(), base.persistence(),
+                        behaviors.nodeExternalIoCapacitiesFor(nodes));
+            }""") \
+            or manifest_for_resolved_body != normalized("""manifestForResolved(ExecutionKey key,
+                    GraphContentId graphContentId, GraphDefinitionIdentity graphIdentity,
+                    ExecutionPolicy policy, Instant pinnedAt, ResolvedOperationalPolicy operational) {
+                Objects.requireNonNull(policy, "policy");
+                Objects.requireNonNull(operational, "operational");
+                var runtime = runtime(policy, executionLimitsDigestOf(operational.graph()));
+                List<PinnedNodePackage> packages = operational.nodePackages().stream()
+                        .map(entry -> behaviors.nodePackageBinding(entry.packageId()).orElseThrow().identity())
+                        .toList();
+                return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key, graphContentId,
+                        graphIdentity, runtime, packages, pinnedAt, operational);
+            }""") \
             or persistence_argument is None \
             or normalized(persistence_argument[0]) != normalized(
                 "java.util.Optional.ofNullable(maximumPersistencePayloadBytes)"
                 " .map(ResolvedOperationalPolicy.PersistenceLimits::new)") \
             or encode_body != normalized("""encodeForManifest(int manifestFormatVersion) {
-                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2
+                        && persistence.isEmpty() && nodeExternalIo.isEmpty()
+                        && hasLegacyDecompressionAuthority()) {
                     return encodeVersion(ENCODING_VERSION_1);
                 }
-                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3 && persistence.isPresent()) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3
+                        && persistence.isPresent() && hasLegacyDecompressionAuthority()) {
+                    if (!nodeExternalIo.isEmpty()) {
+                        throw new IllegalArgumentException("manifest format 3 cannot carry new external-I/O capacity");
+                    }
                     return encodeVersion(ENCODING_VERSION_2);
+                }
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_4
+                        && hasCompleteDecompressionAuthority()) {
+                    return encodeVersion(ENCODING_VERSION_3);
                 }
                 throw new IllegalArgumentException("operational policy does not match manifest format");
             }""") \
@@ -5379,17 +5806,18 @@ def persistence_policy_authority_from_source(
                 return decodeVersion(encoded, switch (manifestFormatVersion) {
                     case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
                     case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;
+                    case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_3;
                     default -> throw new IllegalArgumentException("manifest format has no operational policy");
                 });
             }""") \
             or java_static_final_initializer(manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION") is None \
             or normalized(java_static_final_initializer(
-                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_3" \
+                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_4" \
             or any(java_static_final_initializer(manifest, "ExecutionManifest", field) is None
                    or normalized(java_static_final_initializer(
                        manifest, "ExecutionManifest", field)[0]) != value
                    for field, value in (("FORMAT_VERSION_1", "1"), ("FORMAT_VERSION_2", "2"),
-                                        ("FORMAT_VERSION_3", "3"))):
+                                        ("FORMAT_VERSION_3", "3"), ("FORMAT_VERSION_4", "4"))):
         return None
     candidate_ids = sorted(identifier for contract in contracts for identifier in contract["candidateIds"])
     if len(candidate_ids) != len(set(candidate_ids)):
@@ -5491,6 +5919,38 @@ def persistence_policy_authority_from_source(
          "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
         (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
          "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "formatFourRoundTripsExplicitPersistenceDispositionAndNodeBoundIo"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "nodeIoStructuralBoundaryFitsTheCodecAndOneMoreIsRefused"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "olderManifestCodecCannotDiscardANodeIoSnapshot"),
+        (PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH, "ExecutionManifestResolverEnginePolicyTest",
+         "formatFourPinsExactNodeIoWhileOlderRowsRefuseOnlyAffectedGraphs"),
+        (PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+         "DefaultRavenrootApplicationExecutionManifestTest",
+         "rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "exactFormatFourAuthorityCreatesAndClaimsIndividualAndRestrictedWork"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
     )
     approved_new_test_digests = {
         "anExplicitSqliteSelectorIsTheSameAsNoSelector": "ae9e843851cccb75ebfd373f4b4fc2890f59e280fbaabcee3ccee6c78aa8aeb4",
@@ -5589,6 +6049,549 @@ def persistence_policy_authority_errors(root: Path, authorities: object,
                 or not isinstance(default_evidence, list) \
                 or sorted(str(item) for item in default_evidence) != contract["defaultCandidateIds"]:
             errors.append(f"{identifier}: persistence owner, binding, or default evidence has drifted")
+    return errors
+
+
+def external_io_policy_source_present(root: Path) -> bool:
+    """Recognize the complete #319 source family without relying on inventory markers."""
+    return any((root / path).exists() for path in (
+        EXTERNAL_IO_LIMITS_PATH, EXTERNAL_IO_PACKAGE_POLICY_PATH,
+        EXTERNAL_IO_WS_RESOLVER_PATH, EXTERNAL_IO_DEPLOYMENT_PATH,
+    ))
+
+
+def external_io_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed platform external-I/O settings and their decisive consumers."""
+    paths = (
+        Path("compose.yaml"), Path("dev.sh"),
+        Path("docs/examples/assistant/compose.override.yaml"),
+        Path("scripts/publish_environment_reference.py"),
+        Path("ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java"),
+        EXTERNAL_IO_LIMITS_PATH, EXTERNAL_IO_RESERVED_POLICY_PATH,
+        EXTERNAL_IO_NODE_CAPACITY_PATH, EXTERNAL_IO_CAPACITY_CAPABLE_PATH,
+        EXTERNAL_IO_OUTBOUND_HTTP_PATH, EXTERNAL_IO_PACKAGE_POLICY_PATH,
+        EXTERNAL_IO_MANAGED_SERVICES_PATH, EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH,
+        EXTERNAL_IO_GRAPH_RUNNER_PATH, EXTERNAL_IO_NODE_PACKAGES_PATH,
+        EXTERNAL_IO_DEPLOYMENT_PATH,
+        EXTERNAL_IO_APPLICATION_PATH, EXTERNAL_IO_SERVER_MAIN_PATH,
+        EXTERNAL_IO_GRANTS_PATH, EXTERNAL_IO_WS_PROFILE_PATH,
+        EXTERNAL_IO_WS_RESOLVER_PATH, EXTERNAL_IO_WS_SEND_PATH,
+        EXTERNAL_IO_WS_ADMISSION_PATH, EXTERNAL_IO_TEAMS_PROFILE_PATH,
+        EXTERNAL_IO_TEAMS_CONFIGURATION_PATH, EXTERNAL_IO_TEAMS_SOURCE_PATH,
+        EXTERNAL_IO_MATTERMOST_PROFILE_PATH, EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH,
+        EXTERNAL_IO_MATTERMOST_SOURCE_PATH,
+        Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundHttpRequest.java"),
+        Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundWebSocketRequest.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressHttpClients.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/ReservedNetworkPolicy.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketReceiveNodeBehavior.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketSettings.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsBehaviorDescriptors.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostBehaviorDescriptors.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/node/service/ExternalIoLimitsTest.java"),
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/test/java/ai/ravenroot/extensions/websocket/WebSocketAdmissionConcurrencyTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/test/java/ai/ravenroot/extensions/websocket/WebSocketSendNodeBehaviorTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-teams/src/test/java/ai/ravenroot/extensions/teams/TeamsConfigurationTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-mattermost/src/test/java/ai/ravenroot/extensions/mattermost/MattermostConfigurationTest.java"),
+    )
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except OSError:
+        return None
+
+    def exact(path: Path, *, kind: str | None = None, role: str | None = None,
+              expression: str | None = None) -> list[str]:
+        return sorted(candidate.id for candidate in discovered.values()
+                      if candidate.path == path.as_posix()
+                      and (kind is None or candidate.kind == kind)
+                      and (role is None or candidate.role == role)
+                      and (expression is None or candidate.expression == expression))
+
+    def required(path: Path, *, kind: str | None = None, role: str | None = None,
+                 expression: str | None = None) -> list[str] | None:
+        identifiers = exact(path, kind=kind, role=role, expression=expression)
+        return identifiers if identifiers else None
+
+    def camel_to_kebab(value: str) -> str:
+        return re.sub(r"(?<!^)(?=[A-Z])", "-", value).lower()
+
+    contracts: list[dict[str, object]] = []
+
+    reserved_paths = (
+        Path("compose.yaml"), Path("docs/examples/assistant/compose.override.yaml"),
+        Path("ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java"),
+        EXTERNAL_IO_RESERVED_POLICY_PATH,
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java"),
+        EXTERNAL_IO_SERVER_MAIN_PATH,
+    )
+    reserved_ids = sorted(identifier for path in reserved_paths for identifier in exact(
+        path, expression="RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"))
+    reserved_ids.extend(sorted(candidate.id for candidate in discovered.values()
+                               if candidate.path == "dev.sh"
+                               and candidate.expression == "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"
+                               and (candidate.evidence.startswith((
+                                   "if [ -z", "export RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"))
+                                    or candidate.evidence
+                                    == "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS=$BENCH_EXCEPTIONS")))
+    reserved_ids.extend(exact(EXTERNAL_IO_RESERVED_POLICY_PATH,
+                              role="EXCEPTIONS_ENVIRONMENT_VARIABLE",
+                              expression='"RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"'))
+    reserved_default = required(
+        EXTERNAL_IO_RESERVED_POLICY_PATH, role="DEFAULT_EXCEPTIONS",
+        expression='"localhost:LOOPBACK"')
+    if not reserved_ids or reserved_default is None:
+        return None
+    reserved_ids = sorted(set(reserved_ids + reserved_default))
+    contracts.append({
+        "setting": "egress.reserved-network-exceptions",
+        "owner": f"{EXTERNAL_IO_RESERVED_POLICY_PATH.as_posix()}#ReservedNetworkPolicy",
+        "field": "DEFAULT_EXCEPTIONS", "bindings": ["RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"],
+        "defaultExpression": '"localhost:LOOPBACK"', "defaultCandidateIds": reserved_default,
+        "candidateIds": reserved_ids,
+        "scope": "Live deployment authorization; graphs and manifests cannot widen it.",
+        "pinning": "Current authorization is checked at each connection and is not manifest-pinned.",
+    })
+
+    server_bindings = {
+        "builtin-http.allowed-hosts": ("RAVENROOT_HTTP_ALLOWED_HOSTS", "allowedHosts"),
+        "builtin-http.allowed-ports": ("RAVENROOT_HTTP_ALLOWED_PORTS", "allowedPorts"),
+        "builtin-http.maximum-response-bytes": ("RAVENROOT_HTTP_MAX_RESPONSE_BYTES", "maximumResponseBytes"),
+        "builtin-http.maximum-request-bytes": ("RAVENROOT_HTTP_MAX_REQUEST_BYTES", "maximumRequestBytes"),
+    }
+    http_defaults = {
+        "builtin-http.allowed-ports": ("DEFAULT_ALLOWED_PORTS",),
+        "builtin-http.maximum-response-bytes": ("DEFAULT_MAX_RESPONSE_BYTES",),
+        "builtin-http.maximum-request-bytes": ("DEFAULT_MAX_REQUEST_BYTES",),
+    }
+    for setting, (environment, field) in server_bindings.items():
+        binding = required(EXTERNAL_IO_SERVER_MAIN_PATH, kind="environment-binding",
+                           expression=environment)
+        if binding is None:
+            return None
+        default_ids = binding
+        if setting in http_defaults:
+            default_ids = sorted(identifier for role in http_defaults[setting]
+                                 for identifier in exact(EXTERNAL_IO_OUTBOUND_HTTP_PATH, role=role))
+            if not default_ids:
+                return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix()}#OutboundHttpPolicy",
+            "field": field, "bindings": [environment],
+            "defaultExpression": "deny all when absent" if setting.endswith("allowed-hosts")
+                else "typed OutboundHttpPolicy default",
+            "defaultCandidateIds": default_ids,
+            "candidateIds": sorted(set(binding + default_ids)),
+            "scope": "Built-in HTTP deployment policy; destination reach remains live.",
+            "pinning": "Host and port authorization stay live; request and response byte limits are pinned.",
+        })
+    timeout_defaults = sorted(set(
+        exact(EXTERNAL_IO_OUTBOUND_HTTP_PATH, role="maximumTimeout", expression="30")
+        + exact(EXTERNAL_IO_OUTBOUND_HTTP_PATH, kind="inline-operational-call", expression="30")))
+    if not timeout_defaults:
+        return None
+    contracts.append({
+        "setting": "builtin-http.maximum-timeout",
+        "owner": f"{EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix()}#OutboundHttpPolicy",
+        "field": "maximumTimeout", "bindings": [],
+        "defaultExpression": "Duration.ofSeconds(30)",
+        "defaultCandidateIds": timeout_defaults, "candidateIds": timeout_defaults,
+        "scope": "Built-in HTTP execution duration ceiling.",
+        "pinning": "Resolved once and pinned for managed execution and recovery.",
+    })
+
+    external_limits_source = sources[EXTERNAL_IO_LIMITS_PATH]
+    external_components = java_record_components(external_limits_source, "ExternalIoLimits")
+    if external_components != (
+            "maximumRequestBytes", "maximumEncodedResponseBytes", "maximumDecodedResponseBytes",
+            "maximumOutputBytes", "maximumDecompressionRatio", "maximumDuration",
+            "cancellationBound", "acceptedMediaTypes", "acceptedContentEncodings"):
+        return None
+    external_defaults: dict[str, tuple[str, list[str]]] = {}
+    for field in external_components:
+        span = java_record_default_expression_span(
+            external_limits_source, "ExternalIoLimits", "MANAGED_HTTP_DEFAULTS", field)
+        if span is None:
+            return None
+        expression, start, end = span
+        ids = candidate_ids_in_source_span(
+            EXTERNAL_IO_LIMITS_PATH, external_limits_source, start, end,
+            "fixed-declaration", "MANAGED_HTTP_DEFAULTS", discovered)
+        external_defaults[field] = (expression, sorted(ids))
+    duration_default = required(EXTERNAL_IO_LIMITS_PATH, role="DEFAULT_MANAGED_HTTP_DURATION",
+                                expression="30")
+    cancellation_default = required(EXTERNAL_IO_LIMITS_PATH, role="COOPERATIVE_CANCELLATION_BOUND",
+                                    expression="2")
+    if duration_default is None or cancellation_default is None:
+        return None
+    external_defaults["maximumDuration"] = (
+        "DEFAULT_MANAGED_HTTP_DURATION", duration_default)
+    external_defaults["cancellationBound"] = (
+        "COOPERATIVE_CANCELLATION_BOUND", cancellation_default)
+    for field in external_components:
+        expression, identifiers = external_defaults[field]
+        contracts.append({
+            "setting": f"external-io.compatibility-{camel_to_kebab(field)}",
+            "owner": f"{EXTERNAL_IO_LIMITS_PATH.as_posix()}#ExternalIoLimits",
+            "field": field, "bindings": [], "defaultExpression": expression,
+            "defaultCandidateIds": identifiers,
+            "candidateIds": [] if field == "acceptedContentEncodings" else identifiers,
+            "scope": "Finite caller compatibility envelope intersected with trusted package policy.",
+            "pinning": "Caller narrowing is per operation; the trusted execution envelope is pinned separately.",
+        })
+
+    package_fields = (
+        ("node-package.maximum-request-bytes", "maximumRequestBytes", "DEFAULT_MAX_REQUEST_BYTES", "maxRequestBytes"),
+        ("node-package.maximum-response-bytes", "maximumResponseBytes", "DEFAULT_MAX_RESPONSE_BYTES", "maxResponseBytes"),
+        ("node-package.maximum-websocket-message-bytes", "maximumWebSocketMessageBytes", "DEFAULT_MAX_WEBSOCKET_MESSAGE_BYTES", "maxWebSocketMessageBytes"),
+        ("node-package.maximum-websocket-fragments", "maximumWebSocketFragments", "maximumWebSocketFragments", "maxWebSocketFragments"),
+        ("node-package.maximum-concurrent-operations", "maximumConcurrentOperations", "maximumConcurrentOperations", "maxConcurrentOperations"),
+        ("node-package.maximum-concurrent-per-tenant", "maximumConcurrentPerTenant", "maximumConcurrentPerTenant", "maxConcurrentPerTenant"),
+        ("node-package.maximum-queued-websocket-sends", "maximumQueuedWebSocketSends", "maximumQueuedWebSocketSends", "maxQueuedWebSocketSends"),
+        ("node-package.maximum-decompression-ratio", "maximumDecompressionRatio", "DEFAULT_MAX_DECOMPRESSION_RATIO", "maxDecompressionRatio"),
+        ("node-package.maximum-deadline", "maximumDeadline", "maximumDeadline", "maxDeadlineMs"),
+        ("node-package.maximum-websocket-lifetime", "maximumWebSocketLifetime", "maximumWebSocketLifetime", "maxWebSocketLifetimeMs"),
+        ("node-package.maximum-websocket-idle", "maximumWebSocketIdle", "maximumWebSocketIdle", "maxWebSocketIdleMs"),
+    )
+    for setting, field, default_role, binding_name in package_fields:
+        # The constructor uses several field names twice: once as a numeric default and once as
+        # quoted diagnostic text. Only the numeric expression owns the setting.
+        default_ids = sorted(identifier for identifier in exact(
+            EXTERNAL_IO_PACKAGE_POLICY_PATH, role=default_role)
+            if not discovered[identifier].expression.startswith(('"', "'")))
+        binding_ids = required(EXTERNAL_IO_GRANTS_PATH, role="LIMIT_KEYS", expression=f'"{binding_name}"')
+        if not default_ids or binding_ids is None:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{EXTERNAL_IO_PACKAGE_POLICY_PATH.as_posix()}#NodePackageEgressPolicy",
+            "field": field, "bindings": [binding_name],
+            "defaultExpression": "NodePackageEgressPolicy.Builder default",
+            "defaultCandidateIds": default_ids,
+            "candidateIds": sorted(set(default_ids + binding_ids)),
+            "scope": "One package's managed HTTP and WebSocket service envelope.",
+            "pinning": "Quantitative capacity is pinned; destinations, methods, headers and credentials stay live.",
+        })
+
+    ws_binding = required(EXTERNAL_IO_WS_RESOLVER_PATH, kind="environment-binding",
+                          expression="RAVENROOT_WEBSOCKET_PROFILE_")
+    if ws_binding is None:
+        return None
+    contracts.append({
+        "setting": "websocket.profile.binding",
+        "owner": f"{EXTERNAL_IO_WS_PROFILE_PATH.as_posix()}#WebSocketProfile",
+        "field": "name", "bindings": ["RAVENROOT_WEBSOCKET_PROFILE_<hex-name>"],
+        "defaultExpression": "no profile; the behavior is unavailable",
+        "defaultCandidateIds": ws_binding,
+        "candidateIds": ws_binding,
+        "scope": "One strictly decoded named WebSocket profile.",
+        "pinning": "The binding selects a profile; each field has its own authorization or capacity lifetime.",
+    })
+    ws_fields = (
+        ("destination", "live destination authorization", "Current authorization; never manifest-pinned."),
+        ("headers", "live header authorization", "Current authorization; never manifest-pinned."),
+        ("subprotocols", "live subprotocol authorization", "Current authorization; never manifest-pinned."),
+        ("credentialBindingId", "live credential binding identity", "Current authorization; never manifest-pinned."),
+        ("credentialReference", "live credential reference", "Current authorization; never manifest-pinned."),
+        ("maximumMessageBytes", "WebSocket send and receive capacity", "Pinned per send node; receive sources use the current deployment profile."),
+        ("maximumFragments", "WebSocket send and receive capacity", "Pinned per send node; receive sources use the current deployment profile."),
+        ("timeoutMs", "WebSocket send and receive timeout", "Pinned per send node; receive sources use the current deployment profile."),
+        ("maxConcurrency", "WebSocket send and receive concurrency", "Pinned per send node; receive sources use the current deployment profile."),
+        ("reconnectBackoffMs", "WebSocket receive lifecycle backoff", "Current source lifecycle; not execution-pinned."),
+        ("maxBufferedEvents", "WebSocket receive buffer capacity", "Current source lifecycle; not execution-pinned."),
+    )
+    for field, scope, pinning in ws_fields:
+        identifiers = required(EXTERNAL_IO_WS_RESOLVER_PATH, role="FIELDS", expression=f'"{field}"')
+        if identifiers is None:
+            return None
+        contracts.append({
+            "setting": f"websocket.profile.{camel_to_kebab(field)}",
+            "owner": f"{EXTERNAL_IO_WS_PROFILE_PATH.as_posix()}#WebSocketProfile",
+            "field": field, "bindings": ["RAVENROOT_WEBSOCKET_PROFILE_<hex-name>"],
+            "defaultExpression": "required field in a named profile",
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+            "scope": scope, "pinning": pinning,
+        })
+
+    for setting, profile_path, field, expression in (
+        ("mattermost.maximum-ack-timeout", EXTERNAL_IO_MATTERMOST_PROFILE_PATH,
+         "ackTimeoutMs", "2_800"),
+        ("teams.maximum-ack-timeout", EXTERNAL_IO_TEAMS_PROFILE_PATH,
+         "ackTimeoutMs", "4_500"),
+    ):
+        identifiers = required(profile_path, role="MAX_ACK_TIMEOUT_MS", expression=expression)
+        if identifiers is None:
+            return None
+        contracts.append({
+            "setting": setting, "owner": f"{profile_path.as_posix()}#{profile_path.stem}",
+            "field": field, "bindings": [], "defaultExpression": expression,
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+            "scope": "Deployment-lifecycle webhook acknowledgement budget below the provider window.",
+            "pinning": "A source lifecycle limit; it is not part of execution replay.",
+        })
+
+    operator_candidate_ids = [identifier for contract in contracts for identifier in contract["candidateIds"]]
+    if len(operator_candidate_ids) != len(set(operator_candidate_ids)):
+        return None
+    retained_partitions: list[dict[str, object]] = []
+    retained_candidate_ids: list[str] = []
+    semantic_partition_names = {
+        "derived": "derived-runtime-value",
+        "presentation-text": "diagnostic-presentation",
+        "protocol-or-format-invariant": "protocol-and-structural-format",
+        "published-contract-description": "generated-public-contract",
+        "security-ceiling-or-default": "fixed-security-and-parser-safety",
+    }
+    for classification, baseline_identifiers in EXTERNAL_IO_RETAINED_PARTITION_IDS.items():
+        identifiers = baseline_identifiers + EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS.get(
+            classification, ())
+        if any(identifier not in discovered for identifier in identifiers):
+            return None
+        retained_candidate_ids.extend(identifiers)
+        retained_partitions.append({
+            "classification": classification, "status": "retained",
+            "semanticPartition": semantic_partition_names[classification],
+            "candidateIds": list(identifiers),
+        })
+    if len(retained_candidate_ids) != len(set(retained_candidate_ids)) \
+            or set(retained_candidate_ids) & set(operator_candidate_ids):
+        return None
+    candidate_ids = sorted(operator_candidate_ids + retained_candidate_ids)
+    if set(candidate_ids) != external_io_policy_cohort_candidate_ids(discovered):
+        return None
+
+    capacity_source = sources[EXTERNAL_IO_NODE_CAPACITY_PATH]
+    if java_record_components(capacity_source, "NodeExternalIoCapacity") != (
+            "maximumMessageBytes", "maximumFragments", "maximumTimeout",
+            "maximumConcurrency"):
+        return None
+    compact_span = java_compact_constructor_span(capacity_source, "NodeExternalIoCapacity")
+    expected_compact = normalized("""NodeExternalIoCapacity {
+        if (maximumMessageBytes < 1) throw new IllegalArgumentException("maximumMessageBytes must be positive");
+        if (maximumFragments < 1) throw new IllegalArgumentException("maximumFragments must be positive");
+        if (maximumConcurrency < 1) throw new IllegalArgumentException("maximumConcurrency must be positive");
+        Objects.requireNonNull(maximumTimeout, "maximumTimeout");
+        if (maximumTimeout.isZero() || maximumTimeout.isNegative()) {
+            throw new IllegalArgumentException("maximumTimeout must be positive");
+        }
+        try {
+            maximumTimeout.toNanos();
+        } catch (ArithmeticException tooLarge) {
+            throw new IllegalArgumentException("maximumTimeout is too large", tooLarge);
+        }
+    }""")
+    if compact_span is None or normalized(strip_c_comments(
+            capacity_source[slice(*compact_span)])) != expected_compact:
+        return None
+    expected_spi = normalized("""package ai.ravenroot.api.node;
+        import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
+        import ai.ravenroot.api.node.service.NodePackageServices;
+        public interface ExecutionIoCapacityCapable {
+            NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration);
+            NodeAction create(NodeConfiguration configuration, NodePackageServices services,
+                              NodeExternalIoCapacity capacity);
+        }""")
+    if normalized(strip_c_comments(sources[EXTERNAL_IO_CAPACITY_CAPABLE_PATH])) != expected_spi:
+        return None
+
+    approved_methods = (
+        (EXTERNAL_IO_RESERVED_POLICY_PATH, "ReservedNetworkPolicy", "fromCommaSeparatedExceptions",
+         "7eb09df9e906ca3eb3fe7597ba0205a58341d2a0f5ff09b405330ccdfd9ee520"),
+        (EXTERNAL_IO_SERVER_MAIN_PATH, "RavenrootServerMain", "byteCeiling",
+         "f13441d5ade83b65753af2f6bc4f8c0387eb504abe01694360429a13501707ab"),
+        (EXTERNAL_IO_GRANTS_PATH, "EnvironmentNodePackageServiceGrants", "applyLimits",
+         "1bde5228c75298d77783b0e22ad485800e98778a6c14d4de0c1351cefdb07bd1"),
+        (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "nodeExternalIoCapacitiesFor",
+         "e3285ab11843b4fae3085058d7cb5a5d5f0c0a2bfa2593da3b0fc73fe0bbb9da"),
+        (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "requiresExternalIoCapacity",
+         "26ad07dec14f887ff245e7e306cf1d7444fa878292528f0f252d77ca14b69f39"),
+        (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
+         "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
+        (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
+         "8c259d0cbe9588b242bf82e395288abe1f388d12a6e26e4318cc7e52c7b2ff97"),
+        (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
+         "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
+        (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
+         "74950914d80d6c00ed13dc7e502d6464af7e99cf537d1900648eb2f48bdd32c1"),
+        (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "executeHttp",
+         "f8baedda556637f780f48d6619ef5cfdd5aba613c710a38f0a5aa586055baf2f"),
+        (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "openWebSocket",
+         "31f5c92efaa99d3fd68aa6c7e1008baf5fe3d443de400183517a5b29437fb593"),
+        (EXTERNAL_IO_WS_RESOLVER_PATH, "EnvironmentWebSocketProfileResolver", "resolve",
+         "de8a9ef8aac5ad1a3f74c0cb71c7baef571fef12561d2ac75caae8909c4801f3"),
+        (EXTERNAL_IO_WS_SEND_PATH, "WebSocketSendNodeBehavior", "resolveExecutionIoCapacity",
+         "f1b7eb0d8e7a74e3c9dd7b11994ae1313cf66324d6fbdb2f2c447443c8513690"),
+    )
+    if any(java_method_digest(sources[path], type_symbol, method) != digest
+           for path, type_symbol, method, digest in approved_methods):
+        return None
+
+    # Four execution entry points bind the exact resolved policy before dispatch.  Keeping the
+    # cardinality explicit prevents a new hosted/recovery path from silently bypassing the pin.
+    if sources[EXTERNAL_IO_GRAPH_RUNNER_PATH].count(
+            "behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(") != 4:
+        return None
+
+    structural_fragments = {
+        EXTERNAL_IO_OUTBOUND_HTTP_PATH: (
+            "return fromCommaSeparated(hosts, ports, maximumResponseBytes, 0);",
+            "Duration.ofSeconds(30), parsedPorts, maximumResponseBytes, maximumRequestBytes",
+        ),
+        EXTERNAL_IO_WS_ADMISSION_PATH: (
+            "if (active >= maximum) return false;",
+            "if (!gate.tryAcquire(maximum)) {",
+        ),
+        EXTERNAL_IO_WS_SEND_PATH: (
+            "return new NodeExternalIoCapacity(settings.maximumMessageBytes(), settings.maximumFragments(),",
+            "lease = admission.tryAcquire(message.tenantId(), settings.profile().name(),",
+        ),
+        EXTERNAL_IO_GRAPH_RUNNER_PATH: (
+            ".whenComplete((ignored, failure) -> behaviors.releaseOperationalPolicy(traversalId));",
+        ),
+        EXTERNAL_IO_APPLICATION_PATH: (
+            "policyForNodeAdmission(behaviorNodes)",
+            "manifests.pinResolved(key, contentId,",
+        ),
+        EXTERNAL_IO_TEAMS_CONFIGURATION_PATH: (
+            "TeamsValues.number(limits.get(\"ackTimeoutMs\"), 100,",
+            "profile.ackTimeoutMs() > authority.requestTimeout().toMillis()",
+        ),
+        EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH: (
+            "MattermostValues.number(limits.get(\"requestTimeoutMs\"), 100,",
+            "profile.requestTimeoutMs() > authority.requestTimeout().toMillis()",
+        ),
+    }
+    if any(any(source.count(fragment) != 1 for fragment in fragments)
+           for path, fragments in structural_fragments.items()
+           for source in (sources[path],)):
+        return None
+
+    test_methods = (
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "malformedDeclaredPropertyDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "missingCapabilityDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "forbiddenRuntimeNatureDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "complexityRefusalDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+         "HostedExternalIoPolicyTest", "oldThenNewPinsCoexistOnOneHostedRunner"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+         "HostedExternalIoPolicyTest", "newThenOldPinsCoexistOnOneHostedRunner"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+         "HostedExternalIoPolicyTest", "bypassedWebSocketSendNeverResolvesItsMissingProfileOrCreatesAnAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "noOpSourceStopRevokesTheFullManagedSessionAcrossStopRestartAndUndeploy"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "createThrowAndNullReturnRevokeTheirProvisionalAuthorities"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "secondSourceStartFailureRevokesItAndRollsBackTheReadySibling"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "startFailureRevokesReadySiblingsBeforeTheCurrentRollbackCanBlock"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "sourceStartFailureRetiresRouteAcquiredBeforeHandleOwnership"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "managedIngressFailureRevokesEverySiblingBeforeCallbacksAndRollsBackEachOnce"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "stopRevokesEverySiblingAndSessionBeforeTheFirstCallbackCanBlock"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/node/service/ExternalIoLimitsTest.java"),
+         "ExternalIoLimitsTest", "compatibilityFactoriesShareOneFiniteHttpLifetimeAndCooperativeCancellationRequest"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java"),
+         "ResolvedOperationalPolicyTest", "formatFourRoundTripsExplicitPersistenceDispositionAndNodeBoundIo"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java"),
+         "ExecutionManifestResolverEnginePolicyTest", "formatFourPinsExactNodeIoWhileOlderRowsRefuseOnlyAffectedGraphs"),
+        (Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/test/java/ai/ravenroot/extensions/websocket/WebSocketAdmissionConcurrencyTest.java"),
+         "WebSocketAdmissionConcurrencyTest", "overlappingPinnedRevisionsShareOneCounterUsingEachCallersThreshold"),
+        (Path("ravenroot/ravenroot-extensions/ravenroot-teams/src/test/java/ai/ravenroot/extensions/teams/TeamsConfigurationTest.java"),
+         "TeamsConfigurationTest", "rejectsUnknownFieldsQuerySecretsAndAuthorityWidening"),
+        (Path("ravenroot/ravenroot-extensions/ravenroot-mattermost/src/test/java/ai/ravenroot/extensions/mattermost/MattermostConfigurationTest.java"),
+         "MattermostConfigurationTest", "rejectsUnknownFieldsDuplicateRoutesAndOriginPaths"),
+    )
+    test_evidence: list[dict[str, str]] = []
+    for path, type_symbol, method in test_methods:
+        source = sources[path]
+        digest = java_method_digest(source, type_symbol, method)
+        annotations = java_method_annotations(source, type_symbol, method)
+        inline_test = re.search(rf"@Test\s+(?:public\s+)?void\s+{re.escape(method)}\s*\(", source)
+        if digest is None or (annotations != ("@Test",) and inline_test is None):
+            return None
+        test_evidence.append({"path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
+
+    return {
+        "kind": "java-platform-external-io-policy-family-v1",
+        "contracts": contracts, "semanticPartitions": retained_partitions,
+        "candidateIds": candidate_ids,
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "testEvidence": test_evidence,
+    }
+
+
+def external_io_policy_authority_errors(root: Path, authorities: object,
+                                        entries: dict[str, dict[str, object]],
+                                        discovered: dict[str, Candidate]) -> list[str]:
+    """Require the source-derived #319 operator family even if every marker is removed."""
+    if not external_io_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["external-I/O policy authority exists without its source family"])
+    expected = external_io_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["external-I/O policy source family is incomplete or unsupported"]
+    errors: list[str] = []
+    if not isinstance(authorities, dict) or set(authorities) != {EXTERNAL_IO_POLICY_AUTHORITY_ID} \
+            or authorities.get(EXTERNAL_IO_POLICY_AUTHORITY_ID) != expected:
+        errors.append("external-I/O settings require the exact mandatory source-derived authority")
+    operator_by_id = {str(identifier): contract for contract in expected["contracts"]
+                      for identifier in contract["candidateIds"]}
+    retained_by_id = {str(identifier): partition
+                      for partition in expected["semanticPartitions"]
+                      for identifier in partition["candidateIds"]}
+    expected_by_id = {**operator_by_id, **retained_by_id}
+    if set(expected_by_id) != set(expected["candidateIds"]):
+        errors.append("external-I/O authority source partition overlaps or is incomplete")
+    if set(expected_by_id) - set(entries):
+        errors.append("external-I/O authority current source candidate set is incomplete")
+    reviewed_ids = {identifier for identifier in expected_by_id
+                    if entries.get(identifier, {}).get("status") != "pending-review"}
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("externalIoPolicyAuthority") is not None}
+    if marked != reviewed_ids:
+        errors.append("external-I/O authority candidate partition is missing, duplicated, or foreign")
+    for identifier, contract in operator_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None or entry.get("status") == "pending-review":
+            continue
+        if entry.get("status") != "already-centralized" \
+                or entry.get("classification") != "operator-configurable":
+            errors.append(f"{identifier}: external-I/O authority requires one reviewed operator setting")
+        if entry.get("externalIoPolicyAuthority") != EXTERNAL_IO_POLICY_AUTHORITY_ID \
+                or entry.get("setting") != contract["setting"]:
+            errors.append(f"{identifier}: external-I/O authority setting assignment has drifted")
+        default_evidence = entry.get("defaultEvidence")
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"] \
+                or entry.get("bindings") != contract["bindings"] \
+                or not isinstance(default_evidence, list) \
+                or sorted(str(item) for item in default_evidence) != contract["defaultCandidateIds"]:
+            errors.append(f"{identifier}: external-I/O owner, binding, or default evidence has drifted")
+    for identifier, partition in retained_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None or entry.get("status") == "pending-review":
+            continue
+        if entry.get("status") != partition["status"] \
+                or entry.get("classification") != partition["classification"]:
+            errors.append(f"{identifier}: external-I/O retained semantic partition has drifted")
+        if entry.get("externalIoPolicyAuthority") != EXTERNAL_IO_POLICY_AUTHORITY_ID:
+            errors.append(f"{identifier}: external-I/O retained evidence marker has drifted")
     return errors
 
 
@@ -6365,6 +7368,11 @@ def environment_reference_description_candidate_ids(
                     "binding-default", "environment-binding", "inline-script-operational",
                 } \
                 and expression in production_names:
+            identifiers.add(candidate.id)
+        if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                and candidate.symbol == "boundary" \
+                and candidate.kind == "environment-binding" \
+                and any(name.startswith(expression) for name in production_names):
             identifiers.add(candidate.id)
     return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
@@ -8073,6 +9081,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                         errors.append(f"{identifier}: unsupported Helm authority owner: {owner}")
                 elif entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
                     pass
+                elif entry.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+                    pass
                 elif current_source_owner(root, owner) is None:
                     errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
                 elif not current_source_field(root, owner, str(entry.get("field", ""))):
@@ -8222,6 +9232,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             json.dumps(entry.get("carrierEvidence"), sort_keys=True),
             entry.get("helmAuthority"),
             entry.get("persistenceAuthority"),
+            entry.get("externalIoPolicyAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -8281,6 +9292,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(persistence_policy_authority_errors(
         root, document.get("persistencePolicyAuthorities"), entries, discovered,
     ))
+    errors.extend(external_io_policy_authority_errors(
+        root, document.get("externalIoPolicyAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -8301,6 +9315,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                                 f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
             continue
         if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+            continue
+        if representative.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -8513,6 +9529,37 @@ def render_report(document: dict[str, object]) -> str:
                 f"{len(contract.get('candidateIds', []))} |")
     else:
         lines.append("| _No source-proven persistence policy_ |  |  |  |  |  |")
+    external_authorities = document.get("externalIoPolicyAuthorities", {})
+    external_authority = (external_authorities.get(EXTERNAL_IO_POLICY_AUTHORITY_ID)
+                          if isinstance(external_authorities, dict) else None)
+    external_contracts = (external_authority.get("contracts", [])
+                          if isinstance(external_authority, dict) else [])
+    external_partitions = (external_authority.get("semanticPartitions", [])
+                           if isinstance(external_authority, dict) else [])
+    lines.extend(("", "## Source-proven external-I/O policy", "",
+                  "The closed roster separates operator-controlled capacities and authorization from",
+                  "protocol, safety, derived, and presentation atoms. Pinning is recorded per setting",
+                  "because live destination authority and replay-affecting numeric capacity have different",
+                  "lifetimes.", "",
+                  "| Setting | Typed owner | Field | Bindings | Default source | Inventory candidates | Pinning |",
+                  "|---|---|---|---|---|---:|---|"))
+    if isinstance(external_contracts, list) and external_contracts:
+        for contract in sorted(external_contracts, key=lambda item: str(item.get("setting", ""))):
+            bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", [])) or "none"
+            lines.append(
+                f"| {contract.get('setting', '')} | `{contract.get('owner', '')}` | "
+                f"`{contract.get('field', '')}` | {bindings} | "
+                f"`{contract.get('defaultExpression', '')}` | "
+                f"{len(contract.get('candidateIds', []))} | {contract.get('pinning', '')} |")
+    else:
+        lines.append("| _No source-proven external-I/O policy_ |  |  |  |  |  |  |")
+    if isinstance(external_partitions, list) and external_partitions:
+        lines.extend(("", "Retained external-I/O evidence is closed by semantic role:", "",
+                      "| Semantic partition | Classification | Candidates |", "|---|---|---:|"))
+        for partition in external_partitions:
+            lines.append(f"| {partition.get('semanticPartition', '')} | "
+                         f"{partition.get('classification', '')} | "
+                         f"{len(partition.get('candidateIds', []))} |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
     deferred_entries = sorted(
         (entry for entry in typed if entry.get("status") == "deferred"),

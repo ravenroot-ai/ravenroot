@@ -130,6 +130,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private final AtomicReference<java.util.function.Function<NodeMessage,
             ai.ravenroot.api.persistence.ResolvedOperationalPolicy>> executionPolicies =
             new AtomicReference<>();
+    private final AtomicReference<java.util.function.Function<InboundSourceContext, SourceAuthority>>
+            sourceAuthorities = new AtomicReference<>();
 
     private ManagedNodePackageServices(Builder builder) {
         packageId = safePackageId(builder.packageId);
@@ -164,7 +166,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 policy.maximumRequestBytes(), policy.maximumResponseBytes(),
                 policy.maximumWebSocketMessageBytes(), policy.maximumWebSocketFragments(),
                 policy.maximumConcurrentOperations(), policy.maximumConcurrentPerTenant(),
-                policy.maximumQueuedWebSocketSends(), policy.maximumDeadline(),
+                policy.maximumQueuedWebSocketSends(), policy.maximumDecompressionRatio(),
+                policy.maximumDeadline(),
                 policy.maximumWebSocketLifetime(), policy.maximumWebSocketIdle()));
     }
 
@@ -173,6 +176,14 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             ai.ravenroot.api.persistence.ResolvedOperationalPolicy> resolver) {
         if (!executionPolicies.compareAndSet(null, Objects.requireNonNull(resolver, "resolver"))) {
             throw new IllegalStateException("execution policy resolver is already bound");
+        }
+    }
+
+    /** Installs the core-owned source-context identity and lifecycle lookup once. */
+    public void bindSourceAuthorityResolver(
+            java.util.function.Function<InboundSourceContext, SourceAuthority> resolver) {
+        if (!sourceAuthorities.compareAndSet(null, Objects.requireNonNull(resolver, "resolver"))) {
+            throw new IllegalStateException("source authority resolver is already bound");
         }
     }
 
@@ -189,8 +200,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
 
             @Override public OutboundCall<CredentialLease> resolve(InboundSourceContext context,
                                                                    String reference, Duration deadline) {
-                return resolveCredential(() -> Objects.requireNonNull(context, "deliveredContext").identity(),
-                        reference, deadline);
+                try { return resolveCredential(sourceIdentity(context), reference, deadline); }
+                catch (RuntimeException refused) { return failed(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE); }
             }
         };
     }
@@ -208,7 +219,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
 
             @Override public OutboundCall<OutboundHttpResponse> execute(InboundSourceContext context,
                                                                         OutboundHttpRequest request) {
-                return executeHttp(() -> Objects.requireNonNull(context, "deliveredContext").identity(), request);
+                try { return executeHttp(sourceIdentity(context), request); }
+                catch (RuntimeException refused) { return failed(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE); }
             }
         };
     }
@@ -228,8 +240,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             @Override public OutboundCall<OutboundWebSocketSession> open(InboundSourceContext context,
                                                                          OutboundWebSocketRequest request,
                                                                          OutboundWebSocketListener listener) {
-                return openWebSocket(() -> Objects.requireNonNull(context, "deliveredContext").identity(),
-                        request, listener);
+                try { return openWebSocket(sourceIdentity(context), request, listener); }
+                catch (RuntimeException refused) { return failed(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE); }
             }
         };
     }
@@ -509,7 +521,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         AdmissionController.Lease lease = admission.tryAcquire(tenant,
                 capacity.maximumConcurrentOperations(), capacity.maximumConcurrentPerTenant());
         if (lease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
-        return submit(deadline, lease, () -> {
+        return submit(identity, deadline, lease, () -> {
+            identity.requireActive();
             try (SecretValue secret = credentials.resolve(packageId, tenant, safeReference)
                     .orElseThrow(() -> refusal(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE))) {
                 char[] copied = secret.copy();
@@ -557,9 +570,11 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             });
             ExternalIoLimits authority = new ExternalIoLimits(capacity.maximumRequestBytes(),
                     capacity.maximumResponseBytes(), capacity.maximumResponseBytes(),
-                    capacity.maximumResponseBytes(), request.limits().maximumDecompressionRatio(),
+                    capacity.maximumResponseBytes(), capacity.maximumDecompressionRatio().orElseThrow(() ->
+                    refusal(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE)),
                     capacity.maximumDeadline(),
-                    Duration.ofSeconds(2), Set.of(), Set.of("identity", "gzip"));
+                    ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND,
+                    Set.of(), Set.of("identity", "gzip"));
             limits = request.limits().intersect(authority);
             if (body.length > limits.maximumRequestBytes()) {
                 return failed(NodePackageServiceException.Reason.REQUEST_TOO_LARGE);
@@ -575,14 +590,17 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 capacity.maximumConcurrentOperations(), capacity.maximumConcurrentPerTenant());
         if (lease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
         Duration effectiveDeadline = deadline;
-        return submit(effectiveDeadline, lease, () -> {
+        return submit(identity, effectiveDeadline, lease, () -> {
+            identity.requireActive();
             requireResolvable(destination);
             Map<String, List<String>> outgoingHeaders = request.signing()
                     .map(signing -> signRequest(tenant, destination, method, headers, body, signing))
                     .orElse(headers);
             HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(effectiveDeadline);
             outgoingHeaders.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
+            identity.requireActive();
             request.credential().ifPresent(binding -> injectCredential(builder, tenant, destination, binding));
+            identity.requireActive();
             builder.method(method, body.length == 0
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<byte[]> response;
@@ -638,26 +656,38 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         if (admissionLease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
 
         ManagedCall<OutboundWebSocketSession> call = new ManagedCall<>();
+        SourceOperation sourceOperation;
+        try {
+            sourceOperation = identity.track(call::cancel);
+        } catch (RuntimeException revoked) {
+            admissionLease.close();
+            return failed(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
         AtomicBoolean transferred = new AtomicBoolean();
         Runnable release = releaseOnce(admissionLease);
         WebSocketBridge bridge = new WebSocketBridge(safeListener, limits, release);
         Thread worker = Thread.ofVirtual().name("ravenroot-package-websocket-open").unstarted(() -> {
             CompletableFuture<WebSocket> opening = null;
             try {
+                identity.requireActive();
                 requireResolvable(destination);
                 WebSocket.Builder builder = client().newWebSocketBuilder().connectTimeout(deadline);
                 headers.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
+                identity.requireActive();
                 request.credential().ifPresent(binding -> injectCredential(builder, tenant, destination, binding));
                 if (!request.subprotocols().isEmpty()) {
                     builder.subprotocols(request.subprotocols().get(0),
                             request.subprotocols().subList(1, request.subprotocols().size()).toArray(String[]::new));
                 }
+                identity.requireActive();
                 opening = builder.buildAsync(destination, bridge);
                 call.transportFuture(opening);
                 WebSocket socket = opening.get(deadline.toNanos(), TimeUnit.NANOSECONDS);
                 ManagedWebSocketSession session = new ManagedWebSocketSession(socket, bridge, capacity,
                         limits, release);
                 bridge.attach(session);
+                SourceOperation sessionOperation = sourceOperation.transfer(session::cancel);
+                session.onTerminal(sessionOperation::close);
                 if (bridge.isTerminal()) {
                     session.terminal();
                     call.fail(refusal(NodePackageServiceException.Reason.TRANSPORT_FAILED));
@@ -669,7 +699,10 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             } catch (Throwable failure) {
                 call.fail(mapFailure(failure));
             } finally {
-                if (!transferred.get()) release.run();
+                if (!transferred.get()) {
+                    sourceOperation.close();
+                    release.run();
+                }
             }
         });
         call.worker(worker);
@@ -844,9 +877,17 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
     }
 
-    private <T> OutboundCall<T> submit(Duration deadline, AdmissionController.Lease lease,
+    private <T> OutboundCall<T> submit(IdentitySource identity, Duration deadline,
+                                       AdmissionController.Lease lease,
                                        ThrowingSupplier<T> work) {
         ManagedCall<T> call = new ManagedCall<>();
+        SourceOperation sourceOperation;
+        try {
+            sourceOperation = identity.track(call::cancel);
+        } catch (RuntimeException revoked) {
+            lease.close();
+            return failed(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
         Thread worker = Thread.ofVirtual().name("ravenroot-node-package-service").unstarted(() -> {
             try {
                 T value = work.get();
@@ -861,6 +902,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             } catch (Throwable failure) {
                 call.fail(mapFailure(failure));
             } finally {
+                sourceOperation.close();
                 lease.close();
             }
         });
@@ -1037,7 +1079,18 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         return new MessageIdentity(delivered);
     }
 
+    private IdentitySource sourceIdentity(InboundSourceContext context) {
+        InboundSourceContext delivered = Objects.requireNonNull(context, "deliveredContext");
+        var resolver = sourceAuthorities.get();
+        if (resolver == null) throw refusal(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        return new SourceIdentity(Objects.requireNonNull(resolver.apply(delivered), "source authority"));
+    }
+
     private NodePackageEgressCapacityProfile.Limits capacityFor(IdentitySource identity) {
+        if (identity instanceof SourceIdentity source) {
+            source.authority().requireActive();
+            return source.authority().capacity();
+        }
         ai.ravenroot.api.persistence.ResolvedOperationalPolicy pinned = identity instanceof MessageIdentity message
                 ? trustedPolicy(message.message()) : null;
         if (pinned == null) return currentCapacity();
@@ -1061,7 +1114,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 policy.maximumResponseBytes(), policy.maximumWebSocketMessageBytes(),
                 policy.maximumWebSocketFragments(), policy.maximumConcurrentOperations(),
                 policy.maximumConcurrentPerTenant(), policy.maximumQueuedWebSocketSends(),
-                policy.maximumDeadline(), policy.maximumWebSocketLifetime(),
+                policy.maximumDecompressionRatio(), policy.maximumDeadline(),
+                policy.maximumWebSocketLifetime(),
                 policy.maximumWebSocketIdle()).limits().orElseThrow();
     }
 
@@ -1075,11 +1129,39 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     @FunctionalInterface
     private interface IdentitySource {
         SecurityContext identity();
+
+        default void requireActive() { }
+        default SourceOperation track(Runnable cancel) { return SourceOperation.NOOP; }
     }
 
     private record MessageIdentity(NodeMessage message) implements IdentitySource {
         private MessageIdentity { Objects.requireNonNull(message, "message"); }
         @Override public SecurityContext identity() { return message.security(); }
+    }
+
+    private record SourceIdentity(SourceAuthority authority) implements IdentitySource {
+        private SourceIdentity { Objects.requireNonNull(authority, "authority"); }
+        @Override public SecurityContext identity() { authority.requireActive(); return authority.identity(); }
+        @Override public void requireActive() { authority.requireActive(); }
+        @Override public SourceOperation track(Runnable cancel) { return authority.track(cancel); }
+    }
+
+    /** Core-owned source identity and revocable operation scope. */
+    public interface SourceAuthority {
+        SecurityContext identity();
+        NodePackageEgressCapacityProfile.Limits capacity();
+        void requireActive();
+        SourceOperation track(Runnable cancel);
+    }
+
+    /** One operation owned by a source scope; transfer is atomic against scope revocation. */
+    public interface SourceOperation extends AutoCloseable {
+        SourceOperation NOOP = new SourceOperation() {
+            @Override public SourceOperation transfer(Runnable cancel) { return this; }
+            @Override public void close() { }
+        };
+        SourceOperation transfer(Runnable cancel);
+        @Override void close();
     }
 
     private static final class ManagedCall<T> implements OutboundCall<T> {
@@ -1255,6 +1337,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private final AtomicBoolean cancelRequested = new AtomicBoolean();
         private final AtomicReference<ScheduledFuture<?>> idle = new AtomicReference<>();
         private final ScheduledFuture<?> lifetime;
+        private final AtomicBoolean terminalReached = new AtomicBoolean();
+        private final AtomicReference<Runnable> terminalObserver = new AtomicReference<>();
 
         /** Policy-only overload: the effective ceilings are the operator ceilings. */
         ManagedWebSocketSession(WebSocket socket, WebSocketBridge bridge,
@@ -1348,9 +1432,20 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
 
         void terminal() {
+            if (!terminalReached.compareAndSet(false, true)) return;
             closed.set(true);
             cancelTimers();
             release.run();
+            Runnable observer = terminalObserver.getAndSet(null);
+            if (observer != null) observer.run();
+        }
+
+        void onTerminal(Runnable observer) {
+            Runnable safe = Objects.requireNonNull(observer, "observer");
+            if (!terminalObserver.compareAndSet(null, safe)) {
+                throw new IllegalStateException("terminal observer is already installed");
+            }
+            if (terminalReached.get() && terminalObserver.compareAndSet(safe, null)) safe.run();
         }
 
         boolean touch() {
@@ -1379,7 +1474,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             cancelTimers();
             socket.abort();
             bridge.failOnce(refusal(NodePackageServiceException.Reason.CANCELLED));
-            release.run();
+            terminal();
         }
 
         private static CompletionStage<Void> tooLarge() {

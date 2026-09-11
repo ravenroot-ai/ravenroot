@@ -1,6 +1,7 @@
 package ai.ravenroot.api.persistence;
 
 import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -26,9 +27,11 @@ import java.util.Optional;
 public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                         Optional<BuiltInHttpCapacity> builtInHttp,
                                         List<PackageCapacity> nodePackages,
-                                        Optional<PersistenceLimits> persistence) {
+                                        Optional<PersistenceLimits> persistence,
+                                        List<NodeIoCapacity> nodeExternalIo) {
     private static final int ENCODING_VERSION_1 = 1;
     private static final int ENCODING_VERSION_2 = 2;
+    private static final int ENCODING_VERSION_3 = 3;
     private static final int MAX_POLICY_BYTES = 512 * 1024;
     private static final int MAX_BASE64_CHARACTERS = ((MAX_POLICY_BYTES + 2) / 3) * 4;
 
@@ -38,6 +41,7 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         Objects.requireNonNull(builtInHttp, "builtInHttp");
         Objects.requireNonNull(nodePackages, "nodePackages");
         Objects.requireNonNull(persistence, "persistence");
+        Objects.requireNonNull(nodeExternalIo, "nodeExternalIo");
         if (nodePackages.size() > ExecutionManifest.MAX_NODE_PACKAGES) {
             throw new IllegalArgumentException("too many package capacity entries");
         }
@@ -51,36 +55,69 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
             }
         }
         nodePackages = List.copyOf(sorted);
+        var sortedIo = new ArrayList<>(nodeExternalIo);
+        if (sortedIo.size() > ExecutionManifest.MAX_NODE_EXTERNAL_IO_CAPACITIES) {
+            throw new IllegalArgumentException("too many node external-I/O capacity entries");
+        }
+        sortedIo.forEach(entry -> Objects.requireNonNull(entry, "node external-I/O capacity"));
+        sortedIo.sort(java.util.Comparator.comparing(NodeIoCapacity::bindingDigest));
+        var seenIo = new HashSet<String>();
+        for (NodeIoCapacity entry : sortedIo) {
+            if (!seenIo.add(entry.bindingDigest())) {
+                throw new IllegalArgumentException("duplicate node external-I/O capacity");
+            }
+        }
+        nodeExternalIo = List.copyOf(sortedIo);
+    }
+
+    /** Compatibility constructor for policies before node-bound external-I/O snapshots. */
+    public ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
+                                     Optional<BuiltInHttpCapacity> builtInHttp,
+                                     List<PackageCapacity> nodePackages,
+                                     Optional<PersistenceLimits> persistence) {
+        this(graph, results, builtInHttp, nodePackages, persistence, List.of());
     }
 
     /** Compatibility constructor for policies whose graphs do not use core HTTP. */
     public ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                      List<PackageCapacity> nodePackages) {
-        this(graph, results, Optional.empty(), nodePackages, Optional.empty());
+        this(graph, results, Optional.empty(), nodePackages, Optional.empty(), List.of());
     }
 
     /** Compatibility constructor for the v2 layout, which had no generic persistence capacity. */
     public ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                      Optional<BuiltInHttpCapacity> builtInHttp,
                                      List<PackageCapacity> nodePackages) {
-        this(graph, results, builtInHttp, nodePackages, Optional.empty());
+        this(graph, results, builtInHttp, nodePackages, Optional.empty(), List.of());
     }
 
     /** Canonical durable value, with no free-form policy or secret field. */
     public String encode() {
-        if (persistence.isPresent()) {
-            throw new IllegalStateException("generic persistence capacity requires manifest format 3");
+        if (persistence.isPresent() || !nodeExternalIo.isEmpty()) {
+            throw new IllegalStateException("new operational capacity requires manifest format 4");
+        }
+        if (!hasLegacyDecompressionAuthority()) {
+            throw new IllegalStateException("legacy operational policy requires decompression ratio 1000");
         }
         return encodeVersion(ENCODING_VERSION_1);
     }
 
     /** Encodes the policy layout required by the containing manifest format. */
     public String encodeForManifest(int manifestFormatVersion) {
-        if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()) {
+        if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()
+                && nodeExternalIo.isEmpty()
+                && hasLegacyDecompressionAuthority()) {
             return encodeVersion(ENCODING_VERSION_1);
         }
-        if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3 && persistence.isPresent()) {
+        if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3 && persistence.isPresent()
+                && hasLegacyDecompressionAuthority()) {
+            if (!nodeExternalIo.isEmpty()) {
+                throw new IllegalArgumentException("manifest format 3 cannot carry new external-I/O capacity");
+            }
             return encodeVersion(ENCODING_VERSION_2);
+        }
+        if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_4 && hasCompleteDecompressionAuthority()) {
+            return encodeVersion(ENCODING_VERSION_3);
         }
         throw new IllegalArgumentException("operational policy does not match manifest format");
     }
@@ -95,11 +132,18 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                 out.writeInt(results.maximumPayloadBytes());
                 if (encodingVersion == ENCODING_VERSION_2) {
                     out.writeInt(persistence.orElseThrow().maximumPayloadBytes());
+                } else if (encodingVersion == ENCODING_VERSION_3) {
+                    out.writeBoolean(persistence.isPresent());
+                    if (persistence.isPresent()) out.writeInt(persistence.orElseThrow().maximumPayloadBytes());
                 }
                 out.writeBoolean(builtInHttp.isPresent());
                 if (builtInHttp.isPresent()) builtInHttp.orElseThrow().write(out);
                 out.writeInt(nodePackages.size());
-                for (PackageCapacity entry : nodePackages) entry.write(out);
+                for (PackageCapacity entry : nodePackages) entry.write(out, encodingVersion);
+                if (encodingVersion == ENCODING_VERSION_3) {
+                    out.writeInt(nodeExternalIo.size());
+                    for (NodeIoCapacity entry : nodeExternalIo) entry.write(out);
+                }
             }
             byte[] value = bytes.toByteArray();
             if (value.length > MAX_POLICY_BYTES) {
@@ -121,6 +165,7 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         return decodeVersion(encoded, switch (manifestFormatVersion) {
             case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
             case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;
+            case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_3;
             default -> throw new IllegalArgumentException("manifest format has no operational policy");
         });
     }
@@ -140,8 +185,12 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                 }
                 GraphLimits graph = GraphLimits.read(in);
                 ResultLimits results = new ResultLimits(in.readBoolean(), in.readInt());
-                Optional<PersistenceLimits> persistence = expectedEncodingVersion == ENCODING_VERSION_2
-                        ? Optional.of(new PersistenceLimits(in.readInt())) : Optional.empty();
+                Optional<PersistenceLimits> persistence = switch (expectedEncodingVersion) {
+                    case ENCODING_VERSION_2 -> Optional.of(new PersistenceLimits(in.readInt()));
+                    case ENCODING_VERSION_3 -> in.readBoolean()
+                            ? Optional.of(new PersistenceLimits(in.readInt())) : Optional.empty();
+                    default -> Optional.empty();
+                };
                 Optional<BuiltInHttpCapacity> builtInHttp = in.readBoolean()
                         ? Optional.of(BuiltInHttpCapacity.read(in)) : Optional.empty();
                 int count = in.readInt();
@@ -149,9 +198,18 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                     throw new IllegalArgumentException("invalid package capacity count");
                 }
                 var packages = new ArrayList<PackageCapacity>(count);
-                for (int i = 0; i < count; i++) packages.add(PackageCapacity.read(in));
+                for (int i = 0; i < count; i++) packages.add(PackageCapacity.read(in, expectedEncodingVersion));
+                var externalIo = new ArrayList<NodeIoCapacity>();
+                if (expectedEncodingVersion == ENCODING_VERSION_3) {
+                    int ioCount = in.readInt();
+                    if (ioCount < 0 || ioCount > ExecutionManifest.MAX_NODE_EXTERNAL_IO_CAPACITIES) {
+                        throw new IllegalArgumentException("invalid node external-I/O capacity count");
+                    }
+                    for (int i = 0; i < ioCount; i++) externalIo.add(NodeIoCapacity.read(in));
+                }
                 if (in.read() != -1) throw new IllegalArgumentException("trailing operational policy data");
-                policy = new ResolvedOperationalPolicy(graph, results, builtInHttp, packages, persistence);
+                policy = new ResolvedOperationalPolicy(graph, results, builtInHttp, packages,
+                        persistence, externalIo);
             }
             if (!policy.encodeVersion(expectedEncodingVersion).equals(encoded)) {
                 throw new IllegalArgumentException("operational policy is not canonical");
@@ -163,6 +221,16 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
             if (malformed instanceof IllegalArgumentException invalid) throw invalid;
             throw new IllegalArgumentException("invalid operational policy", malformed);
         }
+    }
+
+    private boolean hasCompleteDecompressionAuthority() {
+        return nodePackages.stream().flatMap(entry -> entry.capacity().limits().stream())
+                .allMatch(limits -> limits.maximumDecompressionRatio().isPresent());
+    }
+
+    private boolean hasLegacyDecompressionAuthority() {
+        return nodePackages.stream().flatMap(entry -> entry.capacity().limits().stream())
+                .allMatch(limits -> limits.maximumDecompressionRatio().orElse(-1) == 1_000);
     }
 
     /** The graph parser, payload and live traversal budgets used by runtime consumers. */
@@ -276,7 +344,7 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
             Objects.requireNonNull(capacity, "capacity");
         }
 
-        private void write(DataOutputStream out) throws IOException {
+        private void write(DataOutputStream out, int encodingVersion) throws IOException {
             out.writeUTF(packageId);
             var value = capacity.limits();
             out.writeBoolean(value.isPresent());
@@ -289,21 +357,57 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
             out.writeInt(limits.maximumConcurrentOperations());
             out.writeInt(limits.maximumConcurrentPerTenant());
             out.writeInt(limits.maximumQueuedWebSocketSends());
+            if (encodingVersion == ENCODING_VERSION_3) {
+                out.writeInt(limits.maximumDecompressionRatio().orElseThrow());
+            }
             ResolvedOperationalPolicy.writeDuration(out, limits.maximumDeadline());
             ResolvedOperationalPolicy.writeDuration(out, limits.maximumWebSocketLifetime());
             ResolvedOperationalPolicy.writeDuration(out, limits.maximumWebSocketIdle());
         }
 
-        private static PackageCapacity read(DataInputStream in) throws IOException {
+        private static PackageCapacity read(DataInputStream in, int encodingVersion) throws IOException {
             String packageId = in.readUTF();
             if (!in.readBoolean()) {
                 return new PackageCapacity(packageId,
                         NodePackageEgressCapacityProfile.noManagedEgress());
             }
-            return new PackageCapacity(packageId, NodePackageEgressCapacityProfile.bounded(
-                    in.readLong(), in.readLong(), in.readLong(), in.readInt(), in.readInt(),
-                    in.readInt(), in.readInt(), ResolvedOperationalPolicy.readDuration(in),
-                    ResolvedOperationalPolicy.readDuration(in), ResolvedOperationalPolicy.readDuration(in)));
+            long request = in.readLong();
+            long response = in.readLong();
+            long websocket = in.readLong();
+            int fragments = in.readInt();
+            int concurrent = in.readInt();
+            int tenant = in.readInt();
+            int queued = in.readInt();
+            int ratio = encodingVersion == ENCODING_VERSION_3 ? in.readInt() : 0;
+            Duration deadline = ResolvedOperationalPolicy.readDuration(in);
+            Duration lifetime = ResolvedOperationalPolicy.readDuration(in);
+            Duration idle = ResolvedOperationalPolicy.readDuration(in);
+            return new PackageCapacity(packageId, encodingVersion == ENCODING_VERSION_3
+                    ? NodePackageEgressCapacityProfile.bounded(request, response, websocket, fragments,
+                    concurrent, tenant, queued, ratio, deadline, lifetime, idle)
+                    : NodePackageEgressCapacityProfile.bounded(request, response, websocket, fragments,
+                    concurrent, tenant, queued, 1_000, deadline, lifetime, idle));
+        }
+    }
+
+    /** Capacity snapshot for one exact graph node, package and behavior binding. */
+    public record NodeIoCapacity(String bindingDigest, NodeExternalIoCapacity capacity) {
+        public NodeIoCapacity {
+            bindingDigest = ManifestTokens.requireSha256Hex(bindingDigest, "node I/O binding digest");
+            Objects.requireNonNull(capacity, "capacity");
+        }
+
+        private void write(DataOutputStream out) throws IOException {
+            out.writeUTF(bindingDigest);
+            out.writeInt(capacity.maximumMessageBytes());
+            out.writeInt(capacity.maximumFragments());
+            writeDuration(out, capacity.maximumTimeout());
+            out.writeInt(capacity.maximumConcurrency());
+        }
+
+        private static NodeIoCapacity read(DataInputStream in) throws IOException {
+            return new NodeIoCapacity(in.readUTF(), new NodeExternalIoCapacity(in.readInt(), in.readInt(),
+                    readDuration(in), in.readInt()));
         }
     }
 

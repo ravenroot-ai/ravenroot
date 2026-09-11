@@ -443,10 +443,9 @@ public final class DurableExecutionPauseService {
             // Fails here rather than after a lease and a runner exist, so a hold naming a node the
             // pinned graph does not contain is refused before anything has been claimed.
             manager.definition().node(pause.request().nodeId());
-            var policy = manifests == null ? null : manifests.resolvePolicy(pause.key(),
+            var policy = manifests == null ? null : manifests.resolvePolicyForNodes(pause.key(),
                     ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
-                    manager.definition().nodes().stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
-                            .filter(java.util.Objects::nonNull).toList());
+                    manager.definition().nodes());
             return new Prepared(manager, snapshot, pinnedLimits, policy);
         } catch (RuntimeException failure) {
             manager.close();

@@ -44,15 +44,25 @@ class SqliteManagedExecutionStoreContractTest extends ManagedExecutionStoreContr
 
     @Test
     void processCreationAndOrphanCleanupSerializeAcrossTheManifestLock() throws Exception {
-        assertCleanupSerializes(false);
+        assertCleanupSerializes(false, false);
     }
 
     @Test
     void processCreationAndOrphanPurgeSerializeAcrossTheManifestLock() throws Exception {
-        assertCleanupSerializes(true);
+        assertCleanupSerializes(true, false);
     }
 
-    private void assertCleanupSerializes(boolean purge) throws Exception {
+    @Test
+    void formatFourProcessCreationAndOrphanCleanupSerializeAcrossTheManifestLock() throws Exception {
+        assertCleanupSerializes(false, true);
+    }
+
+    @Test
+    void formatFourProcessCreationAndOrphanPurgeSerializeAcrossTheManifestLock() throws Exception {
+        assertCleanupSerializes(true, true);
+    }
+
+    private void assertCleanupSerializes(boolean purge, boolean formatFour) throws Exception {
         Path file = directory.resolve("cleanup-race.db");
         var atCommit = new CountDownLatch(1);
         var releaseCommit = new CountDownLatch(1);
@@ -76,7 +86,9 @@ class SqliteManagedExecutionStoreContractTest extends ManagedExecutionStoreContr
                      SqliteStoreLocation.ofFile(file), Clock.systemUTC(),
                      ExecutionManifestReferences.NONE, cleanupEntered::countDown)) {
             var key = new ai.ravenroot.api.persistence.ExecutionKey("acme", UUID.randomUUID());
-            var stored = await(manifests.pin(manifest(key, executions.maxPayloadBytes())));
+            var stored = await(manifests.pin(formatFour
+                    ? manifestV4(key, executions.maxPayloadBytes())
+                    : manifest(key, executions.maxPayloadBytes())));
             armed.set(true);
             var creation = executions.applyManaged(creationBatch(key), ExecutionPersistenceAuthority.from(stored));
             assertTrue(atCommit.await(10, TimeUnit.SECONDS));

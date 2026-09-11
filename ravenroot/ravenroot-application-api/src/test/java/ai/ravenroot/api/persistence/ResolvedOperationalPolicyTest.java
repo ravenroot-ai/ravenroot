@@ -1,6 +1,7 @@
 package ai.ravenroot.api.persistence;
 
 import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -15,8 +16,23 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ResolvedOperationalPolicyTest {
+
+    @Test
+    void legacyPackageCapacityFactoriesRetainTheHistoricalAbsoluteDecompressionCeiling() {
+        var profile = NodePackageEgressCapacityProfile.bounded(
+                1, 2, 3, 4, 5, 5, 6, Duration.ofSeconds(7), Duration.ofSeconds(9), Duration.ofSeconds(8));
+        var direct = new NodePackageEgressCapacityProfile.Limits(
+                1, 2, 3, 4, 5, 5, 6, Duration.ofSeconds(7), Duration.ofSeconds(9), Duration.ofSeconds(8));
+
+        assertEquals(1_000, profile.limits().orElseThrow().maximumDecompressionRatio().orElseThrow());
+        assertEquals(1_000, direct.maximumDecompressionRatio().orElseThrow());
+        assertTrue(NodePackageEgressCapacityProfile.boundedWithoutDecompressionRatio(
+                1, 2, 3, 4, 5, 5, 6, Duration.ofSeconds(7), Duration.ofSeconds(9), Duration.ofSeconds(8))
+                .limits().orElseThrow().maximumDecompressionRatio().isEmpty());
+    }
 
     @Test
     void maximumSupportedPackageShapeRoundTrips() {
@@ -51,6 +67,64 @@ class ResolvedOperationalPolicyTest {
                         current.encodeForManifest(ExecutionManifest.FORMAT_VERSION_3),
                         ExecutionManifest.FORMAT_VERSION_2));
         assertThrows(IllegalStateException.class, current::encode);
+    }
+
+    @Test
+    void formatFourRoundTripsExplicitPersistenceDispositionAndNodeBoundIo() {
+        var packageCapacity = NodePackageEgressCapacityProfile.bounded(1, 2, 3, 4, 5, 5, 6, 100,
+                Duration.ofSeconds(7), Duration.ofSeconds(8), Duration.ofSeconds(7));
+        var nodeCapacity = new ResolvedOperationalPolicy.NodeIoCapacity("a".repeat(64),
+                new NodeExternalIoCapacity(1024, 8, Duration.ofSeconds(3), 4));
+        var embedded = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(),
+                List.of(new ResolvedOperationalPolicy.PackageCapacity("package", packageCapacity)),
+                Optional.empty(), List.of(nodeCapacity));
+        var durable = new ResolvedOperationalPolicy(embedded.graph(), embedded.results(),
+                embedded.builtInHttp(), embedded.nodePackages(),
+                Optional.of(new ResolvedOperationalPolicy.PersistenceLimits(8192)),
+                embedded.nodeExternalIo());
+
+        assertEquals(embedded, ResolvedOperationalPolicy.decodeForManifest(
+                embedded.encodeForManifest(ExecutionManifest.FORMAT_VERSION_4),
+                ExecutionManifest.FORMAT_VERSION_4));
+        assertEquals(durable, ResolvedOperationalPolicy.decodeForManifest(
+                durable.encodeForManifest(ExecutionManifest.FORMAT_VERSION_4),
+                ExecutionManifest.FORMAT_VERSION_4));
+        assertThrows(IllegalArgumentException.class,
+                () -> embedded.encodeForManifest(ExecutionManifest.FORMAT_VERSION_2));
+        assertThrows(IllegalArgumentException.class,
+                () -> durable.encodeForManifest(ExecutionManifest.FORMAT_VERSION_3));
+    }
+
+    @Test
+    void nodeIoStructuralBoundaryFitsTheCodecAndOneMoreIsRefused() {
+        var entries = new ArrayList<ResolvedOperationalPolicy.NodeIoCapacity>();
+        for (int index = 0; index < ExecutionManifest.MAX_NODE_EXTERNAL_IO_CAPACITIES; index++) {
+            entries.add(new ResolvedOperationalPolicy.NodeIoCapacity("%064x".formatted(index),
+                    new NodeExternalIoCapacity(1, 1, Duration.ofNanos(1), 1)));
+        }
+        var boundary = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 1), Optional.empty(), List.of(),
+                Optional.empty(), entries);
+        String encoded = boundary.encodeForManifest(ExecutionManifest.FORMAT_VERSION_4);
+        assertEquals(boundary, ResolvedOperationalPolicy.decodeForManifest(
+                encoded, ExecutionManifest.FORMAT_VERSION_4));
+
+        entries.add(new ResolvedOperationalPolicy.NodeIoCapacity("f".repeat(64),
+                new NodeExternalIoCapacity(1, 1, Duration.ofNanos(1), 1)));
+        assertThrows(IllegalArgumentException.class, () -> new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 1), Optional.empty(), List.of(),
+                Optional.empty(), entries));
+    }
+
+    @Test
+    void olderManifestCodecCannotDiscardANodeIoSnapshot() {
+        var policy = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 1), Optional.empty(), List.of(),
+                Optional.empty(), List.of(new ResolvedOperationalPolicy.NodeIoCapacity("a".repeat(64),
+                        new NodeExternalIoCapacity(1, 1, Duration.ofNanos(1), 1))));
+        assertThrows(IllegalArgumentException.class,
+                () -> policy.encodeForManifest(ExecutionManifest.FORMAT_VERSION_2));
     }
 
     @Test
@@ -106,7 +180,7 @@ class ResolvedOperationalPolicyTest {
     }
 
     private static NodePackageEgressCapacityProfile capacity() {
-        return NodePackageEgressCapacityProfile.bounded(1, 2, 3, 4, 5, 5, 6,
+        return NodePackageEgressCapacityProfile.bounded(1, 2, 3, 4, 5, 5, 6, 1_000,
                 Duration.ofSeconds(7), Duration.ofSeconds(8), Duration.ofSeconds(7));
     }
 

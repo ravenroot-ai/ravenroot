@@ -1347,17 +1347,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         byte[] graphBytes = document.bytes();
         String graphVersion = sha256(graphBytes);
         var manager = document.manager();
-        var behaviorNames = manager.definition().nodes().stream()
+        var behaviorNodes = manager.definition().nodes().stream()
                 .filter(node -> node.kind() == NodeKind.BEHAVIOR)
-                .map(ai.ravenroot.core.graph.GraphNode::behavior).filter(java.util.Objects::nonNull)
-                .collect(java.util.stream.Collectors.toSet());
-        var manifestService = executionManifests();
-        ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy = manifestService == null ? null
-                : manifestService.policyForAdmission(behaviorNames);
-        var effectiveExecutionLimits = operationalPolicy == null ? graphExecutionLimits
-                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(operationalPolicy);
+                .toList();
         GraphRunner runner;
+        ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy;
         try {
+            // Package capacity resolvers are third-party callbacks. Every graph/package check runs
+            // before one is invoked, and this outer cleanup boundary owns the parsed manager if
+            // either validation or policy resolution refuses.
+            GraphRunner.validateGraphAdmission(manager.definition(), behaviors, policy,
+                    graphExecutionLimits, null);
+            var manifestService = executionManifests();
+            operationalPolicy = manifestService == null ? null
+                    : manifestService.policyForNodeAdmission(behaviorNodes);
+            var effectiveExecutionLimits = operationalPolicy == null ? graphExecutionLimits
+                    : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                            operationalPolicy);
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
                     runnerShutdownStepBound, unknownBehaviors, policy, effectiveExecutionLimits,
                     operationalPolicy);
@@ -1407,7 +1413,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // this execution: the policy it runs under, the packages it may reach, the limits it is
             // bounded by and the engine it runs on all decide what the same bytes do, and every one
             // of them can change before this execution is recovered.
-            recordExecutionManifest(security, processInstanceId, graphVersion, policy, behaviorNames);
+            recordExecutionManifest(security, processInstanceId, graphVersion, policy, operationalPolicy);
             // Recorded before the graph starts so a rejected write cannot leave an unrecorded
             // execution running; the surrounding catch already owns cleanup.
             long revision = recordAcceptedExecution(security, processInstanceId, traversalId,
@@ -3029,16 +3035,16 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private void recordExecutionManifest(SecurityContext security, UUID processInstanceId,
                                          String graphVersion, ExecutionPolicy policy,
-                                         java.util.Collection<String> behaviorNames) {
+                                         ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
         var manifests = executionManifests();
         if (manifests == null) {
             return;
         }
         var key = new ExecutionKey(security.tenantId(), processInstanceId);
         var contentId = new ai.ravenroot.api.persistence.GraphContentId(graphVersion);
-        manifests.pin(key, contentId,
+        manifests.pinResolved(key, contentId,
                 ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(contentId), policy,
-                behaviorNames);
+                java.util.Objects.requireNonNull(operationalPolicy, "operationalPolicy"));
         manifests.verify(key, policy);
     }
 

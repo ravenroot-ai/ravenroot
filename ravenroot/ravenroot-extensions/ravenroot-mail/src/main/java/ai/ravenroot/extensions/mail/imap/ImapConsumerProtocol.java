@@ -16,6 +16,10 @@ interface ImapConsumerProtocol {
     interface Owner {
         String sourceFolder();
         long uidValidity();
+        /** Snapshots selected-mailbox UIDVALIDITY and high-water UID without projecting history. */
+        default Poll snapshot() throws Failure {
+            throw new Failure(true, "imap-snapshot-unavailable");
+        }
         /** Provider I/O is bounded by the profile's fixed read timeout configured at open. */
         Poll pollAfter(long afterUid, int batchSize, int scanWindow) throws Failure;
         void wakeup();

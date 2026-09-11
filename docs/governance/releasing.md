@@ -58,13 +58,22 @@ rules.
 
 ## Where the checks run
 
-`dev` is the verification point and `main` is a promotion.
+`dev` is the verification point and `main` is a promotion. Verification happens upstream, on the work
+branch, where it costs whoever produced the work and blocks nobody else.
 
-Every functional check runs on the pull request into `dev`: the policy and documentation gates, the
-UI audit, unit and end-to-end suites, the backend build and test suites, the support modules, the
-plugin boundary, the API documentation gate, and the runtime smoke tests. A failure there costs
-little, because it names the single pull request that caused it. The push to `dev` runs the same set
-again after the merge, which is the only place a merge is observed as a whole.
+The full tier is the complete functional suite: the policy and documentation gates, the UI audit,
+unit and end-to-end suites, the backend build and test suites, the support modules, the plugin
+boundary, the API documentation gate, and the runtime smoke tests. It runs on:
+
+- a review candidate, dispatched once on the exact commit about to be reviewed:
+  `gh workflow run ci.yml --ref <branch> -f tier=full`. The dispatch offers `full` alone;
+- every pull request into `dev`;
+- every merge-group commit, when a merge queue is enabled on `dev`;
+- every push to `dev`.
+
+A push to a `feature/**` branch runs the fast feedback workflow instead: the policy, Python and shell
+contracts, the UI unit suite and build, and a backend compile. It is feedback for whoever is working,
+not a gate, and a newer push to the same branch cancels it.
 
 The `dev` to `main` promotion re-verifies none of it. By then the behaviour has already been
 verified, commit by commit, on the branch where a fix is cheap, so the promotion carries only:
@@ -82,7 +91,14 @@ a finding is still correctable after the code has been approved on `dev`.
 `ci-required` decides which jobs an event demanded and refuses anything less. Its expectations live
 in `scripts/ci_required.py`, which is also what holds `.github/workflows/ci.yml` to them: a required
 job that reports `skipped` is a failure, not a pass, and so is a job that is removed, re-gated, or
-left unobserved. A green `ci-required` therefore means the jobs the event required actually ran.
+left unobserved. It also checks the tier against the event independently of the classifier, so an
+event headed for `dev` can never be vouched for on a lighter tier. A green `ci-required` therefore
+means the jobs the event required actually ran.
+
+Only `.github/workflows/ci.yml` may publish `ci-required`, and only a full-tier run may satisfy it. A
+check run belongs to the commit rather than to the event that produced it, and a skipped job counts
+as passed for a required check. The fast feedback workflow therefore publishes its own `ci-fast`
+context, and `scripts/ci_required.py` refuses any other workflow that defines `ci-required`.
 
 ## Integrating changes on `dev`
 

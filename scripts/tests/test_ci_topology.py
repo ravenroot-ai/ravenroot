@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import unittest
 
-from scripts.ci_required import WORKFLOW, declared_needs, job_blocks
+from scripts.ci_required import FAST_WORKFLOW, WORKFLOW, declared_needs, job_blocks
 
 
 class ContinuousIntegrationTopologyTest(unittest.TestCase):
@@ -119,6 +119,22 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             ["ravenroot-backend-build", "ravenroot-plugins", "ravenroot-ui"],
             "only the download side may repeat a producer's artifact name",
         )
+
+    def test_the_fast_feedback_runs_the_same_contracts_as_the_gate(self) -> None:
+        """The fast tier repeats these commands; this keeps the copy from drifting from the original."""
+        fast = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))["fast-policy"]
+
+        def commands(block: str) -> set[str]:
+            return {
+                line.strip()
+                for line in block.splitlines()
+                if line.strip().startswith(("python3 ", "./scripts/tests/", "./dev.sh ", "docker ", "git diff"))
+            }
+
+        full = set()
+        for job in ("full-python-contracts", "full-shell-contracts", "full-source-policy"):
+            full |= commands(self.jobs[job])
+        self.assertEqual(commands(fast), full)
 
 
 if __name__ == "__main__":

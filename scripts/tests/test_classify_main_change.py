@@ -131,6 +131,28 @@ class ClassifyTest(unittest.TestCase):
             "full",
         )
 
+    def test_a_merge_group_commit_is_full(self):
+        self.assertEqual(
+            classify(event_name="merge_group", base_ref="", ref_name="gh-readonly-queue/dev/pr-1",
+                     labels=set(), paths=["README.md"])["tier"],
+            "full",
+        )
+
+    def test_a_dispatch_runs_the_full_tier_and_nothing_lighter(self):
+        """The result lands on the dispatched commit, where a pull request into `dev` reads it."""
+        for requested in ("", "full"):
+            with self.subTest(requested=requested):
+                self.assertEqual(
+                    classify(event_name="workflow_dispatch", base_ref="", ref_name="feature/x",
+                             labels=set(), paths=[], dispatch_tier=requested)["tier"],
+                    "full",
+                )
+        for requested in ("docs", "promotion", "fast", "FULL"):
+            with self.subTest(requested=requested):
+                with self.assertRaises(ClassificationError):
+                    classify(event_name="workflow_dispatch", base_ref="", ref_name="feature/x",
+                             labels=set(), paths=[], dispatch_tier=requested)
+
     def test_push_to_dev_and_manual_dispatch_are_full(self):
         for event_name, ref_name in (("push", "dev"), ("workflow_dispatch", "main")):
             result = classify(

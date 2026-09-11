@@ -21,6 +21,12 @@ disagreement means one of the two is wrong and neither can be trusted to say whi
 the workflow but absent from this table, or absent from the gate's `needs`, fails as well: an
 unobserved job is indistinguishable from a job that silently stopped running.
 
+It also checks the tier against the event, independently of the classifier, and enforces one
+constraint on every workflow: only ci.yml may publish `ci-required`. The work-branch fast tier in
+ci-fast.yml publishes `ci-fast` instead, because a check run belongs to the commit and a skipped job
+counts as passed for a required check — a fast run publishing `ci-required` would let a pull request
+into `dev` merge without the full tier. `--fast` runs the same checks as that workflow's aggregator.
+
 Run with `--print-contexts TIER` to list the check contexts an event produces, which is what a branch
 ruleset's required-checks list has to name.
 """
@@ -36,6 +42,8 @@ from pathlib import Path
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+WORKFLOW_DIRECTORY = WORKFLOW.parent
+FAST_WORKFLOW = WORKFLOW_DIRECTORY / "ci-fast.yml"
 
 CLASSIFICATION_JOB = "release-classification"
 GATE_JOB = "ci-required"
@@ -85,6 +93,25 @@ REQUIRED_BY_TIER = {
     "docs": frozenset(POLICY_JOBS),
     "promotion": frozenset(),
 }
+
+# Which tiers each event may carry. The classifier decides the tier; this is the second, independent
+# statement of what it is allowed to decide, so a classification defect that hands an event headed
+# for `dev` a lighter tier is refused here instead of trusted. Push events are keyed by the branch
+# pushed; pull requests by their base. Anything not listed is refused.
+ALLOWED_TIERS_BY_EVENT = {
+    ("pull_request", "dev"): frozenset({"full"}),
+    ("pull_request", "main"): frozenset({"promotion"}),
+    ("push", "dev"): frozenset({"full"}),
+    ("push", "main"): frozenset({"full", "docs"}),
+    ("workflow_dispatch", ""): frozenset({"full"}),
+    ("merge_group", ""): frozenset({"full"}),
+}
+
+# The work-branch fast tier lives in its own workflow and is advice, not a gate. It is modelled here
+# for one reason: to hold it to the constraint that it never publishes `ci-required`.
+FAST_GATE_JOB = "ci-fast"
+FAST_JOBS = frozenset({"fast-policy", "fast-ui", "fast-backend"})
+FAST_TRIGGER = "on:\n  push:\n    branches: ['feature/**']\n"
 
 POLICY_CONDITION = (
     "contains(fromJSON('[\"docs\",\"full\"]'), needs.release-classification.outputs.tier)"
@@ -198,6 +225,8 @@ def verify_workflow(contents: str) -> list[str]:
         for job in sorted(observed - wanted):
             problems.append(f"{job}: listed in the {GATE_JOB} `needs` list but not in the topology.")
 
+    problems.extend(verify_triggers(contents))
+
     shard_block = blocks.get("full-ui-e2e-shard", "")
     expected_matrix = "shard: [" + ", ".join(str(index) for index in range(1, E2E_SHARDS + 1)) + "]"
     if expected_matrix not in shard_block:
@@ -213,6 +242,135 @@ def verify_workflow(contents: str) -> list[str]:
         )
 
     return problems
+
+
+def trigger_block(contents: str) -> str:
+    """Return the workflow's `on:` block, from `on:` up to the next top-level key."""
+    match = re.search(r"(?ms)^on:\n.*?(?=^\S)", contents)
+    return match.group(0) if match else ""
+
+
+def declared_name(block: str) -> str | None:
+    """Return a job's `name:` value — the check context it publishes — or None to use its id."""
+    match = re.search(r"(?m)^    name: (.+)$", block)
+    return match.group(1).strip() if match else None
+
+
+def verify_triggers(contents: str) -> list[str]:
+    """Hold ci.yml's events to the model: no work-branch pushes, a merge-queue trigger, full dispatch."""
+    problems: list[str] = []
+    triggers = trigger_block(contents)
+    if "  push:\n    branches: [dev, main]\n" not in triggers:
+        problems.append(
+            "ci.yml: `push` must name exactly `[dev, main]`. Work-branch pushes belong to the fast "
+            "tier in ci-fast.yml; the full tier on every push would saturate the runners."
+        )
+    if "\n  merge_group:\n" not in triggers:
+        problems.append(
+            "ci.yml: the `merge_group` trigger is missing. Without it ci-required is never reported on "
+            "a merge-group commit, and every pull request in a merge queue times out."
+        )
+    tier_input = re.search(r"(?ms)^      tier:\n(.*?)(?=^      \S|^  \S)", triggers)
+    if not tier_input or "options: [full]\n" not in tier_input.group(1):
+        problems.append(
+            "ci.yml: the dispatch `tier` input must offer `full` alone. A selectable lighter tier would "
+            "let ci-required pass on a work-branch commit without the full tier."
+        )
+    return problems
+
+
+def verify_single_publisher(directory: Path) -> list[str]:
+    """Refuse any workflow other than ci.yml that could publish a `ci-required` context.
+
+    Check runs belong to the commit, and a skipped job counts as passed for a required check. A
+    `ci-required` published by any other run — the fast tier above all — would therefore satisfy the
+    ruleset for a pull request whose head is that commit, without the full tier having run on it.
+    """
+    problems: list[str] = []
+    for path in sorted(directory.glob("*.y*ml")):
+        if path.name == WORKFLOW.name:
+            continue
+        contents = path.read_text(encoding="utf-8")
+        if "\njobs:\n" not in contents:
+            continue
+        for job, block in job_blocks(contents).items():
+            name = declared_name(block)
+            if job == GATE_JOB or (name is not None and GATE_JOB in name):
+                problems.append(
+                    f"{path.name}: job {job!r} would publish {GATE_JOB!r}. Only ci.yml may publish it, "
+                    "because only a full-tier run may satisfy it."
+                )
+    return problems
+
+
+def verify_fast_workflow(contents: str) -> list[str]:
+    """Report every way ci-fast.yml no longer matches the fast topology declared above."""
+    problems: list[str] = []
+    if not trigger_block(contents).startswith(FAST_TRIGGER) or any(
+        event in trigger_block(contents)
+        for event in ("pull_request", "merge_group", "workflow_dispatch", "schedule")
+    ):
+        problems.append(
+            "ci-fast.yml: must run on pushes to `feature/**` alone. It is feedback for whoever is "
+            "working, not a check any pull request or queue should wait on."
+        )
+    blocks = job_blocks(contents)
+    expected = FAST_JOBS | {FAST_GATE_JOB}
+    for job in sorted(expected - set(blocks)):
+        problems.append(f"ci-fast.yml: {job} is declared in scripts/ci_required.py but absent.")
+    for job in sorted(set(blocks) - expected):
+        problems.append(f"ci-fast.yml: {job} is not part of the declared fast topology.")
+    for job, block in blocks.items():
+        name = declared_name(block) or job
+        if name != job:
+            problems.append(f"ci-fast.yml: {job} publishes {name!r}; a fast job publishes its own id.")
+    gate = blocks.get(FAST_GATE_JOB, "")
+    if gate:
+        if declared_condition(gate) != "always()":
+            problems.append(f"ci-fast.yml: {FAST_GATE_JOB} must run with `if: always()`.")
+        if declared_needs(gate) != set(FAST_JOBS):
+            problems.append(f"ci-fast.yml: {FAST_GATE_JOB} must wait on exactly {sorted(FAST_JOBS)}.")
+    return problems
+
+
+def verify_fast_results(results: dict[str, str]) -> list[str]:
+    """Require every fast job to have succeeded; a skipped one fails here too."""
+    problems: list[str] = []
+    for job in sorted(FAST_JOBS - set(results)):
+        problems.append(f"{job}: no result reported to {FAST_GATE_JOB}.")
+    for job in sorted(set(results) - FAST_JOBS):
+        problems.append(f"{job}: reported a result but is not part of the fast topology.")
+    for job in sorted(FAST_JOBS & set(results)):
+        if results[job] != "success":
+            problems.append(f"{job}: expected success, got {results[job]}.")
+    return problems
+
+
+def event_key(event_name: str, base_ref: str, ref_name: str) -> tuple[str, str]:
+    """Key an event the way ALLOWED_TIERS_BY_EVENT does."""
+    if event_name == "pull_request":
+        return (event_name, base_ref)
+    if event_name == "push":
+        return (event_name, ref_name)
+    return (event_name, "")
+
+
+def verify_event(event_name: str, base_ref: str, ref_name: str, tier: str) -> list[str]:
+    """Refuse a tier the event is not allowed to carry, or an event the model does not know."""
+    key = event_key(event_name, base_ref, ref_name)
+    allowed = ALLOWED_TIERS_BY_EVENT.get(key)
+    if allowed is None:
+        return [
+            f"Event {key!r} is not part of the CI model, so no tier can be vouched for on it. "
+            "Unrecognised events are refused, never assumed."
+        ]
+    if tier not in allowed:
+        return [
+            f"Tier {tier!r} is not permitted for event {key!r}; it may carry only "
+            f"{', '.join(sorted(allowed))}. The classification and the model disagree, and the gate "
+            "does not settle that in favour of the lighter tier."
+        ]
+    return []
 
 
 def verify_results(tier: str, results: dict[str, str]) -> list[str]:
@@ -270,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(REQUIRED_BY_TIER),
         help="List the check contexts an event of this tier publishes, then exit.",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=f"Act as {FAST_GATE_JOB}: require every fast job, and the single-publisher constraint.",
+    )
     arguments = parser.parse_args(argv)
 
     if arguments.print_contexts:
@@ -277,14 +440,41 @@ def main(argv: list[str] | None = None) -> int:
             print(context)
         return 0
 
-    tier = os.environ.get("CI_TIER", "")
+    gate = FAST_GATE_JOB if arguments.fast else GATE_JOB
     try:
         results = parse_results(os.environ.get("NEEDS_JSON", "{}"))
     except (json.JSONDecodeError, ValueError) as exc:
-        print(f"ci-required could not read the job results: {exc}", file=sys.stderr)
+        print(f"{gate} could not read the job results: {exc}", file=sys.stderr)
         return 1
 
-    problems = verify_workflow(WORKFLOW.read_text(encoding="utf-8"))
+    # Both gates hold both workflows to the constraint, so a change that breaks it is refused by
+    # whichever of them runs first — including by ci-required on the full run of that change.
+    problems = verify_single_publisher(WORKFLOW_DIRECTORY)
+    try:
+        problems.extend(verify_fast_workflow(FAST_WORKFLOW.read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        problems.append(f"{FAST_WORKFLOW.name} is missing; the fast topology cannot be verified.")
+
+    if arguments.fast:
+        problems.extend(verify_fast_results(results))
+        if problems:
+            print(f"{FAST_GATE_JOB} refuses:", file=sys.stderr)
+            for problem in problems:
+                print(f"  - {problem}", file=sys.stderr)
+            return 1
+        print(f"{FAST_GATE_JOB}: every fast job succeeded.")
+        return 0
+
+    tier = os.environ.get("CI_TIER", "")
+    problems.extend(
+        verify_event(
+            os.environ.get("EVENT_NAME", ""),
+            os.environ.get("BASE_REF", ""),
+            os.environ.get("REF_NAME", ""),
+            tier,
+        )
+    )
+    problems.extend(verify_workflow(WORKFLOW.read_text(encoding="utf-8")))
     problems.extend(verify_results(tier, results))
 
     if problems:

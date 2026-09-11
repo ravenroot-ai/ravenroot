@@ -162,7 +162,7 @@ public sealed interface ExecutionStoreConfiguration {
         Objects.requireNonNull(environment, "environment");
         String selector = selectorIn(properties, environment);
         if (!POSTGRESQL_SELECTOR.equals(selector)
-                && PostgresStoreConfiguration.anyConfigured(properties, environment)) {
+                && postgresqlOnlyPolicyConfigured(properties, environment)) {
             throw new IllegalArgumentException("PostgreSQL policy requires " + SELECTOR_VARIABLE
                     + "=" + POSTGRESQL_SELECTOR);
         }
@@ -266,6 +266,13 @@ public sealed interface ExecutionStoreConfiguration {
     private static boolean isConfigured(Map<String, String> environment, String variable) {
         String raw = environment.get(variable);
         return raw != null && !raw.isBlank();
+    }
+
+    private static boolean postgresqlOnlyPolicyConfigured(Map<String, String> properties,
+                                                          Map<String, String> environment) {
+        return PostgresStoreConfiguration.anyConfigured(properties, environment)
+                || isConfigured(properties, POOL_SIZE_PROPERTY)
+                || isConfigured(properties, POOL_TIMEOUT_PROPERTY);
     }
 
     private static int positiveInt(Map<String, String> environment, String variable, int fallback) {

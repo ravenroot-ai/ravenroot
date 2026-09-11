@@ -4472,6 +4472,8 @@ PERSISTENCE_POSTGRES_CONFIG_PATH = Path(
     "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java")
 PERSISTENCE_POSTGRES_RESOLVER_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java")
+PERSISTENCE_STORE_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
 PERSISTENCE_REGISTRY_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicy.java")
 PERSISTENCE_IN_MEMORY_POLICY_PATH = Path(
@@ -4585,6 +4587,7 @@ def persistence_policy_authority_from_source(
     """Derive the closed persistence policy from typed declarations and executable consumers."""
     paths = (
         PERSISTENCE_POSTGRES_CONFIG_PATH, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+        PERSISTENCE_STORE_CONFIGURATION_PATH,
         PERSISTENCE_REGISTRY_POLICY_PATH, PERSISTENCE_IN_MEMORY_POLICY_PATH,
         PERSISTENCE_SQLITE_CONFIG_PATH, PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
         PERSISTENCE_QUERY_PATH, PERSISTENCE_MANAGED_STORE_PATH, PERSISTENCE_MANIFEST_PATH,
@@ -4610,6 +4613,7 @@ def persistence_policy_authority_from_source(
         return None
     pg = sources[PERSISTENCE_POSTGRES_CONFIG_PATH]
     resolver = sources[PERSISTENCE_POSTGRES_RESOLVER_PATH]
+    store_configuration = sources[PERSISTENCE_STORE_CONFIGURATION_PATH]
     registry = sources[PERSISTENCE_REGISTRY_POLICY_PATH]
     in_memory = sources[PERSISTENCE_IN_MEMORY_POLICY_PATH]
     sqlite = sources[PERSISTENCE_SQLITE_CONFIG_PATH]
@@ -4787,6 +4791,12 @@ def persistence_policy_authority_from_source(
         "ResolvedOperationalPolicy", operational_components, "persistence")
     digest_conditions = java_method_if_conditions(
         manifest_digest, "ExecutionManifestDigest", "of")
+    store_selection_conditions = java_method_if_conditions(
+        store_configuration, "ExecutionStoreConfiguration", "fromSources")
+    postgres_only_span = java_method_span(
+        store_configuration, "ExecutionStoreConfiguration", "postgresqlOnlyPolicyConfigured")
+    postgres_only_body = normalized(strip_c_comments(store_configuration[slice(*postgres_only_span)])) \
+        if postgres_only_span is not None else ""
     expected_managed_authority_conditions = (
         "!rows.next()",
         "!authority.manifestDigest().value().equals(rows.getString(1)) || "
@@ -4799,7 +4809,18 @@ def persistence_policy_authority_from_source(
         if (!nonblank(raw)) raw = environment.get(variable);
         return nonblank(raw) ? raw.trim() : null;
     }""")
+    expected_postgres_only_body = normalized("""postgresqlOnlyPolicyConfigured(Map<String, String> properties,
+            Map<String, String> environment) {
+        return PostgresStoreConfiguration.anyConfigured(properties, environment)
+                || isConfigured(properties, POOL_SIZE_PROPERTY)
+                || isConfigured(properties, POOL_TIMEOUT_PROPERTY);
+    }""")
     if selected_body != expected_selected \
+            or postgres_only_body != expected_postgres_only_body \
+            or store_selection_conditions is None \
+            or normalized("!POSTGRESQL_SELECTOR.equals(selector) && "
+                          "postgresqlOnlyPolicyConfigured(properties, environment)") \
+                not in store_selection_conditions \
             or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
                                          "ai.ravenroot.server.persistence.ManagedExecutionStore.protect") != (
                 "executionStoreOwner.store()", "executionStoreOwner.executionManifestStore()") \
@@ -4929,6 +4950,7 @@ def persistence_policy_authority_from_source(
     test_methods = (
         (test_paths[0], "ExecutionStoreConfigurationTest", "postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound"),
         (test_paths[0], "ExecutionStoreConfigurationTest", "everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily"),
+        (test_paths[0], "ExecutionStoreConfigurationTest", "poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate"),
         (test_paths[1], "ManagedExecutionStoreTest", "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
         (test_paths[1], "ManagedExecutionStoreTest", "boundedSweepsAdvancePastEightIncompatiblePages"),
         (test_paths[1], "ManagedExecutionStoreTest", "everyExecutionStoreMethodHasAnExplicitManagedRoute"),
@@ -4936,6 +4958,10 @@ def persistence_policy_authority_from_source(
         (test_paths[3], "InMemoryExecutionStorePolicyTest", "explicitPolicyControlsTheReferenceStoreWithoutClaimingManagedPersistence"),
         (test_paths[4], "SqliteConnectionPolicyTest", "oneTypedPolicyControlsArtifactAndEmbedConnectionWaits"),
         (test_paths[5], "ManagedExecutionStoreContract", "fencingThenMatchingReplayPrecedeAChangedLiveCapacityCheck"),
+        (test_paths[5], "ManagedExecutionStoreContract", "individualManagedClaimsRefuseMissingStaleAndLegacyAuthorityWithoutLeasing"),
+        (test_paths[5], "ManagedExecutionStoreContract", "individualManagedClaimRefusesReopenedCapacityDriftWithoutLeasing"),
+        (test_paths[5], "ManagedExecutionStoreContract", "restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (test_paths[5], "ManagedExecutionStoreContract", "restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
         (test_paths[6], "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
         (test_paths[6], "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
         (test_paths[7], "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
@@ -5005,8 +5031,7 @@ def persistence_policy_authority_errors(root: Path, authorities: object,
 
 
 MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
-MANIFEST_PIN_CONFIGURATION_PATH = Path(
-    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
+MANIFEST_PIN_CONFIGURATION_PATH = PERSISTENCE_STORE_CONFIGURATION_PATH
 MANIFEST_PIN_BOOTSTRAP_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
 MANIFEST_PIN_STORE_PATH = Path(

@@ -214,6 +214,30 @@ class ExecutionStoreConfigurationTest {
     }
 
     @Test
+    void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate() {
+        for (String property : new String[] {
+                ExecutionStoreConfiguration.POOL_SIZE_PROPERTY,
+                ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY}) {
+            for (Map<String, String> environment : java.util.List.<Map<String, String>>of(
+                    Map.of(),
+                    Map.of(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite"),
+                    Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, "false"))) {
+                var properties = new Properties();
+                properties.setProperty(property, "20");
+                var refusal = assertThrows(IllegalArgumentException.class,
+                        () -> ExecutionStoreConfiguration.fromSystem(properties, environment));
+                assertTrue(refusal.getMessage().contains(ExecutionStoreConfiguration.SELECTOR_VARIABLE));
+                assertFalse(refusal.getMessage().contains("20"));
+            }
+
+            var blank = new Properties();
+            blank.setProperty(property, " \t ");
+            assertInstanceOf(ExecutionStoreConfiguration.SingleHost.class,
+                    ExecutionStoreConfiguration.fromSystem(blank, Map.of()));
+        }
+    }
+
+    @Test
     void manifestPinRepairAttemptsAreTypedAndPostgresqlOnly() {
         var environment = new HashMap<String, String>();
         environment.put(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql");

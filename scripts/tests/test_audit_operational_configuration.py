@@ -924,6 +924,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_persistence_policy_authority_rejects_partial_or_drifted_source(self) -> None:
         paths = (
             audit.PERSISTENCE_POSTGRES_CONFIG_PATH, audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+            audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
             audit.PERSISTENCE_REGISTRY_POLICY_PATH, audit.PERSISTENCE_IN_MEMORY_POLICY_PATH,
             audit.PERSISTENCE_SQLITE_CONFIG_PATH, audit.PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
             audit.PERSISTENCE_QUERY_PATH, audit.PERSISTENCE_MANAGED_STORE_PATH,
@@ -977,6 +978,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
             rejects(audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
                     "defaults.maxClockSkew(), true)", "defaults.maxClockSkew(), false)")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "|| isConfigured(properties, POOL_TIMEOUT_PROPERTY);",
+                    "|| false;")
             rejects(audit.PERSISTENCE_POSTGRES_CONFIG_PATH,
                     "Duration.ofSeconds(30), 3", "Duration.ofSeconds(31), 3")
             rejects(audit.PERSISTENCE_REGISTRY_POLICY_PATH,
@@ -1022,6 +1026,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
                     "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;",
                     "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_1;")
+            rejects(Path(
+                    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+                    "@Test\n    void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()",
+                    "void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
+                    "final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
+                    "final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
 
             test_path = root / Path(
                 "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")

@@ -138,7 +138,8 @@ rateLimit:
 # much higher figure -- 8.1s -- under CI-typical load on an older component version. This is F30's
 # option (a), the bridge it names explicitly while the real fix (F30's option (c), a pre-initialized
 # native build) is undecided -- NOT a capacity number chosen for any specific deployment. An operator
-# sizing a real production timeout should read F30 and override this.
+# sizing a real production timeout should read F30 and override this. A blank overlay delegates to
+# the Java-owned 5000ms baseline.
 programTimeoutMs: 15000
 
 resources:

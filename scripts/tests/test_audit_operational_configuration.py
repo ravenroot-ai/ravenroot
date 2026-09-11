@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import io
 import copy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -60,7 +61,664 @@ def classify_non_pending(root: Path) -> None:
         audit.render_report(document), encoding="utf-8")
 
 
+REAPPEARANCE_PRIOR_REVISION = "0596c618ac2cb7c55851c6891f7321b407e9686c"
+REAPPEARANCE_TARGET_REVISION = "2ab60f03cb1563a69d245e2b81b5f7cb3b056f95"
+REAPPEARANCE_CHECKPOINT_REVISION = "c2317c6643378e3f82a4f46d638ac03a157b0461"
+
+
+def committed_inventory(revision: str) -> tuple[dict[str, object], bytes]:
+    relative = audit.INVENTORY.relative_to(audit.ROOT).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{relative}"], cwd=ROOT, check=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout), result.stdout
+
+
+def production_reappearance_fixture() -> tuple[
+        dict[str, object], tuple[audit.Candidate, ...], list[dict[str, object]],
+        dict[str, object], bytes, dict[str, object], bytes]:
+    document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+    candidates = audit.discover(ROOT)
+    prior, prior_raw = committed_inventory(REAPPEARANCE_PRIOR_REVISION)
+    checkpoint, checkpoint_raw = committed_inventory(REAPPEARANCE_CHECKPOINT_REVISION)
+    active_ids = {entry["id"] for entry in document["entries"]}
+    retired = {entry["id"]: entry for entry in document["retiredEntries"]}
+    collisions = sorted(active_ids & set(retired))
+    candidate_by_id = {candidate.id: candidate for candidate in candidates}
+    records = [{
+        "kind": audit.REAPPEARANCE_KIND,
+        "issue": "#317",
+        "candidateId": identifier,
+        "approved": True,
+        "rationale": (
+            f"The pending schema atom {retired[identifier]['expression']} reappeared with the same "
+            "normalized identity after the closed Helm schema moved its source line; this approval "
+            "does not inherit semantic review from the retired row."
+        ),
+        "priorInventoryRevision": REAPPEARANCE_PRIOR_REVISION,
+        "priorInventoryPath": audit.INVENTORY.relative_to(audit.ROOT).as_posix(),
+        "priorInventoryDigest": audit.hashlib.sha256(prior_raw).hexdigest(),
+        "targetSourceRevision": REAPPEARANCE_TARGET_REVISION,
+        "identityCheckpointRevision": REAPPEARANCE_CHECKPOINT_REVISION,
+        "identityCheckpointInventoryDigest": audit.hashlib.sha256(checkpoint_raw).hexdigest(),
+        "reconciliationId": "issue-317-closed-helm-contract-v1",
+        "retiredPayloadDigest": audit.canonical_json_digest(retired[identifier]),
+        "currentEvidenceDigest": candidate_by_id[identifier].evidence_digest,
+    } for identifier in collisions]
+    return document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw
+
+
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        self.assertEqual({
+            "apiVersion": "v2", "name": "ravenroot", "type": "application",
+        }, {field: authority["chartMetadata"][field]
+            for field in ("apiVersion", "name", "type")})
+        self.assertEqual(authority["chartMetadata"]["version"],
+                         authority["chartMetadata"]["appVersion"])
+        chart_candidate_ids = {
+            candidate.id for candidate in candidates if candidate.path == audit.HELM_CHART_PATH}
+        contract_candidate_ids = {
+            identifier for contract in authority["contracts"]
+            for identifier in contract["candidateIds"]}
+        self.assertTrue(chart_candidate_ids)
+        self.assertTrue(chart_candidate_ids <= set(authority["candidateIds"]))
+        self.assertTrue(chart_candidate_ids.isdisjoint(contract_candidate_ids))
+        entries = {
+            identifier: {
+                "id": identifier, "setting": contract["setting"],
+                "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["defaultDisplay"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "helmAuthority": audit.HELM_AUTHORITY_ID,
+            }
+            for contract in authority["contracts"] for identifier in contract["candidateIds"]
+        }
+        self.assertEqual([], audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"] = altered["candidateIds"][:-1]
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"].append("oc-foreign")
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"].append(altered["candidateIds"][0])
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        wrong_entries = copy.deepcopy(entries)
+        next(iter(wrong_entries.values()))["owner"] = "Example.java#Example"
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
+        wrong_entries = copy.deepcopy(entries)
+        next(iter(wrong_entries.values()))["setting"] = "deployment.unsupported"
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
+
+        self.assertTrue(audit.helm_authority_errors(ROOT, None, {}, candidates))
+
+    def test_helm_authority_distinguishes_absent_partial_and_invalid_charts(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            self.assertEqual([], audit.helm_authority_errors(root, None, {}, ()))
+            self.assertTrue(audit.helm_authority_errors(
+                root, {audit.HELM_AUTHORITY_ID: {}}, {}, ()))
+            self.assertTrue(audit.helm_authority_errors(
+                root, None, {"oc-owned": {"helmAuthority": audit.HELM_AUTHORITY_ID}}, ()))
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            target = root / audit.HELM_VALUES_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / audit.HELM_VALUES_PATH, target)
+            errors = audit.helm_authority_errors(root, None, {}, ())
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            target = root / audit.HELM_CHART_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("apiVersion: v2\n", encoding="utf-8")
+            errors = audit.helm_authority_errors(root, None, {}, ())
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        candidates = audit.discover(ROOT)
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authority = audit.helm_authority_from_source(ROOT, candidates)
+            self.assertIsNotNone(authority)
+            assert authority is not None
+            for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                         audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                         *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                         authority["timeoutRuntime"]["path"]}:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            schema = root / audit.HELM_SCHEMA_PATH
+            schema.write_text(schema.read_text(encoding="utf-8").replace(
+                '"const": true', '"const": false', 1), encoding="utf-8")
+            errors = audit.helm_authority_errors(root, None, {}, candidates)
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        chart_mutations = (
+            ("apiVersion: v2", "apiVersion: v1"),
+            ("name: ravenroot", "name: another-chart"),
+            ("type: application", "type: library"),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.\n", ""),
+            ("version: 0.1.0-alpha.1\n", ""),
+            ('appVersion: "0.1.0-alpha.1"\n', ""),
+            ('kubeVersion: ">=1.25.0-0"\n', ""),
+            ("apiVersion: v2", "apiVersion: ["),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+             "description: broken: metadata"),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+             "description: 'broken' metadata'"),
+        )
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                    audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                    *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                    authority["timeoutRuntime"]["path"]}
+        for before, after in chart_mutations:
+            with self.subTest(chart_mutation=before):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    chart = root / audit.HELM_CHART_PATH
+                    source = chart.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    chart.write_text(source.replace(before, after, 1), encoding="utf-8")
+                    errors = audit.helm_authority_errors(root, None, {}, candidates)
+                    self.assertTrue(any("violate the closed authority" in error
+                                        for error in errors), errors)
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            for path in required:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            chart = root / audit.HELM_CHART_PATH
+            source = chart.read_text(encoding="utf-8")
+            source = source.replace("version: 0.1.0-alpha.1",
+                                    "version: 0.1.0-alpha.1+build.7", 1)
+            source = source.replace('appVersion: "0.1.0-alpha.1"',
+                                    'appVersion: "0.1.0-alpha.1+build.7"', 1)
+            chart.write_text(source, encoding="utf-8")
+            self.assertIsNotNone(audit.helm_authority_from_source(root, candidates))
+
+    def test_helm_authority_rejects_source_contract_and_executable_evidence_drift(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        entries = {
+            identifier: {
+                "id": identifier, "setting": contract["setting"],
+                "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["defaultDisplay"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "helmAuthority": audit.HELM_AUTHORITY_ID,
+            }
+            for contract in authority["contracts"] for identifier in contract["candidateIds"]
+        }
+        mutations = (
+            (audit.HELM_VALUES_PATH, "programTimeoutMs: 15000", "programTimeoutMs: 15001"),
+            (audit.HELM_VALUES_PATH, "runAsNonRoot: true", "runAsNonRoot: false"),
+            (audit.HELM_VALUES_PATH, "allowPrivilegeEscalation: false", "allowPrivilegeEscalation: true"),
+            (audit.HELM_VALUES_PATH, "readOnlyRootFilesystem: true", "readOnlyRootFilesystem: false"),
+            (audit.HELM_SCHEMA_PATH, '"maximum": 300000', '"maximum": 300001'),
+            (audit.HELM_SCHEMA_PATH,
+             '"pattern": "^[\\u0009-\\u000D\\u001C-\\u0020\\u1680',
+             '"pattern": "^[\\u0009-\\u000D\\u0020'),
+            (audit.HELM_SCHEMA_PATH, '"additionalProperties": false', '"additionalProperties": true'),
+            (audit.HELM_SCHEMA_PATH, '"required": ["replicaCount"', '"required": ["image"'),
+            (audit.HELM_SCHEMA_PATH, '"enum": ["RuntimeDefault"]',
+             '"enum": ["RuntimeDefault", "Unconfined"]'),
+            (audit.HELM_SCHEMA_PATH, '"runAsNonRoot": { "type": "boolean", "const": true }',
+             '"runAsNonRoot": { "type": "boolean" }'),
+            (audit.HELM_SCHEMA_PATH,
+             '"allowPrivilegeEscalation": { "type": "boolean", "const": false }',
+             '"allowPrivilegeEscalation": { "type": "boolean" }'),
+            (audit.HELM_SCHEMA_PATH,
+             '"readOnlyRootFilesystem": { "type": "boolean", "const": true }',
+             '"readOnlyRootFilesystem": { "type": "boolean" }'),
+            (audit.HELM_TEMPLATE_PATHS[1],
+             '          resources:\n            {{- toYaml .Values.resources | nindent 12 }}',
+             '      resources:\n        {{- toYaml .Values.resources | nindent 8 }}'),
+            (audit.HELM_TEMPLATE_PATHS[1], '- name: RAVENROOT_PROGRAM_TIMEOUT_MS',
+             '# - name: RAVENROOT_PROGRAM_TIMEOUT_MS'),
+            ("scripts/tests/test_program_timeout_helm_contract.sh",
+             "for invalid in 99 300001; do", "for invalid in 99; do"),
+            ("scripts/tests/test_helm_values_contract.sh",
+             '--set-string image.tag=release-test \\\n  --set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"',
+             '--set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             '--set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"',
+             '--set-string image.digest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \\\n  >"$TEMP_DIR/tag-only.yaml"'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             'if tag_image != "registry.example.test/ravenroot:release-test":',
+             'if False:'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             "securityContext.readOnlyRootFilesystem=false \\",
+             "securityContext.readOnlyRootFilesystem=not-a-boolean \\",),
+            (authority["timeoutRuntime"]["path"],
+             'Duration timeout = Duration.ofMillis(', '// Duration timeout = Duration.ofMillis('),
+            (authority["timeoutRuntime"]["path"],
+             'static GraalVmProgramRuntime fromEnvironment(java.util.Map<String, String> environment)',
+             'static GraalVmProgramRuntime fromChangedEnvironment(java.util.Map<String, String> environment)'),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(relative=relative, before=before):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                                audit.HELM_VALUES_PATH,
+                                audit.HELM_SCHEMA_PATH,
+                                *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                                authority["timeoutRuntime"]["path"]}
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    target = root / relative
+                    source = target.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                    self.assertTrue(audit.helm_authority_errors(
+                        root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+        for removed in (audit.HELM_CHART_PATH, audit.HELM_TEMPLATE_PATHS[0],
+                        "scripts/tests/test_helm_values_contract.sh",
+                        authority["timeoutRuntime"]["path"]):
+            with self.subTest(removed=removed):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                                audit.HELM_VALUES_PATH,
+                                audit.HELM_SCHEMA_PATH,
+                                *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                                authority["timeoutRuntime"]["path"]}
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    (root / removed).unlink()
+                    self.assertTrue(audit.helm_authority_errors(
+                        root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                         audit.HELM_VALUES_PATH,
+                         *audit.HELM_TEMPLATE_PATHS,
+                         *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            target = root / audit.HELM_SCHEMA_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('{"type":"object","properties":[]}', encoding="utf-8")
+            self.assertTrue(audit.helm_authority_errors(
+                root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+    def test_inventory_errors_routes_only_exact_helm_owned_rows_through_helm_proof(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        document = copy.deepcopy(audit.load_inventory(allow_previous_schema=True))
+        document["entries"] = []
+        document["evidenceRecords"] = {
+            candidate.evidence_digest: candidate.evidence for candidate in candidates}
+        for candidate in candidates:
+            entry = {**candidate.source_fields(), "status": "pending-review", "classification": None}
+            if candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture")
+            document["entries"].append(entry)
+        by_id = {entry["id"]: entry for entry in document["entries"]}
+        for contract in authority["contracts"]:
+            for identifier in contract["candidateIds"]:
+                by_id[identifier].update(
+                    status="already-centralized", classification="operator-configurable",
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], default=contract["defaultDisplay"],
+                    defaultEvidence=contract["candidateIds"], validation=contract["validation"],
+                    scope=contract["scope"], pinning=contract["pinning"],
+                    coverage=contract["coverage"], helmAuthority=audit.HELM_AUTHORITY_ID,
+                    rationale="The closed Helm values authority proves this deployment setting.",
+                )
+        document["helmAuthorities"] = {audit.HELM_AUTHORITY_ID: authority}
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("Helm" in error for error in errors), errors)
+
+        removed = copy.deepcopy(document)
+        removed.pop("helmAuthorities")
+        helm_fields = {
+            "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+            "validation", "scope", "pinning", "coverage", "helmAuthority",
+        }
+        for entry in removed["entries"]:
+            if entry.get("helmAuthority") == audit.HELM_AUTHORITY_ID:
+                for field in helm_fields:
+                    entry.pop(field, None)
+                entry.update(status="retained", classification="protocol-or-format-invariant",
+                             rationale="Incorrectly relabelled as retained.")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("Helm settings require" in error for error in errors), errors)
+
+        altered = copy.deepcopy(document)
+        marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))
+        marked.pop("helmAuthority")
+        errors = audit.inventory_errors(ROOT, altered, candidates)
+        self.assertTrue(any("Helm candidate coverage" in error for error in errors), errors)
+
+        altered = copy.deepcopy(document)
+        marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))
+        marked["owner"] = (
+            "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/"
+            "GraphExecutionLimits.java#GraphExecutionLimits")
+        errors = audit.inventory_errors(ROOT, altered, candidates)
+        self.assertTrue(any("unsupported Helm authority owner" in error for error in errors), errors)
+
+    def test_helm_live_candidate_references_remap_without_touching_history_or_prose(self) -> None:
+        document = {
+            "helmAuthorities": {audit.HELM_AUTHORITY_ID: {
+                "candidateIds": ["oc-old"],
+                "contracts": [{"candidateIds": ["oc-old"]}],
+                "evidence": "oc-old remains historical prose",
+            }},
+            "semanticReviewHistory": [{"candidateIds": ["oc-old"]}],
+            "normalizedIdentityReappearanceHistory": [{
+                "candidateId": "oc-old", "rationale": "Immutable historical identity evidence.",
+            }],
+        }
+        locations = audit.candidate_reference_locations(document, {"oc-old"})
+        self.assertTrue(all(audit.allowed_migrated_reference(path)
+                            or audit.immutable_historical_reference(path)
+                            or path[-1] == "evidence" for path in locations))
+        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
+        authority = document["helmAuthorities"][audit.HELM_AUTHORITY_ID]
+        self.assertEqual(["oc-new"], authority["candidateIds"])
+        self.assertEqual(["oc-new"], authority["contracts"][0]["candidateIds"])
+        self.assertEqual(["oc-old"], document["semanticReviewHistory"][0]["candidateIds"])
+        self.assertEqual(
+            "oc-old", document["normalizedIdentityReappearanceHistory"][0]["candidateId"])
+        self.assertEqual("oc-old remains historical prose", authority["evidence"])
+
+    def test_normalized_identity_reappearance_is_exact_source_anchored_and_nonsemantic(self) -> None:
+        document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw = \
+            production_reappearance_fixture()
+        self.assertEqual(21, len(records))
+        document["normalizedIdentityReappearanceHistory"] = copy.deepcopy(records)
+
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, document, candidates)
+        self.assertEqual([], errors)
+        self.assertEqual({record["candidateId"] for record in records}, allowed)
+
+        malformed_collection = copy.deepcopy(document)
+        malformed_collection["normalizedIdentityReappearanceHistory"] = {}
+        self.assertEqual(
+            ["normalizedIdentityReappearanceHistory must be an array"],
+            audit.normalized_identity_reappearance_errors(
+                ROOT, malformed_collection, candidates)[0])
+
+        # Exercise the production routing without paying the unrelated append-only semantic-review
+        # validation cost. The source-anchored reappearance validator itself remains unmocked.
+        with mock.patch.object(audit, "reconciliation_history_errors", return_value=[]), \
+                mock.patch.object(audit, "remediation_domain_errors", return_value=[]):
+            routed = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("duplicate active/retired inventory id" in error for error in routed), routed)
+
+        inventory_path = audit.INVENTORY.relative_to(audit.ROOT).as_posix()
+
+        def anchored_errors(value, discovered=candidates, prior_document=prior,
+                            prior_bytes=prior_raw, checkpoint_document=checkpoint,
+                            checkpoint_bytes=checkpoint_raw):
+            def committed(_root, revision, path):
+                if path != inventory_path:
+                    return None, None
+                if revision == REAPPEARANCE_PRIOR_REVISION:
+                    return prior_document, prior_bytes
+                if revision == REAPPEARANCE_CHECKPOINT_REVISION:
+                    return checkpoint_document, checkpoint_bytes
+                return None, None
+            with mock.patch.object(audit, "committed_json", side_effect=committed):
+                return audit.normalized_identity_reappearance_errors(
+                    ROOT, value, discovered)[0]
+
+        absent = copy.deepcopy(document)
+        absent["normalizedIdentityReappearanceHistory"].pop()
+        self.assertTrue(any("missing active/retired collisions" in error
+                            for error in anchored_errors(absent)))
+        self.assertEqual(set(), audit.normalized_identity_reappearance_errors(
+            ROOT, absent, candidates)[1], "a partial record set must grant no duplicate exception")
+        collision_id = records[0]["candidateId"]
+        collision_candidate = next(item for item in candidates if item.id == collision_id)
+        collision_document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": [copy.deepcopy(next(
+                entry for entry in document["entries"] if entry["id"] == collision_id))],
+            "retiredEntries": [copy.deepcopy(next(
+                entry for entry in document["retiredEntries"] if entry["id"] == collision_id))],
+            "migrationHistory": [],
+            "evidenceRecords": {collision_candidate.evidence_digest: collision_candidate.evidence},
+        }
+        with mock.patch.object(audit, "route_table_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "graph_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "environment_resolver_group_errors", return_value=[]), \
+                mock.patch.object(audit, "reconciliation_history_errors", return_value=[]), \
+                mock.patch.object(audit, "remediation_domain_errors", return_value=[]):
+            collision_errors = audit.inventory_errors(
+                ROOT, collision_document, (collision_candidate,))
+        self.assertIn(f"duplicate active/retired inventory id: {collision_id}", collision_errors)
+
+        duplicate = copy.deepcopy(document)
+        duplicate["normalizedIdentityReappearanceHistory"].append(
+            copy.deepcopy(duplicate["normalizedIdentityReappearanceHistory"][0]))
+        self.assertTrue(any("duplicate normalized identity" in error
+                            for error in anchored_errors(duplicate)))
+
+        foreign = copy.deepcopy(document)
+        foreign["normalizedIdentityReappearanceHistory"][0]["candidateId"] = "oc-foreign"
+        self.assertTrue(any("non-colliding candidates" in error
+                            for error in anchored_errors(foreign)))
+
+        for field, value in (
+                ("approved", False), ("rationale", " "), ("issue", "317"),
+                ("priorInventoryPath", "../inventory.json"),
+                ("priorInventoryRevision", "deadbeef"),
+                ("priorInventoryDigest", "0" * 64),
+                ("identityCheckpointInventoryDigest", "0" * 64),
+                ("reconciliationId", "missing-reconciliation"),
+                ("retiredPayloadDigest", "0" * 64),
+                ("currentEvidenceDigest", "0" * 64)):
+            with self.subTest(record_field=field):
+                changed = copy.deepcopy(document)
+                changed["normalizedIdentityReappearanceHistory"][0][field] = value
+                self.assertTrue(anchored_errors(changed))
+
+        extra_field = copy.deepcopy(document)
+        extra_field["normalizedIdentityReappearanceHistory"][0]["owner"] = "forbidden"
+        self.assertTrue(any("unsupported or incomplete shape" in error
+                            for error in anchored_errors(extra_field)))
+
+        with mock.patch.object(audit, "revision_is_ancestor", return_value=False):
+            self.assertTrue(any("ordered ancestry" in error for error in anchored_errors(document)))
+
+        identifier = records[0]["candidateId"]
+        checkpoint_entry = next(entry for entry in checkpoint["entries"]
+                                if entry["id"] == identifier)
+
+        prior_active = copy.deepcopy(prior)
+        prior_active["entries"].append(copy.deepcopy(checkpoint_entry))
+        prior_active_raw = json.dumps(prior_active).encode("utf-8")
+        changed = copy.deepcopy(document)
+        for record in changed["normalizedIdentityReappearanceHistory"]:
+            record["priorInventoryDigest"] = audit.hashlib.sha256(prior_active_raw).hexdigest()
+        self.assertTrue(any("absent from active prior inventory" in error for error in
+                            anchored_errors(changed, prior_document=prior_active,
+                                            prior_bytes=prior_active_raw)))
+
+        prior_without_retirement = copy.deepcopy(prior)
+        prior_without_retirement["retiredEntries"] = [
+            entry for entry in prior_without_retirement["retiredEntries"]
+            if entry.get("id") != identifier]
+        prior_without_raw = json.dumps(prior_without_retirement).encode("utf-8")
+        changed = copy.deepcopy(document)
+        for record in changed["normalizedIdentityReappearanceHistory"]:
+            record["priorInventoryDigest"] = audit.hashlib.sha256(prior_without_raw).hexdigest()
+        self.assertTrue(any("one retirement" in error for error in
+                            anchored_errors(changed, prior_document=prior_without_retirement,
+                                            prior_bytes=prior_without_raw)))
+
+        current_retired_tamper = copy.deepcopy(document)
+        next(entry for entry in current_retired_tamper["retiredEntries"]
+             if entry["id"] == identifier)["retirementRationale"] = "Rewritten history."
+        self.assertTrue(any("immutable retired payload has drifted" in error for error in
+                            anchored_errors(current_retired_tamper)))
+
+        def eligibility_errors(mutator):
+            changed = copy.deepcopy(document)
+            prior_changed = copy.deepcopy(prior)
+            checkpoint_changed = copy.deepcopy(checkpoint)
+            retired_rows = [
+                next(entry for entry in changed["retiredEntries"] if entry["id"] == identifier),
+                next(entry for entry in prior_changed["retiredEntries"] if entry["id"] == identifier),
+                next(entry for entry in checkpoint_changed["retiredEntries"]
+                     if entry["id"] == identifier),
+            ]
+            for row in retired_rows:
+                mutator(row)
+            prior_changed_raw = json.dumps(prior_changed).encode("utf-8")
+            checkpoint_changed_raw = json.dumps(checkpoint_changed).encode("utf-8")
+            for record in changed["normalizedIdentityReappearanceHistory"]:
+                record["priorInventoryDigest"] = audit.hashlib.sha256(prior_changed_raw).hexdigest()
+                record["identityCheckpointInventoryDigest"] = audit.hashlib.sha256(
+                    checkpoint_changed_raw).hexdigest()
+                if record["candidateId"] == identifier:
+                    record["retiredPayloadDigest"] = audit.canonical_json_digest(retired_rows[0])
+            return anchored_errors(
+                changed, prior_document=prior_changed, prior_bytes=prior_changed_raw,
+                checkpoint_document=checkpoint_changed, checkpoint_bytes=checkpoint_changed_raw)
+
+        eligibility_mutations = (
+            lambda row: row.update(status="retained"),
+            lambda row: row.update(classification="protocol-or-format-invariant"),
+            lambda row: row.update(removal={"kind": "duplicate-removed"}),
+            lambda row: row["sourceRefresh"].update(semanticRetirement=True),
+            lambda row: row["sourceRefresh"].update(duplicateAuthorityCredit=1),
+            lambda row: row["sourceRefresh"].update(
+                kind="semantic-candidate-retirement-v1"),
+        )
+        for index, mutation in enumerate(eligibility_mutations):
+            with self.subTest(eligibility=index):
+                self.assertTrue(any("not an eligible mechanical pending refresh" in error
+                                    for error in eligibility_errors(mutation)))
+
+        def mutate_checkpoint_plan(mutator):
+            changed = copy.deepcopy(document)
+            checkpoint_changed = copy.deepcopy(checkpoint)
+            checkpoint_plan = next(plan for plan in checkpoint_changed["reconciliationHistory"]
+                                   if plan["id"] == "issue-317-closed-helm-contract-v1")
+            current_plan = next(plan for plan in changed["reconciliationHistory"]
+                                if plan["id"] == "issue-317-closed-helm-contract-v1")
+            mutator(checkpoint_plan)
+            mutator(current_plan)
+            checkpoint_changed_raw = json.dumps(checkpoint_changed).encode("utf-8")
+            for record in changed["normalizedIdentityReappearanceHistory"]:
+                record["identityCheckpointInventoryDigest"] = audit.hashlib.sha256(
+                    checkpoint_changed_raw).hexdigest()
+            return anchored_errors(
+                changed, checkpoint_document=checkpoint_changed,
+                checkpoint_bytes=checkpoint_changed_raw)
+
+        for plan_field, value in (
+                ("sourceRevision", REAPPEARANCE_TARGET_REVISION),
+                ("sourceInventoryPath", "inventory.json"),
+                ("sourceInventoryDigest", "0" * 64),
+                ("targetRevision", REAPPEARANCE_PRIOR_REVISION)):
+            with self.subTest(checkpoint_plan_field=plan_field):
+                def mutate_anchor(plan, field=plan_field, replacement=value):
+                    plan[field] = replacement
+                self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                                    mutate_checkpoint_plan(mutate_anchor)))
+
+        self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                            mutate_checkpoint_plan(lambda plan: plan.__setitem__(
+                                "additions", [item for item in plan["additions"]
+                                              if item["id"] != identifier]))))
+
+        def replace_addition_with_mapping(plan):
+            plan["additions"] = [item for item in plan["additions"] if item["id"] != identifier]
+            plan["mappings"].append({
+                "fromId": identifier, "toId": identifier, "approved": True,
+                "rationale": "Invalid same-id mapping.", "equivalence": {},
+            })
+        self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                            mutate_checkpoint_plan(replace_addition_with_mapping)))
+
+        unapproved = copy.deepcopy(document)
+        unapproved["reconciliationHistory"] = [
+            plan for plan in unapproved["reconciliationHistory"]
+            if plan.get("id") != "issue-317-closed-helm-contract-v1"]
+        self.assertTrue(any("identity reconciliation is absent" in error
+                            for error in anchored_errors(unapproved)))
+
+        candidate = next(candidate for candidate in candidates if candidate.id == identifier)
+        active = next(entry for entry in document["entries"] if entry["id"] == identifier)
+        source_mutations = {
+            "path": ("path", "deploy/helm/ravenroot/other.json"),
+            "symbol": ("symbol", "other"),
+            "kind": ("kind", "fixed-declaration"),
+            "role": ("role", "other"),
+            "expression": ("expression", '"other"'),
+            "expressionDigest": ("expression_digest", "0" * 64),
+            "evidenceDigest": ("evidence_digest", "0" * 64),
+            "surface": ("surface", "java"),
+        }
+        for entry_field, (candidate_field, value) in source_mutations.items():
+            with self.subTest(source_field=entry_field):
+                changed = copy.deepcopy(document)
+                next(entry for entry in changed["entries"]
+                     if entry["id"] == identifier)[entry_field] = value
+                changed_candidates = tuple(
+                    audit.replace(item, **{candidate_field: value}) if item.id == identifier else item
+                    for item in candidates)
+                self.assertTrue(anchored_errors(changed, discovered=changed_candidates))
+
+        missing_candidate = tuple(item for item in candidates if item.id != identifier)
+        self.assertTrue(any("current candidate is absent" in error
+                            for error in anchored_errors(document, discovered=missing_candidate)))
+
+        moved = copy.deepcopy(document)
+        next(entry for entry in moved["entries"] if entry["id"] == identifier)["line"] = active["line"] + 1
+        moved_candidates = tuple(
+            audit.replace(item, line=item.line + 1) if item.id == identifier else item
+            for item in candidates)
+        self.assertEqual([], anchored_errors(moved, discovered=moved_candidates))
+
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
         expected = audit.manifest_pin_attempt_authorities(ROOT, discovered)
@@ -966,7 +1624,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }, selected)
 
     def test_assistant_two_limit_inventory_adapter_preserves_generic_checks(self) -> None:
-        with tempfile.TemporaryDirectory() as location:
+        # The assistant fixture has only its synthetic deployment carriers; the complete chart
+        # authority is exercised by the unmocked Helm tests.
+        with tempfile.TemporaryDirectory() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
             document, selected = self.assistant_limit_inventory_document(
@@ -1789,7 +2450,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                             for error in errors), errors)
 
     def test_environment_authority_is_candidate_driven_bijective_and_closed(self) -> None:
-        with synthetic_repository() as location:
+        # This resolver fixture uses partial carrier files, not a complete Helm chart.
+        # Keep its target-family and generic checks independent of the Helm authority tests.
+        with synthetic_repository() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             document, discovered, _source, _tests = self.environment_authority_fixture(root)
             self.assertEqual([], audit.inventory_errors(root, document, discovered))
@@ -1873,7 +2537,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("every checker-owned carrier group" in error for error in errors), errors)
 
     def test_environment_authority_source_test_and_carrier_mutations_fail(self) -> None:
-        with synthetic_repository() as location:
+        # Isolate the unrelated chart proof while mutating the synthetic environment carriers.
+        # The dedicated Helm tests exercise the production chart gate without this patch.
+        with synthetic_repository() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             document, discovered, source_path, test_path = self.environment_authority_fixture(root)
             original_source = source_path.read_text(encoding="utf-8")
@@ -2247,9 +2914,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
 
     def graph_limit_inventory_errors(self, document, candidates):
-        # This fixture intentionally contains only graph rows. Assistant's separately mandatory
-        # fixed family is covered by its own general-entrypoint tests.
-        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+        # This fixture intentionally contains only graph rows. The separately mandatory assistant
+        # and Helm authorities are covered by their own unmocked general-entrypoint tests.
+        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -2507,6 +3175,22 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "| Retained published contract descriptions | 0 |",
             audit.render_report({"entries": [], "retiredEntries": [], "migrationHistory": []}),
         )
+
+    def test_report_counts_active_retired_and_reappearance_history_separately(self) -> None:
+        document = {
+            "entries": [{
+                "id": "oc-active", "path": "runtime/Policy.java", "line": 1,
+                "symbol": "Policy", "surface": "java", "status": "retained",
+                "classification": "protocol-or-format-invariant", "rationale": "Protocol token.",
+            }],
+            "retiredEntries": [{"id": "oc-retired"}, {"id": "oc-active"}],
+            "migrationHistory": [], "reconciliationHistory": [],
+            "normalizedIdentityReappearanceHistory": [{"candidateId": "oc-active"}],
+        }
+        report = audit.render_report(document)
+        self.assertIn("| Atomic operational candidates discovered | 1 |", report)
+        self.assertIn("Retired source candidates preserved in inventory history: 2.", report)
+        self.assertIn("Approved normalized-identity reappearances: 1.", report)
 
     def test_new_named_operational_constant_is_rejected(self) -> None:
         with synthetic_repository() as location:
@@ -3998,6 +4682,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "id": "earlier-reconciliation",
                     "additions": [{"id": "oc-old"}],
                 }],
+                "normalizedIdentityReappearanceHistory": [{
+                    "candidateId": "oc-old", "rationale": "Anchored historical reference fixture.",
+                }],
                 "evidenceRecords": {old_entry["evidenceDigest"]: "old evidence"},
             }
             inventory.write_text(json.dumps(source_document, indent=2) + "\n", encoding="utf-8")
@@ -4043,6 +4730,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertEqual(["oc-new"], remapped["entries"][0]["defaultEvidence"])
             self.assertEqual("oc-old", remapped["reconciliationHistory"][0]["additions"][0]["id"],
                              "anchored history must never be rewritten")
+            self.assertEqual(
+                "oc-old", remapped["normalizedIdentityReappearanceHistory"][0]["candidateId"],
+                "reappearance history must never be rewritten")
 
             malformed_issue = copy.deepcopy(plan)
             malformed_issue["issue"] = "316"
@@ -4100,6 +4790,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             tampered["reconciliationHistory"].insert(0, {"id": "forged-prior-record"})
             self.assertTrue(any("append-only chain" in error for error in
                                 audit.reconciliation_history_errors(root, tampered, (candidate,))))
+
+            tampered_reappearance = copy.deepcopy(refreshed)
+            tampered_reappearance["normalizedIdentityReappearanceHistory"][0]["rationale"] = \
+                "Changed later."
+            self.assertTrue(any("normalizedIdentityReappearanceHistory is not an append-only chain"
+                                in error for error in audit.reconciliation_history_errors(
+                                    root, tampered_reappearance, (candidate,))))
 
             missing_retirement = copy.deepcopy(refreshed)
             missing_retirement["retiredEntries"] = []
@@ -4191,7 +4888,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             },
         }
         def errors(value):
-            with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+            # These two unresolved rows contain neither the assistant nor the Helm family.
+            with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "helm_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

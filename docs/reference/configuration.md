@@ -2,6 +2,24 @@
 
 Configuration is environment-owned. A graph cannot select an engine, authentication mode, browser origin, credential backend, adapter, sandbox, or egress policy.
 
+## Helm values compatibility
+
+The Helm values schema is closed over the fields published in `values.yaml`. Older chart revisions
+allowed additional nested keys under `resources`, `podSecurityContext`, `securityContext`, and
+`probes` to pass through `toYaml` without a chart contract. Those undocumented extensions are no
+longer accepted. Before upgrading, remove such keys or apply the required Kubernetes fields with a
+post-renderer or maintained chart/template customization. Supported resource quantities, pod and container
+identity fields, probe timing, storage, image, Service, OIDC, and runtime-policy carriers remain
+available as named values and reject invalid input before a workload is rendered. The packaged chart
+now fixes `engine=pekko`, `podSecurityContext.runAsNonRoot=true`, RuntimeDefault seccomp,
+`securityContext.allowPrivilegeEscalation=false`, `securityContext.readOnlyRootFilesystem=true`,
+capability drop `ALL`, and positive pod/container user and group IDs. Previously valid overrides that
+weakened those named pod-security controls or selected a different packaged-image contract must use
+the post-renderer or maintained chart/template customization path. Quote resource
+quantities in values files and use `--set-string` for unitless quantities, such as
+`--set-string resources.limits.cpu=2`; numeric YAML quantities that older charts passed through must
+be changed to strings before upgrading.
+
 ## Runtime and behavior resolution
 
 | Variable | Default | Accepted contract |
@@ -210,6 +228,13 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_ARTIFACT_STORE_DIR` | `/opt/ravenroot/data/artifact-store` | Durable artifact lifecycle store |
 | `RAVENROOT_ARTIFACT_DUAL_CONTROL` | strict Boolean `false` | `true` requires a second approval authority |
 | `RAVENROOT_ARTIFACT_PROVENANCE` | `refusing` | `unverified` is an explicit unsafe-development opt-out; other values refuse |
+
+The Java baseline for `RAVENROOT_PROGRAM_TIMEOUT_MS` is `5000` ms. The Helm chart deliberately sets
+`programTimeoutMs: 15000` as its F30 cold-start bridge, while Compose uses a `30000` ms local-development
+profile. Helm validates configured integers from `100` through `300000`; an explicit blank Helm overlay
+delegates to the Java baseline. The program deadline participates in the execution compatibility
+fingerprint, so retain `15000` explicitly when work must keep the Helm profile rather than assuming a
+changed deadline can resume it.
 
 Allowed hosts and allowed agent tools are operator allowlists. Empty or absent privileged configuration does not expand access.
 

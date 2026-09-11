@@ -8,6 +8,7 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 
 /**
  * Who this replica is when it takes a lease, and for how long it claims.
@@ -35,9 +36,11 @@ public record ExecutionOwnershipConfiguration(String replicaName, Duration lease
      * is its pod name, and a Compose service's is its container name.
      */
     public static final String WORKER_ID_VARIABLE = "RAVENROOT_WORKER_ID";
+    public static final String WORKER_ID_PROPERTY = "ravenroot.execution.worker-id";
 
     /** How long a traversal lease runs before renewal. Whole seconds, in the house spelling. */
     public static final String LEASE_TTL_VARIABLE = "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS";
+    public static final String LEASE_TTL_PROPERTY = "ravenroot.execution.lease-ttl-seconds";
 
     /**
      * The name used when neither the variable nor the operating system supplies one.
@@ -62,8 +65,22 @@ public record ExecutionOwnershipConfiguration(String replicaName, Duration lease
      * @throws IllegalArgumentException when either value is malformed.
      */
     public static ExecutionOwnershipConfiguration fromEnvironment(Map<String, String> environment) {
+        return fromSources(Map.of(), environment);
+    }
+
+    /** Resolves system properties before environment variables; blank values delegate. */
+    public static ExecutionOwnershipConfiguration fromSystem(Properties properties,
+                                                              Map<String, String> environment) {
+        Objects.requireNonNull(properties, "properties");
+        Map<String, String> propertyValues = properties.stringPropertyNames().stream()
+                .collect(java.util.stream.Collectors.toMap(name -> name, properties::getProperty));
+        return fromSources(propertyValues, environment);
+    }
+
+    static ExecutionOwnershipConfiguration fromSources(Map<String, String> properties,
+                                                        Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
-        String configured = environment.get(WORKER_ID_VARIABLE);
+        String configured = selected(properties, environment, WORKER_ID_PROPERTY, WORKER_ID_VARIABLE);
         String replicaName = configured == null || configured.isBlank()
                 ? hostName() : configured.trim();
         try {
@@ -76,7 +93,7 @@ public record ExecutionOwnershipConfiguration(String replicaName, Duration lease
         } catch (IllegalArgumentException malformed) {
             throw new IllegalArgumentException(WORKER_ID_VARIABLE + " " + WorkerIdentity.NAME_RULE);
         }
-        return new ExecutionOwnershipConfiguration(replicaName, leaseTtl(environment));
+        return new ExecutionOwnershipConfiguration(replicaName, leaseTtl(properties, environment));
     }
 
     /** The identity and ttl the application advances traversals under. */
@@ -117,8 +134,8 @@ public record ExecutionOwnershipConfiguration(String replicaName, Duration lease
         }
     }
 
-    private static Duration leaseTtl(Map<String, String> environment) {
-        String raw = environment.get(LEASE_TTL_VARIABLE);
+    private static Duration leaseTtl(Map<String, String> properties, Map<String, String> environment) {
+        String raw = selected(properties, environment, LEASE_TTL_PROPERTY, LEASE_TTL_VARIABLE);
         if (raw == null || raw.isBlank()) {
             return ExecutionOwnership.DEFAULT_LEASE_TTL;
         }
@@ -135,6 +152,13 @@ public record ExecutionOwnershipConfiguration(String replicaName, Duration lease
             throw new IllegalArgumentException(LEASE_TTL_VARIABLE + " must be a positive whole "
                     + "number of seconds");
         }
+    }
+
+    private static String selected(Map<String, String> properties, Map<String, String> environment,
+                                   String property, String variable) {
+        String raw = properties.get(property);
+        if (raw == null || raw.isBlank()) raw = environment.get(variable);
+        return raw;
     }
 
     /**

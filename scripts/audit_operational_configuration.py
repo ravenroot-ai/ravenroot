@@ -1348,6 +1348,116 @@ def java_constructor_component_call(source: str, type_symbol: str, method: str,
     return argument, base + start, base + end
 
 
+def java_invocation_arguments(source: str, type_symbol: str, method: str,
+                              invocation: str) -> tuple[str, ...] | None:
+    """Return one exact invocation's arguments from an unambiguous direct method."""
+    method_span = java_method_span(source, type_symbol, method)
+    if method_span is None:
+        return None
+    base, limit = method_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    pattern = re.compile(rf"(?<![\w$]){re.escape(invocation)}\s*\(")
+    matches = list(pattern.finditer(code))
+    if len(matches) != 1:
+        return None
+    opening = matches[0].end() - 1
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None:
+        return None
+    if parsed[1] == opening + 1:
+        return ()
+    return tuple(argument for argument, _start, _end in parsed[0])
+
+
+def java_type_assignment_expressions(source: str, type_symbol: str,
+                                     field: str) -> tuple[str, ...]:
+    """Return every executable ``this.field = expression`` in one Java type."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return ()
+    base, limit = type_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    expressions: list[str] = []
+    for match in re.finditer(rf"\bthis\s*\.\s*{re.escape(field)}\s*=", code):
+        start = match.end()
+        round_depth = square_depth = brace_depth = 0
+        for end in range(start, len(code)):
+            char = code[end]
+            if char == "(": round_depth += 1
+            elif char == ")": round_depth -= 1
+            elif char == "[": square_depth += 1
+            elif char == "]": square_depth -= 1
+            elif char == "{": brace_depth += 1
+            elif char == "}": brace_depth -= 1
+            elif char == ";" and round_depth == square_depth == brace_depth == 0:
+                expressions.append(normalized(actual[start:end]))
+                break
+    return tuple(expressions)
+
+
+def java_constructor_delegation_arguments(source: str, type_symbol: str,
+                                          parameters: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Read the leading ``this(...)`` delegation from one exact constructor overload."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return None
+    base, limit = type_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    found: list[tuple[str, ...]] = []
+    for match in re.finditer(rf"\b{re.escape(type_symbol)}\s*\(", code):
+        if depths[match.start()] != 1:
+            continue
+        opening = match.end() - 1
+        parsed_parameters = split_java_arguments(actual, code, opening)
+        if parsed_parameters is None:
+            continue
+        parameter_names = tuple(
+            re.findall(r"\b[A-Za-z_$][\w$]*\b", argument)[-1]
+            for argument, _start, _end in parsed_parameters[0]
+            if re.findall(r"\b[A-Za-z_$][\w$]*\b", argument)
+        )
+        if parameter_names != parameters:
+            continue
+        closing = parsed_parameters[1]
+        opening_brace = code.find("{", closing)
+        if opening_brace < 0:
+            continue
+        closing_brace = matching_delimiter(code, opening_brace, "{", "}")
+        if closing_brace is None:
+            continue
+        body_actual = actual[opening_brace + 1:closing_brace]
+        body_code = code[opening_brace + 1:closing_brace]
+        delegation = re.search(r"^\s*this\s*\(", body_code)
+        if delegation is None:
+            continue
+        call_open = body_code.find("(", delegation.start())
+        call = split_java_arguments(body_actual, body_code, call_open)
+        if call is not None:
+            found.append(tuple(argument for argument, _start, _end in call[0]))
+    return found[0] if len(found) == 1 else None
+
+
+def java_method_if_conditions(source: str, type_symbol: str, method: str) -> tuple[str, ...] | None:
+    """Extract executable if conditions from one unambiguous method."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    actual = source[slice(*span)]
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    conditions: list[str] = []
+    for match in re.finditer(r"\bif\s*\(", code):
+        opening = code.find("(", match.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            return None
+        conditions.append(normalized(actual[opening + 1:closing]))
+    return tuple(conditions)
+
+
 def java_method_digest(source: str, type_symbol: str, method: str) -> str | None:
     span = java_method_span(source, type_symbol, method)
     if span is None:
@@ -2556,6 +2666,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] == "contracts" and path[3].isdigit() \
             and path[4] == "candidateIds":
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "persistencePolicyAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "persistencePolicyAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -2676,6 +2793,18 @@ def remap_declared_candidate_references(document: dict[str, object],
             if isinstance(contracts, list):
                 for contract in contracts:
                     remap_list(contract, "candidateIds")
+
+    persistence_authorities = document.get("persistencePolicyAuthorities")
+    if isinstance(persistence_authorities, dict):
+        for authority in persistence_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultCandidateIds")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -2888,6 +3017,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         if helm_authority is None:
             return None, ["cannot derive the closed Helm values authority from current source"]
         refreshed["helmAuthorities"] = {HELM_AUTHORITY_ID: helm_authority}
+    if persistence_policy_source_present(root):
+        persistence_authority = persistence_policy_authority_from_source(root, current)
+        if persistence_authority is None:
+            return None, ["cannot derive the closed persistence policy authority from current source"]
+        refreshed["persistencePolicyAuthorities"] = {
+            PERSISTENCE_POLICY_AUTHORITY_ID: persistence_authority,
+        }
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history
@@ -4330,9 +4466,1134 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
     return errors, accounted
 
 
-MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
-MANIFEST_PIN_CONFIGURATION_PATH = Path(
+
+PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
+PERSISTENCE_POSTGRES_CONFIG_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java")
+PERSISTENCE_POSTGRES_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java")
+PERSISTENCE_STORE_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
+PERSISTENCE_SHARED_CONNECTION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/SharedStoreConnection.java")
+PERSISTENCE_SHARED_DATASOURCE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/SharedExecutionStoreDataSource.java")
+PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfiguration.java")
+PERSISTENCE_EXECUTION_OWNERSHIP_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionOwnership.java")
+PERSISTENCE_BACKUP_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/BackupRestoreConfiguration.java")
+PERSISTENCE_AUDIT_DIRECTORY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/audit/AuditTrailDirectory.java")
+PERSISTENCE_AUDIT_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/audit/AuditTrailConfiguration.java")
+PERSISTENCE_SQLITE_LOCATION_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreLocation.java")
+PERSISTENCE_REGISTRY_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicy.java")
+PERSISTENCE_IN_MEMORY_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicy.java")
+PERSISTENCE_SQLITE_CONFIG_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java")
+PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicy.java")
+PERSISTENCE_QUERY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ProcessInventoryQuery.java")
+PERSISTENCE_MANAGED_STORE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java")
+PERSISTENCE_MANIFEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifest.java")
+PERSISTENCE_OPERATIONAL_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicy.java")
+PERSISTENCE_MANIFEST_DIGEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifestDigest.java")
+PERSISTENCE_MANIFEST_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java")
+PERSISTENCE_DEFAULT_APPLICATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+PERSISTENCE_BOOTSTRAP_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
+PERSISTENCE_SERVER_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+PERSISTENCE_IN_MEMORY_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/deployment/registry/InMemoryDeploymentRegistry.java")
+PERSISTENCE_SQLITE_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java")
+PERSISTENCE_POSTGRES_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresDeploymentRegistry.java")
+PERSISTENCE_SQLITE_ARTIFACT_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteArtifactRegistry.java")
+PERSISTENCE_SQLITE_EMBED_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java")
+PERSISTENCE_SQLITE_EXECUTION_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionStore.java")
+PERSISTENCE_POSTGRES_EXECUTION_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresExecutionStore.java")
+PERSISTENCE_STORE_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java")
+PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfigurationTest.java")
+PERSISTENCE_MANAGED_STORE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
+PERSISTENCE_CLI_SELECTOR_TEST_PATH = Path(
+    "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/cli/SharedStoreBundleRefusalTest.java")
+PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/audit/AuditTrailDirectoryTest.java")
+PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/audit/AuditTrailConfigurationTest.java")
+PERSISTENCE_DIRECTORY_PARITY_TEST_PATH = Path(
+    "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/server/persistence/BackupRestoreDirectoryParityTest.java")
+PERSISTENCE_SQLITE_LOCATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteBackupRestoreTest.java")
+
+PERSISTENCE_POSTGRES_FIELDS = (
+    ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
+     "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS", "millis", None, "Duration.ofSeconds(5)"),
+    ("postgres.statement-timeout", "statementTimeout", "ravenroot.postgresql.statement-timeout-ms",
+     "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "millis", None, "Duration.ofSeconds(30)"),
+    ("postgres.serialization-retries", "serializationRetries", "ravenroot.postgresql.serialization-retries",
+     "RAVENROOT_POSTGRES_SERIALIZATION_RETRIES", "integer", "0", "3"),
+    ("postgres.max-lease-ttl", "maxLeaseTtl", "ravenroot.postgresql.max-lease-ttl-seconds",
+     "RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS", "seconds", "false", "Duration.ofMinutes(5)"),
+    ("postgres.max-payload-bytes", "maxPayloadBytes", "ravenroot.postgresql.max-payload-bytes",
+     "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES", "integer", "1", "1024 * 1024"),
+    ("postgres.max-clock-skew", "maxClockSkew", "ravenroot.postgresql.max-clock-skew-seconds",
+     "RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS", "seconds", "true", "Duration.ofSeconds(5)"),
+    ("postgres.journal-retention", "journalRetention", "ravenroot.postgresql.journal-retention-seconds",
+     "RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS", "seconds", "false", "Duration.ofHours(24)"),
+    ("postgres.max-inventory-page-size", "maxInventoryPageSize", "ravenroot.postgresql.max-inventory-page-size",
+     "RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE", "integer", "1", "100"),
+    ("postgres.terminal-retention", "terminalRetention", "ravenroot.postgresql.terminal-retention-seconds",
+     "RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS", "seconds", "false", "Duration.ofDays(7)"),
+    ("postgres.execution-result-retention", "executionResultRetention",
+     "ravenroot.postgresql.execution-result-retention-seconds",
+     "RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS", "seconds", "false", "Duration.ofDays(7)"),
+    ("graph.definition.upsert-retries", "graphDefinitionUpsertAttempts",
+     "ravenroot.postgresql.graph-definition-upsert-attempts",
+     "RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS", "integer", "1", "3"),
+)
+PERSISTENCE_IN_MEMORY_FIELDS = (
+    ("inmemory.maximum-lease-ttl", "maximumLeaseTtl", "Duration.ofMinutes(5)"),
+    ("inmemory.maximum-payload-bytes", "maximumPayloadBytes", "1024 * 1024"),
+    ("inmemory.maximum-clock-skew", "maximumClockSkew", "Duration.ofSeconds(5)"),
+    ("inmemory.journal-retention", "journalRetention", "Duration.ofHours(24)"),
+    ("inmemory.maximum-inventory-page-size", "maximumInventoryPageSize", "100"),
+    ("inmemory.terminal-retention", "terminalRetention", "Duration.ofDays(7)"),
+    ("inmemory.execution-result-retention", "executionResultRetention", "Duration.ofDays(7)"),
+)
+PERSISTENCE_SQLITE_FIELDS = (
+    ("sqlite.synchronous-mode", "synchronousMode", "SynchronousMode.FULL"),
+    ("sqlite.busy-timeout", "busyTimeout", "SqliteConnectionPolicy.DEFAULTS.busyTimeout()"),
+    ("sqlite.maximum-lease-ttl", "maxLeaseTtl", "Duration.ofMinutes(5)"),
+    ("sqlite.maximum-payload-bytes", "maxPayloadBytes", "1024 * 1024"),
+    ("sqlite.maximum-clock-skew", "maxClockSkew", "Duration.ofSeconds(5)"),
+    ("sqlite.journal-retention", "journalRetention", "Duration.ofHours(24)"),
+    ("sqlite.maximum-inventory-page-size", "maxInventoryPageSize", "100"),
+    ("sqlite.terminal-retention", "terminalRetention", "Duration.ofDays(7)"),
+    ("sqlite.execution-result-retention", "executionResultRetention", "Duration.ofDays(7)"),
+)
+
+
+def _source_digest(source: str) -> str:
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _exact_candidate_ids(discovered: dict[str, Candidate], path: Path, kind: str,
+                         expression: str) -> list[str]:
+    return sorted(candidate.id for candidate in discovered.values()
+                  if candidate.path == path.as_posix() and candidate.kind == kind
+                  and candidate.expression == expression)
+
+
+def persistence_policy_source_present(root: Path) -> bool:
+    """Distinguish true absence from any partial #318 persistence policy source family."""
+    return any((root / path).exists() for path in (
+        PERSISTENCE_POSTGRES_RESOLVER_PATH, PERSISTENCE_REGISTRY_POLICY_PATH,
+        PERSISTENCE_IN_MEMORY_POLICY_PATH, PERSISTENCE_MANAGED_STORE_PATH,
+        PERSISTENCE_AUDIT_DIRECTORY_PATH, PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+        PERSISTENCE_SQLITE_LOCATION_PATH,
+    ))
+
+
+def persistence_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed persistence policy from typed declarations and executable consumers."""
+    paths = (
+        PERSISTENCE_POSTGRES_CONFIG_PATH, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+        PERSISTENCE_STORE_CONFIGURATION_PATH, PERSISTENCE_SHARED_CONNECTION_PATH,
+        PERSISTENCE_SHARED_DATASOURCE_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+        PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
+        PERSISTENCE_BACKUP_CONFIGURATION_PATH, PERSISTENCE_AUDIT_DIRECTORY_PATH,
+        PERSISTENCE_AUDIT_CONFIGURATION_PATH, PERSISTENCE_SQLITE_LOCATION_PATH,
+        PERSISTENCE_REGISTRY_POLICY_PATH, PERSISTENCE_IN_MEMORY_POLICY_PATH,
+        PERSISTENCE_SQLITE_CONFIG_PATH, PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
+        PERSISTENCE_QUERY_PATH, PERSISTENCE_MANAGED_STORE_PATH, PERSISTENCE_MANIFEST_PATH,
+        PERSISTENCE_BOOTSTRAP_PATH, PERSISTENCE_SERVER_MAIN_PATH,
+        PERSISTENCE_IN_MEMORY_REGISTRY_PATH, PERSISTENCE_SQLITE_REGISTRY_PATH,
+        PERSISTENCE_POSTGRES_REGISTRY_PATH, PERSISTENCE_SQLITE_ARTIFACT_PATH,
+        PERSISTENCE_SQLITE_EMBED_PATH, PERSISTENCE_SQLITE_EXECUTION_PATH,
+        PERSISTENCE_POSTGRES_EXECUTION_PATH, PERSISTENCE_OPERATIONAL_POLICY_PATH,
+        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_PATH,
+        PERSISTENCE_DEFAULT_APPLICATION_PATH,
+        PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+        PERSISTENCE_MANAGED_STORE_TEST_PATH, PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+        PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
+        PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+        Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+        Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+        Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+        Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+    )
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except OSError:
+        return None
+    pg = sources[PERSISTENCE_POSTGRES_CONFIG_PATH]
+    resolver = sources[PERSISTENCE_POSTGRES_RESOLVER_PATH]
+    store_configuration = sources[PERSISTENCE_STORE_CONFIGURATION_PATH]
+    shared_connection = sources[PERSISTENCE_SHARED_CONNECTION_PATH]
+    shared_data_source = sources[PERSISTENCE_SHARED_DATASOURCE_PATH]
+    ownership_configuration = sources[PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH]
+    execution_ownership = sources[PERSISTENCE_EXECUTION_OWNERSHIP_PATH]
+    backup_configuration = sources[PERSISTENCE_BACKUP_CONFIGURATION_PATH]
+    audit_directory = sources[PERSISTENCE_AUDIT_DIRECTORY_PATH]
+    audit_configuration = sources[PERSISTENCE_AUDIT_CONFIGURATION_PATH]
+    sqlite_location = sources[PERSISTENCE_SQLITE_LOCATION_PATH]
+    registry = sources[PERSISTENCE_REGISTRY_POLICY_PATH]
+    in_memory = sources[PERSISTENCE_IN_MEMORY_POLICY_PATH]
+    sqlite = sources[PERSISTENCE_SQLITE_CONFIG_PATH]
+    sqlite_connection = sources[PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH]
+    query = sources[PERSISTENCE_QUERY_PATH]
+    managed = sources[PERSISTENCE_MANAGED_STORE_PATH]
+    manifest = sources[PERSISTENCE_MANIFEST_PATH]
+    bootstrap = sources[PERSISTENCE_BOOTSTRAP_PATH]
+    server_main = sources[PERSISTENCE_SERVER_MAIN_PATH]
+    in_memory_registry = sources[PERSISTENCE_IN_MEMORY_REGISTRY_PATH]
+    sqlite_registry = sources[PERSISTENCE_SQLITE_REGISTRY_PATH]
+    postgres_registry = sources[PERSISTENCE_POSTGRES_REGISTRY_PATH]
+    sqlite_artifact = sources[PERSISTENCE_SQLITE_ARTIFACT_PATH]
+    sqlite_embed = sources[PERSISTENCE_SQLITE_EMBED_PATH]
+    sqlite_execution = sources[PERSISTENCE_SQLITE_EXECUTION_PATH]
+    postgres_execution = sources[PERSISTENCE_POSTGRES_EXECUTION_PATH]
+    operational_policy = sources[PERSISTENCE_OPERATIONAL_POLICY_PATH]
+    manifest_digest = sources[PERSISTENCE_MANIFEST_DIGEST_PATH]
+    manifest_resolver = sources[PERSISTENCE_MANIFEST_RESOLVER_PATH]
+    default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
+    pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
+                          in PERSISTENCE_POSTGRES_FIELDS)
+    if java_record_components(pg, "PostgresStoreConfig") != pg_components \
+            or java_record_components(in_memory, "InMemoryExecutionStorePolicy") != tuple(
+                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) \
+            or java_record_components(sqlite, "SqliteStoreConfig") != tuple(
+                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) \
+            or java_record_components(registry, "DeploymentRegistryPolicy") != ("commandRetention", "limits") \
+            or java_record_components(sqlite_connection, "SqliteConnectionPolicy") != ("busyTimeout",):
+        return None
+    resolver_components = java_record_components(pg, "PostgresStoreConfig")
+    contracts: list[dict[str, object]] = []
+    for setting, field, property_name, environment, helper, constraint, approved_default in PERSISTENCE_POSTGRES_FIELDS:
+        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field)
+        call = java_constructor_component_call(
+            resolver, "PostgresStoreConfiguration", "fromSources", "PostgresStoreConfig",
+            resolver_components, field)
+        if default_span is None or call is None \
+                or normalized(default_span[0]) != normalized(approved_default):
+            return None
+        argument = normalized(call[0])
+        suffix = "" if constraint is None else f", {constraint}"
+        expected_argument = normalized(
+            f'{helper}(properties, environment, "{property_name}", "{environment}", '
+            f'defaults.{field}(){suffix})')
+        if argument != expected_argument:
+            return None
+        property_ids = _exact_candidate_ids(discovered, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                                            "property-binding", property_name)
+        environment_ids = _exact_candidate_ids(discovered, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                                               "environment-binding", environment)
+        default_ids = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_POSTGRES_CONFIG_PATH, pg, default_span[1], default_span[2], discovered)
+        if len(property_ids) != 1 or len(environment_ids) != 1 or not default_ids:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_POSTGRES_CONFIG_PATH.as_posix()}#PostgresStoreConfig",
+            "field": field, "bindings": [property_name, environment],
+            "defaultExpression": normalized(default_span[0]),
+            "defaultCandidateIds": sorted(default_ids),
+            "candidateIds": sorted(default_ids + property_ids + environment_ids),
+            "resolverCallDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
+        })
+    for setting, field, approved_default in PERSISTENCE_IN_MEMORY_FIELDS:
+        span = java_record_default_expression_span(
+            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field)
+        if span is None or normalized(span[0]) != normalized(approved_default):
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_IN_MEMORY_POLICY_PATH.as_posix()}#InMemoryExecutionStorePolicy",
+            "field": field, "bindings": [], "defaultExpression": normalized(span[0]),
+            "defaultCandidateIds": sorted(numeric_candidate_ids_in_source_span(
+                PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
+            "candidateIds": sorted(numeric_candidate_ids_in_source_span(
+                PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
+        })
+    for setting, field, approved_default in PERSISTENCE_SQLITE_FIELDS:
+        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field)
+        if span is None or normalized(span[0]) != normalized(approved_default):
+            return None
+        default_ids = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_SQLITE_CONFIG_PATH, sqlite, span[1], span[2], discovered)
+        if field == "busyTimeout":
+            connection_default = java_record_default_expression_span(
+                sqlite_connection, "SqliteConnectionPolicy", "DEFAULTS", "busyTimeout")
+            if connection_default is None or normalized(span[0]) != \
+                    "SqliteConnectionPolicy.DEFAULTS.busyTimeout()" \
+                    or normalized(connection_default[0]) != "Duration.ofSeconds(5)":
+                return None
+            default_ids = numeric_candidate_ids_in_source_span(
+                PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH, sqlite_connection,
+                connection_default[1], connection_default[2], discovered)
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_SQLITE_CONFIG_PATH.as_posix()}#SqliteStoreConfig",
+            "field": field, "bindings": [], "defaultExpression": normalized(span[0]),
+            "defaultCandidateIds": sorted(default_ids), "candidateIds": sorted(default_ids),
+        })
+    registry_span = java_static_final_initializer(registry, "DeploymentRegistryPolicy", "DEFAULTS")
+    if registry_span is None:
+        return None
+    registry_expression = registry[registry_span[1]:registry_span[2]]
+    registry_code = strip_c_comments_and_literals(registry_expression)
+    policy_match = re.fullmatch(r"\s*new\s+DeploymentRegistryPolicy\s*\((.*)\)\s*",
+                                registry_code, re.DOTALL)
+    if policy_match is None:
+        return None
+    policy_open = registry_code.find("(")
+    policy_args = split_java_arguments(registry_expression, registry_code, policy_open)
+    if policy_args is None or len(policy_args[0]) != 2:
+        return None
+    _limits_normalized, limits_start, limits_end = policy_args[0][1]
+    limits_expression = registry_expression[limits_start:limits_end]
+    limits_code = strip_c_comments_and_literals(limits_expression)
+    limits_match = re.fullmatch(r"\s*new\s+DeploymentRegistry\.Limits\s*\((.*)\)\s*",
+                                limits_code, re.DOTALL)
+    if limits_match is None:
+        return None
+    limits_open = limits_code.find("(")
+    limits_args = split_java_arguments(limits_expression, limits_code, limits_open)
+    if limits_args is None or len(limits_args[0]) != 3:
+        return None
+    registry_settings = (
+        ("deployment.registry.command-retention", "commandRetention", policy_args[0][0],
+         "Duration.ofDays(7)", registry_span[1]),
+        ("deployment.registry.max-page-size", "limits", limits_args[0][0], "100",
+         registry_span[1] + limits_start),
+        ("deployment.registry.max-lease-ttl", "limits", limits_args[0][1],
+         "Duration.ofMinutes(5)", registry_span[1] + limits_start),
+        ("deployment.registry.max-clock-skew", "limits", limits_args[0][2],
+         "Duration.ofSeconds(5)", registry_span[1] + limits_start),
+    )
+    for setting, field, argument_span, expected_expression, base_offset in registry_settings:
+        expression, start, end = argument_span
+        if normalized(expression) != normalized(expected_expression):
+            return None
+        identifiers = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_REGISTRY_POLICY_PATH, registry, base_offset + start, base_offset + end,
+            discovered)
+        if len(identifiers) != 1:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_REGISTRY_POLICY_PATH.as_posix()}#DeploymentRegistryPolicy",
+            "field": field, "bindings": [], "defaultExpression": normalized(expression),
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+        })
+    query_default = java_static_final_initializer(query, "ProcessInventoryQuery", "DEFAULT_LIMIT")
+    query_ids = _exact_candidate_ids(discovered, PERSISTENCE_QUERY_PATH, "fixed-declaration", "50")
+    if query_default is None or normalized(query_default[0]) != "50" or len(query_ids) != 1:
+        return None
+    contracts.append({
+        "setting": "execution.inventory.default-page-size",
+        "owner": f"{PERSISTENCE_QUERY_PATH.as_posix()}#Builder", "field": "limit",
+        "bindings": ["ProcessInventoryQuery.Builder.limit(int)"], "defaultExpression": "50",
+        "defaultCandidateIds": query_ids, "candidateIds": query_ids,
+    })
+    # The eight deployment/composition settings below deliberately do not use the generic numeric
+    # record-component authorities.  Their executable contracts include a sealed selector, opaque
+    # credentials, a split pool policy, and a dynamic worker-name fallback.  Each exact method digest
+    # is an approved source shape: changing behavior cannot be blessed merely by refreshing the
+    # generated whole-file digest in inventory metadata.
+    approved_method_digests = (
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "fromSources",
+         "a039ad53983628039513d754eab7915736c73ae4fd62d5a3622070cae12ecf3d"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "selectorIn",
+         "7c2c5afebf35bf617e1cc3ed71e83f8ee0389484a80a32457ffdc2af54ef6af7"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "fromSources",
+         "3894af506beb3e9023fed14ef15e2096216d9e0fc0ee28953cc455c7a0184c00"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "poolSize",
+         "5e5b3ffa3add995faacc61f53bc2fe3e584face1c8b327a433d42da459300e96"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "poolTimeout",
+         "a88b3622bfc4791c7f08909a9987798ee154761db1caa70171f57af3af5c7bf0"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "selected",
+         "2ea7879f6b19fa0afcc348c0770bf5aba14c54dc6510de8b43ac5f6b49eee292"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "trimmed",
+         "a021259e23c302f4aaa3ac554251fb3d69322adf9b6b7eecfdfe5d243d8955f0"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "toString",
+         "01bc141b77a1150809f3100afdecf1b73408d7474b5d0341e02c9b77a912c6cd"),
+        (PERSISTENCE_SHARED_DATASOURCE_PATH, "SharedExecutionStoreDataSource", "open",
+         "6e2620dbfe05f4053025efecc0603b2dc2558d34a1388841088b9370098fa3b1"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "fromSources",
+         "a885517152cb34299e887fdc594001c67452c06f0602e3436ae32f527bddf6b0"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "leaseTtl",
+         "9e579c6bc82463894d8fc9ae854fad7ae8716b033d7ef01ec2f9fc23bcfbe81b"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "selected",
+         "d55b771b9e9e35402eeb5b2e54e9a4308bb2135e6da4309b77273d12cdd5a5f9"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "hostName",
+         "e239183f35515e56f755cebcf261b0ca55580f63c6959ee216e58b2a72686372"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "usableName",
+         "adf5c56cd390d84d4ea30aff6e5cf99d793eadc4e9d540022f303dd8fb7b88c5"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "runtimeOwnership",
+         "73754fdc86f588dcfdc0494242240230bfa7f923490fc1df482b13ac432b5b45"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "recoveryIdentity",
+         "79a701c248ce4e2af942ee2fd859ac90c724d223b3477df8c2f184355d99e2be"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
+         "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
+        (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
+         "e6cd6a703f6daa7ed4e4f9ce498f5e33cb6bc77fbbf34f7415da44b27e8e1b62"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
+         "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
+         "4cf8be7a3951a412f80bd9937287b876fbd4cc2bea77de3dd100164dfbad9378"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "SqliteStoreLocation", "underConfiguredDirectory",
+         "46fed5770f116f2dc9298d7b678394b542cd53146db93d8657c0e90878763e22"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "SqliteStoreLocation", "underDirectory",
+         "41bf3e1968896c4dcf8bfac8744c432da1cd510ed983282cc838b6648c2c9f69"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "BackupRestoreConfiguration", "fromEnvironment",
+         "2382822498bda441f9bb5b63b50c36ec1a4bea3db64d67bb3b790619dce63513"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "singleHostLocation",
+         "10b29a815f02ec4ce915c796bbb7091b06f6b7687e240a13659fb8f2feccace3"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "enabledIn",
+         "c37f4a358c11a630fb93873a1ebf02d1815cfb4c0aa8b7647d59c5e895ebb52f"),
+    )
+    if any(java_method_digest(sources[path], type_symbol, method) != digest
+           for path, type_symbol, method, digest in approved_method_digests):
+        return None
+    configuration_span = java_type_span(store_configuration, "ExecutionStoreConfiguration")
+    configuration_type = strip_c_comments(
+        store_configuration[slice(*configuration_span)] if configuration_span is not None else "")
+    selector_constants_exact = all(len(re.findall(
+        rf'\bString\s+{field}\s*=\s*"{re.escape(value)}"\s*;', configuration_type)) == 1
+        for field, value in (("SQLITE_SELECTOR", "sqlite"),
+                             ("POSTGRESQL_SELECTOR", "postgresql")))
+    enabled_default_exact = len(re.findall(
+        r'\bstatic\s+final\s+String\s+DEFAULT_ENABLED_VALUE\s*=\s*"true"\s*;',
+        configuration_type)) == 1
+    compact = java_compact_constructor_span(shared_connection, "SharedStoreConnection")
+    if compact is None or java_span_digest(shared_connection, compact) != \
+            "def1d81068a369cafbe90d4975eb1fc57067f20be43bdf211a45e059dd95c864" \
+            or _source_digest(backup_configuration) != \
+            "e7992790f1a312a57ea9d888b8ca8e0107877965e2eedf3b80589812f7ca3fe0" \
+            or not selector_constants_exact or not enabled_default_exact \
+            or java_static_final_initializer(
+                shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX") is None \
+            or normalized(java_static_final_initializer(
+                shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX")[0]) != \
+            '"jdbc:postgresql:"':
+        return None
+    lease_default = java_static_final_initializer(
+        execution_ownership, "ExecutionOwnership", "DEFAULT_LEASE_TTL")
+    if lease_default is None or normalized(lease_default[0]) != "Duration.ofSeconds(30)":
+        return None
+
+    def exact_ids(specs: tuple[tuple[Path, str, str, str], ...]) -> list[str] | None:
+        identifiers: list[str] = []
+        for path, kind, expression, role in specs:
+            matched = sorted(candidate.id for candidate in discovered.values()
+                             if candidate.path == path.as_posix() and candidate.kind == kind
+                             and candidate.expression == expression and candidate.role == role)
+            if len(matched) != 1:
+                return None
+            identifiers.extend(matched)
+        return identifiers if len(identifiers) == len(set(identifiers)) else None
+
+    selector_ids = exact_ids((
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE", "RAVENROOT_EXECUTION_STORE"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_STORE"', "STORE_SELECTOR_VARIABLE"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"postgresql"', "SHARED_STORE_SELECTOR"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution-store"', "STORE_SELECTOR_PROPERTY"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store", "ravenroot.execution-store"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE", "RAVENROOT_EXECUTION_STORE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store", "ravenroot.execution-store"),
+    ))
+    url_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                          "RAVENROOT_EXECUTION_STORE_URL", "RAVENROOT_EXECUTION_STORE_URL"),))
+    user_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                           "RAVENROOT_EXECUTION_STORE_USER", "RAVENROOT_EXECUTION_STORE_USER"),))
+    password_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                               "RAVENROOT_EXECUTION_STORE_PASSWORD",
+                               "RAVENROOT_EXECUTION_STORE_PASSWORD"),))
+    pool_size_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_POOL_SIZE", "RAVENROOT_EXECUTION_STORE_POOL_SIZE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_POOL_SIZE"', "POOL_SIZE_VARIABLE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "10", "DEFAULT_POOL_SIZE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "1_000", "MAX_POOL_SIZE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"ravenroot.execution-store.pool-size"', "POOL_SIZE_PROPERTY"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store.pool-size", "ravenroot.execution-store.pool-size"),
+    ))
+    pool_timeout_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS", "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"', "POOL_TIMEOUT_VARIABLE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "10", "DEFAULT_POOL_TIMEOUT"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "250", "MIN_POOL_TIMEOUT"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"ravenroot.execution-store.pool-timeout-ms"', "POOL_TIMEOUT_PROPERTY"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store.pool-timeout-ms",
+         "ravenroot.execution-store.pool-timeout-ms"),
+    ))
+    worker_ids = exact_ids((
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_WORKER_ID", "RAVENROOT_WORKER_ID"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_WORKER_ID"', "WORKER_ID_VARIABLE"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution.worker-id"', "WORKER_ID_PROPERTY"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution.worker-id", "ravenroot.execution.worker-id"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"unnamed-replica"', "UNRESOLVED_REPLICA_NAME"),
+    ))
+    lease_ids = exact_ids((
+        (PERSISTENCE_EXECUTION_OWNERSHIP_PATH, "fixed-declaration", "30", "DEFAULT_LEASE_TTL"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS", "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"', "LEASE_TTL_VARIABLE"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution.lease-ttl-seconds"', "LEASE_TTL_PROPERTY"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution.lease-ttl-seconds", "ravenroot.execution.lease-ttl-seconds"),
+    ))
+    if any(group is None for group in (selector_ids, url_ids, user_ids, password_ids,
+                                       pool_size_ids, pool_timeout_ids, worker_ids, lease_ids)):
+        return None
+    assert selector_ids is not None and url_ids is not None and user_ids is not None \
+        and password_ids is not None and pool_size_ids is not None \
+        and pool_timeout_ids is not None and worker_ids is not None and lease_ids is not None
+    # MIN_POOL_TIMEOUT mirrors HikariCP's own admissibility floor.  It is source evidence for the
+    # parser's validation, but it is neither an operator default nor part of the operator setting's
+    # candidate partition; inventory retains that atom as a fixed dependency contract.
+    pool_timeout_contract_ids = [identifier for index, identifier in enumerate(pool_timeout_ids)
+                                 if index != 3]
+    contracts.extend((
+        {
+            "setting": "execution.store.selector",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+            "field": "selector", "bindings": ["ravenroot.execution-store", "RAVENROOT_EXECUTION_STORE"],
+            "defaultExpression": "SQLITE_SELECTOR", "defaultKind": "closed-variant-fallback",
+            "defaultCandidateIds": [selector_ids[5]],
+            "candidateIds": sorted(selector_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#sharedStoreSelected",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates; absent selects sqlite; only sqlite or postgresql is accepted; CLI spelling and refusal match the server.",
+        },
+        {
+            "setting": "execution.store.url",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "url", "bindings": ["RAVENROOT_EXECUTION_STORE_URL"],
+            "defaultExpression": "required for postgresql; no fallback",
+            "defaultKind": "required-no-fallback",
+            "defaultCandidateIds": url_ids, "candidateIds": url_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Required only for postgresql and accepted only with the jdbc:postgresql: prefix; diagnostics do not echo the value.",
+        },
+        {
+            "setting": "execution.store.user",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "user", "bindings": ["RAVENROOT_EXECUTION_STORE_USER"],
+            "defaultExpression": "Optional.empty() when absent or blank",
+            "defaultKind": "optional-absent",
+            "defaultCandidateIds": user_ids, "candidateIds": user_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "An optional nonblank role is trimmed; absence delegates authentication to the URL or server.",
+        },
+        {
+            "setting": "execution.store.password",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "password", "bindings": ["RAVENROOT_EXECUTION_STORE_PASSWORD"],
+            "defaultExpression": "Optional.empty() only when absent",
+            "defaultKind": "optional-absent-opaque", "valueHandling": "secret-verbatim-redacted",
+            "defaultCandidateIds": password_ids, "candidateIds": password_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "The optional secret is opaque and every present value, including empty or whitespace, is preserved verbatim and redacted from rendering.",
+        },
+        {
+            "setting": "execution.store.pool-size",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "poolSize", "bindings": ["ravenroot.execution-store.pool-size",
+                                                  "RAVENROOT_EXECUTION_STORE_POOL_SIZE"],
+            "defaultExpression": "10", "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [pool_size_ids[2]],
+            "candidateIds": sorted(pool_size_ids),
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Property overrides environment; blank delegates to 10; accepted range is 1 through 1000 and the resolved value configures the pool.",
+        },
+        {
+            "setting": "execution.store.pool-timeout",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "poolTimeout", "bindings": ["ravenroot.execution-store.pool-timeout-ms",
+                                                    "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"],
+            "defaultExpression": "Duration.ofSeconds(10)",
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [pool_timeout_ids[2]],
+            "candidateIds": sorted(pool_timeout_contract_ids),
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Property overrides environment; blank delegates to 10 seconds; at least 250 ms and strictly below the resolved statement timeout; the resolved duration configures the pool.",
+        },
+        {
+            "setting": "execution.worker-id",
+            "owner": f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#ExecutionOwnershipConfiguration",
+            "field": "replicaName", "bindings": ["ravenroot.execution.worker-id", "RAVENROOT_WORKER_ID"],
+            "defaultExpression": "usable host name or UNRESOLVED_REPLICA_NAME",
+            "defaultKind": "dynamic-host-fallback",
+            "defaultCandidateIds": [worker_ids[4]], "candidateIds": sorted(worker_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#runtimeOwnership",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#recoveryIdentity",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates to a validated host name or unnamed-replica; runtime and recovery identities have distinct roles.",
+        },
+        {
+            "setting": "execution.lease-ttl",
+            "owner": f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#ExecutionOwnershipConfiguration",
+            "field": "leaseTtl", "bindings": ["ravenroot.execution.lease-ttl-seconds",
+                                                "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"],
+            "defaultExpression": "ExecutionOwnership.DEFAULT_LEASE_TTL (Duration.ofSeconds(30))",
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [lease_ids[0]], "candidateIds": sorted(lease_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#requireCompatible",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates to 30 seconds; positive whole seconds, above store skew and no greater than store max lease; used by runtime and recovery claims.",
+        },
+    ))
+    audit_ids = exact_ids((
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "environment-binding",
+         "RAVENROOT_AUDIT_DIR", "RAVENROOT_AUDIT_DIR"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "fixed-declaration",
+         '"RAVENROOT_AUDIT_DIR"', "ENVIRONMENT_VARIABLE"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "fixed-declaration",
+         '"./data/audit"', "DEFAULT_DIRECTORY"),
+    ))
+    execution_directory_ids = exact_ids((
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_DIR"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_STORE_DIR"', "EXECUTION_STORE_DIR_VARIABLE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_DIR"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_DIR"', "DIRECTORY_VARIABLE"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "fixed-declaration",
+         '"./data/execution-store"', "DEFAULT_DIRECTORY"),
+    ))
+    enabled_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_ENABLED", "RAVENROOT_EXECUTION_STORE_ENABLED"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "fixed-declaration",
+         '"true"', "DEFAULT_ENABLED_VALUE"),
+    ))
+    if audit_ids is None or execution_directory_ids is None or enabled_ids is None:
+        return None
+    contracts.extend((
+        {
+            "setting": "deployment.audit-directory",
+            "owner": f"{PERSISTENCE_AUDIT_DIRECTORY_PATH.as_posix()}#AuditTrailDirectory",
+            "field": "path", "bindings": ["RAVENROOT_AUDIT_DIR"],
+            "defaultExpression": '"./data/audit"', "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [audit_ids[2]], "candidateIds": sorted(audit_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_AUDIT_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+            ],
+            "sourceSemantics": "Server and offline CLI read the same environment variable; absent or blank delegates to ./data/audit, nonblank is trimmed, malformed paths are refused without disclosure, and server retention remains 24 hours.",
+        },
+        {
+            "setting": "execution.store.directory",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#SingleHost",
+            "field": "location", "bindings": ["RAVENROOT_EXECUTION_STORE_DIR"],
+            "defaultExpression": '"./data/execution-store"',
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [execution_directory_ids[4]],
+            "candidateIds": sorted(execution_directory_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#singleHostLocation",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+                f"{PERSISTENCE_SQLITE_LOCATION_PATH.as_posix()}#underConfiguredDirectory",
+            ],
+            "sourceSemantics": "Server and offline CLI share one SQLite directory default and resolver; absent or blank delegates, nonblank is trimmed, malformed paths are refused without disclosure, and underDirectory supplies the fixed database filename.",
+        },
+        {
+            "setting": "execution.store.enabled",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+            "field": "enabled", "bindings": ["RAVENROOT_EXECUTION_STORE_ENABLED"],
+            "defaultExpression": 'DEFAULT_ENABLED_VALUE ("true")',
+            "defaultKind": "closed-variant-fallback", "defaultCandidateIds": [enabled_ids[1]],
+            "candidateIds": enabled_ids,
+            "consumerEvidence": [f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#fromSources"],
+            "sourceSemantics": "Absent or blank and canonical true enable the selected store; false, off, 0 and no select Disabled with the same maintenance directory; every other value is refused before composition.",
+        },
+    ))
+    # Each relation below is extracted from an executable method or direct field assignment.  Whole
+    # file digests are retained as provenance, but cannot by themselves approve a changed consumer.
+    selected_body = normalized(strip_c_comments(
+        resolver[slice(*java_method_span(resolver, "PostgresStoreConfiguration", "selected"))])) \
+        if java_method_span(resolver, "PostgresStoreConfiguration", "selected") is not None else ""
+    encode_span = java_method_span(operational_policy, "ResolvedOperationalPolicy", "encodeForManifest")
+    decode_span = java_method_span(operational_policy, "ResolvedOperationalPolicy", "decodeForManifest")
+    encode_body = normalized(strip_c_comments(operational_policy[slice(*encode_span)])) \
+        if encode_span is not None else ""
+    decode_body = normalized(strip_c_comments(operational_policy[slice(*decode_span)])) \
+        if decode_span is not None else ""
+    operational_components = java_record_components(
+        operational_policy, "ResolvedOperationalPolicy")
+    persistence_argument = java_constructor_component_call(
+        manifest_resolver, "ExecutionManifestResolver", "operationalPolicyFor",
+        "ResolvedOperationalPolicy", operational_components, "persistence")
+    digest_conditions = java_method_if_conditions(
+        manifest_digest, "ExecutionManifestDigest", "of")
+    store_selection_conditions = java_method_if_conditions(
+        store_configuration, "ExecutionStoreConfiguration", "fromSources")
+    postgres_only_span = java_method_span(
+        store_configuration, "ExecutionStoreConfiguration", "postgresqlOnlyPolicyConfigured")
+    postgres_only_body = normalized(strip_c_comments(store_configuration[slice(*postgres_only_span)])) \
+        if postgres_only_span is not None else ""
+    expected_managed_authority_conditions = (
+        "!rows.next()",
+        "!authority.manifestDigest().value().equals(rows.getString(1)) || "
+        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+        "pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()",
+    )
+    expected_selected = normalized("""selected(Map<String, String> properties,
+            Map<String, String> environment, String property, String variable) {
+        String raw = properties.get(property);
+        if (!nonblank(raw)) raw = environment.get(variable);
+        return nonblank(raw) ? raw.trim() : null;
+    }""")
+    expected_postgres_only_body = normalized("""postgresqlOnlyPolicyConfigured(Map<String, String> properties,
+            Map<String, String> environment) {
+        return PostgresStoreConfiguration.anyConfigured(properties, environment)
+                || isConfigured(properties, POOL_SIZE_PROPERTY)
+                || isConfigured(properties, POOL_TIMEOUT_PROPERTY);
+        }""")
+    audit_environment = java_static_final_initializer(
+        audit_directory, "AuditTrailDirectory", "ENVIRONMENT_VARIABLE")
+    audit_default = java_static_final_initializer(
+        audit_directory, "AuditTrailDirectory", "DEFAULT_DIRECTORY")
+    audit_configuration_variable = java_static_final_initializer(
+        audit_configuration, "AuditTrailConfiguration", "DIRECTORY_VARIABLE")
+    backup_audit_variable = java_static_final_initializer(
+        backup_configuration, "BackupRestoreConfiguration", "AUDIT_DIR_VARIABLE")
+    backup_store_variable = java_static_final_initializer(
+        backup_configuration, "BackupRestoreConfiguration", "EXECUTION_STORE_DIR_VARIABLE")
+    sqlite_directory_default = java_static_final_initializer(
+        sqlite_location, "SqliteStoreLocation", "DEFAULT_DIRECTORY")
+    sqlite_file_name = java_static_final_initializer(
+        sqlite_location, "SqliteStoreLocation", "DEFAULT_FILE_NAME")
+    configuration_constants_exact = all(len(re.findall(
+        rf'\bString\s+{field}\s*=\s*{re.escape(value)}\s*;', configuration_type)) == 1
+        for field, value in (
+            ("ENABLED_VARIABLE", '"RAVENROOT_EXECUTION_STORE_ENABLED"'),
+            ("DIRECTORY_VARIABLE", '"RAVENROOT_EXECUTION_STORE_DIR"'),
+            ("DEFAULT_DIRECTORY", "SqliteStoreLocation.DEFAULT_DIRECTORY"),
+        ))
+    if selected_body != expected_selected \
+            or postgres_only_body != expected_postgres_only_body \
+            or java_record_components(audit_directory, "AuditTrailDirectory") != ("path",) \
+            or java_record_components(audit_configuration, "AuditTrailConfiguration") != ("directory",) \
+            or audit_environment is None or normalized(audit_environment[0]) != '"RAVENROOT_AUDIT_DIR"' \
+            or audit_default is None or normalized(audit_default[0]) != '"./data/audit"' \
+            or audit_configuration_variable is None \
+            or normalized(audit_configuration_variable[0]) != \
+                "AuditTrailDirectory.ENVIRONMENT_VARIABLE" \
+            or backup_audit_variable is None or normalized(backup_audit_variable[0]) != \
+                "AuditTrailDirectory.ENVIRONMENT_VARIABLE" \
+            or backup_store_variable is None or normalized(backup_store_variable[0]) != \
+                '"RAVENROOT_EXECUTION_STORE_DIR"' \
+            or sqlite_directory_default is None \
+            or normalized(sqlite_directory_default[0]) != '"./data/execution-store"' \
+            or sqlite_file_name is None \
+            or normalized(sqlite_file_name[0]) != '"ravenroot-execution-store.db"' \
+            or not configuration_constants_exact \
+            or store_selection_conditions is None \
+            or normalized("!POSTGRESQL_SELECTOR.equals(selector) && "
+                          "postgresqlOnlyPolicyConfigured(properties, environment)") \
+                not in store_selection_conditions \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "ai.ravenroot.server.persistence.ManagedExecutionStore.protect") != (
+                "executionStoreOwner.store()", "executionStoreOwner.executionManifestStore()") \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "AuditTrailConfiguration.fromEnvironment") != ("System.getenv()",) \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "new FileAuditTrail") != (
+                "auditDirectory.path()", "java.time.Clock.systemUTC()", "Duration.ofHours(24)") \
+            or java_invocation_arguments(audit_configuration, "AuditTrailConfiguration",
+                                         "fromEnvironment", "AuditTrailDirectory.resolve") != (
+                "environment.get(DIRECTORY_VARIABLE)",) \
+            or java_invocation_arguments(backup_configuration, "BackupRestoreConfiguration",
+                                         "fromEnvironment", "AuditTrailDirectory.resolve") != (
+                "environment.get(AUDIT_DIR_VARIABLE)",) \
+            or java_invocation_arguments(backup_configuration, "BackupRestoreConfiguration",
+                                         "fromEnvironment",
+                                         "SqliteStoreLocation.underConfiguredDirectory") != (
+                "environment.get(EXECUTION_STORE_DIR_VARIABLE)",) \
+            or java_invocation_arguments(store_configuration, "ExecutionStoreConfiguration",
+                                         "singleHostLocation",
+                                         "SqliteStoreLocation.underConfiguredDirectory") != (
+                "environment.get(DIRECTORY_VARIABLE)",) \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresExecutionStore") != (
+                "pool.dataSource()", "clock", "storeConfig", "humanTaskPolicy") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresGraphDefinitionStore") != (
+                "pool.dataSource()", "clock",
+                "ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE",
+                "graphMlLimits.maxBytes()", "storeConfig") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresExecutionManifestStore") != (
+                "pool.dataSource()", "clock",
+                "ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE",
+                "configuration.manifestPinAttempts()", "storeConfig") \
+            or java_invocation_arguments(sqlite_artifact, "SqliteArtifactRegistry", "prepare",
+                                         "connectionPolicy.apply") != ("connection",) \
+            or java_invocation_arguments(sqlite_embed, "SqliteEmbedRegistrationStore", "prepare",
+                                         "connectionPolicy.apply") != ("opened",) \
+            or java_type_assignment_expressions(sqlite_registry, "SqliteDeploymentRegistry",
+                                                "commandRetention") != ("policy.commandRetention()",) \
+            or java_type_assignment_expressions(sqlite_registry, "SqliteDeploymentRegistry",
+                                                "limits") != ("policy.limits()",) \
+            or java_type_assignment_expressions(postgres_registry, "PostgresDeploymentRegistry",
+                                                "commandRetention") != ("policy.commandRetention()",) \
+            or java_type_assignment_expressions(postgres_registry, "PostgresDeploymentRegistry",
+                                                "limits") != ("policy.limits()",) \
+            or java_type_assignment_expressions(in_memory_registry, "InMemoryDeploymentRegistry",
+                                                "limits") != ("Objects.requireNonNull(limits, \"limits\")",) \
+            or java_constructor_delegation_arguments(
+                in_memory_registry, "InMemoryDeploymentRegistry", ("clock",)) != (
+                    "clock", "tenant -> DeploymentId.of(UUID.randomUUID().toString())",
+                    "DeploymentRegistryPolicy.inMemoryLimits()") \
+            or java_constructor_delegation_arguments(
+                in_memory_registry, "InMemoryDeploymentRegistry", ("clock", "ids")) != (
+                    "clock", "ids", "DeploymentRegistryPolicy.inMemoryLimits()") \
+            or java_constructor_delegation_arguments(
+                sqlite_registry, "SqliteDeploymentRegistry", ("databaseFile", "clock", "ids")) != (
+                    "SqliteStoreLocation.ofFile(databaseFile)", "clock", "ids",
+                    "DeploymentRegistryPolicy.DEFAULTS") \
+            or java_constructor_delegation_arguments(
+                postgres_registry, "PostgresDeploymentRegistry", ("dataSource", "clock", "ids")) != (
+                    "dataSource", "clock", "ids", "DeploymentRegistryPolicy.DEFAULTS",
+                    "PostgresStoreConfig.defaults()") \
+            or java_direct_return_expression(in_memory_registry, "InMemoryDeploymentRegistry", "limits") != "limits" \
+            or java_direct_return_expression(sqlite_registry, "SqliteDeploymentRegistry", "limits") != "limits" \
+            or java_direct_return_expression(postgres_registry, "PostgresDeploymentRegistry", "limits") != "limits" \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "applyManaged",
+                                         "applyInternal") != ("batch", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "applyManaged",
+                                         "applyInternal") != ("batch", "authority") \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "applyLocked",
+                                         "requireManagedAuthority") != ("key", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "applyLocked",
+                                         "requireManagedAuthority") != ("connection", "key", "authority") \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "claimManaged",
+                                         "requireManagedAuthority") != ("key", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "claimManaged",
+                                         "requireManagedAuthority") != ("connection", "key", "authority") \
+            or java_method_if_conditions(
+                sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority") \
+                != expected_managed_authority_conditions \
+            or java_method_if_conditions(
+                postgres_execution, "PostgresExecutionStore", "requireManagedAuthority") \
+                != expected_managed_authority_conditions \
+            or java_invocation_arguments(
+                sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority",
+                "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
+            or java_invocation_arguments(
+                postgres_execution, "PostgresExecutionStore", "requireManagedAuthority",
+                "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
+            or java_invocation_arguments(managed, "ManagedExecutionStore", "apply",
+                                         "delegate.applyManaged") != ("batch", "authority") \
+            or java_invocation_arguments(managed, "ManagedExecutionStore", "collectAuthorities",
+                                         "delegate.managedClaimCandidates") != (
+                "tenantId", "workerId", "pageSize", "ttl", "timersOnly", "scan.nextAfter()") \
+            or java_invocation_arguments(default_application, "DefaultRavenrootApplication",
+                                         "executionManifests",
+                                         "ai.ravenroot.core.manifest.ExecutionManifestResolver.completeManaged") != (
+                "engine", "executionStore.capabilities()", "resultPayloadBytes",
+                "executionStore.maxPayloadBytes()", "behaviors", "unknownBehaviors",
+                "graphExecutionLimits", "programRuntime") \
+            or java_invocation_arguments(default_application, "DefaultRavenrootApplication",
+                                         "executionManifests",
+                                         "executionStore.protectsManagedPersistence") != () \
+            or java_invocation_arguments(manifest_digest, "ExecutionManifestDigest", "of",
+                                         "manifest.operationalPolicy().encodeForManifest") != (
+                "manifest.formatVersion()",) \
+            or digest_conditions is None \
+            or normalized("manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_2 || "
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3") \
+                not in digest_conditions \
+            or persistence_argument is None \
+            or normalized(persistence_argument[0]) != normalized(
+                "java.util.Optional.ofNullable(maximumPersistencePayloadBytes)"
+                " .map(ResolvedOperationalPolicy.PersistenceLimits::new)") \
+            or encode_body != normalized("""encodeForManifest(int manifestFormatVersion) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()) {
+                    return encodeVersion(ENCODING_VERSION_1);
+                }
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3 && persistence.isPresent()) {
+                    return encodeVersion(ENCODING_VERSION_2);
+                }
+                throw new IllegalArgumentException("operational policy does not match manifest format");
+            }""") \
+            or decode_body != normalized("""decodeForManifest(String encoded, int manifestFormatVersion) {
+                return decodeVersion(encoded, switch (manifestFormatVersion) {
+                    case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
+                    case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;
+                    default -> throw new IllegalArgumentException("manifest format has no operational policy");
+                });
+            }""") \
+            or java_static_final_initializer(manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION") is None \
+            or normalized(java_static_final_initializer(
+                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_3" \
+            or any(java_static_final_initializer(manifest, "ExecutionManifest", field) is None
+                   or normalized(java_static_final_initializer(
+                       manifest, "ExecutionManifest", field)[0]) != value
+                   for field, value in (("FORMAT_VERSION_1", "1"), ("FORMAT_VERSION_2", "2"),
+                                        ("FORMAT_VERSION_3", "3"))):
+        return None
+    candidate_ids = sorted(identifier for contract in contracts for identifier in contract["candidateIds"])
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return None
+    test_methods = (
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "anExplicitSqliteSelectorIsTheSameAsNoSelector"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "anUnknownSelectorFailsClosedWithoutEchoingIt"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "theSharedStoreRequiresAUrlAndRefusesAnotherDriversUrl"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "poolSettingsDefaultAndAreBoundedOnBothSides"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "theConnectionNeverRendersItsUrlOrPassword"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "aPasswordIsNotTrimmedBecauseItIsOpaque"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theTtlDefaultsToTheValueThatUsedToBeHardCoded"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "aMalformedTtlFailsClosedRatherThanFallingBackToTheDefault"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "anUnsetNameStillProducesAUsableIdentity"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "aMalformedNameIsRefusedAgainstTheVariableTheOperatorSet"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theTtlIsCheckedAgainstTheComposedStoresOwnPublishedBounds"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "theSelectorSpellingMatchesTheServersOwn"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "selectorPropertyOverridesEnvironmentForBundleRefusal"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "backupAndRestoreAreRefusedUnderTheSharedStore"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "absentAndBlankValuesResolveToTheSoleDefault"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "aConfiguredPathIsTrimmedOnceBeforeParsing"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "anInvalidPathIsRefusedWithoutRepeatingIt"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH, "AuditTrailConfigurationTest",
+         "serverCompositionUsesTheSharedDefaultBlankAndTrimRules"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH, "AuditTrailConfigurationTest",
+         "malformedServerAuditDirectoryIsRefusedBeforeOpeningTheTrail"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "bothCompositionRootsRefuseTheSameMalformedPaths"),
+        (PERSISTENCE_SQLITE_LOCATION_TEST_PATH, "SqliteBackupRestoreTest",
+         "configuredDirectoriesShareOneDefaultAndBlankTrimRule"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "malformedEnabledValueIsRejectedWithoutEchoOrCause"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "disabledKeepsTheConfiguredDirectoryAsTheMaintenanceAuthority"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "malformedDirectoryIsRejectedWithoutRepeatingTheEnvironmentValue"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "boundedSweepsAdvancePastEightIncompatiblePages"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "everyExecutionStoreMethodHasAnExplicitManagedRoute"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+         "DeploymentRegistryPolicyTest", "defaultsAreOneTypedDurableRegistryDecision"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+         "InMemoryExecutionStorePolicyTest", "explicitPolicyControlsTheReferenceStoreWithoutClaimingManagedPersistence"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+         "SqliteConnectionPolicyTest", "oneTypedPolicyControlsArtifactAndEmbedConnectionWaits"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "fencingThenMatchingReplayPrecedeAChangedLiveCapacityCheck"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "individualManagedClaimsRefuseMissingStaleAndLegacyAuthorityWithoutLeasing"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "individualManagedClaimRefusesReopenedCapacityDriftWithoutLeasing"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+    )
+    approved_new_test_digests = {
+        "anExplicitSqliteSelectorIsTheSameAsNoSelector": "ae9e843851cccb75ebfd373f4b4fc2890f59e280fbaabcee3ccee6c78aa8aeb4",
+        "anUnknownSelectorFailsClosedWithoutEchoingIt": "3c048de0c904f8f210a2e89b0c0e05f9c884e177f045df0268d7aba80e37329e",
+        "theSharedStoreRequiresAUrlAndRefusesAnotherDriversUrl": "18ce8ec8f9490e849603cd0ef1bb914974a27a96d9ad4bb537541683581ba541",
+        "poolSettingsDefaultAndAreBoundedOnBothSides": "1956e0e920ab339bc87c2f5066009ca91e80800ad60142ccab895b20aadad6fe",
+        "theConnectionNeverRendersItsUrlOrPassword": "917716431ddb7e3291a12f59921917b224d4c22d5642547dfda6ed07cd6a32a9",
+        "aPasswordIsNotTrimmedBecauseItIsOpaque": "e5bc520883ba15972c312eecfed1150202a3094b86fd37d78c0b6497aa0df345",
+        "theTtlDefaultsToTheValueThatUsedToBeHardCoded": "07ad8a3b60da4835e6262575c5c48e303c7682ce61c5190f241299d89a8c7914",
+        "ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate": "b3133e9a0c521aab63f5ccbef19974bb614cf29f7e8190528c5fdb0bbfe91517",
+        "aMalformedTtlFailsClosedRatherThanFallingBackToTheDefault": "aba1426f81a999845f700f745fc52e986d8bb71587db4b6efa0596b97a887cd1",
+        "theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct": "d94ce04c84dbd4215f0a79072398ef44b4b0c093929414796021263db88aa178",
+        "anUnsetNameStillProducesAUsableIdentity": "3be679136b89ee7081de5a8150c0b4ee9b3b8ef61d07ed4463e222873817790c",
+        "aMalformedNameIsRefusedAgainstTheVariableTheOperatorSet": "1fe0af9b6877c12c78a7e3324a831f15c8f6b470d0ab8839c79ed17e853d1091",
+        "theTtlIsCheckedAgainstTheComposedStoresOwnPublishedBounds": "81f3e4d0b75c4974ba60bad0ef528fb49436feebb926f497bece7fa84718c5e0",
+        "theSelectorSpellingMatchesTheServersOwn": "caf7902ec0f9f11a8c1706b22f294aa828ea5716c6463717fed7a10a0e30165e",
+        "selectorPropertyOverridesEnvironmentForBundleRefusal": "21355efcd75acec2071f4be9c8c2c65499afc6f12d987d14678efc04e03b6745",
+        "backupAndRestoreAreRefusedUnderTheSharedStore": "6adff2e480e35b2fec11c2433462ea2d442e71f81e6537628912ede299e9dcd0",
+        "absentAndBlankValuesResolveToTheSoleDefault": "723506176b197283fe82f3bda91fcad41dc46e68c720b240c31362d2ccbc0875",
+        "aConfiguredPathIsTrimmedOnceBeforeParsing": "b01243e10c701e9d2aabe2b1f4395eb4be023e5e2d0dbc1f7a694293d7c55dea",
+        "anInvalidPathIsRefusedWithoutRepeatingIt": "11a0afb17c679f68c8b79adb58372a0465c47a19d9f81a36132d407b6fb4e5ee",
+        "serverCompositionUsesTheSharedDefaultBlankAndTrimRules": "8d3e9493c705f53d33dcef1789c71ff74f2a96407332f72ff966afcb374f3d04",
+        "malformedServerAuditDirectoryIsRefusedBeforeOpeningTheTrail": "bc0d93dadcf86d2b7ac71f5e60e49ad14a9a27a6d5dbf4103d04ef0feeadcb02",
+        "auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer": "9f11784459d8ee120a9599fe081391d67446c84e48060fae8b272478954e995b",
+        "executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer": "b08e6b5417fd6a9aa66c3a8c36db5513d5b87bedfa5e089b60628ebb7f65f01d",
+        "bothCompositionRootsRefuseTheSameMalformedPaths": "14f23154a56a7ece244059662c587c9b4f7046e066f35d96c12df60d972f24b9",
+        "configuredDirectoriesShareOneDefaultAndBlankTrimRule": "8c6e524f4734caa56fb87dea79ce57382a264dd383c67bd5d24d5e1fa5d4ab67",
+        "absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule": "1dd9d27888784f7258ddb392c04b08b25a6512b6a3309fe72f67f6740090478f",
+        "acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases": "b42172c272bc28a45e40990f643b9f02f9e717334992efd5ac22dd1be9e53037",
+        "malformedEnabledValueIsRejectedWithoutEchoOrCause": "29cba941a77b6eb7dc66fc8b9c78fa102dac12cc42fae36c8d0b51e9c1c2871e",
+        "disabledKeepsTheConfiguredDirectoryAsTheMaintenanceAuthority": "eb981d95c3160561bd00b421ec5d6ff27aa0bfc060afb3af81bc656ac518f3f8",
+        "malformedDirectoryIsRejectedWithoutRepeatingTheEnvironmentValue": "5e496c8c8a9c25e4461c54aa23fc322c4027e5aecaf7a5e540a086bf73817441",
+    }
+    test_evidence: list[dict[str, str]] = []
+    for path, type_symbol, method in test_methods:
+        source = sources[path]
+        digest = java_method_digest(source, type_symbol, method)
+        if digest is None or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            return None
+        if method in approved_new_test_digests and approved_new_test_digests[method] != digest:
+            return None
+        test_evidence.append({"path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
+    return {
+        "kind": "java-persistence-policy-family-v1",
+        "contracts": contracts,
+        "candidateIds": candidate_ids,
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "testEvidence": test_evidence,
+    }
+
+
+def persistence_policy_authority_errors(root: Path, authorities: object,
+                                        entries: dict[str, dict[str, object]],
+                                        discovered: dict[str, Candidate]) -> list[str]:
+    """Require the complete source-derived #318 policy even when inventory markers are removed."""
+    if not persistence_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["persistence policy authority exists without its typed resolver source"])
+    expected = persistence_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["persistence policy source family is incomplete or unsupported"]
+    errors: list[str] = []
+    if not isinstance(authorities, dict) or set(authorities) != {PERSISTENCE_POLICY_AUTHORITY_ID} \
+            or authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID) != expected:
+        errors.append("persistence settings require the exact mandatory source-derived authority")
+    expected_by_id = {
+        str(identifier): contract for contract in expected["contracts"]
+        for identifier in contract["candidateIds"]
+    }
+    missing = set(expected_by_id) - set(entries)
+    if missing:
+        errors.append("persistence authority current source candidate set is incomplete")
+    reviewed_ids = {identifier for identifier in expected_by_id
+                    if entries.get(identifier, {}).get("status") != "pending-review"}
+    marked = {identifier: entry for identifier, entry in entries.items()
+              if entry.get("persistenceAuthority") is not None}
+    if set(marked) != reviewed_ids:
+        errors.append("persistence authority candidate partition is missing, duplicated, or foreign")
+    for identifier, contract in expected_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None:
+            continue
+        if entry.get("status") == "pending-review":
+            continue
+        if entry.get("status") != "already-centralized" \
+                or entry.get("classification") != "operator-configurable":
+            errors.append(f"{identifier}: persistence authority requires one reviewed operator setting")
+        if entry.get("persistenceAuthority") != PERSISTENCE_POLICY_AUTHORITY_ID \
+                or entry.get("setting") != contract["setting"]:
+            errors.append(f"{identifier}: persistence authority setting assignment has drifted")
+        default_evidence = entry.get("defaultEvidence")
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"] \
+                or entry.get("bindings") != contract["bindings"] \
+                or not isinstance(default_evidence, list) \
+                or sorted(str(item) for item in default_evidence) != contract["defaultCandidateIds"]:
+            errors.append(f"{identifier}: persistence owner, binding, or default evidence has drifted")
+    return errors
+
+
+MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
+MANIFEST_PIN_CONFIGURATION_PATH = PERSISTENCE_STORE_CONFIGURATION_PATH
 MANIFEST_PIN_BOOTSTRAP_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
 MANIFEST_PIN_STORE_PATH = Path(
@@ -4343,64 +5604,60 @@ MANIFEST_PIN_STORE_PATH = Path(
 def manifest_pin_attempt_authorities(root: Path,
                                      discovered: dict[str, Candidate]) -> dict[str, object] | None:
     """Derive the closed nested Shared-setting authority from its exact executable source."""
-    configuration = (root / MANIFEST_PIN_CONFIGURATION_PATH).read_text(encoding="utf-8")
-    bootstrap = (root / MANIFEST_PIN_BOOTSTRAP_PATH).read_text(encoding="utf-8")
-    store = (root / MANIFEST_PIN_STORE_PATH).read_text(encoding="utf-8")
-    if java_record_components(configuration, "Shared") != ("connection", "manifestPinAttempts") \
-            or not exact_import_identity(
-                configuration,
-                "ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore"):
+    try:
+        configuration = (root / MANIFEST_PIN_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        bootstrap = (root / MANIFEST_PIN_BOOTSTRAP_PATH).read_text(encoding="utf-8")
+        store = (root / MANIFEST_PIN_STORE_PATH).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    components = ("connection", "manifestPinAttempts", "storeConfig")
+    if java_record_components(configuration, "Shared") != components or not exact_import_identity(
+            configuration, "ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore"):
         return None
     call = java_constructor_component_call(
-        configuration, "ExecutionStoreConfiguration", "fromEnvironment", "Shared",
-        ("connection", "manifestPinAttempts"), "manifestPinAttempts")
-    expected_call = (
-        "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, "
-        "DEFAULT_MANIFEST_PIN_ATTEMPTS)")
-    if call is None or normalized(call[0]) != normalized(expected_call):
-        return None
+        configuration, "ExecutionStoreConfiguration", "fromSources", "Shared",
+        components, "manifestPinAttempts")
+    expected_call = "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, DEFAULT_MANIFEST_PIN_ATTEMPTS)"
     helper_span = java_method_span(configuration, "ExecutionStoreConfiguration", "positiveInt")
-    expected_helper = """
-        positiveInt(Map<String, String> environment, String variable, int fallback) {
-            String raw = environment.get(variable);
-            if (raw == null || raw.isBlank()) return fallback;
-            try {
-                int value = Integer.parseInt(raw.trim());
-                if (value < 1) throw new NumberFormatException();
-                return value;
-            } catch (NumberFormatException invalid) {
-                throw new IllegalArgumentException(variable + " must be a positive integer");
-            }
-        }
-    """
     compact_span = java_compact_constructor_span(configuration, "Shared")
-    expected_compact = """
-        Shared {
-            Objects.requireNonNull(connection, "connection");
-            if (manifestPinAttempts < 1) {
-                throw new IllegalArgumentException("manifestPinAttempts must be positive");
-            }
+    if call is None or normalized(call[0]) != normalized(expected_call) \
+            or helper_span is None or compact_span is None:
+        return None
+    helper_code = normalized(strip_c_comments(configuration[slice(*helper_span)]))
+    compact_code = normalized(strip_c_comments(configuration[slice(*compact_span)]))
+    expected_helper = normalized("""positiveInt(Map<String, String> environment, String variable, int fallback) {
+        String raw = environment.get(variable);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) throw new NumberFormatException();
+            return value;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException(variable + " must be a positive integer");
         }
-    """
-    if java_method_header(configuration, "ExecutionStoreConfiguration", "fromEnvironment") != \
-            "static ExecutionStoreConfiguration fromEnvironment(Map<String, String> environment)" \
+    }""")
+    expected_compact = normalized("""Shared {
+        Objects.requireNonNull(connection, "connection");
+        Objects.requireNonNull(storeConfig, "storeConfig");
+        if (manifestPinAttempts < 1) {
+            throw new IllegalArgumentException("manifestPinAttempts must be positive");
+        }
+    }""")
+    if java_method_header(configuration, "ExecutionStoreConfiguration", "fromSources") != \
+            "private static ExecutionStoreConfiguration fromSources(Map<String, String> properties, Map<String, String> environment)" \
             or java_method_header(configuration, "ExecutionStoreConfiguration", "positiveInt") != \
             "private static int positiveInt(Map<String, String> environment, String variable, int fallback)" \
-            or helper_span is None or compact_span is None \
-            or normalized(strip_c_comments(configuration[slice(*helper_span)])) != normalized(expected_helper) \
-            or normalized(strip_c_comments(configuration[slice(*compact_span)])) != normalized(expected_compact):
+            or helper_code != expected_helper or compact_code != expected_compact:
         return None
     environment = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"
-    environment_candidates = sorted(
-        candidate.id for candidate in discovered.values()
-        if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
-        and candidate.kind == "environment-binding" and candidate.expression == environment)
-    declaration_candidates = sorted(
-        candidate.id for candidate in discovered.values()
-        if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
-        and candidate.kind == "operational-declaration"
-        and candidate.role == "MANIFEST_PIN_ATTEMPTS_VARIABLE"
-        and candidate.expression == f'"{environment}"')
+    def ids(kind: str, expression: str, role: str | None = None) -> list[str]:
+        return sorted(candidate.id for candidate in discovered.values()
+                      if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
+                      and candidate.kind == kind and candidate.expression == expression
+                      and (role is None or candidate.role == role))
+    environment_candidates = ids("environment-binding", environment)
+    declaration_candidates = ids("operational-declaration", f'"{environment}"',
+                                "MANIFEST_PIN_ATTEMPTS_VARIABLE")
     terminal_candidates = sorted(
         candidate.id for candidate in discovered.values()
         if candidate.path == MANIFEST_PIN_STORE_PATH.as_posix()
@@ -4408,22 +5665,19 @@ def manifest_pin_attempt_authorities(root: Path,
         and candidate.role == "DEFAULT_MAX_PIN_ATTEMPTS" and candidate.expression == "3")
     terminal = java_static_final_initializer(store, "PostgresExecutionManifestStore",
                                              "DEFAULT_MAX_PIN_ATTEMPTS")
-    alias = re.findall(
-        r"\bint\s+DEFAULT_MANIFEST_PIN_ATTEMPTS\s*=\s*"
-        r"PostgresExecutionManifestStore\.DEFAULT_MAX_PIN_ATTEMPTS\s*;",
-        strip_c_comments(configuration))
-    if len(environment_candidates) != 1 or len(declaration_candidates) != 1 \
-            or len(terminal_candidates) != 1 or terminal is None \
-            or normalized(terminal[0]) != "3" or len(alias) != 1:
+    alias = re.findall(r"\bint\s+DEFAULT_MANIFEST_PIN_ATTEMPTS\s*=\s*"
+                       r"PostgresExecutionManifestStore\.DEFAULT_MAX_PIN_ATTEMPTS\s*;",
+                       strip_c_comments(configuration))
+    if any(len(group) != 1 for group in (environment_candidates, declaration_candidates,
+                                         terminal_candidates)) \
+            or terminal is None or normalized(terminal[0]) != "3" or len(alias) != 1:
         return None
     bootstrap_span = java_method_span(bootstrap, "ExecutionStoreBootstrap", "openShared")
     bootstrap_code = normalized(strip_c_comments(
         bootstrap[slice(*bootstrap_span)] if bootstrap_span is not None else ""))
-    expected_bootstrap_call = normalized("""
-        new PostgresExecutionManifestStore(pool.dataSource(), clock,
-            ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
-            configuration.manifestPinAttempts())
-    """)
+    expected_bootstrap_call = normalized("""new PostgresExecutionManifestStore(pool.dataSource(), clock,
+        ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
+        configuration.manifestPinAttempts(), storeConfig)""")
     if bootstrap_span is None or bootstrap_code.count(expected_bootstrap_call) != 1:
         return None
     tests = (
@@ -4439,29 +5693,28 @@ def manifest_pin_attempt_authorities(root: Path,
     )
     test_evidence: list[dict[str, object]] = []
     for role, path, type_symbol, method in tests:
-        source = (root / path).read_text(encoding="utf-8")
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            return None
         digest = java_method_digest(source, type_symbol, method)
         if digest is None:
             return None
-        test_evidence.append({
-            "role": role, "path": path.as_posix(), "type": type_symbol,
-            "method": method, "methodDigest": digest,
-        })
+        test_evidence.append({"role": role, "path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
     owner = f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared"
     binding = {
         "kind": "java-shared-manifest-pin-attempts-v1",
         "sourceOwner": owner,
         "factoryOwner": f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
-        "method": "fromEnvironment", "constructorType": "Shared",
+        "method": "fromSources", "constructorType": "Shared",
         "component": "manifestPinAttempts", "componentIndex": 1,
         "helper": "positiveInt", "environmentSymbol": "MANIFEST_PIN_ATTEMPTS_VARIABLE",
         "environment": environment, "environmentCandidateId": environment_candidates[0],
         "declarationCandidateIds": declaration_candidates,
         "callDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
-        "factoryBodyDigest": java_method_digest(
-            configuration, "ExecutionStoreConfiguration", "fromEnvironment"),
-        "helperBodyDigest": java_method_digest(
-            configuration, "ExecutionStoreConfiguration", "positiveInt"),
+        "factoryBodyDigest": java_method_digest(configuration, "ExecutionStoreConfiguration", "fromSources"),
+        "helperBodyDigest": java_method_digest(configuration, "ExecutionStoreConfiguration", "positiveInt"),
         "compactConstructorDigest": java_span_digest(configuration, compact_span),
         "bootstrapBodyDigest": java_method_digest(bootstrap, "ExecutionStoreBootstrap", "openShared"),
         "tests": test_evidence,
@@ -4477,9 +5730,9 @@ def manifest_pin_attempt_authorities(root: Path,
         "terminalField": "DEFAULT_MAX_PIN_ATTEMPTS", "terminalSourceExpression": "3",
         "evaluatedDefault": {"kind": "integer", "value": 3},
     }
+    all_ids = environment_candidates + declaration_candidates + terminal_candidates
     return {"bindingAuthority": binding, "defaultAuthority": default,
-            "candidateIds": sorted(environment_candidates + declaration_candidates + terminal_candidates)}
-
+            "candidateIds": sorted(all_ids)}
 
 def manifest_pin_attempt_authority_errors(root: Path, setting: str,
                                           contract: dict[str, object],
@@ -6818,6 +8071,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if helm_authority != HELM_AUTHORITY_ID \
                             or not owner.startswith(HELM_VALUES_PATH + "#"):
                         errors.append(f"{identifier}: unsupported Helm authority owner: {owner}")
+                elif entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+                    pass
                 elif current_source_owner(root, owner) is None:
                     errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
                 elif not current_source_field(root, owner, str(entry.get("field", ""))):
@@ -6966,6 +8221,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             json.dumps(entry.get("coverageEvidence"), sort_keys=True),
             json.dumps(entry.get("carrierEvidence"), sort_keys=True),
             entry.get("helmAuthority"),
+            entry.get("persistenceAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -7022,6 +8278,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(helm_authority_errors(
         root, document.get("helmAuthorities"), entries, candidates,
     ))
+    errors.extend(persistence_policy_authority_errors(
+        root, document.get("persistencePolicyAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -7040,6 +8299,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                         if evidence_id not in setting_ids:
                             errors.append(
                                 f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
+            continue
+        if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -7231,6 +8492,27 @@ def render_report(document: dict[str, object]) -> str:
                 coverage=entry.get("coverage", "")))
     else:
         lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
+    persistence_authorities = document.get("persistencePolicyAuthorities", {})
+    persistence_authority = (persistence_authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID)
+                             if isinstance(persistence_authorities, dict) else None)
+    persistence_contracts = (persistence_authority.get("contracts", [])
+                             if isinstance(persistence_authority, dict) else [])
+    lines.extend(("", "## Source-proven persistence policy", "",
+                  "The closed roster includes typed programmatic fields even when the lexical scanner finds",
+                  "no candidate atom for that field. Candidate counts therefore describe inventory evidence,",
+                  "not the number of supported policy fields.", "",
+                  "| Setting | Typed owner | Field | Bindings | Default source | Inventory candidates |",
+                  "|---|---|---|---|---|---:|"))
+    if isinstance(persistence_contracts, list) and persistence_contracts:
+        for contract in sorted(persistence_contracts, key=lambda item: str(item.get("setting", ""))):
+            bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", [])) or "none"
+            lines.append(
+                f"| {contract.get('setting', '')} | `{contract.get('owner', '')}` | "
+                f"`{contract.get('field', '')}` | {bindings} | "
+                f"`{contract.get('defaultExpression', '')}` | "
+                f"{len(contract.get('candidateIds', []))} |")
+    else:
+        lines.append("| _No source-proven persistence policy_ |  |  |  |  |  |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
     deferred_entries = sorted(
         (entry for entry in typed if entry.get("status") == "deferred"),

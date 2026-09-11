@@ -43,11 +43,11 @@ final class AgentAuthorityBudgetCodec {
             text(out, aggregate.state().name());
             out.writeLong(aggregate.controlEpoch());
             vector(out, aggregate.spent()); vector(out, aggregate.reserved());
-            out.writeInt(aggregate.grants().size());
+            writeCount(out, aggregate.grants().size());
             aggregate.grants().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
                 try { grant(out, entry.getValue()); } catch (IOException failure) { throw new CodecFailure(failure); }
             });
-            out.writeInt(aggregate.reservations().size());
+            writeCount(out, aggregate.reservations().size());
             aggregate.reservations().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
                 try { reservation(out, entry.getValue()); } catch (IOException failure) { throw new CodecFailure(failure); }
             });
@@ -177,7 +177,7 @@ final class AgentAuthorityBudgetCodec {
         return new String(bytes, StandardCharsets.UTF_8);
     }
     private static void strings(DataOutputStream out, Set<String> values) throws IOException {
-        out.writeInt(values.size()); for (String value : values.stream().sorted().toList()) text(out, value);
+        writeCount(out, values.size()); for (String value : values.stream().sorted().toList()) text(out, value);
     }
     private static Set<String> strings(DataInputStream in) throws IOException {
         int count = count(in); var values = new LinkedHashSet<String>();
@@ -185,7 +185,7 @@ final class AgentAuthorityBudgetCodec {
         return Set.copyOf(values);
     }
     private static void uuids(DataOutputStream out, Set<UUID> values) throws IOException {
-        out.writeInt(values.size()); for (UUID value : values.stream().sorted().toList()) uuid(out, value);
+        writeCount(out, values.size()); for (UUID value : values.stream().sorted().toList()) uuid(out, value);
     }
     private static Set<UUID> uuids(DataInputStream in) throws IOException {
         int count = count(in); var values = new LinkedHashSet<UUID>();
@@ -194,6 +194,10 @@ final class AgentAuthorityBudgetCodec {
     }
     private static int count(DataInputStream in) throws IOException {
         int value = in.readInt(); if (value < 0 || value > MAX_ITEMS) throw new IllegalArgumentException("invalid item count"); return value;
+    }
+    static void writeCount(DataOutputStream out, int value) throws IOException {
+        if (value < 0 || value > MAX_ITEMS) throw new IllegalArgumentException("too many agent authority items");
+        out.writeInt(value);
     }
     private static final class CodecFailure extends RuntimeException { private CodecFailure(Throwable cause) { super(cause); } }
 }

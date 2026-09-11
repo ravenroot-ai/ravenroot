@@ -135,8 +135,10 @@ class ReplicaTopologyStartupCheckTest {
         var environment = Map.of(
                 ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7");
 
+        // Exercise the topology check's independent defensive boundary. Production parses first,
+        // and the parser has its own stricter test for this same contradictory environment.
         var refusal = ReplicaTopologyStartupCheck.evaluate(environment,
-                ExecutionStoreConfiguration.fromEnvironment(environment));
+                ExecutionStoreConfiguration.fromEnvironment(Map.of()));
 
         assertNotNull(refusal);
         assertEquals("EXECUTION_STORE_SELECTOR_CONFLICT", refusal.code());

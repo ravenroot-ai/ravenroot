@@ -173,15 +173,16 @@ public final class ExecutionStoreBootstrap {
                                      GraphMlLimits graphMlLimits,
                                      ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         SharedStoreConnection connection = configuration.connection();
+        PostgresStoreConfig storeConfig = configuration.storeConfig();
         var pool = SharedExecutionStoreDataSource.open(connection);
         try {
             var store = new PostgresExecutionStore(pool.dataSource(), clock,
-                    PostgresStoreConfig.defaults(), humanTaskPolicy);
+                    storeConfig, humanTaskPolicy);
             GraphDefinitionStore definitions;
             try {
                 definitions = new PostgresGraphDefinitionStore(pool.dataSource(), clock,
                         ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE,
-                        graphMlLimits.maxBytes());
+                        graphMlLimits.maxBytes(), storeConfig);
             } catch (RuntimeException failed) {
                 store.close();
                 throw failed;
@@ -190,7 +191,7 @@ public final class ExecutionStoreBootstrap {
             try {
                 manifests = new PostgresExecutionManifestStore(pool.dataSource(), clock,
                         ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
-                        configuration.manifestPinAttempts());
+                        configuration.manifestPinAttempts(), storeConfig);
             } catch (RuntimeException failed) {
                 try {
                     definitions.close();

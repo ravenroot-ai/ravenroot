@@ -112,6 +112,14 @@ class EnvironmentNodePackageServiceGrantsTest {
                         Map.of(STORAGE_VARIABLE, encode("""
                                 {"capabilities":["outbound-http"],"limits":{"maxResponseBytes":0}}""")),
                         NO_CREDENTIALS));
+        for (int invalid : List.of(0, 1_001)) {
+            assertThrows(NodePackageServiceGrantException.class,
+                    () -> EnvironmentNodePackageServiceGrants.fromEnvironment(
+                            Map.of(STORAGE_VARIABLE, encode("""
+                                    {"capabilities":["outbound-http"],
+                                     "limits":{"maxDecompressionRatio":%d}}""".formatted(invalid))),
+                            NO_CREDENTIALS));
+        }
     }
 
     @Test

@@ -404,32 +404,46 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
+        return applyInternal(batch, null);
+    }
+
+    @Override
+    public CompletionStage<StoredProcessInstance> applyManaged(
+            ExecutionBatch batch, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) {
+        Objects.requireNonNull(authority, "authority");
+        return applyInternal(batch, authority);
+    }
+
+    private CompletionStage<StoredProcessInstance> applyInternal(
+            ExecutionBatch batch, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) {
         return async(() -> {
             Objects.requireNonNull(batch, "batch");
             // Decidable from the request alone, so it happens before a transaction is even opened.
             requireNoFencingTokenUnderNotPresent(batch);
-            batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
-            batch.idempotency().ifPresent(write -> {
-                requireWithinPayloadLimit(write.requestFingerprint());
-                requireWithinPayloadLimit(write.outcomeRef());
-            });
-            batch.handlerTransitions().forEach(transition -> {
-                if (!isHumanTaskResolution(batch, transition)) {
-                    requireWithinPayloadLimit(transition.outcomePayload());
-                }
-            });
-            batch.toolApprovalsToRegister().forEach(registration -> {
-                requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(),
-                        "application/json"));
-                requireWithinPayloadLimit(OpaquePayload.of(registration.continuation(),
-                        "application/vnd.ravenroot.tool-continuation"));
-            });
+            if (authority == null) requireBatchPayloads(batch);
             requireEnvelopesMatchBatch(batch);
-            return inWriteTransaction(batch.key(), () -> applyLocked(batch));
+            return inWriteTransaction(batch.key(), () -> applyLocked(batch, authority));
         });
     }
 
-    private StoredProcessInstance applyLocked(ExecutionBatch batch) throws SQLException {
+    private void requireBatchPayloads(ExecutionBatch batch) {
+        batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
+        batch.idempotency().ifPresent(write -> {
+            requireWithinPayloadLimit(write.requestFingerprint());
+            requireWithinPayloadLimit(write.outcomeRef());
+        });
+        batch.handlerTransitions().forEach(transition -> {
+            if (!isHumanTaskResolution(batch, transition)) requireWithinPayloadLimit(transition.outcomePayload());
+        });
+        batch.toolApprovalsToRegister().forEach(registration -> {
+            requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(), "application/json"));
+            requireWithinPayloadLimit(OpaquePayload.of(registration.continuation(),
+                    "application/vnd.ravenroot.tool-continuation"));
+        });
+    }
+
+    private StoredProcessInstance applyLocked(ExecutionBatch batch,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) throws SQLException {
         ExecutionKey key = batch.key();
         InstanceMeta existing = readMeta(key);
 
@@ -451,6 +465,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
         StoredProcessInstance replay = replayOf(batch, existing);
         if (replay != null) {
             return replay;
+        }
+
+        if (authority != null) {
+            requireManagedAuthority(key, authority);
+            requireBatchPayloads(batch);
         }
 
         // Expectation LAST. A write that already happened necessarily bumped the revision, so a
@@ -514,6 +533,40 @@ public final class SqliteExecutionStore implements ExecutionStore {
         dropAcknowledgementsForRescheduledWork(key);
 
         return new StoredProcessInstance(folded, revision, pin, key.tenantId(), now);
+    }
+
+    private void requireManagedAuthority(ExecutionKey key,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT digest, format_version, operational_policy FROM execution_manifest "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) throw failure(ExecutionStoreFailure.invalid(
+                        "managed execution has no pinned persistence authority"));
+                if (!authority.manifestDigest().value().equals(rows.getString(1))
+                        || (rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3
+                        && rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_4)) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "managed execution persistence authority does not match its manifest"));
+                }
+                try {
+                    var policy = ai.ravenroot.api.persistence.ResolvedOperationalPolicy
+                            .decodeForManifest(rows.getString(3), rows.getInt(2));
+                    int pinned = policy.persistence().orElseThrow(
+                            () -> new IllegalArgumentException("persistence capacity is absent"))
+                            .maximumPayloadBytes();
+                    if (pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "managed execution persistence capacity is incompatible"));
+                    }
+                } catch (IllegalArgumentException | NullPointerException malformed) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "managed execution persistence authority is unavailable"));
+                }
+            }
+        }
     }
 
     @Override
@@ -616,6 +669,29 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     // Failing to ACQUIRE, not losing one that was held: ordinary contention, nothing
                     // started and nothing at risk. Reporting it as LeaseLost would bury the rare
                     // critical signal under routine noise.
+                    throw failure(new ExecutionStoreFailure.LeaseHeldByAnother(key, held.workerId(),
+                            held.expiresAt()));
+                }
+                return issueLease(key, meta.fencingToken(), held, workerId, ttl, now);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<LeaseHandle> claimManaged(ExecutionKey key, String workerId, Duration ttl,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(authority, "authority");
+            requireLeaseTtl(ttl);
+            requireWorkerId(workerId);
+            return inWriteTransaction(key, () -> {
+                requireManagedAuthority(key, authority);
+                InstanceMeta meta = readMeta(key);
+                if (meta == null) throw failure(new ExecutionStoreFailure.NotFound(key));
+                Instant now = clock.instant();
+                LeaseHandle held = readLease(key, meta.fencingToken());
+                if (held != null && !held.workerId().equals(workerId) && now.isBefore(held.expiresAt())) {
                     throw failure(new ExecutionStoreFailure.LeaseHeldByAnother(key, held.workerId(),
                             held.expiresAt()));
                 }
@@ -804,6 +880,122 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return List.copyOf(claimed);
             });
         });
+    }
+
+    @Override
+    public CompletionStage<List<PendingWork>> claimPendingWorkAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            java.util.Map<ExecutionKey, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified) {
+        return claimAmong(tenantId, workerId, limit, leaseTtl, verified, false)
+                .thenApply(items -> items.stream().map(PendingWork.class::cast).toList());
+    }
+
+    @Override
+    public CompletionStage<List<PendingWork.TimerDue>> claimDueTimersAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            java.util.Map<ExecutionKey, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified) {
+        return claimAmong(tenantId, workerId, limit, leaseTtl, verified, true)
+                .thenApply(items -> items.stream().map(PendingWork.TimerDue.class::cast).toList());
+    }
+
+    private CompletionStage<List<? extends PendingWork>> claimAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            java.util.Map<ExecutionKey, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified,
+            boolean timersOnly) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            requireWorkerId(workerId);
+            requireLimit(limit);
+            requireLeaseTtl(leaseTtl);
+            var authorities = requireVerifiedAuthorities(tenantId, verified);
+            if (authorities.isEmpty()) return List.of();
+            return inWriteTransaction(null, () -> {
+                Instant now = clock.instant();
+                var claimed = new ArrayList<PendingWork>();
+                for (var entry : authorities.entrySet()) {
+                    if (claimed.size() >= limit) break;
+                    ExecutionKey key = entry.getKey();
+                    requireManagedAuthority(key, entry.getValue());
+                    InstanceMeta meta = readMeta(key);
+                    if (meta == null || leasedByOther(key, meta, workerId, now)) continue;
+                    List<TimerSchedule> timers = claimableTimers(key, now);
+                    List<ScheduledAttempt> attempts = timersOnly ? List.of() : claimableAttempts(key, now);
+                    List<DurableHandler> triggers = timersOnly ? List.of() : claimableTriggers(key, now);
+                    if (attempts.isEmpty() && timers.isEmpty() && triggers.isEmpty()) continue;
+                    LeaseHandle lease = issueLease(key, meta.fencingToken(),
+                            readLease(key, meta.fencingToken()), workerId, leaseTtl, now);
+                    if (!timersOnly) {
+                        for (ScheduledAttempt attempt : attempts) {
+                            if (claimed.size() >= limit) break;
+                            claimed.add(claimAttempt(key, attempt, lease, now, leaseTtl));
+                        }
+                    }
+                    for (TimerSchedule timer : timers) {
+                        if (claimed.size() >= limit) break;
+                        claimed.add(claimTimer(key, timer, lease, now, leaseTtl));
+                    }
+                    if (!timersOnly) {
+                        for (DurableHandler trigger : triggers) {
+                            if (claimed.size() >= limit) break;
+                            claimed.add(claimTrigger(key, trigger, lease, now, leaseTtl));
+                        }
+                    }
+                }
+                return List.copyOf(claimed);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.persistence.ManagedClaimCandidatePage> managedClaimCandidates(
+            String tenantId, String workerId, int limit, Duration leaseTtl, boolean timersOnly,
+            java.util.Optional<UUID> after) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            requireWorkerId(workerId);
+            requireLimit(limit);
+            requireLeaseTtl(leaseTtl);
+            Objects.requireNonNull(after, "after");
+            return inReadTransaction(null, () -> {
+                String sql = "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? "
+                        + (after.isPresent() ? "AND process_instance_id > ? " : "")
+                        + "ORDER BY process_instance_id LIMIT ?";
+                var keys = new ArrayList<ExecutionKey>();
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    int index = 1;
+                    statement.setString(index++, tenantId);
+                    if (after.isPresent()) statement.setString(index++, after.orElseThrow().toString());
+                    statement.setInt(index, limit);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) keys.add(new ExecutionKey(tenantId,
+                                StoredUuid.required(rows, 1, "process_instance", "process_instance_id", tenantId)));
+                    }
+                }
+                java.util.Optional<UUID> next = keys.size() == limit
+                        ? java.util.Optional.of(keys.get(keys.size() - 1).processInstanceId())
+                        : java.util.Optional.empty();
+                return new ai.ravenroot.api.persistence.ManagedClaimCandidatePage(keys, next);
+            });
+        });
+    }
+
+    private static java.util.NavigableMap<ExecutionKey,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> requireVerifiedAuthorities(
+                    String tenantId,
+                    java.util.Map<ExecutionKey,
+                            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified) {
+        Objects.requireNonNull(verified, "verified");
+        var ordered = new java.util.TreeMap<ExecutionKey,
+                ai.ravenroot.api.persistence.ExecutionPersistenceAuthority>(
+                        java.util.Comparator.comparing(key -> key.processInstanceId().toString()));
+        verified.forEach((key, authority) -> {
+            Objects.requireNonNull(key, "verified key");
+            Objects.requireNonNull(authority, "verified authority");
+            if (!tenantId.equals(key.tenantId())) throw failure(ExecutionStoreFailure.invalid(
+                    "managed claim authority belongs to another tenant"));
+            ordered.put(key, authority);
+        });
+        return ordered;
     }
 
     @Override
@@ -1454,10 +1646,16 @@ public final class SqliteExecutionStore implements ExecutionStore {
      */
     @Override
     public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return recordExecutionResult(result, config.maxPayloadBytes());
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
         return async(() -> {
             Objects.requireNonNull(result, "result");
             ExecutionKey key = result.key();
-            requireResultPayloadWithinLimit(result);
+            requireResultPayloadWithinLimit(result, resolvedMaximumPayloadBytes);
             DurableExecutionResult candidate = result.withRetainedUntil(
                     plusClamped(result.endedAt(), config.executionResultRetention()));
             Instant now = clock.instant();
@@ -1544,15 +1742,16 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     // ---------------------------------------------------------------- execution result helpers
 
-    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result, int maximumPayloadBytes) {
+        if (maximumPayloadBytes < 1) throw new IllegalArgumentException("maximumPayloadBytes must be positive");
         ExecutionResultPayload payload = result.payload();
         if (payload.state() == ResultPayloadState.RETAINED
-                && payload.bytes() > config.maxPayloadBytes()) {
+                && payload.bytes() > maximumPayloadBytes) {
             // Refused rather than silently relabelled WITHHELD. The projection decides what to keep,
             // and a store that rewrote that decision would report a payload as refused for size by an
             // adapter the caller never asked about the size of.
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(),
-                    config.maxPayloadBytes()));
+                    maximumPayloadBytes));
         }
         if (payload.state() == ResultPayloadState.EXPIRED) {
             throw failure(ExecutionStoreFailure.invalid(

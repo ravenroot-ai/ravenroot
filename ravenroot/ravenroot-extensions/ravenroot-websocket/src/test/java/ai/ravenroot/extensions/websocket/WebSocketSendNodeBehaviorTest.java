@@ -5,6 +5,9 @@ import ai.ravenroot.api.node.service.NodePackageServiceException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
 import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -263,6 +266,33 @@ class WebSocketSendNodeBehaviorTest {
         open.fail(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE);
         assertEquals(WebSocketException.Code.CREDENTIAL_UNAVAILABLE, failure(result).code());
         assertFalse(failure(result).getMessage().contains("socket-secret"));
+    }
+
+    @Test void pinnedNumericSnapshotSurvivesProfileChangesWhileLiveAuthorizationIsReResolved() {
+        WebSocketProfile accepted = WebSocketTestSupport.profile(2, 2);
+        var capacity = new WebSocketSendNodeBehavior(WebSocketTestSupport.resolver(accepted))
+                .resolveExecutionIoCapacity(WebSocketTestSupport.configuration());
+        WebSocketProfile current = new WebSocketProfile("events",
+                URI.create("wss://changed.example.test/current"), Map.of("X-Current", List.of("yes")),
+                List.of("current.v1"), "current-binding", "current-reference",
+                8, 1, 1_000, 10, 1, 2);
+        var transport = new WebSocketTestSupport.FakeTransport();
+        NodeAction action = new WebSocketSendNodeBehavior(WebSocketTestSupport.resolver(current),
+                new WebSocketAdmissionRegistry()).create(WebSocketTestSupport.configuration(), transport, capacity);
+
+        var first = action.handle(message("tenant-a", text("123456789012")));
+        var second = action.handle(message("tenant-a", text("123456789012")));
+
+        assertEquals(2, transport.opens.size(), "pinned concurrency=2, not the current profile's 1");
+        for (var open : transport.opens) {
+            assertEquals(current.destination(), open.request.destination());
+            assertEquals(current.headers(), open.request.headers());
+            assertEquals(16, open.request.maximumMessageBytes().orElseThrow());
+            assertEquals(Duration.ofMillis(2_000), open.request.deadline());
+            open.fail(NodePackageServiceException.Reason.TRANSPORT_FAILED);
+        }
+        assertEquals(WebSocketException.Code.TRANSPORT_UNAVAILABLE, failure(first).code());
+        assertEquals(WebSocketException.Code.TRANSPORT_UNAVAILABLE, failure(second).code());
     }
 
     private static NodeAction action(WebSocketTestSupport.FakeTransport transport,

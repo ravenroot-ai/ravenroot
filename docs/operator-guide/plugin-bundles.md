@@ -187,7 +187,7 @@ Optional grant members are `origins`, `httpMethods`, `requestHeaders`, `response
 | `credentialBindings` | `bindingId`, `origin`, `headerName`, `prefix` | optional array; `prefix` is optional and the other nested members are required |
 | `awsSigV4Bindings` | `bindingId`, `origin`, `credentialReference`, `region`, `service` | optional array of exact signing-binding objects |
 | `credentialReferences` | — | optional nonempty array of the only opaque references this package may resolve |
-| `limits` | `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, `maxWebSocketIdleMs` | optional exact object; every supplied value is a positive integer |
+| `limits` | `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDecompressionRatio`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, `maxWebSocketIdleMs` | optional exact object; every supplied value is a positive integer |
 <!-- node-package-grant-schema:end -->
 
 Omitted ceilings inherit these finite policy defaults; byte values are bytes and time values are
@@ -203,6 +203,7 @@ milliseconds:
 | `maxQueuedWebSocketSends` | `16` | positive |
 | `maxConcurrentOperations` | `32` | positive package maximum |
 | `maxConcurrentPerTenant` | `8` | positive and no greater than `maxConcurrentOperations` |
+| `maxDecompressionRatio` | `100` | from 1 through the fixed platform safety ceiling of 1000 |
 | `maxDeadlineMs` | `30000` | positive |
 | `maxWebSocketLifetimeMs` | `3600000` | positive |
 | `maxWebSocketIdleMs` | `300000` | positive and no greater than `maxWebSocketLifetimeMs` |
@@ -221,6 +222,17 @@ every signing reference or startup refuses the grant. `credential-resolution` wi
 list can resolve every deployment-held reference for that package, so define the narrow list whenever
 that broader capability is required. `maxConcurrentPerTenant` cannot exceed
 `maxConcurrentOperations`, and `maxWebSocketIdleMs` cannot exceed `maxWebSocketLifetimeMs`.
+Callers may tighten the stored decompression ratio for one request but cannot exceed the package
+profile. Cancellation is cooperative: the deadline settles the managed call and requests transport
+or worker cancellation, but does not promise that arbitrary package or JDK code terminates within a
+fixed wall-clock duration. Admission remains held until the actual managed resource settles.
+
+Inbound source overloads accept only the exact context object issued by the active deployment for
+that package, node and activation generation. Construction-time calls are denied. Stop, rollback,
+restart and undeploy revoke the context before package cleanup; new credential or transport use is
+then refused and an open managed WebSocket is cancelled even if the source's own stop callback is a
+no-op. A secret already copied to a remote transport cannot be recalled, so revocation prevents new
+lookups and closes the resource still owned by the runtime.
 <!-- node-package-egress-rules:end -->
 
 The compiled documentation gate compares the top-level and nested member sets above with the grant

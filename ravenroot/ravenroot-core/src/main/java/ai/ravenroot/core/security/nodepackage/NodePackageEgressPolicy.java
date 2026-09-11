@@ -20,6 +20,7 @@ public final class NodePackageEgressPolicy {
     public static final long DEFAULT_MAX_REQUEST_BYTES = 1024L * 1024;
     public static final long DEFAULT_MAX_RESPONSE_BYTES = 8L * 1024 * 1024;
     public static final long DEFAULT_MAX_WEBSOCKET_MESSAGE_BYTES = 1024L * 1024;
+    public static final int DEFAULT_MAX_DECOMPRESSION_RATIO = 100;
 
     private final Set<Origin> origins;
     private final Set<String> requestHeaders;
@@ -35,6 +36,7 @@ public final class NodePackageEgressPolicy {
     private final int maximumConcurrentOperations;
     private final int maximumConcurrentPerTenant;
     private final int maximumQueuedWebSocketSends;
+    private final int maximumDecompressionRatio;
     private final Duration maximumDeadline;
     private final Duration maximumWebSocketLifetime;
     private final Duration maximumWebSocketIdle;
@@ -61,6 +63,10 @@ public final class NodePackageEgressPolicy {
         }
         maximumQueuedWebSocketSends = positive(builder.maximumQueuedWebSocketSends,
                 "maximumQueuedWebSocketSends");
+        maximumDecompressionRatio = builder.maximumDecompressionRatio;
+        if (maximumDecompressionRatio < 1 || maximumDecompressionRatio > 1_000) {
+            throw new IllegalArgumentException("maximumDecompressionRatio is out of range");
+        }
         maximumDeadline = positive(builder.maximumDeadline, "maximumDeadline");
         maximumWebSocketLifetime = positive(builder.maximumWebSocketLifetime, "maximumWebSocketLifetime");
         maximumWebSocketIdle = positive(builder.maximumWebSocketIdle, "maximumWebSocketIdle");
@@ -119,6 +125,7 @@ public final class NodePackageEgressPolicy {
     public int maximumConcurrentOperations() { return maximumConcurrentOperations; }
     public int maximumConcurrentPerTenant() { return maximumConcurrentPerTenant; }
     public int maximumQueuedWebSocketSends() { return maximumQueuedWebSocketSends; }
+    public int maximumDecompressionRatio() { return maximumDecompressionRatio; }
     public Duration maximumDeadline() { return maximumDeadline; }
     public Duration maximumWebSocketLifetime() { return maximumWebSocketLifetime; }
     public Duration maximumWebSocketIdle() { return maximumWebSocketIdle; }
@@ -202,6 +209,7 @@ public final class NodePackageEgressPolicy {
         private int maximumConcurrentOperations = 32;
         private int maximumConcurrentPerTenant = 8;
         private int maximumQueuedWebSocketSends = 16;
+        private int maximumDecompressionRatio = DEFAULT_MAX_DECOMPRESSION_RATIO;
         private Duration maximumDeadline = Duration.ofSeconds(30);
         private Duration maximumWebSocketLifetime = Duration.ofHours(1);
         private Duration maximumWebSocketIdle = Duration.ofMinutes(5);
@@ -281,6 +289,12 @@ public final class NodePackageEgressPolicy {
 
         public Builder maximumDeadline(Duration maximum) {
             maximumDeadline = maximum;
+            return this;
+        }
+
+        /** Sets the trusted decoded-to-encoded response ratio ceiling. */
+        public Builder maximumDecompressionRatio(int maximum) {
+            maximumDecompressionRatio = maximum;
             return this;
         }
 

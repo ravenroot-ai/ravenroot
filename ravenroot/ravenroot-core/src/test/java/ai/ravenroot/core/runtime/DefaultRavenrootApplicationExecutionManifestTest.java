@@ -2,6 +2,16 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionPolicy;
 import ai.ravenroot.api.application.ExecutionSubmission;
+import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.node.ExecutionIoCapacityCapable;
+import ai.ravenroot.api.node.NodeAction;
+import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodeConfiguration;
+import ai.ravenroot.api.node.NodePackage;
+import ai.ravenroot.api.node.NodeSdk;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
+import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionManifest;
 import ai.ravenroot.api.persistence.ExecutionManifestDifference;
@@ -28,6 +38,9 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -50,6 +63,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * different refuses rather than substituting what it has today.</p>
  */
 class DefaultRavenrootApplicationExecutionManifestTest {
+
+    private static final String IO_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <graph id="io" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="socket"><data key="kind">BEHAVIOR</data><data key="behavior">test.io</data></node>
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-socket" source="start" target="socket"/>
+                <edge id="socket-end" source="socket" target="end"/>
+              </graph>
+            </graphml>
+            """;
 
     /**
      * A credential-shaped literal, carried in the graph document as a node property.
@@ -110,9 +139,46 @@ class DefaultRavenrootApplicationExecutionManifestTest {
             assertEquals(submission.graphVersion(), recovered.manifest().graphContentId().value(),
                     "the manifest pins the same document address the caller was handed, so there is "
                             + "one graph identity rather than two to keep in step");
-            assertEquals(ExecutionManifest.CURRENT_FORMAT_VERSION, recovered.manifest().formatVersion());
+            assertEquals(ExecutionManifest.FORMAT_VERSION_4, recovered.manifest().formatVersion(),
+                    "new admissions use the external-I/O-capable manifest without claiming managed "
+                            + "persistence merely because a raw manifest adapter is present");
+            assertTrue(recovered.manifest().operationalPolicy().persistence().isEmpty(),
+                    "a raw adapter composition remains explicitly unmanaged and does not invent the "
+                            + "server's atomic persistence-capacity authority");
             assertEquals(recovered.manifest().digest(), recovered.digest());
             assertEquals(ExecutionPolicy.STANDARD.name(), recovered.manifest().runtime().executionPolicy());
+        }
+    }
+
+    @Test
+    void rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity() {
+        var manifests = new InMemoryExecutionManifestStore(Clock.systemUTC());
+        var capacity = new NodeExternalIoCapacity(512, 4, Duration.ofSeconds(2), 2);
+        BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(), ioPackage(capacity));
+        var application = new DefaultRavenrootApplication(new SameThreadExecutionEngine(),
+                new ExecutionMonitor(), behaviors, new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), null, 0,
+                UnknownBehaviorPolicy.passThrough(), null, null, null, GraphExecutionLimits.DEFAULTS,
+                null, manifests);
+        ExecutionSubmission submission;
+        try {
+            submission = application.startGraphMl(TestIdentities.TENANT_A, UUID.randomUUID(),
+                    new ByteArrayInputStream(IO_GRAPH.getBytes(StandardCharsets.UTF_8)), "payload");
+            var key = new ExecutionKey(TestIdentities.TENANT_A.tenantId(), submission.processInstanceId());
+            StoredExecutionManifest stored = await(manifests.load(key));
+            assertEquals(ExecutionManifest.FORMAT_VERSION_4, stored.manifest().formatVersion());
+            assertTrue(stored.manifest().operationalPolicy().persistence().isEmpty(),
+                    "an unmanaged embedded application records the explicit not-composed disposition");
+
+            var node = new ai.ravenroot.core.graph.GraphNode("socket",
+                    ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "test.io", Map.of());
+            var recovered = application.executionManifests().resolvePolicyForNodes(
+                    key, ExecutionPolicy.STANDARD, List.of(node));
+            assertEquals(capacity, recovered.nodeExternalIo().getFirst().capacity());
+            assertTrue(recovered.persistence().isEmpty());
+        } finally {
+            application.close();
         }
     }
 
@@ -158,7 +224,7 @@ class DefaultRavenrootApplicationExecutionManifestTest {
     }
 
     @Test
-    void aRuntimeThatResolvesDifferentLimitsRefusesToReproduceTheExecution() {
+    void aRuntimeThatResolvesDifferentLimitsRestoresTheAcceptedExecutionValues() {
         var executions = new InMemoryExecutionStore();
         var definitions = new InMemoryGraphDefinitionStore(Clock.systemUTC());
         var manifests = new InMemoryExecutionManifestStore(Clock.systemUTC());
@@ -184,14 +250,10 @@ class DefaultRavenrootApplicationExecutionManifestTest {
                 GraphExecutionLimits.DEFAULTS.maxRecoveryDeliveriesPerAttempt());
         var recovering = applicationWith(executions, definitions, manifests, tightened);
 
-        ExecutionManifestIncompatibleException refused = assertThrows(
-                ExecutionManifestIncompatibleException.class,
-                () -> recovering.executionManifests().verify(key, ExecutionPolicy.STANDARD));
-
-        assertEquals(1, refused.report().differences().size());
-        assertEquals(ExecutionManifestDifference.Dimension.EXECUTION_LIMITS,
-                refused.report().differences().get(0).dimension());
-        assertFalse(refused.report().truncated());
+        assertEquals(GraphExecutionLimits.DEFAULTS,
+                ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                        recovering.executionManifests().resolvePolicy(key, ExecutionPolicy.STANDARD,
+                                java.util.List.of())));
         recovering.close();
     }
 
@@ -277,6 +339,33 @@ class DefaultRavenrootApplicationExecutionManifestTest {
 
     private static byte[] graphBytes() {
         return GRAPH.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static NodePackage ioPackage(NodeExternalIoCapacity capacity) {
+        final class IoBehavior implements NodeBehavior, ExecutionIoCapacityCapable {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("test.io", "I/O", "Test", "", "actor", false,
+                        List.of(), Set.of());
+            }
+            @Override public NodeAction create(NodeConfiguration configuration) {
+                return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            }
+            @Override public NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration) {
+                return capacity;
+            }
+            @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services,
+                                               NodeExternalIoCapacity pinned) {
+                assertEquals(capacity, pinned);
+                return create(configuration);
+            }
+        }
+        NodeBehavior behavior = new IoBehavior();
+        return new NodePackage() {
+            @Override public String id() { return "test.io.package"; }
+            @Override public String version() { return "1"; }
+            @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+            @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
+        };
     }
 
     private static <T> T await(CompletionStage<T> stage) {

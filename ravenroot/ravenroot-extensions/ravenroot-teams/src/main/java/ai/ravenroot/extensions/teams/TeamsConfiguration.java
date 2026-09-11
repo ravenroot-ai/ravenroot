@@ -70,7 +70,8 @@ record TeamsConfiguration(IngressAuthorityDeclaration authority,
                 (int) TeamsValues.number(value.get("maxConcurrentRequests"), 1, 1_024),
                 TeamsValues.number(value.get("maxRequestBytes"), 1, 16L * 1024 * 1024),
                 TeamsValues.number(value.get("maxResponseBytes"), 1, 16L * 1024 * 1024),
-                Duration.ofMillis(TeamsValues.number(value.get("requestTimeoutMs"), 100, 4_500)));
+                Duration.ofMillis(TeamsValues.number(value.get("requestTimeoutMs"), 100,
+                        TeamsProfile.MAX_ACK_TIMEOUT_MS)));
     }
 
     private static IngressRequestProjectionPolicy projection(Map<String, Object> value) {
@@ -115,7 +116,8 @@ record TeamsConfiguration(IngressAuthorityDeclaration authority,
                 (int) TeamsValues.number(limits.get("maxTextChars"), 1, 28_000),
                 (int) TeamsValues.number(limits.get("maxConcurrency"), 1, 64),
                 (int) TeamsValues.number(limits.get("maxPerSecond"), 1, 50),
-                (int) TeamsValues.number(limits.get("ackTimeoutMs"), 100, 4_500),
+                (int) TeamsValues.number(limits.get("ackTimeoutMs"), 100,
+                        TeamsProfile.MAX_ACK_TIMEOUT_MS),
                 (int) TeamsValues.number(limits.get("signatureMaxAgeSeconds"), 1, 300));
     }
 

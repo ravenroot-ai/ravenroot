@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,6 +34,26 @@ class ExecutionOwnershipConfigurationTest {
     void anExplicitTtlIsReadInWholeSeconds() {
         assertEquals(Duration.ofSeconds(45), ExecutionOwnershipConfiguration.fromEnvironment(
                 Map.of(ExecutionOwnershipConfiguration.LEASE_TTL_VARIABLE, " 45 ")).leaseTtl());
+    }
+
+    @Test
+    void ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate() {
+        var properties = new Properties();
+        properties.setProperty(ExecutionOwnershipConfiguration.WORKER_ID_PROPERTY, "property-worker");
+        properties.setProperty(ExecutionOwnershipConfiguration.LEASE_TTL_PROPERTY, "45");
+        var configured = ExecutionOwnershipConfiguration.fromSystem(properties, Map.of(
+                ExecutionOwnershipConfiguration.WORKER_ID_VARIABLE, "environment-worker",
+                ExecutionOwnershipConfiguration.LEASE_TTL_VARIABLE, "60"));
+        assertEquals("property-worker", configured.replicaName());
+        assertEquals(Duration.ofSeconds(45), configured.leaseTtl());
+
+        properties.setProperty(ExecutionOwnershipConfiguration.WORKER_ID_PROPERTY, " ");
+        properties.setProperty(ExecutionOwnershipConfiguration.LEASE_TTL_PROPERTY, " ");
+        configured = ExecutionOwnershipConfiguration.fromSystem(properties, Map.of(
+                ExecutionOwnershipConfiguration.WORKER_ID_VARIABLE, "environment-worker",
+                ExecutionOwnershipConfiguration.LEASE_TTL_VARIABLE, "60"));
+        assertEquals("environment-worker", configured.replicaName());
+        assertEquals(Duration.ofSeconds(60), configured.leaseTtl());
     }
 
     @Test

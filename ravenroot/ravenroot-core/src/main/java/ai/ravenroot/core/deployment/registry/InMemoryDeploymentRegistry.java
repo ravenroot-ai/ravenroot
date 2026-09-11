@@ -3,6 +3,7 @@ package ai.ravenroot.core.deployment.registry;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryPolicy;
 import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 import ai.ravenroot.api.persistence.RevisionExpectation;
@@ -35,17 +36,24 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
     // it allows is zero. Publishing a comfortable-looking non-zero value would let a caller calibrate
     // against a tolerance that does not exist here and then carry that calibration to a durable
     // adapter where it does, which is exactly the class of error the published bound exists to stop.
-    private final Limits limits = new Limits(100, Duration.ofMinutes(5), Duration.ZERO);
+    private final Limits limits;
     private final Map<Key, Entry> entries = new HashMap<>();
     private final Map<CreateLedgerKey, Recorded> createLedger = new HashMap<>();
 
     public InMemoryDeploymentRegistry(Clock clock) {
-        this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()));
+        this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()),
+                DeploymentRegistryPolicy.inMemoryLimits());
     }
 
     public InMemoryDeploymentRegistry(Clock clock, DeploymentIdSource ids) {
+        this(clock, ids, DeploymentRegistryPolicy.inMemoryLimits());
+    }
+
+    /** Opens the reference adapter with explicit programmatic limits. */
+    public InMemoryDeploymentRegistry(Clock clock, DeploymentIdSource ids, Limits limits) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
+        this.limits = Objects.requireNonNull(limits, "limits");
     }
 
     @Override public Limits limits() { return limits; }

@@ -91,7 +91,8 @@ public final class BoundedBodyHandlers {
 
     private static ExternalIoLimits identityLimits(long maxBytes) {
         return new ExternalIoLimits(maxBytes, maxBytes, maxBytes, maxBytes, 1,
-                java.time.Duration.ofSeconds(30), java.time.Duration.ofSeconds(2),
+                ExternalIoLimits.DEFAULT_MANAGED_HTTP_DURATION,
+                ExternalIoLimits.COOPERATIVE_CANCELLATION_BOUND,
                 java.util.Set.of(), java.util.Set.of("identity"));
     }
 

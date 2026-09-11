@@ -88,7 +88,11 @@ for name, node in properties.items():
     if blank_references != ["#/definitions/humanTaskBlank"]:
         raise SystemExit(f"Helm Human Task field {name} does not use the Human Task blank contract")
 
-shared_ranges = set(definitions) - {"graphBlank", "humanTaskBlank"}
+shared_ranges = {
+    name for name, definition in definitions.items()
+    if any(choice.get("$ref") == "#/definitions/humanTaskBlank"
+           for choice in definition.get("oneOf", []))
+}
 if used_definitions != shared_ranges:
     raise SystemExit("Helm Human Task shared range definitions are stale or unused")
 PY

@@ -206,7 +206,7 @@ class GraphExecutionBudgetTest {
     @Test
     void retiringWorkerCapacityIsSharedAcrossSuccessiveTraversalBudgets() {
         GraphExecutionLimits limits = actorLimit(1);
-        var runnerCapacity = new RunnerActorCapacity(1);
+        var runnerCapacity = new RunnerActorCapacity();
         var firstBudget = new ExecutionBudget(limits, runnerCapacity);
         var secondBudget = new ExecutionBudget(limits, runnerCapacity);
         var terminated = new CompletableFuture<Void>();
@@ -227,9 +227,26 @@ class GraphExecutionBudgetTest {
     }
 
     @Test
+    void sharedRunnerActorAccountingUsesTheRequestingTraversalPinnedLimit() {
+        var runnerCapacity = new RunnerActorCapacity();
+        var narrow = new ExecutionBudget(actorLimit(1), runnerCapacity);
+        var wider = new ExecutionBudget(actorLimit(2), runnerCapacity);
+
+        try (var first = narrow.reserveActor(); var second = wider.reserveActor()) {
+            assertEquals(2, runnerCapacity.retained(),
+                    "a wider historical pin must not be narrowed by the runner startup value");
+            var anotherNarrow = new ExecutionBudget(actorLimit(1), runnerCapacity);
+            assertEquals(GraphExecutionLimitException.Reason.LIVE_ACTORS,
+                    assertThrows(GraphExecutionLimitException.class,
+                            anotherNarrow::reserveActor).reason(),
+                    "a narrower pin must not inherit a wider traversal's authority");
+        }
+    }
+
+    @Test
     void retiringTraversalNatureCapacityIsSharedAcrossSuccessiveTraversalBudgets() {
         GraphExecutionLimits limits = actorLimit(1);
-        var runnerCapacity = new RunnerActorCapacity(1);
+        var runnerCapacity = new RunnerActorCapacity();
         var firstBudget = new ExecutionBudget(limits, runnerCapacity);
         var secondBudget = new ExecutionBudget(limits, runnerCapacity);
         var registry = new TraversalInstanceRegistry(
@@ -251,7 +268,7 @@ class GraphExecutionBudgetTest {
     @Test
     @Timeout(10)
     void workerPermitIsReleasedExactlyOnceWhenTerminationAndRunnerCloseRace() {
-        var runnerCapacity = new RunnerActorCapacity(1);
+        var runnerCapacity = new RunnerActorCapacity();
         var budget = new ExecutionBudget(actorLimit(1), runnerCapacity);
         var terminated = new CompletableFuture<Void>();
         var registry = new WorkerInstanceRegistry(
@@ -273,7 +290,7 @@ class GraphExecutionBudgetTest {
     @Test
     @Timeout(10)
     void traversalPermitIsReleasedExactlyOnceWhenRetirementAndRunnerCloseRace() throws Exception {
-        var runnerCapacity = new RunnerActorCapacity(1);
+        var runnerCapacity = new RunnerActorCapacity();
         var budget = new ExecutionBudget(actorLimit(1), runnerCapacity);
         var registry = new TraversalInstanceRegistry(
                 (name, node) -> new ai.ravenroot.api.execution.NodeRef(name));

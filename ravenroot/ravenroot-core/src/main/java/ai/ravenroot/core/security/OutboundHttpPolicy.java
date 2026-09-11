@@ -190,6 +190,11 @@ public final class OutboundHttpPolicy {
         return requested.compareTo(maximumTimeout) > 0 ? maximumTimeout : requested;
     }
 
+    /** The operator-selected timeout ceiling used when an execution pins HTTP capacity. */
+    public Duration maximumTimeout() {
+        return maximumTimeout;
+    }
+
     /** Always positive. See {@link #DEFAULT_MAX_RESPONSE_BYTES} for why there is no unlimited value. */
     public long maximumResponseBytes() {
         return maximumResponseBytes;

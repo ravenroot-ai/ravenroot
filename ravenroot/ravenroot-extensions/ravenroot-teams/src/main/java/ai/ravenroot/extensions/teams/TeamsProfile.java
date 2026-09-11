@@ -11,6 +11,9 @@ record TeamsProfile(String tenantId, String name, URI workflowEndpoint, String m
                     String credentialReference, String signingSecretReference, String webhookRoute,
                     int requestTimeoutMs, int maxRequestBytes, int maxResponseBytes, int maxTextChars,
                     int maxConcurrency, int maxPerSecond, int ackTimeoutMs, int signatureMaxAgeSeconds) {
+    /** Leaves transport and serialization time inside Teams' five-second acknowledgement window. */
+    static final int MAX_ACK_TIMEOUT_MS = 4_500;
+
     TeamsProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
         workflowEndpoint = endpoint(workflowEndpoint);
@@ -26,7 +29,7 @@ record TeamsProfile(String tenantId, String name, URI workflowEndpoint, String m
                 || maxTextChars < 1 || maxTextChars > 28_000
                 || maxConcurrency < 1 || maxConcurrency > 64
                 || maxPerSecond < 1 || maxPerSecond > 50
-                || ackTimeoutMs < 100 || ackTimeoutMs > 4_500
+                || ackTimeoutMs < 100 || ackTimeoutMs > MAX_ACK_TIMEOUT_MS
                 || signatureMaxAgeSeconds < 1 || signatureMaxAgeSeconds > 300) throw configuration();
     }
 

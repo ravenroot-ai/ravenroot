@@ -5,6 +5,7 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.catalog.NodeTypeDescriptorValidator;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.node.InboundSourceCapable;
+import ai.ravenroot.api.node.ExecutionIoCapacityCapable;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -13,6 +14,7 @@ import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.execution.CancellationSignal;
@@ -155,13 +157,20 @@ public final class NodePackages {
             // fail; the placement is what keeps that true if it ever changes.
             plans.add(new RegistrationPlan(packageId,
                     PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()),
-                    serviceAware, packageServices, List.copyOf(validated)));
+                    serviceAware, packageServices, packageServices.egressCapacityProfile(),
+                    List.copyOf(validated)));
         }
 
         for (RegistrationPlan plan : plans) {
+            if (plan.services() instanceof
+                    ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices managed) {
+                managed.bindExecutionPolicyResolver(registry::operationalPolicyFor);
+                managed.bindSourceAuthorityResolver(
+                        context -> registry.sourceAuthorityFor(plan.packageId(), context));
+            }
             plan.behaviors().forEach(behavior -> registry.registerPackageFactory(
                     new SdkNodeBehaviorFactory(behavior, plan.services(), plan.serviceAware()),
-                    plan.packageId(), plan.pinned()));
+                    plan.packageId(), plan.pinned(), plan.capacity()));
         }
         return registry;
     }
@@ -247,10 +256,26 @@ public final class NodePackages {
 
         @Override
         public NodeHandler create(GraphNode node) {
+            return create(node, java.util.Optional.empty());
+        }
+
+        NodeHandler create(GraphNode node, java.util.Optional<NodeExternalIoCapacity> pinnedCapacity) {
             NodeConfiguration configuration = configurationOf(node);
-            NodeAction action = serviceAware
-                    ? behavior.create(configuration, services)
-                    : behavior.create(configuration);
+            NodeAction action;
+            if (behavior instanceof ExecutionIoCapacityCapable capable) {
+                NodeExternalIoCapacity capacity = pinnedCapacity.orElseThrow(() ->
+                        new IllegalStateException("Behavior '" + node.behavior()
+                                + "' requires a pinned external-I/O capacity for node '" + node.id() + "'"));
+                action = capable.create(configuration, services, capacity);
+            } else {
+                if (pinnedCapacity.isPresent()) {
+                    throw new IllegalStateException("Behavior '" + node.behavior()
+                            + "' received an unexpected external-I/O capacity");
+                }
+                action = serviceAware
+                        ? behavior.create(configuration, services)
+                        : behavior.create(configuration);
+            }
             if (action == null) {
                 throw new IllegalStateException("Behavior '" + node.behavior() + "' returned no action for node '"
                         + node.id() + "'");
@@ -277,6 +302,13 @@ public final class NodePackages {
                     return stage;
                 }
             };
+        }
+
+        java.util.Optional<NodeExternalIoCapacity> resolveExecutionIoCapacity(GraphNode node) {
+            if (!(behavior instanceof ExecutionIoCapacityCapable capable)) return java.util.Optional.empty();
+            return java.util.Optional.of(java.util.Objects.requireNonNull(
+                    capable.resolveExecutionIoCapacity(configurationOf(node)),
+                    "resolved external-I/O capacity"));
         }
 
         @Override
@@ -346,6 +378,9 @@ public final class NodePackages {
     }
 
     private record RegistrationPlan(String packageId, PinnedNodePackage pinned, boolean serviceAware,
-                                    NodePackageServices services, List<NodeBehavior> behaviors) {
+                                    NodePackageServices services,
+                                    java.util.Optional<ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile>
+                                            capacity,
+                                    List<NodeBehavior> behaviors) {
     }
 }

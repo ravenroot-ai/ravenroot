@@ -63,6 +63,12 @@ final class DurableExecutionResults implements ExecutionResultRegistry.Durable {
         await(store.recordExecutionResult(Objects.requireNonNull(result, "result")));
     }
 
+    @Override
+    public void record(DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
+        await(store.recordExecutionResult(Objects.requireNonNull(result, "result"),
+                resolvedMaximumPayloadBytes));
+    }
+
     private static <T> T await(CompletionStage<T> stage) {
         try {
             return stage.toCompletableFuture().join();

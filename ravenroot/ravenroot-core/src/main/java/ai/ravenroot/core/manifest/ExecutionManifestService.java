@@ -9,10 +9,14 @@ import ai.ravenroot.api.persistence.ExecutionManifestStoreException;
 import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Collection;
+import java.util.List;
+import ai.ravenroot.core.graph.GraphNode;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
@@ -85,6 +89,35 @@ public final class ExecutionManifestService {
         return await(store.pin(manifest));
     }
 
+    /** Resolves the exact values admission will persist, before constructing its consumers. */
+    public ResolvedOperationalPolicy policyForAdmission(Collection<String> behaviorNames) {
+        return resolver.operationalPolicyFor(behaviorNames);
+    }
+
+    /** Resolves one immutable package and per-node policy snapshot for admission. */
+    public ResolvedOperationalPolicy policyForNodeAdmission(Collection<GraphNode> nodes) {
+        return resolver.operationalPolicyForNodes(nodes);
+    }
+
+    /** Persists the exact policy snapshot already supplied to runtime construction. */
+    public StoredExecutionManifest pinResolved(ExecutionKey key, GraphContentId graphContentId,
+                                               GraphDefinitionIdentity graphIdentity,
+                                               ExecutionPolicy policy,
+                                               ResolvedOperationalPolicy operationalPolicy) {
+        ExecutionManifest manifest = resolver.manifestForResolved(key, graphContentId, graphIdentity,
+                policy, Instant.now(clock), operationalPolicy);
+        return await(store.pin(manifest));
+    }
+
+    /** Pins v2 policy for exactly the behavior names referenced by the accepted graph. */
+    public StoredExecutionManifest pin(ExecutionKey key, GraphContentId graphContentId,
+                                       GraphDefinitionIdentity graphIdentity, ExecutionPolicy policy,
+                                       Collection<String> behaviorNames) {
+        ExecutionManifest manifest = resolver.manifestFor(key, graphContentId, graphIdentity, policy,
+                Instant.now(clock), behaviorNames);
+        return await(store.pin(manifest));
+    }
+
     /**
      * Reads one execution's manifest, verifies its integrity, and compares it against this runtime.
      *
@@ -101,13 +134,37 @@ public final class ExecutionManifestService {
     public StoredExecutionManifest verify(ExecutionKey key, ExecutionPolicy policy) {
         StoredExecutionManifest stored = await(store.load(key));
         ExecutionManifest pinned = stored.manifest();
-        ExecutionManifest current = resolver.manifestFor(pinned.key(), pinned.graphContentId(),
-                pinned.graphIdentity(), policy, pinned.pinnedAt());
-        ExecutionManifestCompatibility report = ExecutionManifestCompatibility.compare(pinned, current);
+        ExecutionManifestCompatibility report = resolver.compare(pinned, policy);
         if (!report.compatible()) {
             throw new ExecutionManifestIncompatibleException(key, report);
         }
         return stored;
+    }
+
+    /** Verifies identity compatibility and returns the immutable values runtime consumers must use. */
+    public ResolvedOperationalPolicy resolvePolicy(ExecutionKey key, ExecutionPolicy policy) {
+        StoredExecutionManifest stored = await(store.load(key));
+        return resolver.resolvePolicy(stored.manifest(), policy);
+    }
+
+    /** Resolves policy after parsing the pinned graph, enabling narrow v1 no-egress proof. */
+    public ResolvedOperationalPolicy resolvePolicy(ExecutionKey key, ExecutionPolicy policy,
+                                                   Collection<String> behaviorNames) {
+        StoredExecutionManifest stored = await(store.load(key));
+        return resolver.resolvePolicy(stored.manifest(), policy, behaviorNames);
+    }
+
+    /** Resolves policy with exact graph-node proof for versioned external-I/O snapshots. */
+    public ResolvedOperationalPolicy resolvePolicyForNodes(ExecutionKey key, ExecutionPolicy policy,
+                                                           Collection<GraphNode> nodes) {
+        StoredExecutionManifest stored = await(store.load(key));
+        return resolver.resolvePolicyForNodes(stored.manifest(), policy, nodes);
+    }
+
+    /** Restores verified graph limits before the pinned graph is parsed for full policy proof. */
+    public ResolvedOperationalPolicy graphPolicyForParsing(ExecutionKey key, ExecutionPolicy policy) {
+        StoredExecutionManifest stored = await(store.load(key));
+        return resolver.graphPolicyForParsing(stored.manifest(), policy);
     }
 
     /**
@@ -137,9 +194,7 @@ public final class ExecutionManifestService {
      */
     public ExecutionManifestCompatibility describe(StoredExecutionManifest stored, ExecutionPolicy policy) {
         ExecutionManifest pinned = Objects.requireNonNull(stored, "stored").manifest();
-        ExecutionManifest current = resolver.manifestFor(pinned.key(), pinned.graphContentId(),
-                pinned.graphIdentity(), policy, pinned.pinnedAt());
-        return ExecutionManifestCompatibility.compare(pinned, current);
+        return resolver.compare(pinned, policy);
     }
 
     /**

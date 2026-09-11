@@ -16,6 +16,10 @@ RAVENROOT_AUDIT_DIR=/opt/ravenroot/data/audit \
 ravenroot restore /secure-backups/ravenroot-2026-08-29
 ```
 
+The server and these commands apply the same path rule: surrounding whitespace is trimmed, while an
+unset or blank audit or execution-store directory selects `./data/audit` or
+`./data/execution-store`, respectively.
+
 Backup and restore acquire the same persistent maintenance lock as the server and return `BUSY` while a live owner holds it. Stop or scale the single workload to zero; never delete `.ravenroot-maintenance.lock`.
 
 ## Bundle inventory

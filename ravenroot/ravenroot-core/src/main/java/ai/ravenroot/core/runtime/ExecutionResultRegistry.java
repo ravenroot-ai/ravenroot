@@ -123,6 +123,9 @@ public final class ExecutionResultRegistry {
          * @param result the record to store.
          */
         void record(DurableExecutionResult result);
+
+        /** Records using the immutable payload limit accepted for this execution. */
+        void record(DurableExecutionResult result, int resolvedMaximumPayloadBytes);
     }
 
     private final Durable durable;
@@ -430,6 +433,15 @@ public final class ExecutionResultRegistry {
         if (durable != null) {
             durable.record(result);
         }
+    }
+
+    /** Records through the durable authority with the execution's pinned payload limit. */
+    public void recordDurably(DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
+        Objects.requireNonNull(result, "result");
+        if (resolvedMaximumPayloadBytes < 1) {
+            throw new IllegalArgumentException("resolvedMaximumPayloadBytes must be positive");
+        }
+        if (durable != null) durable.record(result, resolvedMaximumPayloadBytes);
     }
 
     /**

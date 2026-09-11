@@ -1,9 +1,17 @@
 package ai.ravenroot.api.node.service;
 
 import java.util.Set;
+import java.util.Optional;
 
 /** Immutable, package-scoped service view supplied by the trusted runtime composition root. */
 public interface NodePackageServices {
+    /**
+     * Describes the immutable quantitative external-I/O policy enforced by this service view.
+     * Empty means a custom provider has not supplied the v2 contract; it does not imply denial.
+     */
+    default Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+        return Optional.empty();
+    }
     /**
      * Lists exactly the operator-composed capabilities exposed by this view.
      *
@@ -58,6 +66,9 @@ public interface NodePackageServices {
         NodePackageServiceException unavailable = new NodePackageServiceException(
                 NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
         return new NodePackageServices() {
+            @Override public Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+                return Optional.of(NodePackageEgressCapacityProfile.noManagedEgress());
+            }
             @Override public Set<NodePackageCapability> capabilities() { return Set.of(); }
             @Override public NodeCredentialService credentials() {
                 return (message, reference, deadline) -> OutboundCall.failed(unavailable);

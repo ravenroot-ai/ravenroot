@@ -81,6 +81,10 @@ test('fine-pointer hover exposes a stable semantic minibar and trace uses the ex
       { action: 'trace', hidden: false, label: 'Trace full path from Start', tooltip: 'Trace full path from Start' },
       { action: 'delete', hidden: false, label: 'Delete Start', tooltip: 'Delete Start' },
       { action: 'duplicate', hidden: true, label: 'Duplicate Start', tooltip: 'Duplicate Start' },
+      // Visual groups put their two direct actions in the minibar too (docs/user-guide/
+      // workspace-authoring.md). Neither applies to a lone ungrouped node, so both stay hidden.
+      { action: 'group', hidden: true, label: 'Group selection', tooltip: 'Group selection' },
+      { action: 'toggleGroup', hidden: true, label: 'Collapse group', tooltip: 'Collapse group' },
       { action: 'more', hidden: false, label: 'More node actions', tooltip: 'More node actions' },
     ],
   });
@@ -666,7 +670,13 @@ test.describe('coarse pointer node actions', () => {
     await page.keyboard.press('Enter');
     const menu = page.getByRole('menu');
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveCount(3);
+    // The More menu lists the node actions followed by the visual-group actions
+    // (docs/user-guide/workspace-authoring.md); for a lone ungrouped node only the three node
+    // actions are operable. Every entry, disabled or not, must still meet the coarse target size.
+    await expect(items).toHaveCount(8);
+    expect(await items.evaluateAll(elements => elements.map(element => element.dataset.nodeAction))).toEqual(
+      ['trace', 'duplicate', 'delete', 'group', 'toggleGroup', 'renameGroup', 'replaceGroup', 'ungroup']);
+    await expect(menu.getByRole('menuitem', { disabled: false })).toHaveCount(3);
     const boxes = await items.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()));
     for (const box of boxes) expect(box.height).toBeGreaterThanOrEqual(50.5);
     for (let index = 1; index < boxes.length; index += 1) {

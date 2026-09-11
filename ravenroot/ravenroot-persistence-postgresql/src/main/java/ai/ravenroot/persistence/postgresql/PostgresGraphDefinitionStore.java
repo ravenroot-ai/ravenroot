@@ -82,12 +82,11 @@ public final class PostgresGraphDefinitionStore implements GraphDefinitionStore 
      * default: both bounds exist for the same reason, to turn "this is not resolving" into a reported
      * failure rather than an invisible stall.</p>
      */
-    private static final int MAX_DEFINITION_UPSERT_ATTEMPTS = 3;
-
     private final DataSource dataSource;
     private final Clock clock;
     private final GraphDefinitionReferences references;
     private final int maxDefinitionBytes;
+    private final int definitionUpsertAttempts;
     private final Transactions transactions;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -115,9 +114,16 @@ public final class PostgresGraphDefinitionStore implements GraphDefinitionStore 
      */
     public PostgresGraphDefinitionStore(DataSource dataSource, Clock clock, GraphDefinitionReferences references,
                                         int maxDefinitionBytes) {
+        this(dataSource, clock, references, maxDefinitionBytes, PostgresStoreConfig.defaults());
+    }
+
+    /** Opens with the resolved PostgreSQL transaction and definition-repair policy. */
+    public PostgresGraphDefinitionStore(DataSource dataSource, Clock clock, GraphDefinitionReferences references,
+                                        int maxDefinitionBytes, PostgresStoreConfig config) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.references = Objects.requireNonNull(references, "references");
+        Objects.requireNonNull(config, "config");
         if (maxDefinitionBytes < 1) {
             throw new IllegalArgumentException("maxDefinitionBytes must be positive");
         }
@@ -125,7 +131,7 @@ public final class PostgresGraphDefinitionStore implements GraphDefinitionStore 
             throw new IllegalArgumentException("maxDefinitionBytes exceeds the supported safety ceiling");
         }
         this.maxDefinitionBytes = maxDefinitionBytes;
-        PostgresStoreConfig config = PostgresStoreConfig.defaults();
+        this.definitionUpsertAttempts = config.graphDefinitionUpsertAttempts();
         this.transactions = new Transactions(dataSource, config, CommitBoundary.NONE);
         // One virtual thread per call rather than a sized platform-thread pool: every operation here
         // blocks on JDBC I/O and nothing here is CPU-bound, so there is no working set to size a pool
@@ -431,12 +437,12 @@ public final class PostgresGraphDefinitionStore implements GraphDefinitionStore 
      * returning no row at all - the row this method was about to lock is gone. That is not corruption;
      * it is the ordinary outcome of losing a race to a legitimate concurrent removal, and the correct
      * response is to try the insert again against what is now an empty slot, which the loop below
-     * does. See {@link #MAX_DEFINITION_UPSERT_ATTEMPTS} for the bound on how long this adapter keeps
-     * retrying before treating the contention as pathological.
+     * does. The resolved {@link PostgresStoreConfig#graphDefinitionUpsertAttempts()} bounds how long
+     * this adapter keeps retrying before treating the contention as pathological.
      */
     private Row upsertDefinition(Connection connection, GraphDefinitionKey key, GraphDefinitionIdentity identity,
                                  CanonicalGraphMl canonical, Instant now) throws SQLException {
-        for (int attempt = 0; attempt < MAX_DEFINITION_UPSERT_ATTEMPTS; attempt++) {
+        for (int remaining = definitionUpsertAttempts; remaining > 0; remaining--) {
             byte[] bytes = canonical.bytes();
             byte[] digest = sha256(bytes);
             int inserted = insertDefinitionIfAbsent(connection, key, identity, canonical, bytes, digest, now);

@@ -27,7 +27,8 @@ import java.util.Set;
  */
 public final class ReservedNetworkPolicy {
     /** Names allowed to resolve into reserved space out of the box. */
-    public static final String DEFAULT_EXCEPTIONS = "localhost:LOOPBACK";
+    public static final String DEFAULT_EXCEPTIONS =
+            ai.ravenroot.api.security.egress.ReservedNetworkPolicy.DEFAULT_EXCEPTIONS;
 
     private final ai.ravenroot.api.security.egress.ReservedNetworkPolicy delegate;
 

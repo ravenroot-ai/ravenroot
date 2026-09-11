@@ -110,6 +110,44 @@ def production_reappearance_fixture() -> tuple[
     return document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw
 
 
+def external_io_reviewed_entries(
+        candidates: tuple[audit.Candidate, ...] | list[audit.Candidate],
+        authority: dict[str, object]) -> dict[str, dict[str, object]]:
+    """Build truthful reviewed metadata for the closed source-derived #319 cohort."""
+    discovered = {candidate.id: candidate for candidate in candidates}
+    contracts = {identifier: contract for contract in authority["contracts"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in authority["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
+    entries: dict[str, dict[str, object]] = {}
+    for identifier, contract in contracts.items():
+        entry = discovered[identifier].inventory_entry()
+        entry.update(
+            status="already-centralized", classification="operator-configurable",
+            setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+            bindings=contract["bindings"], default=contract["defaultExpression"],
+            defaultEvidence=contract["defaultCandidateIds"],
+            validation="The typed policy validates the value before external I/O is admitted.",
+            scope=contract["scope"], pinning=contract["pinning"],
+            coverage="Source-derived owner, default, binding, consumer and test evidence.",
+            rationale="The closed platform external-I/O policy is the source authority.",
+            externalIoPolicyAuthority=audit.EXTERNAL_IO_POLICY_AUTHORITY_ID,
+        )
+        entries[identifier] = entry
+    for identifier, partition in retained.items():
+        entry = discovered[identifier].inventory_entry()
+        entry.update(
+            status=partition["status"], classification=partition["classification"],
+            rationale=("The closed external-I/O source proof assigns this exact candidate to "
+                       f"the {partition['semanticPartition']} partition."),
+            externalIoPolicyAuthority=audit.EXTERNAL_IO_POLICY_AUTHORITY_ID,
+        )
+        if partition["classification"] == "published-contract-description":
+            entry["retainedAuthority"] = audit.ENVIRONMENT_REFERENCE_AUTHORITY_ID
+        entries[identifier] = entry
+    return entries
+
+
 class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
@@ -821,6 +859,243 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
                             and "partition" in error for error in errors), errors)
 
+    def test_external_io_policy_authority_is_closed_over_source_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.external_io_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        assert expected is not None
+        self.assertEqual(40, len(expected["contracts"]))
+        self.assertEqual(81, sum(len(contract["candidateIds"])
+                                 for contract in expected["contracts"]))
+        self.assertEqual({
+            "derived": 11, "presentation-text": 38,
+            "protocol-or-format-invariant": 70,
+            "published-contract-description": 2,
+            "security-ceiling-or-default": 78,
+        }, {partition["classification"]: len(partition["candidateIds"])
+            for partition in expected["semanticPartitions"]})
+        self.assertEqual(280, len(expected["candidateIds"]))
+        self.assertEqual(set(expected["candidateIds"]),
+                         audit.external_io_policy_cohort_candidate_ids(discovered))
+
+        entries = external_io_reviewed_entries(candidates, expected)
+        authorities = {audit.EXTERNAL_IO_POLICY_AUTHORITY_ID: expected}
+        self.assertEqual([], audit.external_io_policy_authority_errors(
+            ROOT, authorities, entries, discovered))
+
+        missing = copy.deepcopy(authorities)
+        missing.clear()
+        self.assertTrue(audit.external_io_policy_authority_errors(
+            ROOT, missing, entries, discovered))
+
+        operator_id = expected["contracts"][0]["candidateIds"][0]
+        relabelled_operator = copy.deepcopy(entries)
+        relabelled_operator[operator_id].update(
+            status="retained", classification="protocol-or-format-invariant")
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, relabelled_operator, discovered)
+        self.assertTrue(any("requires one reviewed operator setting" in error
+                            for error in errors), errors)
+
+        retained_id = expected["semanticPartitions"][0]["candidateIds"][0]
+        relabelled_retained = copy.deepcopy(entries)
+        relabelled_retained[retained_id]["classification"] = "protocol-or-format-invariant"
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, relabelled_retained, discovered)
+        self.assertTrue(any("retained semantic partition has drifted" in error
+                            for error in errors), errors)
+
+        unmarked = copy.deepcopy(entries)
+        unmarked[operator_id].pop("externalIoPolicyAuthority")
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, unmarked, discovered)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+        missing_entry = copy.deepcopy(entries)
+        missing_entry.pop(retained_id)
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, missing_entry, discovered)
+        self.assertTrue(any("current source candidate set is incomplete" in error
+                            for error in errors), errors)
+
+        foreign = copy.deepcopy(entries)
+        outsider = next(candidate for candidate in candidates
+                        if candidate.id not in expected["candidateIds"])
+        foreign[outsider.id] = {
+            **outsider.inventory_entry(), "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Unrelated fixed vocabulary.",
+            "externalIoPolicyAuthority": audit.EXTERNAL_IO_POLICY_AUTHORITY_ID,
+        }
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, foreign, discovered)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+        missing_contract = copy.deepcopy(authorities)
+        missing_contract[audit.EXTERNAL_IO_POLICY_AUTHORITY_ID]["contracts"].pop()
+        self.assertTrue(audit.external_io_policy_authority_errors(
+            ROOT, missing_contract, entries, discovered))
+        missing_partition = copy.deepcopy(authorities)
+        missing_partition[audit.EXTERNAL_IO_POLICY_AUTHORITY_ID]["semanticPartitions"].pop()
+        self.assertTrue(audit.external_io_policy_authority_errors(
+            ROOT, missing_partition, entries, discovered))
+
+    def test_inventory_routes_mandatory_external_io_authority_without_markers(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        authority = audit.external_io_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        reviewed = external_io_reviewed_entries(candidates, authority)
+        entries = []
+        for candidate in candidates:
+            entry = reviewed.get(candidate.id, candidate.inventory_entry())
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                for candidate in candidates},
+            "externalIoPolicyAuthorities": {
+                audit.EXTERNAL_IO_POLICY_AUTHORITY_ID: authority,
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        target_ids = set(authority["candidateIds"])
+        target_settings = {contract["setting"] for contract in authority["contracts"]}
+        target_errors = [error for error in errors
+                         if "external-I/O" in error or "externalIo" in error
+                         or any(token in error for token in target_ids | target_settings)]
+        self.assertEqual([], target_errors)
+        self.assertTrue(errors, "the synthetic document deliberately omits unrelated authorities")
+        unrelated = [error for error in errors if error not in target_errors]
+        self.assertEqual([], [error for error in unrelated if not (
+            error == "AssistantConfiguration operational limits require one closed family authority"
+            or error == "Helm settings require the exact source-derived closed values authority"
+            or error == "persistence settings require the exact mandatory source-derived authority"
+            or (error.startswith("deployment.")
+                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
+        )], unrelated)
+
+        removed = copy.deepcopy(document)
+        removed.pop("externalIoPolicyAuthorities")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error
+                            for error in errors), errors)
+
+        markerless = copy.deepcopy(document)
+        markerless.pop("externalIoPolicyAuthorities")
+        markerless["entries"] = [entry for entry in markerless["entries"]
+                                 if entry["id"] not in target_ids]
+        markerless["remediationDomains"] = audit.build_remediation_domains(markerless["entries"])
+        errors = audit.inventory_errors(ROOT, markerless, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error
+                            or "current source candidate set is incomplete" in error
+                            for error in errors), errors)
+
+        relabelled = copy.deepcopy(document)
+        operator_id = authority["contracts"][0]["candidateIds"][0]
+        next(entry for entry in relabelled["entries"] if entry["id"] == operator_id).update(
+            status="retained", classification="protocol-or-format-invariant")
+        errors = audit.inventory_errors(ROOT, relabelled, candidates)
+        self.assertTrue(any("requires one reviewed operator setting" in error
+                            for error in errors), errors)
+
+        retained_id = authority["semanticPartitions"][0]["candidateIds"][0]
+        retained_relabel = copy.deepcopy(document)
+        next(entry for entry in retained_relabel["entries"]
+             if entry["id"] == retained_id)["classification"] = "protocol-or-format-invariant"
+        errors = audit.inventory_errors(ROOT, retained_relabel, candidates)
+        self.assertTrue(any("retained semantic partition has drifted" in error
+                            for error in errors), errors)
+
+    def test_external_io_policy_authority_rejects_partial_or_drifted_source(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.external_io_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        assert expected is not None
+        paths = tuple(Path(item["path"]) for item in expected["sourceDigests"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]],
+                           cwd=root, check=True)
+
+            def derives() -> bool:
+                current = {candidate.id: candidate for candidate in audit.discover(root)}
+                return audit.external_io_policy_authority_from_source(root, current) is not None
+
+            self.assertTrue(derives())
+
+            def rejects(relative: Path, before: str, after: str) -> None:
+                target = root / relative
+                source = target.read_text(encoding="utf-8")
+                self.assertEqual(1, source.count(before), (relative, before))
+                target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                try:
+                    self.assertFalse(derives(), relative)
+                finally:
+                    target.write_text(source, encoding="utf-8")
+
+            rejects(audit.EXTERNAL_IO_LIMITS_PATH,
+                    "DEFAULT_MANAGED_HTTP_DURATION = Duration.ofSeconds(30)",
+                    "DEFAULT_MANAGED_HTTP_DURATION = Duration.ofSeconds(31)")
+            rejects(audit.EXTERNAL_IO_NODE_CAPACITY_PATH,
+                    "int maximumMessageBytes, int maximumFragments,\n"
+                    "                                     Duration maximumTimeout, int maximumConcurrency",
+                    "int maximumMessageBytes, int maximumConcurrency,\n"
+                    "                                     Duration maximumTimeout, int maximumFragments")
+            rejects(audit.EXTERNAL_IO_NODE_CAPACITY_PATH,
+                    "maximumTimeout.toNanos();", "maximumTimeout.toMillis();")
+            rejects(audit.EXTERNAL_IO_CAPACITY_CAPABLE_PATH,
+                    "NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration);",
+                    "NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration, "
+                    "NodePackageServices services);")
+            rejects(audit.EXTERNAL_IO_SERVER_MAIN_PATH,
+                    "if (value < 1) throw new NumberFormatException(\"nonpositive\");",
+                    "if (value < 0) throw new NumberFormatException(\"negative\");")
+            rejects(audit.EXTERNAL_IO_APPLICATION_PATH,
+                    "policyForNodeAdmission(behaviorNodes)",
+                    "policyForNodes(behaviorNodes)")
+            rejects(audit.EXTERNAL_IO_WS_ADMISSION_PATH,
+                    "if (active >= maximum) return false;",
+                    "if (active > maximum) return false;")
+            rejects(audit.EXTERNAL_IO_TEAMS_PROFILE_PATH, "MAX_ACK_TIMEOUT_MS = 4_500",
+                    "MAX_ACK_TIMEOUT_MS = 4_600")
+            rejects(audit.EXTERNAL_IO_MATTERMOST_PROFILE_PATH, "MAX_ACK_TIMEOUT_MS = 2_800",
+                    "MAX_ACK_TIMEOUT_MS = 2_900")
+
+            test_path = Path(
+                "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/"
+                "HostedExternalIoPolicyTest.java")
+            rejects(test_path, "@Test void oldThenNewPinsCoexistOnOneHostedRunner()",
+                    "void oldThenNewPinsCoexistOnOneHostedRunner()")
+
+            capacity_path = root / audit.EXTERNAL_IO_NODE_CAPACITY_PATH
+            capacity_bytes = capacity_path.read_bytes()
+            capacity_path.unlink()
+            try:
+                self.assertFalse(derives())
+            finally:
+                capacity_path.write_bytes(capacity_bytes)
+
+            # A new scanner-visible setting in a dedicated family source must not be omitted merely
+            # because every previously reviewed identifier and method digest still matches.
+            target = root / audit.EXTERNAL_IO_LIMITS_PATH
+            source = target.read_text(encoding="utf-8")
+            target.write_text(source.rsplit("}", 1)[0]
+                              + "    static final int UNREVIEWED_EXTERNAL_IO_LIMIT = 17;\n}\n",
+                              encoding="utf-8")
+            self.assertFalse(derives())
+
     def test_persistence_policy_authority_is_closed_over_source_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
         discovered = {candidate.id: candidate for candidate in candidates}
@@ -1197,6 +1472,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
                     "pinned != config.maxPayloadBytes()",
                     "pinned < config.maxPayloadBytes()")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    'policy.persistence().orElseThrow(\n'
+                    '                            () -> new IllegalArgumentException('
+                    '"persistence capacity is absent"))',
+                    'policy.persistence().orElseThrow()')
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    'policy.persistence().orElseThrow(\n'
+                    '                            () -> new IllegalArgumentException('
+                    '"persistence capacity is absent"))',
+                    'policy.persistence().orElseThrow()')
             rejects(audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
                     "ExecutionManifestResolver.completeManaged(engine,",
                     "ExecutionManifestResolver.complete(engine,")
@@ -1236,6 +1521,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
                     "@Test\n    final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
                     "final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute()",
+                    "final void formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess()",
+                    "final void formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess()")
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
                     "@Test\n    void aPasswordIsNotTrimmedBecauseItIsOpaque()",
                     "void aPasswordIsNotTrimmedBecauseItIsOpaque()")
@@ -1921,6 +2214,29 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_environment_reference_publication_authority_has_source_derived_membership(self) -> None:
         candidates = audit.discover(ROOT)
         eligible = audit.environment_reference_description_candidate_ids(ROOT, candidates)
+        websocket_boundary = next(candidate for candidate in candidates
+                                  if candidate.path == audit.ENVIRONMENT_REFERENCE_PATH.as_posix()
+                                  and candidate.symbol == "boundary"
+                                  and candidate.role == "RAVENROOT_WEBSOCKET_")
+        self.assertIn(websocket_boundary.id, eligible)
+        unsupported_boundary = audit.Candidate(
+            id="oc-unsupported-boundary", path=audit.ENVIRONMENT_REFERENCE_PATH.as_posix(),
+            line=1, symbol="boundary", kind="environment-binding",
+            role="RAVENROOT_NOT_A_REAL_FAMILY_", expression="RAVENROOT_NOT_A_REAL_FAMILY_",
+            expression_digest="expression", evidence="unsupported",
+            evidence_digest="evidence", surface="script",
+        )
+        off_path_boundary = audit.Candidate(
+            id="oc-off-path-boundary", path="scripts/other_generator.py",
+            line=1, symbol="boundary", kind="environment-binding",
+            role="RAVENROOT_WEBSOCKET_", expression="RAVENROOT_WEBSOCKET_",
+            expression_digest="expression", evidence="off path",
+            evidence_digest="evidence", surface="script",
+        )
+        widened = audit.environment_reference_description_candidate_ids(
+            ROOT, (*candidates, unsupported_boundary, off_path_boundary))
+        self.assertNotIn(unsupported_boundary.id, widened)
+        self.assertNotIn(off_path_boundary.id, widened)
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         authorized = {entry["id"] for entry in document["entries"]
                       if entry.get("retainedAuthority") ==

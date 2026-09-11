@@ -47,15 +47,25 @@ class PostgresManagedExecutionStoreContractTest extends ManagedExecutionStoreCon
 
     @Test
     void processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock() throws Exception {
-        assertCleanupSerializes(false);
+        assertCleanupSerializes(false, false);
     }
 
     @Test
     void processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock() throws Exception {
-        assertCleanupSerializes(true);
+        assertCleanupSerializes(true, false);
     }
 
-    private void assertCleanupSerializes(boolean purge) throws Exception {
+    @Test
+    void formatFourProcessCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock() throws Exception {
+        assertCleanupSerializes(false, true);
+    }
+
+    @Test
+    void formatFourProcessCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock() throws Exception {
+        assertCleanupSerializes(true, true);
+    }
+
+    private void assertCleanupSerializes(boolean purge, boolean formatFour) throws Exception {
         DataSource raw = PostgresTestDatabase.dataSourceFor("managed-cleanup-" + UUID.randomUUID());
         var atCommit = new CountDownLatch(1);
         var releaseCommit = new CountDownLatch(1);
@@ -76,7 +86,7 @@ class PostgresManagedExecutionStoreContractTest extends ManagedExecutionStoreCon
                      PostgresExecutionManifestStore.DEFAULT_MAX_PIN_ATTEMPTS,
                      PostgresStoreConfig.defaults(), cleanupEntered::countDown)) {
             var key = new ai.ravenroot.api.persistence.ExecutionKey("acme", UUID.randomUUID());
-            var stored = await(manifests.pin(purge
+            var stored = await(manifests.pin(formatFour
                     ? manifestV4(key, executions.maxPayloadBytes())
                     : manifest(key, executions.maxPayloadBytes())));
             armed.set(true);

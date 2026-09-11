@@ -99,6 +99,36 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     @Test
+    final void formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute() {
+        int liveCapacity = bundle().executionStore().maxPayloadBytes();
+
+        ExecutionKey absent = new ExecutionKey("v4-absent-apply", UUID.randomUUID());
+        var absentStored = await(bundle().manifestStore().pin(manifestV4WithoutPersistence(absent)));
+        var absentAuthority = new ExecutionPersistenceAuthority(absentStored.digest(), liveCapacity);
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                failureOf(() -> await(bundle().executionStore().applyManaged(
+                        creationBatch(absent), absentAuthority))));
+        assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                failureOf(() -> await(bundle().executionStore().load(absent))));
+
+        ManagedFixture direct = rawClaimableWithoutPersistence("v4-absent-direct", false);
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                failureOf(() -> await(bundle().executionStore().claimManaged(
+                        direct.key(), "worker-1", java.time.Duration.ofSeconds(5), direct.authority()))));
+        assertTrue(await(bundle().executionStore().leases(direct.key().tenantId())).isEmpty());
+
+        ManagedFixture work = rawClaimableWithoutPersistence("v4-absent-work", false);
+        assertRestrictedClaimRefuses(work.key().tenantId(), false,
+                Map.of(work.key(), work.authority()));
+        assertTrue(await(bundle().executionStore().leases(work.key().tenantId())).isEmpty());
+
+        ManagedFixture timer = rawClaimableWithoutPersistence("v4-absent-timer", true);
+        assertRestrictedClaimRefuses(timer.key().tenantId(), true,
+                Map.of(timer.key(), timer.authority()));
+        assertTrue(await(bundle().executionStore().leases(timer.key().tenantId())).isEmpty());
+    }
+
+    @Test
     final void missingStaleAndLegacyAuthoritiesRefuseBeforeCreatingAProcess() {
         ExecutionKey missing = new ExecutionKey("acme", UUID.randomUUID());
         var invented = new ExecutionPersistenceAuthority(
@@ -205,6 +235,21 @@ public abstract class ManagedExecutionStoreContract {
     }
 
     @Test
+    final void formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess() {
+        ExecutionKey key = new ExecutionKey("v4-cleanup-wins", UUID.randomUUID());
+        var stored = await(bundle().manifestStore().pin(
+                manifestV4(key, bundle().executionStore().maxPayloadBytes())));
+        var authority = ExecutionPersistenceAuthority.from(stored);
+        await(bundle().manifestStore().remove(key));
+
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                failureOf(() -> await(bundle().executionStore().applyManaged(
+                        creationBatch(key), authority))));
+        assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                failureOf(() -> await(bundle().executionStore().load(key))));
+    }
+
+    @Test
     final void incompatibleCapacityAndEmptyVerifiedClaimSetNeverFallThrough() {
         ExecutionKey key = new ExecutionKey("acme", UUID.randomUUID());
         int live = bundle().executionStore().maxPayloadBytes();
@@ -277,6 +322,18 @@ public abstract class ManagedExecutionStoreContract {
                 new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(), List.of(),
                 Optional.of(new ResolvedOperationalPolicy.PersistenceLimits(persistenceCapacity)),
                 List.of(new ResolvedOperationalPolicy.NodeIoCapacity("b".repeat(64),
+                        new ai.ravenroot.api.node.service.NodeExternalIoCapacity(
+                                4096, 8, java.time.Duration.ofSeconds(3), 4))));
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key,
+                new GraphContentId("a".repeat(64)),
+                new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
+                profile(), List.of(), NOW, policy);
+    }
+
+    private static ExecutionManifest manifestV4WithoutPersistence(ExecutionKey key) {
+        ResolvedOperationalPolicy policy = new ResolvedOperationalPolicy(graph(),
+                new ResolvedOperationalPolicy.ResultLimits(false, 4096), Optional.empty(), List.of(),
+                Optional.empty(), List.of(new ResolvedOperationalPolicy.NodeIoCapacity("b".repeat(64),
                         new ai.ravenroot.api.node.service.NodeExternalIoCapacity(
                                 4096, 8, java.time.Duration.ofSeconds(3), 4))));
         return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key,
@@ -413,6 +470,34 @@ public abstract class ManagedExecutionStoreContract {
                 .scheduleTimer(new TimerSchedule(UUID.randomUUID(), NOW, traversal, null,
                         OpaquePayload.empty("application/octet-stream")))
                 .build(), authority));
+        return new ManagedFixture(key, authority);
+    }
+
+    private ManagedFixture rawClaimableWithoutPersistence(String tenantId, boolean timersOnly) {
+        ExecutionKey key = new ExecutionKey(tenantId, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var stored = await(bundle().manifestStore().pin(manifestV4WithoutPersistence(key)));
+        var authority = new ExecutionPersistenceAuthority(
+                stored.digest(), bundle().executionStore().maxPayloadBytes());
+        var created = await(bundle().executionStore().apply(creationBatch(key, traversal)));
+        ExecutionBatch.Builder next = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()));
+        if (timersOnly) {
+            next.scheduleTimer(new TimerSchedule(UUID.randomUUID(), NOW, traversal, null,
+                    OpaquePayload.empty("application/octet-stream")));
+        } else {
+            UUID invocation = UUID.randomUUID();
+            next.apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversal, TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversal,
+                            new NodeInvocation(invocation, "work", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                    List.of(), NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.InvocationTransitioned(
+                            traversal, invocation, NodeInvocationStatus.RUNNING))
+                    .apply(new ExecutionTransition.AttemptAdded(traversal, invocation,
+                            new NodeAttempt(UUID.randomUUID(), 1, NodeAttemptStatus.SCHEDULED)));
+        }
+        await(bundle().executionStore().apply(next.build()));
         return new ManagedFixture(key, authority);
     }
 

@@ -554,7 +554,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 try {
                     var policy = ai.ravenroot.api.persistence.ResolvedOperationalPolicy
                             .decodeForManifest(rows.getString(3), rows.getInt(2));
-                    int pinned = policy.persistence().orElseThrow().maximumPayloadBytes();
+                    int pinned = policy.persistence().orElseThrow(
+                            () -> new IllegalArgumentException("persistence capacity is absent"))
+                            .maximumPayloadBytes();
                     if (pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()) {
                         throw failure(ExecutionStoreFailure.invalid(
                                 "managed execution persistence capacity is incompatible"));

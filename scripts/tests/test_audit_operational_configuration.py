@@ -67,6 +67,20 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         authority = audit.helm_authority_from_source(ROOT, candidates)
         self.assertIsNotNone(authority)
         assert authority is not None
+        self.assertEqual({
+            "apiVersion": "v2", "name": "ravenroot", "type": "application",
+        }, {field: authority["chartMetadata"][field]
+            for field in ("apiVersion", "name", "type")})
+        self.assertEqual(authority["chartMetadata"]["version"],
+                         authority["chartMetadata"]["appVersion"])
+        chart_candidate_ids = {
+            candidate.id for candidate in candidates if candidate.path == audit.HELM_CHART_PATH}
+        contract_candidate_ids = {
+            identifier for contract in authority["contracts"]
+            for identifier in contract["candidateIds"]}
+        self.assertTrue(chart_candidate_ids)
+        self.assertTrue(chart_candidate_ids <= set(authority["candidateIds"]))
+        self.assertTrue(chart_candidate_ids.isdisjoint(contract_candidate_ids))
         entries = {
             identifier: {
                 "id": identifier, "setting": contract["setting"],
@@ -129,7 +143,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             authority = audit.helm_authority_from_source(ROOT, candidates)
             self.assertIsNotNone(authority)
             assert authority is not None
-            for path in {audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+            for path in {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                          *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                          authority["timeoutRuntime"]["path"]}:
                 target = root / path
@@ -140,6 +154,39 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 '"const": true', '"const": false', 1), encoding="utf-8")
             errors = audit.helm_authority_errors(root, None, {}, candidates)
             self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        chart_mutations = (
+            ("apiVersion: v2", "apiVersion: v1"),
+            ("name: ravenroot", "name: another-chart"),
+            ("type: application", "type: library"),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.\n", ""),
+            ("version: 0.1.0-alpha.1\n", ""),
+            ('appVersion: "0.1.0-alpha.1"\n', ""),
+            ('kubeVersion: ">=1.25.0-0"\n', ""),
+            ("apiVersion: v2", "apiVersion: ["),
+        )
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        required = {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                    *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                    authority["timeoutRuntime"]["path"]}
+        for before, after in chart_mutations:
+            with self.subTest(chart_mutation=before):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    chart = root / audit.HELM_CHART_PATH
+                    source = chart.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    chart.write_text(source.replace(before, after, 1), encoding="utf-8")
+                    errors = audit.helm_authority_errors(root, None, {}, candidates)
+                    self.assertTrue(any("violate the closed authority" in error
+                                        for error in errors), errors)
 
     def test_helm_authority_rejects_source_contract_and_executable_evidence_drift(self) -> None:
         candidates = audit.discover(ROOT)
@@ -207,7 +254,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             with self.subTest(relative=relative, before=before):
                 with tempfile.TemporaryDirectory() as location:
                     root = Path(location)
-                    required = {audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                    required = {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH,
+                                audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                                 authority["timeoutRuntime"]["path"]}
                     for path in required:
@@ -222,13 +270,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     self.assertTrue(audit.helm_authority_errors(
                         root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
 
-        for removed in (audit.HELM_TEMPLATE_PATHS[0],
+        for removed in (audit.HELM_CHART_PATH, audit.HELM_TEMPLATE_PATHS[0],
                         "scripts/tests/test_helm_values_contract.sh",
                         authority["timeoutRuntime"]["path"]):
             with self.subTest(removed=removed):
                 with tempfile.TemporaryDirectory() as location:
                     root = Path(location)
-                    required = {audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                    required = {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH,
+                                audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
                                 authority["timeoutRuntime"]["path"]}
                     for path in required:
@@ -242,7 +291,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
-            for path in {audit.HELM_VALUES_PATH, *audit.HELM_TEMPLATE_PATHS,
+            for path in {audit.HELM_CHART_PATH, audit.HELM_VALUES_PATH,
+                         *audit.HELM_TEMPLATE_PATHS,
                          *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)

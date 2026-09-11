@@ -1988,6 +1988,67 @@ def helm_chart_present(root: Path, candidates: tuple[Candidate, ...]) -> bool:
         or any(candidate.path in chart_paths for candidate in candidates)
 
 
+def helm_chart_metadata(root: Path) -> dict[str, object] | None:
+    """Read the exact flat metadata contract that identifies the supported chart."""
+    try:
+        source = (root / HELM_CHART_PATH).read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        return None
+    expected_fields = {
+        "apiVersion", "name", "description", "type", "version", "appVersion", "kubeVersion",
+    }
+    fields: dict[str, str] = {}
+    for raw in source.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)\s*:\s*(.*?)\s*", raw)
+        if match is None or match.group(1) in fields or not match.group(2):
+            return None
+        key, scalar = match.groups()
+        if scalar.startswith('"'):
+            try:
+                value = json.loads(scalar)
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(value, str):
+                return None
+        elif scalar.startswith("'"):
+            if len(scalar) < 2 or not scalar.endswith("'"):
+                return None
+            value = scalar[1:-1].replace("''", "'")
+        elif scalar[0] in "[{>|&*!" or " #" in scalar:
+            return None
+        else:
+            value = scalar
+        if not value.strip():
+            return None
+        fields[key] = value
+    if set(fields) != expected_fields \
+            or fields["apiVersion"] != "v2" \
+            or fields["name"] != "ravenroot" \
+            or fields["type"] != "application":
+        return None
+    semantic_version = re.compile(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+        r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?")
+    if semantic_version.fullmatch(fields["version"]) is None \
+            or fields["appVersion"] != fields["version"] \
+            or re.fullmatch(r">=[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?",
+                            fields["kubeVersion"]) is None:
+        return None
+    return {
+        "path": HELM_CHART_PATH,
+        "apiVersion": fields["apiVersion"],
+        "name": fields["name"],
+        "description": fields["description"],
+        "type": fields["type"],
+        "version": fields["version"],
+        "appVersion": fields["appVersion"],
+        "kubeVersion": fields["kubeVersion"],
+        "digest": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+    }
+
+
 def helm_timeout_runtime_evidence(root: Path) -> dict[str, object] | None:
     path = ("ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/"
             "programming/graalvm/GraalVmProgramRuntime.java")
@@ -2030,6 +2091,9 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
         schema_source = (root / HELM_SCHEMA_PATH).read_text(encoding="utf-8")
         schema = json.loads(schema_source)
     except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    chart_metadata = helm_chart_metadata(root)
+    if chart_metadata is None:
         return None
     operator_paths = {contract[0] for contract in HELM_OPERATOR_VALUE_CONTRACTS}
     fixed_paths = set(HELM_FIXED_VALUE_CONTRACTS) | set(HELM_FIXED_LIST_CONTRACTS)
@@ -2141,9 +2205,13 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
     runtime = helm_timeout_runtime_evidence(root)
     if runtime is None or helm_test_evidence_errors(root):
         return None
-    covered_paths = {HELM_VALUES_PATH, HELM_SCHEMA_PATH, *HELM_TEMPLATE_PATHS, *HELM_TEST_ROLES}
+    covered_paths = {
+        HELM_CHART_PATH, HELM_VALUES_PATH, HELM_SCHEMA_PATH,
+        *HELM_TEMPLATE_PATHS, *HELM_TEST_ROLES,
+    }
     return {
         "kind": "helm-values-authority-v1",
+        "chartMetadata": chart_metadata,
         "valuesPath": HELM_VALUES_PATH,
         "schemaPath": HELM_SCHEMA_PATH,
         "templatePaths": list(HELM_TEMPLATE_PATHS),

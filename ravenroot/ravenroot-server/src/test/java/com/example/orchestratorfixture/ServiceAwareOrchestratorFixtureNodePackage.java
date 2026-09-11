@@ -1,7 +1,10 @@
 package com.example.orchestratorfixture;
 
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.deployment.InboundSource;
+import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -20,10 +23,12 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class ServiceAwareOrchestratorFixtureNodePackage implements NodePackage {
     public static final AtomicBoolean LEGACY_CREATE_CALLED = new AtomicBoolean();
     public static final AtomicReference<NodePackageServices> RECEIVED_SERVICES = new AtomicReference<>();
+    public static final AtomicReference<InboundSourceContext> RECEIVED_SOURCE_CONTEXT = new AtomicReference<>();
 
     public static void reset() {
         LEGACY_CREATE_CALLED.set(false);
         RECEIVED_SERVICES.set(null);
+        RECEIVED_SOURCE_CONTEXT.set(null);
     }
 
     @Override public String id() { return "test.orchestrator.services"; }
@@ -31,7 +36,7 @@ public final class ServiceAwareOrchestratorFixtureNodePackage implements NodePac
     @Override public String sdkContract() { return NodeSdk.CONTRACT; }
     @Override public List<NodeBehavior> behaviors() { return List.of(new Behavior()); }
 
-    private static final class Behavior implements NodeBehavior {
+    private static final class Behavior implements NodeBehavior, InboundSourceCapable {
         @Override public NodeTypeDescriptor descriptor() {
             return new NodeTypeDescriptor("orchestrator.services", "Services", "Test", "", "actor", false,
                     List.of(), Set.of());
@@ -46,6 +51,21 @@ public final class ServiceAwareOrchestratorFixtureNodePackage implements NodePac
         @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services) {
             RECEIVED_SERVICES.set(services);
             return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+        }
+
+        @Override public InboundSource createSource(NodeConfiguration configuration,
+                                                     InboundSourceContext context) {
+            return new InboundSource() {
+                @Override public java.util.concurrent.CompletionStage<Void> start(
+                        InboundSourceContext issuedContext) {
+                    RECEIVED_SOURCE_CONTEXT.set(issuedContext);
+                    return CompletableFuture.completedFuture(null);
+                }
+
+                @Override public java.util.concurrent.CompletionStage<Void> stop() {
+                    return CompletableFuture.completedFuture(null);
+                }
+            };
         }
     }
 }

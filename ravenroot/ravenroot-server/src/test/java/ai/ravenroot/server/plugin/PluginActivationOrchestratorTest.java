@@ -6,10 +6,15 @@ import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.TrustedIngress;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.DefaultGraphDeployment;
+import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -19,6 +24,7 @@ import ai.ravenroot.core.security.OutboundHttpPolicy;
 import ai.ravenroot.core.security.ProviderCredentialResolver;
 import ai.ravenroot.core.ai.AgentRuntimeRegistry;
 import ai.ravenroot.core.ai.ModelProviderRegistry;
+import ai.ravenroot.pekko.PekkoExecutionEngine;
 import ai.ravenroot.plugin.bundle.PluginBundleException;
 import ai.ravenroot.plugin.bundle.PluginBundleValidator;
 import com.example.orchestratorfixture.OrchestratorFixtureNodePackage;
@@ -34,6 +40,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.HexFormat;
@@ -45,6 +52,7 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -195,17 +203,23 @@ class PluginActivationOrchestratorTest {
         var registered = PluginActivationOrchestrator.register(
                 BehaviorRegistry.standard(behaviorEnvironment()), environment,
                 EnvironmentNodePackageServiceGrants.fromEnvironment(environment, recording));
-        registered.registry().create(new GraphNode("probe", NodeKind.BEHAVIOR,
-                "orchestrator.services", Map.of())).orElseThrow();
-        var services = ServiceAwareOrchestratorFixtureNodePackage.RECEIVED_SERVICES.get();
+        try (var source = startSource(registered.registry(), "tenant-a")) {
+            var services = ServiceAwareOrchestratorFixtureNodePackage.RECEIVED_SERVICES.get();
 
-        assertTrue(await(services.credentials().resolve(sourceContext("tenant-a"), "allowed",
-                java.time.Duration.ofSeconds(5))), "an admitted reference must resolve");
-        assertFalse(await(services.credentials().resolve(sourceContext("tenant-a"), "denied",
-                java.time.Duration.ofSeconds(5))), "a reference outside the list must not resolve");
-        assertEquals(List.of("allowed"), asked,
-                "the deployment credential path must never even be asked for a reference outside the list");
-        registered.activation().close();
+            assertFalse(await(services.credentials().resolve(sourceContext(source.context()), "allowed",
+                    java.time.Duration.ofSeconds(5))),
+                    "an equivalent caller-built context cannot mint source authority");
+            assertEquals(List.of(), asked,
+                    "a forged context must be refused before the deployment resolver is called");
+            assertTrue(await(services.credentials().resolve(source.context(), "allowed",
+                    java.time.Duration.ofSeconds(5))), "an admitted reference must resolve");
+            assertFalse(await(services.credentials().resolve(source.context(), "denied",
+                    java.time.Duration.ofSeconds(5))), "a reference outside the list must not resolve");
+            assertEquals(List.of("allowed"), asked,
+                    "the deployment credential path must never even be asked for a reference outside the list");
+        } finally {
+            registered.activation().close();
+        }
     }
 
     /**
@@ -242,22 +256,23 @@ class PluginActivationOrchestratorTest {
         var registered = PluginActivationOrchestrator.register(
                 BehaviorRegistry.standard(behaviorEnvironment()), environment,
                 EnvironmentNodePackageServiceGrants.fromEnvironment(environment, deployment));
-        registered.registry().create(new GraphNode("probe", NodeKind.BEHAVIOR,
-                "orchestrator.services", Map.of())).orElseThrow();
-        var services = ServiceAwareOrchestratorFixtureNodePackage.RECEIVED_SERVICES.get();
+        try (var source = startSource(registered.registry(), "tenant-a")) {
+            var services = ServiceAwareOrchestratorFixtureNodePackage.RECEIVED_SERVICES.get();
 
-        try (var lease = services.credentials()
-                .resolve(sourceContext("tenant-a"), "storage-key", java.time.Duration.ofSeconds(5))
-                .completion().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS)) {
-            assertEquals("secret:storage-key", new String(lease.copy()),
-                    "once written into the list, a SigV4-bound reference is readable in the clear");
+            try (var lease = services.credentials()
+                    .resolve(source.context(), "storage-key", java.time.Duration.ofSeconds(5))
+                    .completion().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                assertEquals("secret:storage-key", new String(lease.copy()),
+                        "once written into the list, a SigV4-bound reference is readable in the clear");
+            }
+            // The list still governs everything it names, and everything it does not.
+            assertTrue(await(services.credentials().resolve(source.context(), "api-key",
+                    java.time.Duration.ofSeconds(5))));
+            assertFalse(await(services.credentials().resolve(source.context(), "unrelated",
+                    java.time.Duration.ofSeconds(5))));
+        } finally {
+            registered.activation().close();
         }
-        // The list still governs everything it names, and everything it does not.
-        assertTrue(await(services.credentials().resolve(sourceContext("tenant-a"), "api-key",
-                java.time.Duration.ofSeconds(5))));
-        assertFalse(await(services.credentials().resolve(sourceContext("tenant-a"), "unrelated",
-                java.time.Duration.ofSeconds(5))));
-        registered.activation().close();
     }
 
     /** True when the call produced a lease; false when it refused. Closes the lease either way. */
@@ -271,25 +286,67 @@ class PluginActivationOrchestratorTest {
         }
     }
 
-    private static InboundSourceContext sourceContext(String tenant) {
-        var identity = new ai.ravenroot.api.security.SecurityContext(
-                "request", tenant, "subject",
-                ai.ravenroot.api.security.PrincipalType.USER, "issuer");
+    private static InboundSourceContext sourceContext(InboundSourceContext issued) {
         return new InboundSourceContext() {
             @Override public DeploymentId deploymentId() {
-                return DeploymentId.of("plugin-orchestrator-test");
+                return issued.deploymentId();
             }
-            @Override public String nodeId() { return "source"; }
+            @Override public String nodeId() { return issued.nodeId(); }
             @Override public ai.ravenroot.api.security.SecurityContext identity() {
-                return identity;
+                return issued.identity();
             }
             @Override public TrustedIngress ingress() {
-                throw new UnsupportedOperationException();
+                return issued.ingress();
             }
             @Override public void reportDegraded(String sanitizedReason) { }
             @Override public void reportHealthy() { }
         };
     }
+
+    private static LiveSource startSource(BehaviorRegistry registry, String tenant) throws Exception {
+        var engine = new PekkoExecutionEngine("plugin-orchestrator-source-" + System.nanoTime());
+        var deployment = new DefaultGraphDeployment(DeploymentId.of("plugin-orchestrator-source"), engine,
+                registry, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8),
+                DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
+        var identity = new SecurityContext("request", tenant, "subject", PrincipalType.USER, "issuer");
+        try {
+            deployment.start(identity).toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+            InboundSourceContext context = ServiceAwareOrchestratorFixtureNodePackage
+                    .RECEIVED_SOURCE_CONTEXT.get();
+            assertNotNull(context, "the fixture must receive the core-issued context during source.start");
+            return new LiveSource(deployment, engine, context);
+        } catch (Exception failure) {
+            deployment.stop().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+            engine.close();
+            throw failure;
+        }
+    }
+
+    private record LiveSource(DefaultGraphDeployment deployment, PekkoExecutionEngine engine,
+                              InboundSourceContext context) implements AutoCloseable {
+        @Override public void close() throws Exception {
+            deployment.stop().toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+            engine.close();
+        }
+    }
+
+    private static final String SOURCE_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <graph id="g" edgedefault="directed">
+                <node id="start"><data key="kind">start</data></node>
+                <node id="source"><data key="kind">behavior</data>
+                  <data key="behavior">orchestrator.services</data></node>
+                <node id="end"><data key="kind">end</data></node>
+                <node id="error"><data key="kind">error</data></node>
+                <edge source="start" target="source"/>
+                <edge source="source" target="end"/>
+              </graph>
+            </graphml>
+            """;
 
     /**
      * The two-argument {@code registerWithInventory} is what embedders compile against. Its meaning is

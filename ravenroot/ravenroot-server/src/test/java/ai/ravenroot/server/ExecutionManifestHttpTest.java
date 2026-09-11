@@ -101,7 +101,7 @@ class ExecutionManifestHttpTest {
                 assertTrue(body.contains("\"incompatibleDimensions\":[]"), body);
                 assertTrue(body.contains("\"graphVersion\":\"" + graphVersion + "\""),
                         () -> "the caller's own submitted graph address must be echoed back: " + body);
-                assertTrue(body.contains("\"manifestFormatVersion\":2"), body);
+                assertTrue(body.contains("\"manifestFormatVersion\":4"), body);
                 assertTrue(Pattern.compile("\"manifestDigest\":\"[0-9a-f]{64}\"").matcher(body).find(),
                         () -> "the manifest's own address identifies it to its owner: " + body);
                 assertTrue(body.contains("\"dimensionsTruncated\":false"), body);

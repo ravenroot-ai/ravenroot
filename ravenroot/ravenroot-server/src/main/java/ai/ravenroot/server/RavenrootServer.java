@@ -308,6 +308,7 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
+    private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
     /** Installed only by the packaged composition when durable agent authority is enabled. */
     /**
@@ -965,8 +966,14 @@ public final class RavenrootServer implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             throw new IllegalStateException("server is already started");
         }
-        server.start();
-        verifyRequestHeaderCapTookEffect();
+        try {
+            if (interactionWebSockets != null) interactionWebSockets.start();
+            server.start();
+            verifyRequestHeaderCapTookEffect();
+        } catch (RuntimeException failure) {
+            if (interactionWebSockets != null) interactionWebSockets.close();
+            throw failure;
+        }
     }
 
     /**
@@ -1009,6 +1016,21 @@ public final class RavenrootServer implements AutoCloseable {
         humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
         humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
         humanTaskPolicy = java.util.Objects.requireNonNull(policy, "policy");
+    }
+
+    /** Installs the independently bound durable interaction listener before either listener starts. */
+    synchronized void installInteractionWebSockets(
+            ai.ravenroot.server.interaction.InteractionWebSocketConfiguration configuration) {
+        if (started.get()) throw new IllegalStateException("interaction WebSocket must be installed before start");
+        if (interactionWebSockets != null) throw new IllegalStateException("interaction WebSocket is already installed");
+        if (humanTasks == null) throw new IllegalStateException("interaction WebSocket requires durable human tasks");
+        if (!authorizedApplication.durableEventJournalAvailable()) {
+            throw new IllegalStateException("interaction WebSocket requires a durable event journal");
+        }
+        interactionWebSockets = new ai.ravenroot.server.interaction.InteractionWebSocketServer(
+                java.util.Objects.requireNonNull(configuration, "configuration"), authorizedApplication,
+                authenticator, httpSecurity.browserOrigins(), httpSecurity.sseAuthenticationRevalidation(),
+                rateLimiter, humanTasks, humanTaskSweep, clock);
     }
 
     /**
@@ -5022,6 +5044,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (managedIngress != null) {
             managedIngress.close();
         }
+        if (interactionWebSockets != null) interactionWebSockets.close();
         server.stop((int) httpStopDelay.toSeconds());
         executor.close();
         try {

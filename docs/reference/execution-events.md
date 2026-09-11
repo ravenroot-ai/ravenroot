@@ -147,4 +147,8 @@ Durable replay survives a restart within retained history. RING eviction and res
 
 Raw `detail`, tenant attributes, correlation strings and journal payloads are not published in this envelope. Live message/output fields are already bounded and targeted-redacted at their producing boundary. They remain author diagnostics, never assistant/provider context. The stable-edge limit remains 8192 UTF-8 bytes, auxiliary traversal strings share the 12287-byte escaped budget, and the complete traversal SSE frame remains below 65536 bytes.
 
+The optional [authenticated interaction WebSocket](interactions-websocket.md) reuses this durable
+journal projection and adds bounded acknowledgement flow control plus durable Human Task commands.
+It does not change the SSE representation or create server-side cursor state.
+
 For API paths see [HTTP API and CLI](api-cli.md). For diagnosis see [Events and persistence](../troubleshooting/events-persistence.md).

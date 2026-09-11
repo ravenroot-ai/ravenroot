@@ -169,6 +169,8 @@
         -->
         <graalvm.polyglot.version>25.2.4</graalvm.polyglot.version>
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
+        <!-- Jetty is used only by the optional, independently bound interaction WebSocket listener. -->
+        <jetty.version>12.1.12</jetty.version>
         <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
         <!-- Same driver artifact ravenroot-extensions/ravenroot-jdbc already pins as a test
              fixture; one property so the two never drift apart. -->
@@ -281,6 +283,11 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>jetty-websocket-jetty-server</artifactId>
+                <version>${jetty.version}</version>
             </dependency>
             <!-- Apache 2.0, imported so ravenroot-observability-otel's own
                  pom can declare individual artifacts without repeating a version. Not imported by, or

@@ -229,13 +229,10 @@ spec:
               value: {{ required "auth.audience is required" .Values.auth.audience | quote }}
             - name: RAVENROOT_AUTH_JWKS_URI
               value: {{ required "auth.jwksUri is required" .Values.auth.jwksUri | quote }}
-            # This chart does not configure RAVENROOT_GRAAL_SANDBOX_SUPERVISOR (SEC-11 is
-            # integrator-provided by design, see docs/deployment.md), so this value only matters once
-            # an operator adds one via an overlay -- but its own default must still not be the code's
-            # 5000ms, which is unsafe against a measured Python cold start. See values.yaml for what
-            # this number is and is not.
+            # A blank overlay delegates to GraalVmProgramRuntime's typed default. A nonblank value
+            # is checked by the chart schema before it reaches the process environment.
             - name: RAVENROOT_PROGRAM_TIMEOUT_MS
-              value: {{ .Values.programTimeoutMs | quote }}
+              value: {{ include "ravenroot.graphLimitValue" .Values.programTimeoutMs }}
           # ReadinessProbe is deliberately /ready, not /health: /ready
           # reports unready during draining and a degraded audit-trail check (ReadinessGate),
           # which is what should pull this pod out of rotation without restarting it. See

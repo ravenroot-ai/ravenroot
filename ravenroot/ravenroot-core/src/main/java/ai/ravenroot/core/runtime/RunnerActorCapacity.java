@@ -2,21 +2,18 @@ package ai.ravenroot.core.runtime;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Runner-scoped capacity shared by actors that belong to different traversals. */
+/** Runner-scoped accounting shared by actors that belong to different traversals. */
 final class RunnerActorCapacity {
-    private final int limit;
     private int retained;
 
-    RunnerActorCapacity(int limit) {
-        if (limit < 1) throw new IllegalArgumentException("actor capacity must be positive");
-        this.limit = limit;
-    }
+    RunnerActorCapacity() { }
 
-    synchronized Permit reserve() {
+    synchronized Permit reserve(int traversalLimit) {
+        if (traversalLimit < 1) throw new IllegalArgumentException("actor capacity must be positive");
         long next = (long) retained + 1;
-        if (next > limit) {
+        if (next > traversalLimit) {
             throw new GraphExecutionLimitException(GraphExecutionLimitException.Reason.LIVE_ACTORS,
-                    next, limit);
+                    next, traversalLimit);
         }
         retained++;
         return new Permit(this);

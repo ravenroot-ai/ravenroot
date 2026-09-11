@@ -339,7 +339,7 @@ class PinnedGraphToolApprovalPreflightTest {
                         List.of(ai.ravenroot.api.persistence.PinnedNodePackage.of(
                                 resolver.nodePackages().get(0).packageId(), "0.0.1-before-the-upgrade",
                                 ai.ravenroot.api.node.NodeSdk.CONTRACT)),
-                        accepted.pinnedAt());
+                        accepted.pinnedAt(), accepted.operationalPolicy());
                 manifestStore.pin(rebuilt).toCompletableFuture().join();
                 assertEquals(1, resolver.nodePackages().size(),
                         "the probe package is the one installed package, so the difference below is "

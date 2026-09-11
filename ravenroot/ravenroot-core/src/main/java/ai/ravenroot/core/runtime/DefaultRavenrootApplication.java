@@ -1347,10 +1347,26 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         byte[] graphBytes = document.bytes();
         String graphVersion = sha256(graphBytes);
         var manager = document.manager();
+        var behaviorNodes = manager.definition().nodes().stream()
+                .filter(node -> node.kind() == NodeKind.BEHAVIOR)
+                .toList();
         GraphRunner runner;
+        ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy;
         try {
+            // Package capacity resolvers are third-party callbacks. Every graph/package check runs
+            // before one is invoked, and this outer cleanup boundary owns the parsed manager if
+            // either validation or policy resolution refuses.
+            GraphRunner.validateGraphAdmission(manager.definition(), behaviors, policy,
+                    graphExecutionLimits, null);
+            var manifestService = executionManifests();
+            operationalPolicy = manifestService == null ? null
+                    : manifestService.policyForNodeAdmission(behaviorNodes);
+            var effectiveExecutionLimits = operationalPolicy == null ? graphExecutionLimits
+                    : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(
+                            operationalPolicy);
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
-                    runnerShutdownStepBound, unknownBehaviors, policy, graphExecutionLimits);
+                    runnerShutdownStepBound, unknownBehaviors, policy, effectiveExecutionLimits,
+                    operationalPolicy);
         } catch (RuntimeException error) {
             manager.close();
             throw error;
@@ -1397,7 +1413,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // this execution: the policy it runs under, the packages it may reach, the limits it is
             // bounded by and the engine it runs on all decide what the same bytes do, and every one
             // of them can change before this execution is recovered.
-            recordExecutionManifest(security, processInstanceId, graphVersion, policy);
+            recordExecutionManifest(security, processInstanceId, graphVersion, policy, operationalPolicy);
             // Recorded before the graph starts so a rejected write cannot leave an unrecorded
             // execution running; the surrounding catch already owns cleanup.
             long revision = recordAcceptedExecution(security, processInstanceId, traversalId,
@@ -1441,6 +1457,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
                         executionResults.payloadFailed(resultKey, processInstanceId, rejected);
                         recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                operationalPolicy,
                                 active.startedAt, ProcessInstanceStatus.FAILED, null, null, null,
                                 rejected);
                     } else if (ExecutionTermination.isCancellation(terminalFailure)) {
@@ -1456,6 +1473,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // an unchanged FAILED status is what separates the two, and recording a class
                         // name as well would invite a reader to treat the stop as an incident.
                         recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                operationalPolicy,
                                 active.startedAt, ProcessInstanceStatus.FAILED,
                                 ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED, null,
                                 null, null);
@@ -1472,17 +1490,20 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // control-flow detail, and it is what tells an observer still reading the
                         // classifier that no node broke.
                         recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                operationalPolicy,
                                 active.startedAt, ProcessInstanceStatus.FAILED,
                                 ai.ravenroot.api.application.ExecutionTerminationReason.UNREACHABLE,
                                 null, null, terminalFailure);
                     } else if (error != null || result == null) {
                         executionResults.failed(resultKey, processInstanceId);
                         recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                operationalPolicy,
                                 active.startedAt, ProcessInstanceStatus.FAILED, null, null, null,
                                 terminalFailure);
                     } else {
                         executionResults.completed(resultKey, result);
                         recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                operationalPolicy,
                                 active.startedAt, ProcessInstanceStatus.COMPLETED, null,
                                 result.payload(), result, null);
                     }
@@ -1616,7 +1637,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * trade-off on its own rather than inherit it as a side effect of this one.</p>
      */
     private void recordDurableResult(SecurityContext security, UUID processInstanceId, UUID traversalId,
-                                     String graphVersion, Instant startedAt,
+                                     String graphVersion,
+                                     ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy,
+                                     Instant startedAt,
                                      ProcessInstanceStatus status,
                                      ai.ravenroot.api.application.ExecutionTerminationReason reason,
                                      Object payload, GraphExecutionResult result, Throwable failure) {
@@ -1638,13 +1661,16 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var refused = failure instanceof ai.ravenroot.api.payload.PayloadException rejected
                 ? ai.ravenroot.api.persistence.ExecutionResultPayload.refused(rejected.reason())
                 : null;
+        int maximumPayloadBytes = operationalPolicy == null ? durableResults.maxPayloadBytes()
+                : operationalPolicy.results().maximumPayloadBytes();
         try {
             executionResults.recordDurably(refused == null
                     ? ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId, pin,
                             status, reason, startedAt, endedAt, payload, nodes, failure,
-                            durableResults.maxPayloadBytes())
+                            maximumPayloadBytes)
                     : ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId, pin,
-                            status, reason, startedAt, endedAt, refused, nodes, failure));
+                            status, reason, startedAt, endedAt, refused, nodes, failure),
+                    maximumPayloadBytes);
         } catch (ExecutionStoreException notRecorded) {
             boolean conflict = notRecorded.failure()
                     instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable;
@@ -1976,9 +2002,18 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         if (existing != null) {
             return existing;
         }
-        var resolver = ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
-                executionStore == null ? java.util.Set.of() : executionStore.capabilities(),
-                behaviors, unknownBehaviors, graphExecutionLimits, programRuntime);
+        int resultPayloadBytes = executionStore != null
+                && executionStore.supports(StoreCapability.EXECUTION_RESULTS)
+                ? executionStore.maxExecutionResultPayloadBytes()
+                : graphExecutionLimits.payload().maxEncodedBytes();
+        var resolver = executionStore != null && executionStore.protectsManagedPersistence()
+                ? ai.ravenroot.core.manifest.ExecutionManifestResolver.completeManaged(engine,
+                        executionStore.capabilities(), resultPayloadBytes, executionStore.maxPayloadBytes(),
+                        behaviors, unknownBehaviors, graphExecutionLimits, programRuntime)
+                : ai.ravenroot.core.manifest.ExecutionManifestResolver.complete(engine,
+                        executionStore == null ? java.util.Set.of() : executionStore.capabilities(),
+                        resultPayloadBytes, behaviors, unknownBehaviors,
+                        graphExecutionLimits, programRuntime);
         var created = new ai.ravenroot.core.manifest.ExecutionManifestService(
                 executionManifestStore, resolver, java.time.Clock.systemUTC());
         return executionManifests.compareAndSet(null, created) ? created : executionManifests.get();
@@ -2999,15 +3034,17 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * exists to prevent.</p>
      */
     private void recordExecutionManifest(SecurityContext security, UUID processInstanceId,
-                                         String graphVersion, ExecutionPolicy policy) {
+                                         String graphVersion, ExecutionPolicy policy,
+                                         ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
         var manifests = executionManifests();
         if (manifests == null) {
             return;
         }
         var key = new ExecutionKey(security.tenantId(), processInstanceId);
         var contentId = new ai.ravenroot.api.persistence.GraphContentId(graphVersion);
-        manifests.pin(key, contentId,
-                ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(contentId), policy);
+        manifests.pinResolved(key, contentId,
+                ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(contentId), policy,
+                java.util.Objects.requireNonNull(operationalPolicy, "operationalPolicy"));
         manifests.verify(key, policy);
     }
 

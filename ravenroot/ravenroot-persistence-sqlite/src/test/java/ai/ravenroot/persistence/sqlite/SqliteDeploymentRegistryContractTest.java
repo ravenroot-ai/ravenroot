@@ -2,6 +2,7 @@ package ai.ravenroot.persistence.sqlite;
 
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryPolicy;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.testkit.persistence.DeploymentRegistryContract;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
@@ -37,6 +39,19 @@ class SqliteDeploymentRegistryContractTest extends DeploymentRegistryContract {
     protected DeploymentRegistry createRegistry(Clock clock) {
         return new SqliteDeploymentRegistry(databaseDirectory.resolve("deployment-registry.db"), clock,
                 tenant -> DeploymentId.of(UUID.randomUUID().toString()));
+    }
+
+    @Test
+    void explicitTypedPolicyControlsPublishedAndEnforcedLimits() {
+        var policy = new DeploymentRegistryPolicy(Duration.ofDays(2),
+                new DeploymentRegistry.Limits(2, Duration.ofSeconds(20), Duration.ofSeconds(2)));
+        try (DeploymentRegistry registry = new SqliteDeploymentRegistry(
+                SqliteStoreLocation.ofFile(databaseDirectory.resolve("explicit-policy.db")),
+                Clock.systemUTC(), tenant -> DeploymentId.of(UUID.randomUUID().toString()), policy)) {
+            assertEquals(policy.limits(), registry.limits());
+            assertThrows(CompletionException.class,
+                    () -> registry.list("acme", null, 3).toCompletableFuture().join());
+        }
     }
 
     /**

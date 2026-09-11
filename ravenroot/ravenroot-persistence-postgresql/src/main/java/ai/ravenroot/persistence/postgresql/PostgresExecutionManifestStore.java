@@ -11,6 +11,7 @@ import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.persistence.ResolvedRuntimeProfile;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
 
@@ -66,12 +67,14 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
      * transaction waited for the lock. See {@link PostgresGraphDefinitionStore}'s identical bound for
      * the identical reason.
      */
-    private static final int MAX_PIN_ATTEMPTS = 3;
+    public static final int DEFAULT_MAX_PIN_ATTEMPTS = 3;
 
     private final DataSource dataSource;
     private final Clock clock;
     private final ExecutionManifestReferences references;
     private final Transactions transactions;
+    private final int maximumPinAttempts;
+    private final Runnable cleanupStarted;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -86,15 +89,44 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
      */
     public PostgresExecutionManifestStore(DataSource dataSource, Clock clock,
                                           ExecutionManifestReferences references) {
+        this(dataSource, clock, references, DEFAULT_MAX_PIN_ATTEMPTS);
+    }
+
+    /** Opens with the operator-resolved lost-race repair bound. */
+    public PostgresExecutionManifestStore(DataSource dataSource, Clock clock,
+                                          ExecutionManifestReferences references,
+                                          int maximumPinAttempts) {
+        this(dataSource, clock, references, maximumPinAttempts, PostgresStoreConfig.defaults());
+    }
+
+    /** Opens with resolved manifest-repair and PostgreSQL transaction policy. */
+    public PostgresExecutionManifestStore(DataSource dataSource, Clock clock,
+                                          ExecutionManifestReferences references,
+                                          int maximumPinAttempts, PostgresStoreConfig config) {
+        this(dataSource, clock, references, maximumPinAttempts, config, () -> {});
+    }
+
+    PostgresExecutionManifestStore(DataSource dataSource, Clock clock,
+                                   ExecutionManifestReferences references,
+                                   int maximumPinAttempts, PostgresStoreConfig config,
+                                   Runnable cleanupStarted) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.references = Objects.requireNonNull(references, "references");
-        PostgresStoreConfig config = PostgresStoreConfig.defaults();
+        Objects.requireNonNull(config, "config");
+        this.cleanupStarted = Objects.requireNonNull(cleanupStarted, "cleanupStarted");
+        if (maximumPinAttempts < 1) throw new IllegalArgumentException("maximumPinAttempts must be positive");
+        this.maximumPinAttempts = maximumPinAttempts;
         this.transactions = new Transactions(dataSource, config, CommitBoundary.NONE);
         // See PostgresGraphDefinitionStore's identical field for why this is a virtual-thread-per-call
         // executor rather than a sized platform-thread pool.
         this.worker = Executors.newVirtualThreadPerTaskExecutor();
         ensureSchema(dataSource, clock);
+    }
+
+    /** Returns the resolved lost-race repair bound used by this store. */
+    public int maximumPinAttempts() {
+        return maximumPinAttempts;
     }
 
     @Override
@@ -166,6 +198,7 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
     public CompletionStage<Void> remove(ExecutionKey key) {
         return async(() -> {
             requireKey(key);
+            cleanupStarted.run();
             try {
                 return transactions.inTransaction(connection -> {
                     // Locked before the reachability question is asked and held to commit, for the
@@ -199,6 +232,7 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
             if (tenantId == null || tenantId.isBlank()) {
                 throw failure(new ExecutionManifestStoreFailure.InvalidRequest("tenantId cannot be blank"));
             }
+            cleanupStarted.run();
             try {
                 return transactions.inTransaction(connection -> {
                     var candidates = new ArrayList<UUID>();
@@ -264,7 +298,7 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
     private StoredExecutionManifest upsertManifest(Connection connection, ExecutionManifest manifest,
                                                     ExecutionManifestDigest digest, ExecutionKey key)
             throws SQLException {
-        for (int attempt = 0; attempt < MAX_PIN_ATTEMPTS; attempt++) {
+        for (int remaining = maximumPinAttempts; remaining > 0; remaining--) {
             Instant now = Instant.now(clock);
             int inserted = insertManifestIfAbsent(connection, manifest, digest, now);
             if (inserted > 0) {
@@ -330,7 +364,7 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
         String sql = "SELECT format_version, digest, graph_content_id, graph_id, version_id, "
                 + "graph_schema_version, definition_format_version, execution_policy, "
                 + "unknown_behavior_mode, engine_digest, store_digest, limits_digest, "
-                + "program_runtime_digest, pinned_at_epoch_second, pinned_at_nano, "
+                + "program_runtime_digest, operational_policy, pinned_at_epoch_second, pinned_at_nano, "
                 + "committed_at_epoch_second, committed_at_nano FROM execution_manifest "
                 + "WHERE tenant_id = ? AND process_instance_id = ?" + (forUpdate ? " FOR UPDATE" : "");
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -341,7 +375,7 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
                     return null;
                 }
                 recordedDigest = rows.getString(2);
-                committedAt = Instant.ofEpochSecond(rows.getLong(16), rows.getInt(17));
+                committedAt = Instant.ofEpochSecond(rows.getLong(17), rows.getInt(18));
                 try {
                     var profile = new ResolvedRuntimeProfile(rows.getInt(6), rows.getInt(7),
                             rows.getString(8), rows.getString(9), rows.getString(10),
@@ -350,7 +384,10 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
                             new GraphContentId(rows.getString(3)),
                             new GraphDefinitionIdentity(rows.getString(4), rows.getString(5)),
                             profile, readPackages(connection, key),
-                            Instant.ofEpochSecond(rows.getLong(14), rows.getInt(15)));
+                            Instant.ofEpochSecond(rows.getLong(15), rows.getInt(16)),
+                            rows.getString(14) == null ? null
+                                    : ResolvedOperationalPolicy.decodeForManifest(
+                                            rows.getString(14), rows.getInt(1)));
                 } catch (IllegalArgumentException | NullPointerException malformed) {
                     throw new SqlFailure(new ExecutionManifestStoreFailure.Corrupted(key,
                             String.valueOf(malformed.getMessage())));
@@ -388,9 +425,9 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
                 "INSERT INTO execution_manifest (tenant_id, process_instance_id, format_version, digest, "
                         + "graph_content_id, graph_id, version_id, graph_schema_version, "
                         + "definition_format_version, execution_policy, unknown_behavior_mode, "
-                        + "engine_digest, store_digest, limits_digest, program_runtime_digest, "
+                        + "engine_digest, store_digest, limits_digest, program_runtime_digest, operational_policy, "
                         + "pinned_at_epoch_second, pinned_at_nano, committed_at_epoch_second, "
-                        + "committed_at_nano) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "committed_at_nano) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, process_instance_id) DO NOTHING")) {
             statement.setString(1, key.tenantId());
             StoredUuid.bind(statement, 2, key.processInstanceId());
@@ -407,8 +444,10 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
             statement.setString(13, runtime.storeDigest());
             statement.setString(14, runtime.executionLimitsDigest());
             statement.setString(15, runtime.programRuntimeDigest());
-            StoredInstant.bindValue(statement, 16, manifest.pinnedAt());
-            StoredInstant.bindValue(statement, 18, now);
+            statement.setString(16, manifest.operationalPolicy() == null
+                    ? null : manifest.operationalPolicy().encodeForManifest(manifest.formatVersion()));
+            StoredInstant.bindValue(statement, 17, manifest.pinnedAt());
+            StoredInstant.bindValue(statement, 19, now);
             return statement.executeUpdate();
         }
     }

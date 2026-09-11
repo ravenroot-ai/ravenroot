@@ -3,7 +3,10 @@ package ai.ravenroot.server.persistence;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,6 +48,27 @@ class ExecutionStoreConfigurationTest {
         assertTrue(singleHost.location().databaseFile().startsWith("/srv/ravenroot/store"),
                 "a server and the CLI that backs it up must not be told the same path twice");
         assertEquals("RAVENROOT_EXECUTION_STORE_DIR", ExecutionStoreConfiguration.DIRECTORY_VARIABLE);
+    }
+
+    @Test
+    void absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule() {
+        var defaultLocation = ((ExecutionStoreConfiguration.SingleHost)
+                ExecutionStoreConfiguration.fromEnvironment(Map.of())).location();
+        assertEquals(java.nio.file.Path.of(
+                        ai.ravenroot.persistence.sqlite.SqliteStoreLocation.DEFAULT_DIRECTORY)
+                        .toAbsolutePath().normalize(),
+                defaultLocation.directory());
+        for (String blank : new String[] {"", "  ", "\t"}) {
+            var location = ((ExecutionStoreConfiguration.SingleHost)
+                    ExecutionStoreConfiguration.fromEnvironment(Map.of(
+                            ExecutionStoreConfiguration.DIRECTORY_VARIABLE, blank))).location();
+            assertEquals(defaultLocation, location);
+        }
+        var configured = ((ExecutionStoreConfiguration.SingleHost)
+                ExecutionStoreConfiguration.fromEnvironment(Map.of(
+                        ExecutionStoreConfiguration.DIRECTORY_VARIABLE,
+                        "  /srv/ravenroot/store  "))).location();
+        assertTrue(configured.databaseFile().startsWith("/srv/ravenroot/store"));
     }
 
     @Test
@@ -119,6 +143,159 @@ class ExecutionStoreConfigurationTest {
                         ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql",
                         ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db:5432/ravenroot")));
         assertEquals("jdbc:postgresql://db:5432/ravenroot", shared.connection().url());
+        assertEquals(3, shared.manifestPinAttempts());
+        assertEquals(ai.ravenroot.persistence.postgresql.PostgresStoreConfig.defaults(), shared.storeConfig());
+    }
+
+    @Test
+    void postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound() {
+        var properties = new Properties();
+        properties.setProperty(ExecutionStoreConfiguration.SELECTOR_PROPERTY, "postgresql");
+        properties.setProperty("ravenroot.postgresql.statement-timeout-ms", "60000");
+        properties.setProperty(ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY, "45000");
+        properties.setProperty("ravenroot.postgresql.serialization-retries", "9");
+        var environment = Map.of(
+                ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite",
+                ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot",
+                "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "30000",
+                ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "10000");
+
+        var shared = assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromSystem(properties, environment));
+
+        assertEquals(60_000, shared.storeConfig().statementTimeout().toMillis());
+        assertEquals(45_000, shared.connection().poolTimeout().toMillis());
+        assertEquals(9, shared.storeConfig().serializationRetries());
+    }
+
+    @Test
+    void everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily() {
+        var properties = new Properties();
+        properties.setProperty(ExecutionStoreConfiguration.SELECTOR_PROPERTY, "postgresql");
+        properties.setProperty("ravenroot.postgresql.lock-timeout-ms", "1000");
+        properties.setProperty("ravenroot.postgresql.statement-timeout-ms", "20000");
+        properties.setProperty("ravenroot.postgresql.serialization-retries", "5");
+        properties.setProperty("ravenroot.postgresql.max-lease-ttl-seconds", "120");
+        properties.setProperty("ravenroot.postgresql.max-payload-bytes", "65536");
+        properties.setProperty("ravenroot.postgresql.max-clock-skew-seconds", "2");
+        properties.setProperty("ravenroot.postgresql.journal-retention-seconds", "3600");
+        properties.setProperty("ravenroot.postgresql.max-inventory-page-size", "64");
+        properties.setProperty("ravenroot.postgresql.terminal-retention-seconds", "7200");
+        properties.setProperty("ravenroot.postgresql.execution-result-retention-seconds", "3600");
+        properties.setProperty("ravenroot.postgresql.graph-definition-upsert-attempts", "7");
+
+        var shared = assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromSystem(properties, Map.of(
+                        ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot")));
+        var config = shared.storeConfig();
+        assertEquals(Duration.ofSeconds(1), config.lockTimeout());
+        assertEquals(Duration.ofSeconds(20), config.statementTimeout());
+        assertEquals(5, config.serializationRetries());
+        assertEquals(Duration.ofSeconds(120), config.maxLeaseTtl());
+        assertEquals(65_536, config.maxPayloadBytes());
+        assertEquals(Duration.ofSeconds(2), config.maxClockSkew());
+        assertEquals(Duration.ofHours(1), config.journalRetention());
+        assertEquals(64, config.maxInventoryPageSize());
+        assertEquals(Duration.ofHours(2), config.terminalRetention());
+        assertEquals(Duration.ofHours(1), config.executionResultRetention());
+        assertEquals(7, config.graphDefinitionUpsertAttempts());
+    }
+
+    @Test
+    void malformedPostgresqlPolicyFailsWithoutEchoingTheSuppliedValue() {
+        String secretShaped = "secret-should-not-be-logged";
+        var environment = Map.of(
+                ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql",
+                ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot",
+                "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES", secretShaped);
+
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+        assertTrue(failure.getMessage().contains("RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES"));
+        assertFalse(failure.getMessage().contains(secretShaped));
+        assertNull(failure.getCause());
+    }
+
+    @Test
+    void postgresqlPolicyIsRejectedOutsideThePostgresqlSelectorAndCrossConstraintsFailEarly() {
+        assertThrows(IllegalArgumentException.class, () -> ExecutionStoreConfiguration.fromEnvironment(
+                Map.of("RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS", "1000")));
+
+        var environment = new HashMap<String, String>();
+        environment.put(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql");
+        environment.put(ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot");
+        environment.put("RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "5000");
+        environment.put(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "5000");
+        assertThrows(IllegalArgumentException.class,
+                () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+
+        environment.put(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "4999");
+        assertEquals(4_999, assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromEnvironment(environment)).connection().poolTimeout().toMillis());
+    }
+
+    @Test
+    void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate() {
+        for (String property : new String[] {
+                ExecutionStoreConfiguration.POOL_SIZE_PROPERTY,
+                ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY}) {
+            for (Map<String, String> environment : java.util.List.<Map<String, String>>of(
+                    Map.of(),
+                    Map.of(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite"),
+                    Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, "false"))) {
+                var properties = new Properties();
+                properties.setProperty(property, "20");
+                var refusal = assertThrows(IllegalArgumentException.class,
+                        () -> ExecutionStoreConfiguration.fromSystem(properties, environment));
+                assertTrue(refusal.getMessage().contains(ExecutionStoreConfiguration.SELECTOR_VARIABLE));
+                assertFalse(refusal.getMessage().contains("20"));
+            }
+
+            var blank = new Properties();
+            blank.setProperty(property, " \t ");
+            assertInstanceOf(ExecutionStoreConfiguration.SingleHost.class,
+                    ExecutionStoreConfiguration.fromSystem(blank, Map.of()));
+        }
+    }
+
+    @Test
+    void manifestPinRepairAttemptsAreTypedAndPostgresqlOnly() {
+        var environment = new HashMap<String, String>();
+        environment.put(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "postgresql");
+        environment.put(ExecutionStoreConfiguration.URL_VARIABLE, "jdbc:postgresql://db/ravenroot");
+        environment.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7");
+        var shared = assertInstanceOf(ExecutionStoreConfiguration.Shared.class,
+                ExecutionStoreConfiguration.fromEnvironment(environment));
+        assertEquals(7, shared.manifestPinAttempts());
+
+        for (String invalid : new String[]{"0", "-1", "many", "2147483648"}) {
+            environment.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, invalid);
+            var refusal = assertThrows(IllegalArgumentException.class,
+                    () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+            assertEquals(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE
+                    + " must be a positive integer", refusal.getMessage());
+        }
+    }
+
+    @Test
+    void manifestPinRepairAttemptsAreInertWhenBlankAndRefusedForOtherStoreSelections() {
+        var blank = new HashMap<String, String>();
+        blank.put(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, " \t");
+        assertInstanceOf(ExecutionStoreConfiguration.SingleHost.class,
+                ExecutionStoreConfiguration.fromEnvironment(blank));
+
+        for (Map<String, String> environment : List.of(
+                Map.of(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7"),
+                Map.of(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite",
+                        ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7"),
+                Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, "false",
+                        ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7"))) {
+            var refusal = assertThrows(IllegalArgumentException.class,
+                    () -> ExecutionStoreConfiguration.fromEnvironment(environment));
+            assertEquals(ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE + " requires "
+                    + ExecutionStoreConfiguration.SELECTOR_VARIABLE + "="
+                    + ExecutionStoreConfiguration.POSTGRESQL_SELECTOR, refusal.getMessage());
+        }
     }
 
     @Test

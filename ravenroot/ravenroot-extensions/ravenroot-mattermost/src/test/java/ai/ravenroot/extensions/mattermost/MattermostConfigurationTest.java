@@ -30,6 +30,16 @@ class MattermostConfigurationTest {
                 "operations", java.net.URI.create("https://mattermost.example.test/prefix"),
                 MattermostTestSupport.TEAM, Set.of(MattermostTestSupport.CHANNEL), "binding", "credential",
                 "webhook", "/outgoing", 4_000, 1_024, 1_024, 1, 1, 1_000, 0));
+        assertDoesNotThrow(() -> new MattermostProfile(MattermostTestSupport.TENANT,
+                "operations", java.net.URI.create("https://mattermost.example.test"),
+                MattermostTestSupport.TEAM, Set.of(MattermostTestSupport.CHANNEL), "binding", "credential",
+                "webhook", "/outgoing", 4_000, 1_024, 1_024, 1, 1,
+                MattermostProfile.MAX_ACK_TIMEOUT_MS, 0));
+        assertThrows(MattermostException.class, () -> new MattermostProfile(MattermostTestSupport.TENANT,
+                "operations", java.net.URI.create("https://mattermost.example.test"),
+                MattermostTestSupport.TEAM, Set.of(MattermostTestSupport.CHANNEL), "binding", "credential",
+                "webhook", "/outgoing", 4_000, 1_024, 1_024, 1, 1,
+                MattermostProfile.MAX_ACK_TIMEOUT_MS + 1, 0));
     }
 
     static String configuration(String name, String tenant, String team, String channel, String route) {

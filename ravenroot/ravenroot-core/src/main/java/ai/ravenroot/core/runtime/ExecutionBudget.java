@@ -15,7 +15,7 @@ final class ExecutionBudget {
     private int liveActors;
 
     ExecutionBudget(GraphExecutionLimits limits) {
-        this(limits, new RunnerActorCapacity(limits.maxLiveActorsPerTraversal()));
+        this(limits, new RunnerActorCapacity());
     }
 
     ExecutionBudget(GraphExecutionLimits limits, RunnerActorCapacity runnerActors) {
@@ -24,7 +24,7 @@ final class ExecutionBudget {
     }
 
     static ExecutionBudget restore(GraphExecutionLimits limits, GraphExecutionBudgetSnapshot snapshot) {
-        return restore(limits, snapshot, new RunnerActorCapacity(limits.maxLiveActorsPerTraversal()));
+        return restore(limits, snapshot, new RunnerActorCapacity());
     }
 
     static ExecutionBudget restore(GraphExecutionLimits limits, GraphExecutionBudgetSnapshot snapshot,
@@ -90,7 +90,7 @@ final class ExecutionBudget {
     }
 
     synchronized Actor reserveActor() {
-        RunnerActorCapacity.Permit runnerPermit = runnerActors.reserve();
+        RunnerActorCapacity.Permit runnerPermit = runnerActors.reserve(limits.maxLiveActorsPerTraversal());
         try {
             long next = (long) liveActors + 1;
             require(GraphExecutionLimitException.Reason.LIVE_ACTORS, next,

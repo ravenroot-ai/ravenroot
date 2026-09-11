@@ -298,7 +298,7 @@ public final class DurableExecutionPauseService {
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                    runnerShutdownStepBound, executionLimits);
+                    runnerShutdownStepBound, prepared.executionLimits(), prepared.operationalPolicy());
         } catch (RuntimeException setupFailure) {
             setupFailure = cleanup(setupFailure, recorder::close);
             setupFailure = cleanup(setupFailure, manager::close);
@@ -425,31 +425,17 @@ public final class DurableExecutionPauseService {
         return new NodeCommand(NodeDirective.valueOf(request.commandDirective()), request.commandName());
     }
 
-    /**
-     * Refuses to rebuild a graph for a held execution this runtime cannot reproduce.
-     *
-     * <p>Runs first, before the pinned document is read and before the hold's node is looked up, so a
-     * refusal claims nothing. An absent, unreadable or digest-mismatched manifest arrives as
-     * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}; a runtime that resolves
-     * something different arrives as
-     * {@link ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException} naming each differing
-     * dimension. The policy compared against is
-     * {@link ai.ravenroot.api.application.ExecutionPolicy#STANDARD}, which is the policy this service
-     * rebuilds the runner under.</p>
-     */
-    private void verifyManifest(ai.ravenroot.api.persistence.ExecutionKey key) {
-        if (manifests != null) {
-            manifests.verify(key, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
-        }
-    }
 
     private Prepared prepare(DurableExecutionPause pause) {
-        verifyManifest(pause.key());
+        var parsingPolicy = manifests == null ? null : manifests.graphPolicyForParsing(
+                pause.key(), ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+        var pinnedLimits = parsingPolicy == null ? executionLimits
+                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(parsingPolicy);
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(pause.key().tenantId(),
                         new GraphContentId(pause.request().graphVersionPin().reference())))
                 .toCompletableFuture().join();
         GraphManager manager = GraphManager.readGraphMl(
-                new ByteArrayInputStream(stored.canonical().bytes()), executionLimits.graphMl());
+                new ByteArrayInputStream(stored.canonical().bytes()), pinnedLimits.graphMl());
         try {
             GraphVersionSnapshot snapshot = GraphVersionSnapshot.create(
                     new GraphVersionKey(stored.identity().graphId(), stored.identity().versionId()),
@@ -457,14 +443,19 @@ public final class DurableExecutionPauseService {
             // Fails here rather than after a lease and a runner exist, so a hold naming a node the
             // pinned graph does not contain is refused before anything has been claimed.
             manager.definition().node(pause.request().nodeId());
-            return new Prepared(manager, snapshot);
+            var policy = manifests == null ? null : manifests.resolvePolicyForNodes(pause.key(),
+                    ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
+                    manager.definition().nodes());
+            return new Prepared(manager, snapshot, pinnedLimits, policy);
         } catch (RuntimeException failure) {
             manager.close();
             throw failure;
         }
     }
 
-    private record Prepared(GraphManager manager, GraphVersionSnapshot snapshot) {
+    private record Prepared(GraphManager manager, GraphVersionSnapshot snapshot,
+                            GraphExecutionLimits executionLimits,
+                            ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) {
     }
 
     private static Throwable unwrap(Throwable failure) {

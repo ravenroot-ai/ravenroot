@@ -2,6 +2,7 @@ package ai.ravenroot.persistence.postgresql;
 
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryPolicy;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.testkit.persistence.DeploymentRegistryContract;
@@ -59,6 +60,21 @@ class PostgresDeploymentRegistryContractTest extends DeploymentRegistryContract 
         DataSource dataSource = PostgresTestDatabase.dataSourceFor(storeId);
         return new PostgresDeploymentRegistry(dataSource, clock,
                 tenant -> DeploymentId.of(UUID.randomUUID().toString()));
+    }
+
+    @Test
+    void explicitTypedPolicyControlsPublishedAndEnforcedLimits() {
+        var policy = new DeploymentRegistryPolicy(Duration.ofDays(2),
+                new DeploymentRegistry.Limits(2, Duration.ofSeconds(20), Duration.ofSeconds(2)));
+        DataSource dataSource = PostgresTestDatabase.dataSourceFor(
+                "deployment-registry-policy-" + UUID.randomUUID());
+        try (DeploymentRegistry registry = new PostgresDeploymentRegistry(dataSource, FIXED,
+                tenant -> DeploymentId.of(UUID.randomUUID().toString()), policy,
+                PostgresStoreConfig.defaults())) {
+            assertEquals(policy.limits(), registry.limits());
+            assertThrows(CompletionException.class,
+                    () -> registry.list("acme", null, 3).toCompletableFuture().join());
+        }
     }
 
     /**

@@ -60,6 +60,18 @@ class TeamsConfigurationTest {
                 first.signingSecretReference(), first.webhookRoute(), first.requestTimeoutMs(),
                 first.maxRequestBytes(), first.maxResponseBytes(), first.maxTextChars(), first.maxConcurrency(),
                 first.maxPerSecond(), first.ackTimeoutMs(), first.signatureMaxAgeSeconds()));
+        assertDoesNotThrow(() -> new TeamsProfile(first.tenantId(), first.name(), first.workflowEndpoint(),
+                first.microsoftTenantId(), first.teamId(), first.channelIds(), first.credentialBindingId(),
+                first.credentialReference(), first.signingSecretReference(), first.webhookRoute(),
+                first.requestTimeoutMs(), first.maxRequestBytes(), first.maxResponseBytes(), first.maxTextChars(),
+                first.maxConcurrency(), first.maxPerSecond(), TeamsProfile.MAX_ACK_TIMEOUT_MS,
+                first.signatureMaxAgeSeconds()));
+        assertThrows(TeamsException.class, () -> new TeamsProfile(first.tenantId(), first.name(),
+                first.workflowEndpoint(), first.microsoftTenantId(), first.teamId(), first.channelIds(),
+                first.credentialBindingId(), first.credentialReference(), first.signingSecretReference(),
+                first.webhookRoute(), first.requestTimeoutMs(), first.maxRequestBytes(), first.maxResponseBytes(),
+                first.maxTextChars(), first.maxConcurrency(), first.maxPerSecond(),
+                TeamsProfile.MAX_ACK_TIMEOUT_MS + 1, first.signatureMaxAgeSeconds()));
         String invalid = Base64.getEncoder().encodeToString(
                 "{\"authority\":{},\"projection\":{},\"store\":{},\"profiles\":{},\"extra\":true}"
                         .getBytes(StandardCharsets.UTF_8));

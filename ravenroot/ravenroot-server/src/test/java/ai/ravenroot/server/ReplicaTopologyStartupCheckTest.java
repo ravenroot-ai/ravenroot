@@ -131,6 +131,22 @@ class ReplicaTopologyStartupCheckTest {
     }
 
     @Test
+    void manifestPinAttemptsWithoutTheSharedSelectorAreRefused() {
+        var environment = Map.of(
+                ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE, "7");
+
+        // Exercise the topology check's independent defensive boundary. Production parses first,
+        // and the parser has its own stricter test for this same contradictory environment.
+        var refusal = ReplicaTopologyStartupCheck.evaluate(environment,
+                ExecutionStoreConfiguration.fromEnvironment(Map.of()));
+
+        assertNotNull(refusal);
+        assertEquals("EXECUTION_STORE_SELECTOR_CONFLICT", refusal.code());
+        assertTrue(refusal.detail().contains(
+                ExecutionStoreConfiguration.MANIFEST_PIN_ATTEMPTS_VARIABLE));
+    }
+
+    @Test
     void aSingleHostDirectoryIsNotAConflictForTheSingleHostStore() {
         var environment = Map.of(ExecutionStoreConfiguration.DIRECTORY_VARIABLE, "/srv/ravenroot/store");
         assertNull(ReplicaTopologyStartupCheck.evaluate(environment,

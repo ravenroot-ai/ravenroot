@@ -216,27 +216,6 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         this.manifests = manifests;
     }
 
-    /**
-     * Refuses to rebuild a graph for an execution this runtime cannot reproduce.
-     *
-     * <p>Called from {@code prepare} and from nowhere else, so this executor's graph cannot be
-     * rebuilt without passing through it. It runs before the pinned document is loaded and before any
-     * lease or runner exists, so a refusal costs nothing and claims nothing. Both refusals are typed — a missing, unreadable or
-     * digest-mismatched manifest as
-     * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}, an environment that
-     * resolves differently as
-     * {@link ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException} — and either leaves
-     * the claimed work unacknowledged and reclaimable rather than dispatched.</p>
-     *
-     * <p>The policy compared against is
-     * {@link ai.ravenroot.api.application.ExecutionPolicy#STANDARD} because that is the policy this
-     * executor rebuilds the runner under.</p>
-     */
-    private void verifyManifest(ai.ravenroot.api.persistence.ExecutionKey key) {
-        if (manifests != null) {
-            manifests.verify(key, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
-        }
-    }
 
     /**
      * Makes a manifest refusal visible instead of letting it vanish into a {@code false}.
@@ -311,7 +290,8 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             GraphRunner runner;
             try {
                 runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                        runnerShutdownStepBound, executionLimits, task.request().nodeId());
+                        runnerShutdownStepBound, prepared.executionLimits(), task.request().nodeId(),
+                        prepared.operationalPolicy());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
                 setupFailure = cleanup(setupFailure, manager::close);
@@ -407,18 +387,24 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         // The task's own key, which execute() has already proven equal to the claim's before it gets
         // here. Verifying from inside prepare is what makes this the only way in: a later call site
         // would have to obtain a Prepared to rebuild anything, and obtaining one verifies.
-        verifyManifest(task.key());
+        var parsingPolicy = manifests == null ? null : manifests.graphPolicyForParsing(
+                task.key(), ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+        var pinnedLimits = parsingPolicy == null ? executionLimits
+                : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(parsingPolicy);
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(task.key().tenantId(),
                 new GraphContentId(task.request().graphVersionPin().reference())))
                 .toCompletableFuture().join();
         GraphManager manager = GraphManager.readGraphMl(
-                new ByteArrayInputStream(stored.canonical().bytes()), executionLimits.graphMl());
+                new ByteArrayInputStream(stored.canonical().bytes()), pinnedLimits.graphMl());
         try {
             GraphVersionSnapshot snapshot = GraphVersionSnapshot.create(
                     new GraphVersionKey(stored.identity().graphId(), stored.identity().versionId()),
                     manager.definition());
             manager.definition().node(task.request().nodeId());
-            return new Prepared(manager, snapshot);
+            var policy = manifests == null ? null : manifests.resolvePolicyForNodes(task.key(),
+                    ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
+                    manager.definition().nodes());
+            return new Prepared(manager, snapshot, pinnedLimits, policy);
         } catch (RuntimeException failure) {
             manager.close();
             throw failure;
@@ -498,5 +484,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         return current;
     }
 
-    private record Prepared(GraphManager manager, GraphVersionSnapshot snapshot) { }
+    private record Prepared(GraphManager manager, GraphVersionSnapshot snapshot,
+                            ai.ravenroot.core.runtime.GraphExecutionLimits executionLimits,
+                            ai.ravenroot.api.persistence.ResolvedOperationalPolicy operationalPolicy) { }
 }

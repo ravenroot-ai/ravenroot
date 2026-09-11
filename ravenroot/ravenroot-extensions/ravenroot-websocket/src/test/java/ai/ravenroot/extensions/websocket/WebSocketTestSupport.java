@@ -226,14 +226,22 @@ final class WebSocketTestSupport {
     static final class FakeContext implements InboundSourceContext {
         final String tenant;
         final FakeIngress ingress;
+        private final SecurityContext identity;
         final CopyOnWriteArrayList<String> degraded = new CopyOnWriteArrayList<>();
         final AtomicInteger healthy = new AtomicInteger();
 
-        FakeContext(String tenant, FakeIngress ingress) { this.tenant = tenant; this.ingress = ingress; }
+        FakeContext(String tenant, FakeIngress ingress) {
+            this(new SecurityContext("source", tenant, "operator", PrincipalType.WORKLOAD, "test"), ingress);
+        }
+        FakeContext(SecurityContext identity, FakeIngress ingress) {
+            this.tenant = identity.tenantId();
+            this.identity = identity;
+            this.ingress = ingress;
+        }
         @Override public DeploymentId deploymentId() { return DeploymentId.of("deployment"); }
         @Override public String nodeId() { return "socket"; }
         @Override public SecurityContext identity() {
-            return new SecurityContext("source", tenant, "operator", PrincipalType.WORKLOAD, "test");
+            return identity;
         }
         @Override public TrustedIngress ingress() { return ingress; }
         @Override public void reportDegraded(String reason) { degraded.add(reason); }

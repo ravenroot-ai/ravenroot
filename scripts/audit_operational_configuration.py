@@ -16,23 +16,32 @@ import json
 import re
 import subprocess
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
+
+try:
+    from check_product_version import SEMVER as PRODUCT_SEMVER, helm_errors as product_helm_errors
+except ModuleNotFoundError:  # Imported as scripts.audit_operational_configuration.
+    from scripts.check_product_version import (
+        SEMVER as PRODUCT_SEMVER,
+        helm_errors as product_helm_errors,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "scripts" / "operational-configuration-inventory.json"
 REPORT = ROOT / "docs" / "architecture" / "operational-configuration-audit.md"
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
     "operator-configurable",
     "security-ceiling-or-default",
     "protocol-or-format-invariant",
     "published-contract-description",
+    "presentation-text",
     "derived",
     "test-fixture",
 }
@@ -50,6 +59,7 @@ CLASSIFICATION_STATUSES = {
     "security-ceiling-or-default": {"retained", "deferred"},
     "protocol-or-format-invariant": {"retained", "deferred"},
     "published-contract-description": {"retained", "deferred"},
+    "presentation-text": {"retained"},
     "derived": {"retained", "deferred"},
     "test-fixture": {"retained"},
 }
@@ -133,6 +143,71 @@ DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS = {
     }),
     "rawKubernetes": frozenset({"deploy/kubernetes/ravenroot.yaml"}),
 }
+HELM_AUTHORITY_ID = "ravenroot-helm-values-v1"
+HELM_CHART_PATH = "deploy/helm/ravenroot/Chart.yaml"
+HELM_RELEASE_CONTRACT_PATH = "scripts/check_product_version.py"
+HELM_VALUES_PATH = "deploy/helm/ravenroot/values.yaml"
+HELM_SCHEMA_PATH = "deploy/helm/ravenroot/values.schema.json"
+HELM_TEMPLATE_PATHS = (
+    "deploy/helm/ravenroot/templates/_helpers.tpl",
+    "deploy/helm/ravenroot/templates/deployment.yaml",
+    "deploy/helm/ravenroot/templates/pvc.yaml",
+    "deploy/helm/ravenroot/templates/service.yaml",
+)
+HELM_TEST_ROLES = {
+    "scripts/tests/test_helm_values_contract.sh": (
+        "closed-schema", "default-render", "nondefault-render", "tag-only-render", "refusal"),
+    "scripts/tests/test_program_timeout_helm_contract.sh": (
+        "timeout-default", "timeout-nondefault", "timeout-blank", "timeout-refusal"),
+    "scripts/tests/test_execution_manifest_pin_helm_contract.sh": (
+        "unsupported-setting-refusal",),
+}
+
+# This is the complete chart-owned operator surface. Blank Java-default carriers are intentionally
+# absent: their typed authorities remain in Java and this Helm proof only verifies their transport.
+# Entries are value path, setting, exact serialized default, schema rule, projection rule.
+HELM_OPERATOR_VALUE_CONTRACTS = (
+    ("image.repository", "deployment.image.repository", "ravenroot", "nonempty-string", "image-helper"),
+    ("image.tag", "deployment.image.tag", "local", "string", "image-helper"),
+    ("image.digest", "deployment.image.digest", '""', "image-digest", "image-helper"),
+    ("image.pullPolicy", "deployment.image.pull-policy", "IfNotPresent", "image-pull-policy", "image-pull-policy"),
+    ("service.type", "deployment.service.type", "ClusterIP", "service-type", "service-type"),
+    ("service.port", "deployment.service.port", "8080", "service-port", "service-port"),
+    ("auth.issuer", "deployment.auth.issuer", '""', "required-auth", "auth-required"),
+    ("auth.audience", "deployment.auth.audience", '""', "required-auth", "auth-required"),
+    ("auth.jwksUri", "deployment.auth.jwks-uri", '""', "required-auth", "auth-required"),
+    ("programTimeoutMs", "deployment.program-timeout-ms", "15000", "program-timeout", "program-timeout"),
+    ("resources.requests.cpu", "deployment.resources.requests.cpu", "100m", "quantity", "resources"),
+    ("resources.requests.memory", "deployment.resources.requests.memory", "256Mi", "quantity", "resources"),
+    ("resources.limits.cpu", "deployment.resources.limits.cpu", '"1"', "quantity", "resources"),
+    ("resources.limits.memory", "deployment.resources.limits.memory", "1Gi", "quantity", "resources"),
+    ("podSecurityContext.fsGroup", "deployment.pod-security.fs-group", "10001", "positive-id", "pod-security"),
+    ("podSecurityContext.fsGroupChangePolicy", "deployment.pod-security.fs-group-change-policy", "OnRootMismatch", "fs-group-policy", "pod-security"),
+    ("securityContext.runAsUser", "deployment.container-security.run-as-user", "10001", "positive-id", "container-security"),
+    ("securityContext.runAsGroup", "deployment.container-security.run-as-group", "10001", "positive-id", "container-security"),
+    ("probes.readiness.initialDelaySeconds", "deployment.probe.readiness-initial-delay-seconds", "3", "probe-initial", "readiness-probe"),
+    ("probes.readiness.periodSeconds", "deployment.probe.readiness-period-seconds", "5", "probe-period", "readiness-probe"),
+    ("probes.liveness.initialDelaySeconds", "deployment.probe.liveness-initial-delay-seconds", "15", "probe-initial", "liveness-probe"),
+    ("probes.liveness.periodSeconds", "deployment.probe.liveness-period-seconds", "10", "probe-period", "liveness-probe"),
+    ("tmpfs.sizeLimit", "deployment.tmpfs.size-limit", "64Mi", "positive-quantity", "tmpfs"),
+    ("persistence.size", "deployment.persistence.size", "1Gi", "positive-quantity", "persistence-size"),
+    ("persistence.storageClass", "deployment.persistence.storage-class", '""', "string", "persistence-storage-class"),
+)
+HELM_FIXED_VALUE_CONTRACTS = {
+    "replicaCount": "1",
+    "engine": "pekko",
+    "podSecurityContext.runAsNonRoot": "true",
+    "podSecurityContext.seccompProfile.type": "RuntimeDefault",
+    "securityContext.allowPrivilegeEscalation": "false",
+    "securityContext.readOnlyRootFilesystem": "true",
+}
+HELM_FIXED_LIST_CONTRACTS = {
+    "securityContext.capabilities.drop.0": "ALL",
+    "persistence.accessModes.0": "ReadWriteOnce",
+}
+HELM_JAVA_CARRIER_PREFIXES = (
+    "executionRuntime.", "graph.", "humanTask.", "assistant.", "rateLimit.",
+)
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java")
@@ -381,7 +456,8 @@ def surface(relative: Path) -> str | None:
     if text == "compose.yaml" or text.startswith("deploy/"):
         return "deployment"
     if relative.suffix == ".sh":
-        if text.startswith("scripts/tests/") or "/e2e/" in text:
+        if text.startswith("scripts/tests/") or "/e2e/" in text or "/src/test/" in text \
+                or text == "scripts/verify-source-session-editor-activity.sh":
             return "test-fixture"
         return "script"
     # Documented runnable configuration is a deployment surface, not ordinary prose.
@@ -944,7 +1020,8 @@ def discover(root: Path) -> tuple[Candidate, ...]:
     return tuple(candidates)
 
 
-def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = False) -> dict[str, object]:
+def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = False,
+                   allow_unreconciled: bool = False) -> dict[str, object]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -960,8 +1037,14 @@ def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = Fals
         raise ValueError("inventory retiredEntries must be an array")
     if document.get("schemaVersion") == SCHEMA_VERSION and not isinstance(document.get("evidenceRecords"), dict):
         raise ValueError("inventory evidenceRecords must be an object")
+    if document.get("schemaVersion") == SCHEMA_VERSION \
+            and document.get("reconciliationRequired") is not True \
+            and not allow_unreconciled:
+        raise ValueError("schema v5 inventory requires reconciliationRequired=true")
     if not isinstance(document.get("migrationHistory", []), list):
         raise ValueError("inventory migrationHistory must be an array")
+    if not isinstance(document.get("normalizedIdentityReappearanceHistory", []), list):
+        raise ValueError("inventory normalizedIdentityReappearanceHistory must be an array")
     return document
 
 
@@ -1263,6 +1346,116 @@ def java_constructor_component_call(source: str, type_symbol: str, method: str,
     arguments, opening, closing = found[0]
     argument, start, end = arguments[components.index(component)]
     return argument, base + start, base + end
+
+
+def java_invocation_arguments(source: str, type_symbol: str, method: str,
+                              invocation: str) -> tuple[str, ...] | None:
+    """Return one exact invocation's arguments from an unambiguous direct method."""
+    method_span = java_method_span(source, type_symbol, method)
+    if method_span is None:
+        return None
+    base, limit = method_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    pattern = re.compile(rf"(?<![\w$]){re.escape(invocation)}\s*\(")
+    matches = list(pattern.finditer(code))
+    if len(matches) != 1:
+        return None
+    opening = matches[0].end() - 1
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None:
+        return None
+    if parsed[1] == opening + 1:
+        return ()
+    return tuple(argument for argument, _start, _end in parsed[0])
+
+
+def java_type_assignment_expressions(source: str, type_symbol: str,
+                                     field: str) -> tuple[str, ...]:
+    """Return every executable ``this.field = expression`` in one Java type."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return ()
+    base, limit = type_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    expressions: list[str] = []
+    for match in re.finditer(rf"\bthis\s*\.\s*{re.escape(field)}\s*=", code):
+        start = match.end()
+        round_depth = square_depth = brace_depth = 0
+        for end in range(start, len(code)):
+            char = code[end]
+            if char == "(": round_depth += 1
+            elif char == ")": round_depth -= 1
+            elif char == "[": square_depth += 1
+            elif char == "]": square_depth -= 1
+            elif char == "{": brace_depth += 1
+            elif char == "}": brace_depth -= 1
+            elif char == ";" and round_depth == square_depth == brace_depth == 0:
+                expressions.append(normalized(actual[start:end]))
+                break
+    return tuple(expressions)
+
+
+def java_constructor_delegation_arguments(source: str, type_symbol: str,
+                                          parameters: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Read the leading ``this(...)`` delegation from one exact constructor overload."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return None
+    base, limit = type_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    found: list[tuple[str, ...]] = []
+    for match in re.finditer(rf"\b{re.escape(type_symbol)}\s*\(", code):
+        if depths[match.start()] != 1:
+            continue
+        opening = match.end() - 1
+        parsed_parameters = split_java_arguments(actual, code, opening)
+        if parsed_parameters is None:
+            continue
+        parameter_names = tuple(
+            re.findall(r"\b[A-Za-z_$][\w$]*\b", argument)[-1]
+            for argument, _start, _end in parsed_parameters[0]
+            if re.findall(r"\b[A-Za-z_$][\w$]*\b", argument)
+        )
+        if parameter_names != parameters:
+            continue
+        closing = parsed_parameters[1]
+        opening_brace = code.find("{", closing)
+        if opening_brace < 0:
+            continue
+        closing_brace = matching_delimiter(code, opening_brace, "{", "}")
+        if closing_brace is None:
+            continue
+        body_actual = actual[opening_brace + 1:closing_brace]
+        body_code = code[opening_brace + 1:closing_brace]
+        delegation = re.search(r"^\s*this\s*\(", body_code)
+        if delegation is None:
+            continue
+        call_open = body_code.find("(", delegation.start())
+        call = split_java_arguments(body_actual, body_code, call_open)
+        if call is not None:
+            found.append(tuple(argument for argument, _start, _end in call[0]))
+    return found[0] if len(found) == 1 else None
+
+
+def java_method_if_conditions(source: str, type_symbol: str, method: str) -> tuple[str, ...] | None:
+    """Extract executable if conditions from one unambiguous method."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    actual = source[slice(*span)]
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    conditions: list[str] = []
+    for match in re.finditer(r"\bif\s*\(", code):
+        opening = code.find("(", match.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            return None
+        conditions.append(normalized(actual[opening + 1:closing]))
+    return tuple(conditions)
 
 
 def java_method_digest(source: str, type_symbol: str, method: str) -> str | None:
@@ -1651,6 +1844,574 @@ def yaml_scalar_at_path(source: str, dotted_path: str) -> str | None:
     return found[0] if len(found) == 1 else None
 
 
+def helm_schema_pointer(value_path: str) -> str:
+    return "/properties/" + "/properties/".join(value_path.split("."))
+
+
+def helm_schema_contract(schema: object, value_path: str) -> object | None:
+    """Resolve one value leaf while requiring every mapping ancestor to be closed and required."""
+    node = schema
+    for component in value_path.split("."):
+        if not isinstance(node, dict):
+            return None
+        reference = node.get("$ref")
+        if reference is not None:
+            resolved = json_pointer(schema, str(reference))
+            if not isinstance(resolved, dict):
+                return None
+            node = resolved
+        properties = node.get("properties")
+        if node.get("type") != "object" or node.get("additionalProperties") is not False \
+                or not isinstance(properties, dict) or component not in properties \
+                or not isinstance(node.get("required"), list) \
+                or node["required"].count(component) != 1:
+            return None
+        node = properties[component]
+    if isinstance(node, dict) and "$ref" in node:
+        node = json_pointer(schema, str(node["$ref"]))
+    return node
+
+
+def helm_schema_rule_matches(schema: object, value_path: str, rule: str) -> bool:
+    node = helm_schema_contract(schema, value_path)
+    if not isinstance(node, dict):
+        return False
+    graph_blank = {"$ref": "#/definitions/graphBlank"}
+    rules: dict[str, object] = {
+        "nonempty-string": {"type": "string", "minLength": 1},
+        "string": {"type": "string"},
+        "image-digest": {"type": "string", "pattern": "^(|sha256:[a-f0-9]{64})$"},
+        "image-pull-policy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]},
+        "service-type": {"type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"]},
+        "service-port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "required-auth": {"type": "string", "minLength": 1, "not": graph_blank},
+        "program-timeout": {"x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
+                            "oneOf": [{"type": "integer", "minimum": 100, "maximum": 300000}, graph_blank]},
+        "boolean": {"type": "boolean"},
+        "positive-id": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "fs-group-policy": {"type": "string", "enum": ["Always", "OnRootMismatch"]},
+        "probe-initial": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "probe-period": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "positive-quantity": {"type": "string", "pattern": "^\\+?(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"},
+        "quantity": {"type": "string", "pattern": "^\\+?(?:(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"},
+    }
+    graph_blank_contract = {
+        "type": "string",
+        "pattern": "^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000]*$",
+    }
+    if ("#/definitions/graphBlank" in json.dumps(node, sort_keys=True)
+            and json_pointer(schema, "#/definitions/graphBlank") != graph_blank_contract):
+        return False
+    return rule in rules and node == rules[rule]
+
+
+def helm_values_leaf_paths(source: str) -> set[str]:
+    paths = {path for _line, path, _value in yaml_scalar_rows(source)}
+    stack: list[tuple[int, str]] = []
+    for raw in source.splitlines():
+        mapping = re.match(r'^([ ]*)([A-Za-z_][A-Za-z0-9_.-]*)\s*:\s*(.*?)\s*$', raw)
+        if mapping is not None:
+            indent = len(mapping.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            if not mapping.group(3):
+                stack.append((indent, mapping.group(2)))
+            continue
+        item = re.match(r'^([ ]*)-\s+(\S.*?)\s*$', raw)
+        if item is not None:
+            indent = len(item.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            if stack:
+                prefix = ".".join(component for _depth, component in stack)
+                index = sum(1 for path in paths if path.startswith(prefix + ".") and
+                            path[len(prefix) + 1:].split(".", 1)[0].isdigit())
+                paths.add(f"{prefix}.{index}")
+    return paths
+
+
+def json_value_spans(source: str) -> dict[tuple[str, ...], tuple[int, int]] | None:
+    """Return exact character spans for values in a JSON object without accepting extensions."""
+    decoder = json.JSONDecoder()
+    spans: dict[tuple[str, ...], tuple[int, int]] = {}
+
+    def whitespace(offset: int) -> int:
+        while offset < len(source) and source[offset].isspace():
+            offset += 1
+        return offset
+
+    def parse(offset: int, path: tuple[str, ...]) -> int:
+        start = whitespace(offset)
+        if start >= len(source):
+            raise ValueError("missing JSON value")
+        if source[start] == "{":
+            cursor = whitespace(start + 1)
+            if cursor < len(source) and source[cursor] == "}":
+                end = cursor + 1
+            else:
+                while True:
+                    key, consumed = decoder.raw_decode(source[cursor:])
+                    if not isinstance(key, str):
+                        raise ValueError("JSON object key is not a string")
+                    cursor = whitespace(cursor + consumed)
+                    if cursor >= len(source) or source[cursor] != ":":
+                        raise ValueError("missing JSON colon")
+                    cursor = parse(cursor + 1, path + (key,))
+                    cursor = whitespace(cursor)
+                    if cursor < len(source) and source[cursor] == ",":
+                        cursor = whitespace(cursor + 1)
+                        continue
+                    if cursor >= len(source) or source[cursor] != "}":
+                        raise ValueError("unterminated JSON object")
+                    end = cursor + 1
+                    break
+        elif source[start] == "[":
+            cursor = whitespace(start + 1)
+            index = 0
+            if cursor < len(source) and source[cursor] == "]":
+                end = cursor + 1
+            else:
+                while True:
+                    cursor = parse(cursor, path + (str(index),))
+                    index += 1
+                    cursor = whitespace(cursor)
+                    if cursor < len(source) and source[cursor] == ",":
+                        cursor = whitespace(cursor + 1)
+                        continue
+                    if cursor >= len(source) or source[cursor] != "]":
+                        raise ValueError("unterminated JSON array")
+                    end = cursor + 1
+                    break
+        else:
+            _value, consumed = decoder.raw_decode(source[start:])
+            end = start + consumed
+        spans[path] = (start, end)
+        return end
+
+    try:
+        end = parse(0, ())
+        if whitespace(end) != len(source):
+            return None
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return spans
+
+
+def helm_projection_matches(root: Path, value_path: str, projection: str) -> bool:
+    executable = lambda path: "\n".join(
+        line for line in (root / path).read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#"))
+    try:
+        deployment = executable(HELM_TEMPLATE_PATHS[1])
+        helpers = executable(HELM_TEMPLATE_PATHS[0])
+        pvc = executable(HELM_TEMPLATE_PATHS[2])
+        service = executable(HELM_TEMPLATE_PATHS[3])
+    except (FileNotFoundError, UnicodeDecodeError):
+        return False
+    direct = {
+        "image-pull-policy": (deployment, r"imagePullPolicy:\s*{{\s*\.Values\.image\.pullPolicy\s*}}"),
+        "service-type": (service, r"type:\s*{{\s*\.Values\.service\.type\s*}}"),
+        "service-port": (service, r"port:\s*{{\s*\.Values\.service\.port\s*}}"),
+        "resources": (deployment, r"(?m)^          resources:\s*$\n^            {{- toYaml \.Values\.resources \| nindent 12 }}$"),
+        "pod-security": (deployment, r"(?m)^      securityContext:\s*$\n^        {{- toYaml \.Values\.podSecurityContext \| nindent 8 }}$"),
+        "container-security": (deployment, r"(?m)^          securityContext:\s*$\n^            {{- toYaml \.Values\.securityContext \| nindent 12 }}$"),
+        "readiness-probe": (deployment, r"(?m)^            {{- toYaml \.Values\.probes\.readiness \| nindent 12 }}$"),
+        "liveness-probe": (deployment, r"(?m)^            {{- toYaml \.Values\.probes\.liveness \| nindent 12 }}$"),
+        "tmpfs": (deployment, r"sizeLimit:\s*{{\s*\.Values\.tmpfs\.sizeLimit\s*\|\s*quote\s*}}"),
+        "persistence-size": (pvc, r"storage:\s*{{\s*\.Values\.persistence\.size\s*\|\s*quote\s*}}"),
+        "persistence-storage-class": (pvc, r"with\s+\.Values\.persistence\.storageClass\b"),
+    }
+    if projection == "image-helper":
+        return len(re.findall(r"\.Values\.image\.(?:repository|tag|digest)\b", helpers)) == 5 \
+            and len(re.findall(r'include\s+"ravenroot\.image"', deployment)) == 1
+    if projection == "auth-required":
+        leaf = value_path.rsplit(".", 1)[1]
+        environment = {"issuer": "ISSUER", "audience": "AUDIENCE", "jwksUri": "JWKS_URI"}[leaf]
+        pattern = rf'- name:\s*RAVENROOT_AUTH_{environment}\s+value:\s*{{{{\s*required\s+"auth\.{leaf} is required"\s+\.Values\.auth\.{leaf}\s*\|\s*quote\s*}}}}'
+        return len(re.findall(pattern, deployment)) == 1
+    if projection == "program-timeout":
+        return deployment.count(
+            '- name: RAVENROOT_PROGRAM_TIMEOUT_MS\n'
+            '              value: {{ include "ravenroot.graphLimitValue" .Values.programTimeoutMs }}') == 1
+    source_pattern = direct.get(projection)
+    return source_pattern is not None and len(re.findall(source_pattern[1], source_pattern[0])) == 1
+
+
+def helm_test_evidence_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    sources: dict[str, str] = {}
+    for path in HELM_TEST_ROLES:
+        test = root / path
+        if not test.is_file():
+            errors.append(f"Helm authority test evidence is missing: {path}")
+        else:
+            sources[path] = "\n".join(line for line in test.read_text(encoding="utf-8").splitlines()
+                                      if not line.lstrip().startswith("#"))
+    values = sources.get("scripts/tests/test_helm_values_contract.sh", "")
+    timeout = sources.get("scripts/tests/test_program_timeout_helm_contract.sh", "")
+    unsupported = sources.get("scripts/tests/test_execution_manifest_pin_helm_contract.sh", "")
+    requirements = (
+        (values, r'^helm_base >"\$TEMP_DIR/default\.yaml"$', "default render"),
+        (values, r'^helm_base \\$', "nondefault render"),
+        (values, r'^  >"\$TEMP_DIR/tag-only\.yaml"$', "tag-only render"),
+        (values, r'^for invalid in \\$', "invalid-value refusal"),
+        (values, r'set\(schema\.get\("required", \[\]\)\) != expected_top', "required closure"),
+        (timeout, r'^for value in 100 15000 300000; do$', "timeout boundaries"),
+        (timeout, r'^for invalid in 99 300001; do$', "timeout range refusal"),
+        (timeout, r'^for label_and_value in ', "timeout blank delegation"),
+        (unsupported, r'RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS', "unsupported setting refusal"),
+    )
+    for source, pattern, label in requirements:
+        if re.search(pattern, source, re.MULTILINE) is None:
+            errors.append(f"Helm authority test evidence lacks executable {label}")
+    for value_path, _setting, _default, _schema_rule, _projection in HELM_OPERATOR_VALUE_CONTRACTS:
+        source = timeout if value_path == "programTimeoutMs" else values
+        if value_path not in source:
+            errors.append(f"Helm authority test evidence does not exercise {value_path}")
+    for assertion in (
+            "default image values did not render", "required OIDC values did not render",
+            "default Service values did not render", "default pod security values did not render",
+            "default resource requirements did not render", "default probe timing values did not render",
+            "default tmpfs size limit did not render",
+            "default persistent-volume contract did not render", "nondefault image values did not render",
+            "tag-only image values did not render",
+            "nondefault Service values did not render", "nondefault resource requirements did not render",
+            "nondefault pod security values did not render", "nondefault container identity values did not render",
+            "nondefault probe timing values did not render", "nondefault tmpfs size limit did not render",
+            "nondefault persistent-volume values did not render"):
+        if assertion not in values:
+            errors.append(f"Helm authority test evidence lacks executable assertion: {assertion}")
+    for refusal in (
+            "podSecurityContext.runAsNonRoot=false",
+            "securityContext.allowPrivilegeEscalation=true",
+            "securityContext.readOnlyRootFilesystem=false"):
+        if refusal not in values:
+            errors.append(f"Helm authority test evidence lacks fixed-hardening refusal: {refusal}")
+    tag_only_case = (
+        'helm_base \\\n'
+        '  --set-string image.repository=registry.example.test/ravenroot \\\n'
+        '  --set-string image.tag=release-test \\\n'
+        '  --set-string image.digest= \\\n'
+        '  >"$TEMP_DIR/tag-only.yaml"')
+    tag_only_assertion = (
+        'tag_image = tag_deployment["spec"]["template"]["spec"]["containers"][0]["image"]\n'
+        'if tag_image != "registry.example.test/ravenroot:release-test":\n'
+        '    raise SystemExit("tag-only image values did not render")')
+    if values.count(tag_only_case) != 1 or values.count(tag_only_assertion) != 1:
+        errors.append("Helm authority test evidence lacks the exact executable tag-only image case")
+    return errors
+
+
+def helm_chart_present(root: Path, candidates: tuple[Candidate, ...]) -> bool:
+    """Distinguish true chart absence from a partial or invalid supported chart."""
+    chart_paths = {HELM_CHART_PATH, HELM_VALUES_PATH, HELM_SCHEMA_PATH, *HELM_TEMPLATE_PATHS}
+    return any((root / path).exists() for path in chart_paths) \
+        or any(candidate.path in chart_paths for candidate in candidates)
+
+
+def helm_chart_metadata(root: Path) -> dict[str, object] | None:
+    """Read the exact flat metadata contract that identifies the supported chart."""
+    try:
+        source = (root / HELM_CHART_PATH).read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        return None
+    expected_fields = {
+        "apiVersion", "name", "description", "type", "version", "appVersion", "kubeVersion",
+    }
+    fields: dict[str, str] = {}
+    for raw in source.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"([A-Za-z][A-Za-z0-9]*)\s*:\s*(.*?)\s*", raw)
+        if match is None or match.group(1) in fields or not match.group(2):
+            return None
+        key, scalar = match.groups()
+        if scalar.startswith('"'):
+            try:
+                value = json.loads(scalar)
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(value, str):
+                return None
+        elif scalar.startswith("'"):
+            if len(scalar) < 2 or not scalar.endswith("'"):
+                return None
+            quoted = scalar[1:-1]
+            if "'" in quoted.replace("''", ""):
+                return None
+            value = quoted.replace("''", "'")
+        elif scalar[0] in "[{>|&*!" or " #" in scalar \
+                or re.search(r":(?:\s|$)", scalar):
+            return None
+        else:
+            value = scalar
+        if not value.strip():
+            return None
+        fields[key] = value
+    if set(fields) != expected_fields \
+            or fields["apiVersion"] != "v2" \
+            or fields["name"] != "ravenroot" \
+            or fields["type"] != "application":
+        return None
+    # Release tooling owns version transitions; this proof reuses its accepted grammar and
+    # equality check while treating both values as chart metadata rather than operator settings.
+    if PRODUCT_SEMVER.fullmatch(fields["version"]) is None \
+            or product_helm_errors(fields["version"], source) \
+            or re.fullmatch(r">=[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?",
+                            fields["kubeVersion"]) is None:
+        return None
+    return {
+        "path": HELM_CHART_PATH,
+        "apiVersion": fields["apiVersion"],
+        "name": fields["name"],
+        "description": fields["description"],
+        "type": fields["type"],
+        "version": fields["version"],
+        "appVersion": fields["appVersion"],
+        "kubeVersion": fields["kubeVersion"],
+        "digest": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+    }
+
+
+def helm_timeout_runtime_evidence(root: Path) -> dict[str, object] | None:
+    path = ("ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/"
+            "programming/graalvm/GraalVmProgramRuntime.java")
+    try:
+        source = (root / path).read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        return None
+    methods = ("policyFor", "compatibilityFingerprint", "invokeSupervisor")
+    spans = {method: java_method_span(source, "GraalVmProgramRuntime", method) for method in methods}
+    masked = strip_c_comments_and_literals(source)
+    signature = re.search(
+        r'\bstatic\s+GraalVmProgramRuntime\s+fromEnvironment\s*\(\s*java\.util\.Map<String,\s*String>\s+environment\s*\)\s*\{',
+        masked)
+    spans["fromEnvironmentMap"] = None
+    if signature is not None:
+        opening = masked.find("{", signature.start())
+        closing = matching_delimiter(masked, opening, "{", "}")
+        spans["fromEnvironmentMap"] = None if closing is None else (signature.start(), closing + 1)
+    if any(span is None for span in spans.values()):
+        return None
+    bodies = {method: strip_c_comments(source[slice(*spans[method])]) for method in methods}
+    bodies["fromEnvironment"] = strip_c_comments(source[slice(*spans["fromEnvironmentMap"])])
+    checks = (
+        re.search(r'Duration\s+timeout\s*=\s*Duration\.ofMillis\s*\(\s*integerEnvironment\s*\(\s*environment\s*,\s*"RAVENROOT_PROGRAM_TIMEOUT_MS"\s*,\s*5_000\s*,\s*100\s*,\s*300_000\s*\)\s*\)', bodies["fromEnvironment"]),
+        re.search(r'new\s+SandboxPolicy\s*\(\s*timeout\s*,\s*Math\.toIntExact\s*\(\s*timeout\.toMillis\s*\(\s*\)\s*\)', bodies["policyFor"]),
+        re.search(r'policy\.deadline\s*\(\s*\)\.toMillis\s*\(\s*\)', bodies["compatibilityFingerprint"]),
+        re.search(r'deadline\s*=\s*start\s*\+\s*policy\.deadline\s*\(\s*\)\.toNanos\s*\(\s*\)', bodies["invokeSupervisor"]),
+    )
+    if not all(checks):
+        return None
+    return {"path": path, "type": "GraalVmProgramRuntime",
+            "methods": {method: hashlib.sha256(normalized(bodies[
+                "fromEnvironment" if method == "fromEnvironmentMap" else method]).encode("utf-8")).hexdigest()
+                        for method in (*methods, "fromEnvironmentMap")}}
+
+
+def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) -> dict[str, object] | None:
+    try:
+        values_source = (root / HELM_VALUES_PATH).read_text(encoding="utf-8")
+        schema_source = (root / HELM_SCHEMA_PATH).read_text(encoding="utf-8")
+        release_contract_source = (root / HELM_RELEASE_CONTRACT_PATH).read_text(encoding="utf-8")
+        schema = json.loads(schema_source)
+    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    chart_metadata = helm_chart_metadata(root)
+    if chart_metadata is None:
+        return None
+    operator_paths = {contract[0] for contract in HELM_OPERATOR_VALUE_CONTRACTS}
+    fixed_paths = set(HELM_FIXED_VALUE_CONTRACTS) | set(HELM_FIXED_LIST_CONTRACTS)
+    actual_paths = helm_values_leaf_paths(values_source)
+    external_paths = {path for path in actual_paths
+                      if any(path.startswith(prefix) for prefix in HELM_JAVA_CARRIER_PREFIXES)}
+    if actual_paths != operator_paths | fixed_paths | external_paths:
+        return None
+    schema_spans = json_value_spans(schema_source)
+    if schema_spans is None:
+        return None
+    contracts: list[dict[str, object]] = []
+    scalar_rows = {(line, path): value for line, path, value in yaml_scalar_rows(values_source)}
+    values_candidates = [candidate for candidate in candidates if candidate.path == HELM_VALUES_PATH]
+    schema_candidates = [candidate for candidate in candidates if candidate.path == HELM_SCHEMA_PATH]
+    template_candidates = [candidate for candidate in candidates
+                           if candidate.path in HELM_TEMPLATE_PATHS]
+    schema_lines = [0]
+    for match in re.finditer("\n", schema_source):
+        schema_lines.append(match.end())
+    for value_path, setting, default, schema_rule, projection in HELM_OPERATOR_VALUE_CONTRACTS:
+        if yaml_scalar_at_path(values_source, value_path) != default \
+                or not helm_schema_rule_matches(schema, value_path, schema_rule) \
+                or not helm_projection_matches(root, value_path, projection):
+            return None
+        lines = {line for (line, path), _value in scalar_rows.items() if path == value_path}
+        pointer_path = tuple(component for pair in
+                             (("properties", part) for part in value_path.split("."))
+                             for component in pair)
+        candidate_ids = {candidate.id for candidate in values_candidates if candidate.line in lines}
+        schema_span = schema_spans.get(pointer_path)
+        if schema_span is not None:
+            first_line = bisect_right(schema_lines, schema_span[0])
+            last_line = bisect_right(schema_lines, max(schema_span[0], schema_span[1] - 1))
+            candidate_ids.update(candidate.id for candidate in schema_candidates
+                                 if first_line <= candidate.line <= last_line)
+        template_value = f".Values.{value_path}"
+        # Direct leaf projections are unambiguous. Parent toYaml projections remain structural
+        # Helm candidates and are covered by the authority-wide exact set instead of being assigned
+        # to multiple logical settings.
+        for path in HELM_TEMPLATE_PATHS:
+            local_lines = {index for index, line in enumerate(
+                (root / path).read_text(encoding="utf-8").splitlines(), 1)
+                           if template_value in line}
+            if local_lines:
+                candidate_ids.update(candidate.id for candidate in template_candidates
+                                     if candidate.path == path and candidate.line in local_lines)
+        schema_contract = helm_schema_contract(schema, value_path)
+        environment_name = schema_contract.get("x-ravenroot-environment") \
+            if isinstance(schema_contract, dict) else None
+        environment_name = {
+            "auth.issuer": "RAVENROOT_AUTH_ISSUER",
+            "auth.audience": "RAVENROOT_AUTH_AUDIENCE",
+            "auth.jwksUri": "RAVENROOT_AUTH_JWKS_URI",
+        }.get(value_path, environment_name)
+        if isinstance(environment_name, str):
+            candidate_ids.update(candidate.id for candidate in template_candidates
+                                 if candidate.kind == "environment-binding"
+                                 and candidate.expression == environment_name)
+        contracts.append({
+            "setting": setting,
+            "owner": f"{HELM_VALUES_PATH}#{value_path.split('.', 1)[0]}",
+            "field": value_path,
+            "valuePath": value_path,
+            "default": default,
+            "defaultDisplay": (
+                "no valid default; an explicit nonblank public OIDC value is required"
+                if schema_rule == "required-auth" else
+                "15000 ms Helm deployment profile; blank delegates to the Java-owned 5000 ms default"
+                if value_path == "programTimeoutMs" else default),
+            "validation": schema_rule,
+            "scope": "one rendered Helm release",
+            "pinning": "resolved by Helm schema validation and rendered into the pod specification",
+            "coverage": "closed values/schema/template and executable default, nondefault, and refusal contracts",
+            "schemaPointer": helm_schema_pointer(value_path),
+            "schemaRule": schema_rule,
+            "schemaContract": schema_contract,
+            "projection": projection,
+            "bindings": [] if environment_name is None else [environment_name],
+            "candidateIds": sorted(candidate_ids),
+        })
+    for path, expected in HELM_FIXED_VALUE_CONTRACTS.items():
+        if yaml_scalar_at_path(values_source, path) != expected:
+            return None
+    fixed_schema = {
+        "replicaCount": {"type": "integer", "minimum": 1, "maximum": 1},
+        "engine": {"type": "string", "enum": ["pekko"]},
+        "podSecurityContext.runAsNonRoot": {"type": "boolean", "const": True},
+        "podSecurityContext.seccompProfile.type": {"type": "string", "enum": ["RuntimeDefault"]},
+        "securityContext.allowPrivilegeEscalation": {"type": "boolean", "const": False},
+        "securityContext.readOnlyRootFilesystem": {"type": "boolean", "const": True},
+    }
+    if any(helm_schema_contract(schema, path) != contract
+           for path, contract in fixed_schema.items()):
+        return None
+    if json_pointer(schema, "#/properties/securityContext/properties/capabilities/properties/drop") \
+            != {"type": "array", "minItems": 1, "uniqueItems": True,
+                "items": {"type": "string", "enum": ["ALL"]}} \
+            or json_pointer(schema, "#/properties/persistence/properties/accessModes") \
+            != {"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": True,
+                "items": {"type": "string", "enum": ["ReadWriteOnce"]}}:
+        return None
+    for path, expected in HELM_FIXED_LIST_CONTRACTS.items():
+        parent, index = path.rsplit(".", 1)
+        if index != "0" or re.search(
+                rf'(?m)^\s*{re.escape(parent.rsplit(".", 1)[-1])}:\s*$[\s\S]*?^\s*-\s*{re.escape(expected)}\s*$',
+                values_source) is None:
+            return None
+    runtime = helm_timeout_runtime_evidence(root)
+    if runtime is None or helm_test_evidence_errors(root):
+        return None
+    covered_paths = {
+        HELM_CHART_PATH, HELM_VALUES_PATH, HELM_SCHEMA_PATH,
+        *HELM_TEMPLATE_PATHS, *HELM_TEST_ROLES,
+    }
+    return {
+        "kind": "helm-values-authority-v1",
+        "chartMetadata": chart_metadata,
+        "releaseVersionEvidence": {
+            "path": HELM_RELEASE_CONTRACT_PATH,
+            "fields": ["version", "appVersion"],
+            "digest": hashlib.sha256(release_contract_source.encode("utf-8")).hexdigest(),
+        },
+        "valuesPath": HELM_VALUES_PATH,
+        "schemaPath": HELM_SCHEMA_PATH,
+        "templatePaths": list(HELM_TEMPLATE_PATHS),
+        "contracts": contracts,
+        "fixedValuePaths": sorted(fixed_paths),
+        "javaCarrierPaths": sorted(external_paths),
+        "testEvidence": [{"path": path, "roles": list(roles),
+                          "digest": hashlib.sha256((root / path).read_bytes()).hexdigest()}
+                         for path, roles in HELM_TEST_ROLES.items()],
+        "timeoutRuntime": runtime,
+        "candidateIds": sorted(candidate.id for candidate in candidates
+                               if candidate.path in covered_paths),
+    }
+
+
+def helm_authority_errors(root: Path, authorities: object,
+                          entries: dict[str, dict[str, object]],
+                          candidates: tuple[Candidate, ...]) -> list[str]:
+    chart_present = helm_chart_present(root, candidates)
+    expected = helm_authority_from_source(root, candidates)
+    helm_entries = [entry for entry in entries.values() if entry.get("helmAuthority") is not None]
+    if not chart_present:
+        return ([] if authorities in (None, {}) and not helm_entries else
+                ["Helm authority or owned rows exist without a supported Helm chart"])
+    errors: list[str] = []
+    if expected is None:
+        return ["Helm values, schema, templates, runtime, or executable tests violate the closed authority"]
+    if not isinstance(authorities, dict) or set(authorities) != {HELM_AUTHORITY_ID} \
+            or authorities.get(HELM_AUTHORITY_ID) != expected:
+        errors.append("Helm settings require the exact source-derived closed values authority")
+    by_setting = {str(contract["setting"]): contract for contract in expected["contracts"]}
+    expected_candidate_settings: dict[str, str] = {}
+    for setting, contract in by_setting.items():
+        candidate_ids = contract.get("candidateIds")
+        if not isinstance(candidate_ids, list):
+            errors.append(f"{setting}: Helm authority candidate evidence is malformed")
+            continue
+        for identifier in candidate_ids:
+            previous = expected_candidate_settings.setdefault(str(identifier), setting)
+            if previous != setting:
+                errors.append(
+                    f"Helm candidate {identifier} is assigned to both {previous} and {setting}")
+    assigned: dict[str, set[str]] = defaultdict(set)
+    for entry in entries.values():
+        marker = entry.get("helmAuthority")
+        if marker is None:
+            continue
+        setting = str(entry.get("setting", ""))
+        contract = by_setting.get(setting)
+        assigned[setting].add(str(entry.get("id")))
+        if marker != HELM_AUTHORITY_ID or contract is None:
+            errors.append(f"{entry.get('id')}: unsupported Helm authority or setting")
+            continue
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"]:
+            errors.append(f"{entry.get('id')}: Helm owner or value path has drifted")
+        for field in ("bindings", "defaultDisplay", "validation", "scope", "pinning", "coverage"):
+            entry_field = "default" if field == "defaultDisplay" else field
+            if entry.get(entry_field) != contract[field]:
+                errors.append(f"{entry.get('id')}: Helm {entry_field} metadata has drifted")
+        if not str(entry.get("owner", "")).startswith(HELM_VALUES_PATH + "#"):
+            errors.append(f"{entry.get('id')}: Helm proof cannot authorize a non-values owner")
+    for setting, contract in by_setting.items():
+        expected_ids = {str(identifier) for identifier in contract.get("candidateIds", [])}
+        if assigned[setting] != expected_ids:
+            errors.append(
+                f"{setting}: Helm candidate coverage is incomplete, duplicate, or foreign")
+    errors.extend(helm_test_evidence_errors(root))
+    return errors
+
+
 def yaml_default_removal_errors(root: Path, identifier: str, entry: dict[str, object],
                                 removal: dict[str, object],
                                 active_entries: dict[str, dict[str, object]]) -> list[str]:
@@ -1729,6 +2490,1092 @@ def yaml_default_removal_errors(root: Path, identifier: str, entry: dict[str, ob
     return errors
 
 
+SOURCE_METADATA_FIELDS = {
+    "id", "path", "line", "symbol", "kind", "role", "expression",
+    "expressionDigest", "evidenceDigest", "surface",
+}
+
+
+def committed_json(root: Path, revision: str, path: str) -> tuple[dict[str, object] | None, bytes | None]:
+    """Load one committed JSON object without accepting an option-shaped locator."""
+    if not historical_source_locator_is_safe(revision, path):
+        return None, None
+    result = subprocess.run(["git", "show", f"{revision}:{path}"], cwd=root,
+                            capture_output=True)
+    if result.returncode != 0:
+        return None, None
+    try:
+        value = json.loads(result.stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, result.stdout
+    return value if isinstance(value, dict) else None, result.stdout
+
+
+def candidate_set_digest(identifiers: Iterable[str]) -> str:
+    payload = "\n".join(sorted(identifiers)) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def reconciliation_target_tree_errors(root: Path, target_revision: str) -> list[str]:
+    """Require the scanned worktree to be exactly the committed reconciliation target."""
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True)
+    if head.returncode != 0 or not revision_is_ancestor(root, target_revision, head.stdout.strip()):
+        return ["reconciliation target revision is not an ancestor of the checked-out HEAD"]
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if status.returncode != 0:
+        return ["reconciliation target worktree status cannot be verified"]
+    allowed = {
+        (root / INVENTORY.relative_to(ROOT)).resolve(),
+        (root / REPORT.relative_to(ROOT)).resolve(),
+    }
+    changed: list[str] = []
+    def is_reconciliation_source(raw: str) -> bool:
+        relative = Path(raw)
+        if relative.as_posix() == "scripts/audit_operational_configuration.py":
+            return True
+        return surface(relative) is not None and (
+            relative.suffix in SOURCE_SUFFIXES or relative.name.startswith("Dockerfile"))
+
+    committed_changes = subprocess.run(
+        ["git", "diff", "--name-only", f"{target_revision}..{head.stdout.strip()}"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if committed_changes.returncode != 0:
+        return ["reconciliation target commit range cannot be verified"]
+    for raw in committed_changes.stdout.splitlines():
+        if (root / raw).resolve() not in allowed and is_reconciliation_source(raw):
+            changed.append(raw)
+    for row in status.stdout.splitlines():
+        raw = row[3:]
+        if " -> " in raw:
+            raw = raw.split(" -> ", 1)[1]
+        path = (root / raw).resolve()
+        if path not in allowed and is_reconciliation_source(raw):
+            changed.append(raw)
+    return (["reconciliation target has uncommitted source changes: " + ", ".join(changed[:5])]
+            if changed else [])
+
+
+def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
+    """Return reviewed metadata that an identity-only migration must preserve exactly."""
+    return {key: value for key, value in entry.items()
+            if key not in SOURCE_METADATA_FIELDS and key not in {"retirement", "identityMigration"}}
+
+
+def catalog_property_key(source: str | None, line: object) -> str | None:
+    if source is None or not isinstance(line, int):
+        return None
+    lines = source.splitlines()
+    if line < 1 or line > len(lines):
+        return None
+    matched = re.match(r"\s*(['\"])([^'\"]+)\1\s*:", lines[line - 1])
+    return matched.group(2) if matched is not None else None
+
+
+def candidate_reference_locations(value: object, identifiers: set[str],
+                                  path: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    found: list[tuple[str, ...]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            found.extend(candidate_reference_locations(child, identifiers, path + (str(key),)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(candidate_reference_locations(child, identifiers, path + (str(index),)))
+    elif isinstance(value, str) and value in identifiers:
+        found.append(path)
+    return found
+
+
+def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
+    """Allow only the candidate-ID fields declared by schema v5."""
+    if len(path) == 3 and path[0] == "entries" and path[2] == "id":
+        return path[1].isdigit()
+    if len(path) == 4 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "defaultEvidence":
+        return path[3].isdigit()
+    if len(path) == 4 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "schemaEvidence" and path[3] == "candidateId":
+        return True
+    if len(path) == 4 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "bindingAuthority" \
+            and path[3] in {"environmentCandidateId", "propertyCandidateId"}:
+        return True
+    if len(path) == 5 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "bindingAuthority" \
+            and path[3] in {"sourceEnvironmentCandidateIds", "declarationCandidateIds"}:
+        return path[4].isdigit()
+    if len(path) == 5 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "defaultAuthority" and path[3] == "candidateIds":
+        return path[4].isdigit()
+    if len(path) == 8 and path[0] == "entries" and path[1].isdigit() \
+            and path[2:5] == ("defaultAuthority", "constantReferenceAuthority", "hops") \
+            and path[5].isdigit() and path[6] == "candidateIds":
+        return path[7].isdigit()
+    if len(path) == 5 and path[0] == "entries" and path[1].isdigit() \
+            and path[2] == "coverageEvidence" \
+            and path[3] in {
+                "composeCandidateIds", "helmValueCandidateIds", "helmTemplateCandidateIds",
+                "helmSchemaEnvironmentCandidateIds", "helmSchemaReferenceCandidateIds",
+                "rawKubernetesCandidateIds",
+            }:
+        return path[4].isdigit()
+    if len(path) == 6 and path[0] == "entries" and path[1].isdigit() \
+            and path[2:4] == ("carrierEvidence", "expectedCandidateIds") \
+            and path[4] in {"compose", "deploymentExamples", "helm", "rawKubernetes"}:
+        return path[5].isdigit()
+    if len(path) == 5 and path[0] == "routeTableAuthorities" \
+            and path[2] == "candidateIdsByRole":
+        return path[4].isdigit()
+    if len(path) == 7 and path[0] == "routeTableAuthorities" \
+            and path[2] == "descriptorCandidateIds" and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[6].isdigit()
+    if len(path) == 6 and path[0] == "graphLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "defaultEvidence":
+        return path[5].isdigit()
+    if len(path) == 5 and path[0] == "graphLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "environmentCandidateId":
+        return True
+    if len(path) == 7 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "defaultAuthority" and path[5] == "candidateIds":
+        return path[6].isdigit()
+    if len(path) == 6 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "bindingAuthority" \
+            and path[5] == "environmentCandidateId":
+        return True
+    if len(path) == 7 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "settings" and path[3].isdigit() \
+            and path[4] == "bindingAuthority" and path[5] == "declarationCandidateIds":
+        return path[6].isdigit()
+    if len(path) == 7 and path[0] == "assistantLimitAuthorities" \
+            and path[2] == "carrierEvidence" \
+            and path[4] == "expectedCandidateIds" \
+            and path[5] in {"compose", "deploymentExamples", "helm", "rawKubernetes"}:
+        return path[6].isdigit()
+    if len(path) == 4 and path[0] == "helmAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "helmAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[5].isdigit()
+    if len(path) == 4 and path[0] == "persistencePolicyAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "persistencePolicyAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
+    if len(path) == 4 and path[0] == "externalIoPolicyAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "externalIoPolicyAuthorities" \
+            and path[2] == "contracts" and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
+    if len(path) == 6 and path[0] == "externalIoPolicyAuthorities" \
+            and path[2] == "semanticPartitions" and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[5].isdigit()
+    if len(path) == 5 and path[0] == "remediationDomains" \
+            and path[1] == "domains" and path[2].isdigit() \
+            and path[3] == "candidateIds":
+        return path[4].isdigit()
+    return False
+
+
+def immutable_historical_reference(path: tuple[str, ...]) -> bool:
+    """Recognize anchored historical candidate references that must never be rewritten."""
+    return bool(path) and path[0] in {
+        "reconciliationHistory", "semanticReviewHistory", "retiredEntries",
+        "normalizedIdentityReappearanceHistory",
+    }
+
+
+def remap_declared_candidate_references(document: dict[str, object],
+                                        replacements: dict[str, str]) -> None:
+    """Remap only live candidate-ID fields explicitly declared by schema v5."""
+    def remap_list(container: object, field: str) -> None:
+        if isinstance(container, dict) and isinstance(container.get(field), list):
+            container[field][:] = [replacements.get(value, value) for value in container[field]]
+
+    entries = document.get("entries")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            remap_list(entry, "defaultEvidence")
+            binding = entry.get("bindingAuthority")
+            if isinstance(binding, dict):
+                for field in ("environmentCandidateId", "propertyCandidateId"):
+                    if isinstance(binding.get(field), str):
+                        binding[field] = replacements.get(binding[field], binding[field])
+                for field in ("sourceEnvironmentCandidateIds", "declarationCandidateIds"):
+                    remap_list(binding, field)
+            default = entry.get("defaultAuthority")
+            if isinstance(default, dict):
+                remap_list(default, "candidateIds")
+                chain = default.get("constantReferenceAuthority")
+                hops = chain.get("hops") if isinstance(chain, dict) else None
+                if isinstance(hops, list):
+                    for hop in hops:
+                        remap_list(hop, "candidateIds")
+            schema = entry.get("schemaEvidence")
+            if isinstance(schema, dict) and isinstance(schema.get("candidateId"), str):
+                schema["candidateId"] = replacements.get(schema["candidateId"], schema["candidateId"])
+            coverage = entry.get("coverageEvidence")
+            for field in (
+                    "composeCandidateIds", "helmValueCandidateIds", "helmTemplateCandidateIds",
+                    "helmSchemaEnvironmentCandidateIds", "helmSchemaReferenceCandidateIds",
+                    "rawKubernetesCandidateIds"):
+                remap_list(coverage, field)
+            carrier = entry.get("carrierEvidence")
+            expected = carrier.get("expectedCandidateIds") if isinstance(carrier, dict) else None
+            for field in ("compose", "deploymentExamples", "helm", "rawKubernetes"):
+                remap_list(expected, field)
+
+    authorities = document.get("routeTableAuthorities")
+    if isinstance(authorities, dict):
+        for authority in authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            by_role = authority.get("candidateIdsByRole")
+            if isinstance(by_role, dict):
+                for role in ("methods", "path", "summary", "successStatuses"):
+                    remap_list(by_role, role)
+            descriptors = authority.get("descriptorCandidateIds")
+            if isinstance(descriptors, list):
+                for descriptor in descriptors:
+                    candidate_ids = descriptor.get("candidateIds") \
+                        if isinstance(descriptor, dict) else None
+                    if isinstance(candidate_ids, dict):
+                        for role in ("methods", "path", "summary", "successStatuses"):
+                            remap_list(candidate_ids, role)
+
+    graph_authorities = document.get("graphLimitAuthorities")
+    if isinstance(graph_authorities, dict):
+        for authority in graph_authorities.values():
+            settings = authority.get("settings") if isinstance(authority, dict) else None
+            if not isinstance(settings, list):
+                continue
+            for setting in settings:
+                remap_list(setting, "defaultEvidence")
+                if isinstance(setting, dict) and isinstance(setting.get("environmentCandidateId"), str):
+                    setting["environmentCandidateId"] = replacements.get(
+                        setting["environmentCandidateId"], setting["environmentCandidateId"])
+
+    assistant_authorities = document.get("assistantLimitAuthorities")
+    if isinstance(assistant_authorities, dict):
+        for authority in assistant_authorities.values():
+            settings = authority.get("settings") if isinstance(authority, dict) else None
+            if isinstance(settings, list):
+                for setting in settings:
+                    if not isinstance(setting, dict):
+                        continue
+                    binding = setting.get("bindingAuthority")
+                    if isinstance(binding, dict):
+                        if isinstance(binding.get("environmentCandidateId"), str):
+                            binding["environmentCandidateId"] = replacements.get(
+                                binding["environmentCandidateId"], binding["environmentCandidateId"])
+                        remap_list(binding, "declarationCandidateIds")
+                    remap_list(setting.get("defaultAuthority"), "candidateIds")
+            carriers = authority.get("carrierEvidence") if isinstance(authority, dict) else None
+            if isinstance(carriers, dict):
+                for carrier in carriers.values():
+                    expected = carrier.get("expectedCandidateIds") \
+                        if isinstance(carrier, dict) else None
+                    for field in ("compose", "deploymentExamples", "helm", "rawKubernetes"):
+                        remap_list(expected, field)
+
+    helm_authorities = document.get("helmAuthorities")
+    if isinstance(helm_authorities, dict):
+        for authority in helm_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+
+    persistence_authorities = document.get("persistencePolicyAuthorities")
+    if isinstance(persistence_authorities, dict):
+        for authority in persistence_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultCandidateIds")
+    external_io_authorities = document.get("externalIoPolicyAuthorities")
+    if isinstance(external_io_authorities, dict):
+        for authority in external_io_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contracts = authority.get("contracts")
+            if isinstance(contracts, list):
+                for contract in contracts:
+                    remap_list(contract, "candidateIds")
+                    remap_list(contract, "defaultCandidateIds")
+            partitions = authority.get("semanticPartitions")
+            if isinstance(partitions, list):
+                for partition in partitions:
+                    remap_list(partition, "candidateIds")
+
+    domains = document.get("remediationDomains")
+    domain_rows = domains.get("domains") if isinstance(domains, dict) else None
+    if isinstance(domain_rows, list):
+        for domain in domain_rows:
+            remap_list(domain, "candidateIds")
+
+
+def reconciliation_plan_errors(root: Path, document: dict[str, object],
+                               candidates: tuple[Candidate, ...],
+                               plan: dict[str, object]) -> tuple[list[str], dict[str, dict[str, object]]]:
+    """Validate one explicit old-to-current reconciliation before applying it."""
+    errors: list[str] = []
+    required = {
+        "id", "issue", "sourceRevision", "targetRevision", "sourceInventoryPath",
+        "sourceInventoryDigest", "targetCandidateDigest", "mappings", "retirements", "additions",
+    }
+    if set(plan) != required or not isinstance(plan.get("issue"), str) \
+            or re.fullmatch(r"#[1-9][0-9]*", str(plan["issue"])) is None \
+            or not isinstance(plan.get("id"), str) or not str(plan["id"]).strip():
+        return ["reconciliation plan has an unsupported or incomplete shape"], {}
+    source_revision = plan["sourceRevision"]
+    target_revision = plan["targetRevision"]
+    source_path = plan["sourceInventoryPath"]
+    if not historical_source_locator_is_safe(source_revision, source_path) \
+            or not isinstance(target_revision, str) \
+            or re.fullmatch(r"[0-9a-f]{40}", target_revision) is None:
+        return ["reconciliation plan has an unsafe source or target locator"], {}
+    source_document, source_bytes = committed_json(root, str(source_revision), str(source_path))
+    if source_document is None or source_bytes is None:
+        return ["reconciliation source inventory is not a resolvable committed JSON object"], {}
+    if hashlib.sha256(source_bytes).hexdigest() != plan["sourceInventoryDigest"]:
+        errors.append("reconciliation source inventory digest has drifted")
+    if not commit_exists(root, str(target_revision)) \
+            or not revision_is_ancestor(root, str(source_revision), str(target_revision)):
+        errors.append("reconciliation target revision is not a resolvable descendant")
+    else:
+        errors.extend(reconciliation_target_tree_errors(root, str(target_revision)))
+    current = {candidate.id: candidate for candidate in candidates}
+    if candidate_set_digest(current) != plan["targetCandidateDigest"]:
+        errors.append("reconciliation target candidate set has drifted")
+    source_entries_raw = source_document.get("entries", [])
+    if not isinstance(source_entries_raw, list):
+        return errors + ["reconciliation source inventory has no entries array"], {}
+    source_entries = {str(entry.get("id")): entry for entry in source_entries_raw
+                      if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+    mappings = plan["mappings"]
+    retirements = plan["retirements"]
+    additions = plan["additions"]
+    if not all(isinstance(value, list) for value in (mappings, retirements, additions)):
+        return errors + ["reconciliation mappings, retirements, and additions must be arrays"], source_entries
+
+    mapping_from: set[str] = set()
+    mapping_to: set[str] = set()
+    before_sources: dict[str, str | None] = {}
+    after_sources: dict[str, str | None] = {}
+    for mapping in mappings:
+        if not isinstance(mapping, dict) or set(mapping) != {
+                "fromId", "toId", "approved", "rationale", "equivalence"}:
+            errors.append("identity migration has an unsupported or incomplete shape")
+            continue
+        before = mapping.get("fromId")
+        after = mapping.get("toId")
+        rationale = mapping.get("rationale")
+        equivalence = mapping.get("equivalence")
+        if mapping.get("approved") is not True or not isinstance(rationale, str) or not rationale.strip():
+            errors.append(f"identity migration {before!r} requires row-level approval and rationale")
+            continue
+        if not isinstance(before, str) or not isinstance(after, str) \
+                or before in mapping_from or after in mapping_to:
+            errors.append(f"identity migration {before!r}->{after!r} is duplicate or invalid")
+            continue
+        mapping_from.add(before)
+        mapping_to.add(after)
+        old = source_entries.get(before)
+        candidate = current.get(after)
+        if old is None or candidate is None or not isinstance(equivalence, dict):
+            errors.append(f"identity migration {before}->{after} has no source-backed endpoints")
+            continue
+        kind = equivalence.get("kind")
+        old_atom = tuple(old.get(field) for field in ("path", "symbol", "kind", "role", "expression"))
+        new_atom = (candidate.path, candidate.symbol, candidate.kind, candidate.role, candidate.expression)
+        if kind == "same-atom-v1":
+            if old_atom != new_atom \
+                    or equivalence.get("beforeEvidenceDigest") != old.get("evidenceDigest") \
+                    or equivalence.get("afterEvidenceDigest") != candidate.evidence_digest:
+                errors.append(f"identity migration {before}->{after} is not the same source atom")
+        elif kind == "catalog-property-v1":
+            if old.get("path") != candidate.path or old.get("path") != \
+                    "ravenroot/ravenroot-ui/src/ui-text.js" or old.get("kind") != candidate.kind:
+                errors.append(f"identity migration {before}->{after} is not one catalog property")
+                continue
+            path = str(old["path"])
+            before_sources.setdefault(path, committed_source(root, str(source_revision), path))
+            after_sources.setdefault(path, committed_source(root, str(target_revision), path))
+            old_key = catalog_property_key(before_sources[path], old.get("line"))
+            new_key = catalog_property_key(after_sources[path], candidate.line)
+            if old_key is None or old_key != new_key or equivalence.get("property") != old_key \
+                    or equivalence.get("beforeExpressionDigest") != old.get("expressionDigest") \
+                    or equivalence.get("afterExpressionDigest") != candidate.expression_digest:
+                errors.append(f"identity migration {before}->{after} lacks exact catalog-key evidence")
+        elif kind == "same-expression-location-v1":
+            required_equivalence = {
+                "kind", "path", "beforeLine", "afterLine",
+                "beforeEvidenceDigest", "afterEvidenceDigest",
+            }
+            if set(equivalence) != required_equivalence \
+                    or old.get("path") != candidate.path \
+                    or old.get("expression") != candidate.expression \
+                    or equivalence.get("path") != candidate.path \
+                    or equivalence.get("beforeLine") != old.get("line") \
+                    or equivalence.get("afterLine") != candidate.line \
+                    or equivalence.get("beforeEvidenceDigest") != old.get("evidenceDigest") \
+                    or equivalence.get("afterEvidenceDigest") != candidate.evidence_digest:
+                errors.append(f"identity migration {before}->{after} lacks exact expression/location evidence")
+        else:
+            errors.append(f"identity migration {before}->{after} uses unsupported equivalence {kind!r}")
+
+    retired_ids: set[str] = set()
+    for retirement in retirements:
+        identifier = retirement.get("id") if isinstance(retirement, dict) else None
+        rationale = retirement.get("rationale") if isinstance(retirement, dict) else None
+        if not isinstance(retirement, dict) or set(retirement) != {"id", "approved", "rationale"} \
+                or retirement.get("approved") is not True or not isinstance(identifier, str) \
+                or not isinstance(rationale, str) or not rationale.strip() or identifier in retired_ids:
+            errors.append(f"retirement {identifier!r} requires unique row-level approval and rationale")
+        else:
+            retired_ids.add(identifier)
+
+    addition_ids: set[str] = set()
+    addition_metadata: dict[str, dict[str, object]] = {}
+    for addition in additions:
+        identifier = addition.get("id") if isinstance(addition, dict) else None
+        metadata = addition.get("metadata") if isinstance(addition, dict) else None
+        if not isinstance(addition, dict) or set(addition) != {"id", "metadata"} \
+                or not isinstance(identifier, str) or identifier in addition_ids \
+                or not isinstance(metadata, dict) or metadata.get("status") == "pending-review" \
+                or metadata.get("classification") not in CLASSIFICATIONS:
+            errors.append(f"new candidate {identifier!r} requires one supported semantic classification")
+        else:
+            addition_ids.add(identifier)
+            addition_metadata[identifier] = metadata
+
+    source_ids = set(source_entries)
+    current_ids = set(current)
+    unchanged = source_ids & current_ids
+    missing = source_ids - current_ids
+    new = current_ids - source_ids
+    if mapping_from & retired_ids or mapping_to & addition_ids:
+        errors.append("migrations and genuine retirements/additions are not disjoint")
+    if mapping_from | retired_ids != missing or mapping_to | addition_ids != new:
+        errors.append(
+            "reconciliation does not exactly partition unchanged, migrated, retired, and added candidates")
+    if mapping_from - missing or mapping_to - new:
+        errors.append("reconciliation attempts an arbitrary remap outside absent/new candidates")
+    if len(unchanged) + len(mapping_from) + len(retired_ids) != len(source_ids) \
+            or len(unchanged) + len(mapping_to) + len(addition_ids) != len(current_ids):
+        errors.append("reconciliation partition counts are inconsistent")
+    return errors, source_entries
+
+
+def apply_reconciliation(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...],
+                         plan: dict[str, object]) -> tuple[dict[str, object] | None, list[str]]:
+    """Apply a fully approved reconciliation without rewriting undeclared JSON references."""
+    errors, source_entries = reconciliation_plan_errors(root, document, candidates, plan)
+    if errors:
+        return None, errors
+    replacements = {str(item["fromId"]): str(item["toId"])
+                    for item in plan["mappings"] if isinstance(item, dict)}
+    source_ids = set(source_entries)
+    unexpected = [path for path in candidate_reference_locations(document, source_ids - {
+        candidate.id for candidate in candidates})
+                  if not allowed_migrated_reference(path)
+                  and not immutable_historical_reference(path)]
+    if unexpected:
+        rendered = ", ".join("/".join(path) for path in unexpected[:5])
+        return None, [f"candidate identity appears in an undeclared reference field: {rendered}"]
+
+    current = {candidate.id: candidate for candidate in candidates}
+    merged: list[dict[str, object]] = []
+    for candidate in candidates:
+        if candidate.id in source_entries:
+            preserved = dict(source_entries[candidate.id])
+        else:
+            old_id = next((before for before, after in replacements.items()
+                           if after == candidate.id), None)
+            if old_id is not None:
+                preserved = dict(source_entries[old_id])
+                preserved["identityMigration"] = {"history": plan["id"], "fromId": old_id}
+            else:
+                addition = next(item for item in plan["additions"]
+                                if isinstance(item, dict) and item.get("id") == candidate.id)
+                preserved = {**candidate.source_fields(), **addition["metadata"]}
+        preserved.pop("evidence", None)
+        preserved.pop("retirement", None)
+        preserved.update(candidate.source_fields())
+        merged.append(preserved)
+
+    refreshed = dict(document)
+    refreshed["schemaVersion"] = SCHEMA_VERSION
+    refreshed["reconciliationRequired"] = True
+    refreshed["entries"] = merged
+    remap_declared_candidate_references(refreshed, replacements)
+    refreshed["routeTableAuthorities"] = {
+        ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
+    }
+    chart_present = helm_chart_present(root, candidates)
+    if chart_present:
+        helm_authority = helm_authority_from_source(root, candidates)
+        if helm_authority is None:
+            return None, ["cannot derive the closed Helm values authority from current source"]
+        refreshed["helmAuthorities"] = {HELM_AUTHORITY_ID: helm_authority}
+    if persistence_policy_source_present(root):
+        persistence_authority = persistence_policy_authority_from_source(root, current)
+        if persistence_authority is None:
+            return None, ["cannot derive the closed persistence policy authority from current source"]
+        refreshed["persistencePolicyAuthorities"] = {
+            PERSISTENCE_POLICY_AUTHORITY_ID: persistence_authority,
+        }
+    if external_io_policy_source_present(root):
+        external_io_authority = external_io_policy_authority_from_source(root, current)
+        if external_io_authority is None:
+            return None, ["cannot derive the closed external-I/O policy authority from current source"]
+        refreshed["externalIoPolicyAuthorities"] = {
+            EXTERNAL_IO_POLICY_AUTHORITY_ID: external_io_authority,
+        }
+    history = list(refreshed.get("reconciliationHistory", []))
+    history.append(plan)
+    refreshed["reconciliationHistory"] = history
+    refreshed.setdefault("semanticReviewHistory", [])
+    refreshed["migrationHistory"] = expected_reconciled_migration_history(
+        document, plan, source_entries)
+    refreshed["retiredEntries"] = expected_reconciled_retired_entries(
+        document, source_entries, plan)
+    refreshed["evidenceRecords"] = {
+        digest: evidence for digest, evidence in sorted({
+            candidate.evidence_digest: candidate.evidence for candidate in candidates
+        }.items())
+    }
+    return refreshed, []
+
+
+def expected_reconciled_retired_entries(source_document: dict[str, object],
+                                        source_entries: dict[str, dict[str, object]],
+                                        plan: dict[str, object]) -> list[object]:
+    """Rebuild the exact append-only retirement ledger for one reconciliation."""
+    retired_history = list(source_document.get("retiredEntries", []))
+    old_evidence = source_document.get("evidenceRecords", {})
+    for approval in plan["retirements"]:
+        archived = dict(source_entries[str(approval["id"])])
+        archived.pop("retirement", None)
+        archived["retirementRationale"] = str(approval["rationale"]).strip()
+        if "evidence" not in archived and isinstance(old_evidence, dict):
+            archived["evidence"] = old_evidence.get(str(archived.get("evidenceDigest")), "")
+        retired_history.append(archived)
+    return retired_history
+
+
+def expected_reconciled_migration_history(source_document: dict[str, object],
+                                          plan: dict[str, object],
+                                          source_entries: dict[str, dict[str, object]]) -> list[object]:
+    """Rebuild the exact append-only schema migration ledger for one reconciliation."""
+    migration_history = list(source_document.get("migrationHistory", []))
+    if source_document.get("schemaVersion") != SCHEMA_VERSION:
+        migration_history.append({
+            "fromSchema": source_document.get("schemaVersion"),
+            "toSchema": SCHEMA_VERSION,
+            "sourceRevision": plan["sourceRevision"],
+            "sourcePath": plan["sourceInventoryPath"],
+            "sourceFileDigest": plan["sourceInventoryDigest"],
+            "candidateCount": len(source_entries),
+            "statusCounts": dict(sorted(Counter(
+                str(entry.get("status")) for entry in source_entries.values()).items())),
+            "rationale": "Schema v5 records explicit source reconciliation, row-level identity migrations, and deterministic follow-up ownership.",
+        })
+    return migration_history
+
+
+def reconciliation_history_errors(root: Path, document: dict[str, object],
+                                  candidates: tuple[Candidate, ...]) -> list[str]:
+    history = document.get("reconciliationHistory")
+    if document.get("reconciliationRequired") is False and not history:
+        return []
+    if not isinstance(history, list) or not history:
+        return ["schema v5 inventory requires reconciliationHistory"]
+    identifiers: set[str] = set()
+    for record in history:
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str) \
+                or record["id"] in identifiers:
+            return ["reconciliationHistory contains an invalid or duplicate record"]
+        identifiers.add(str(record["id"]))
+    plan = history[-1]
+    errors, source_entries = reconciliation_plan_errors(root, document, candidates, plan)
+    if errors:
+        return errors
+    active = {str(entry["id"]): entry for entry in document.get("entries", [])
+              if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+    retired = {str(entry["id"]): entry for entry in document.get("retiredEntries", [])
+               if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
+    source_document, _source_bytes = committed_json(
+        root, str(plan["sourceRevision"]), str(plan["sourceInventoryPath"]))
+    source_history = source_document.get("reconciliationHistory", []) \
+        if isinstance(source_document, dict) else []
+    if source_history != history[:-1]:
+        errors.append("reconciliation history is not an append-only chain from the committed source inventory")
+    if isinstance(source_document, dict):
+        source_reappearances = source_document.get("normalizedIdentityReappearanceHistory", [])
+        current_reappearances = document.get("normalizedIdentityReappearanceHistory", [])
+        if not isinstance(source_reappearances, list) \
+                or not isinstance(current_reappearances, list) \
+                or current_reappearances[:len(source_reappearances)] != source_reappearances:
+            errors.append(
+                "normalizedIdentityReappearanceHistory is not an append-only chain from the committed source inventory")
+        expected_retired = expected_reconciled_retired_entries(
+            source_document, source_entries, plan)
+        if document.get("retiredEntries") != expected_retired:
+            errors.append(
+                "retiredEntries is not the exact anchored ledger plus approved reconciliation retirements")
+        expected_migrations = expected_reconciled_migration_history(
+            source_document, plan, source_entries)
+        if document.get("migrationHistory") != expected_migrations:
+            errors.append(
+                "migrationHistory is not the exact anchored ledger plus the required schema migration")
+
+    expected_metadata: dict[str, dict[str, object]] = {}
+    reference_replacements = {
+        str(mapping["fromId"]): str(mapping["toId"]) for mapping in plan["mappings"]
+    }
+    for mapping in plan["mappings"]:
+        before = str(mapping["fromId"])
+        after = str(mapping["toId"])
+        target = active.get(after)
+        payload_holder: dict[str, object] = {
+            "entries": [candidate_semantic_payload(source_entries[before])],
+        }
+        remap_declared_candidate_references(payload_holder, reference_replacements)
+        expected_metadata[after] = payload_holder["entries"][0]
+        if target is not None and target.get("identityMigration") != \
+                {"history": plan["id"], "fromId": before}:
+            errors.append(f"identity migration {before}->{after} lacks its row-level history link")
+    for approval in plan["retirements"]:
+        identifier = str(approval["id"])
+        archived = retired.get(identifier)
+        if archived is None or archived.get("retirementRationale") != \
+                str(approval["rationale"]).strip():
+            errors.append(f"retirement {identifier} did not retain its approved rationale")
+    for addition in plan["additions"]:
+        identifier = str(addition["id"])
+        expected_metadata[identifier] = dict(addition["metadata"])
+    for identifier in set(source_entries) & set(active):
+        expected_metadata[identifier] = candidate_semantic_payload(source_entries[identifier])
+
+    review_history = document.get("semanticReviewHistory", [])
+    if not isinstance(review_history, list):
+        errors.append("semanticReviewHistory must be an array")
+        review_history = []
+    source_reviews = source_document.get("semanticReviewHistory", []) \
+        if isinstance(source_document, dict) else []
+    if not isinstance(source_reviews, list) or review_history[:len(source_reviews)] != source_reviews:
+        errors.append(
+            "semanticReviewHistory is not an append-only chain from the committed source inventory")
+        source_reviews = []
+    for review in review_history[len(source_reviews):]:
+        required = {"candidateId", "approved", "rationale", "sourceRevision",
+                    "beforeMetadata", "afterMetadata"}
+        identifier = review.get("candidateId") if isinstance(review, dict) else None
+        if not isinstance(review, dict) or set(review) != required or review.get("approved") is not True \
+                or not isinstance(identifier, str) or identifier not in expected_metadata \
+                or not isinstance(review.get("rationale"), str) or not str(review["rationale"]).strip() \
+                or not isinstance(review.get("beforeMetadata"), dict) \
+                or not isinstance(review.get("afterMetadata"), dict) \
+                or not isinstance(review.get("sourceRevision"), str) \
+                or re.fullmatch(r"[0-9a-f]{40}", str(review.get("sourceRevision"))) is None:
+            errors.append(f"semantic review {identifier!r} has an unsupported or incomplete approval")
+            continue
+        committed, _raw = committed_json(root, str(review["sourceRevision"]),
+                                         str(plan["sourceInventoryPath"]))
+        committed_entry = next((item for item in committed.get("entries", [])
+                                if isinstance(item, dict) and item.get("id") == identifier), None) \
+            if isinstance(committed, dict) else None
+        if expected_metadata[identifier] != review["beforeMetadata"] \
+                or committed_entry is None \
+                or candidate_semantic_payload(committed_entry) != review["beforeMetadata"]:
+            errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
+            continue
+        expected_metadata[identifier] = dict(review["afterMetadata"])
+    for identifier, expected in expected_metadata.items():
+        target = active.get(identifier)
+        if target is None or candidate_semantic_payload(target) != expected:
+            errors.append(f"candidate {identifier} has an unapproved semantic metadata change")
+    return errors
+
+
+REAPPEARANCE_KIND = "pending-candidate-normalized-identity-reappearance-v1"
+REAPPEARANCE_FIELDS = {
+    "kind", "issue", "candidateId", "approved", "rationale",
+    "priorInventoryRevision", "priorInventoryPath", "priorInventoryDigest",
+    "targetSourceRevision", "identityCheckpointRevision",
+    "identityCheckpointInventoryDigest", "reconciliationId",
+    "retiredPayloadDigest", "currentEvidenceDigest",
+}
+NORMALIZED_IDENTITY_FIELDS = (
+    "path", "symbol", "kind", "role", "expression", "expressionDigest",
+    "evidenceDigest", "surface",
+)
+
+
+def canonical_json_digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+
+
+def normalized_identity_reappearance_errors(
+        root: Path, document: dict[str, object],
+        candidates: tuple[Candidate, ...]) -> tuple[list[str], set[str]]:
+    """Validate the closed, source-anchored exception for a normalized ID reappearing.
+
+    A valid record explains identity reuse only. It neither rewrites the immutable retirement
+    ledger nor transfers the retired row's unreviewed semantic state to the active candidate.
+    """
+    errors: list[str] = []
+    raw_entries = document.get("entries", [])
+    raw_retired = document.get("retiredEntries", [])
+    active = {str(entry["id"]): entry for entry in raw_entries
+              if isinstance(entry, dict) and isinstance(entry.get("id"), str)} \
+        if isinstance(raw_entries, list) else {}
+    retired_by_id: dict[str, list[dict[str, object]]] = defaultdict(list)
+    if isinstance(raw_retired, list):
+        for entry in raw_retired:
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+                retired_by_id[str(entry["id"])].append(entry)
+    collisions = set(active) & set(retired_by_id)
+    raw_history = document.get("normalizedIdentityReappearanceHistory", [])
+    if not isinstance(raw_history, list):
+        return ["normalizedIdentityReappearanceHistory must be an array"], set()
+
+    records: dict[str, dict[str, object]] = {}
+    for raw_record in raw_history:
+        candidate_id = raw_record.get("candidateId") if isinstance(raw_record, dict) else None
+        if not isinstance(raw_record, dict) or set(raw_record) != REAPPEARANCE_FIELDS \
+                or not isinstance(candidate_id, str) or not candidate_id:
+            errors.append("normalized identity reappearance has an unsupported or incomplete shape")
+            continue
+        if candidate_id in records:
+            errors.append(f"duplicate normalized identity reappearance record: {candidate_id}")
+            continue
+        records[candidate_id] = raw_record
+    missing = collisions - set(records)
+    foreign = set(records) - collisions
+    if missing:
+        errors.append(
+            "normalized identity reappearance history is missing active/retired collisions: "
+            + ", ".join(sorted(missing)))
+    if foreign:
+        errors.append(
+            "normalized identity reappearance history contains non-colliding candidates: "
+            + ", ".join(sorted(foreign)))
+    if errors:
+        return errors, set()
+    if not collisions:
+        return [], set()
+
+    inventory_path = INVENTORY.relative_to(ROOT).as_posix()
+    discovered = {candidate.id: candidate for candidate in candidates}
+    head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                                 capture_output=True, text=True)
+    checked_head = head_result.stdout.strip() if head_result.returncode == 0 else ""
+    committed_cache: dict[tuple[str, str], tuple[dict[str, object] | None, bytes | None]] = {}
+
+    def cached_json(revision: str, path: str) -> tuple[dict[str, object] | None, bytes | None]:
+        key = (revision, path)
+        if key not in committed_cache:
+            committed_cache[key] = committed_json(root, revision, path)
+        return committed_cache[key]
+
+    def rows(value: dict[str, object] | None, field: str, identifier: str) \
+            -> list[dict[str, object]]:
+        raw = value.get(field, []) if isinstance(value, dict) else []
+        return [entry for entry in raw
+                if isinstance(entry, dict) and entry.get("id") == identifier] \
+            if isinstance(raw, list) else []
+
+    for identifier, record in records.items():
+        prefix = f"normalized identity reappearance {identifier}"
+        if record.get("kind") != REAPPEARANCE_KIND or record.get("approved") is not True \
+                or not isinstance(record.get("issue"), str) \
+                or re.fullmatch(r"#[1-9][0-9]*", str(record.get("issue"))) is None \
+                or not isinstance(record.get("rationale"), str) \
+                or not str(record.get("rationale")).strip():
+            errors.append(f"{prefix} lacks its closed row-level approval")
+            continue
+        prior_revision = record.get("priorInventoryRevision")
+        prior_path = record.get("priorInventoryPath")
+        target_revision = record.get("targetSourceRevision")
+        checkpoint_revision = record.get("identityCheckpointRevision")
+        digests = (
+            record.get("priorInventoryDigest"),
+            record.get("identityCheckpointInventoryDigest"),
+            record.get("retiredPayloadDigest"),
+            record.get("currentEvidenceDigest"),
+        )
+        if prior_path != inventory_path \
+                or not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+                           for value in (prior_revision, target_revision, checkpoint_revision)) \
+                or not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+                           for value in digests):
+            errors.append(f"{prefix} has an unsafe or malformed source anchor")
+            continue
+        assert isinstance(prior_revision, str) and isinstance(target_revision, str)
+        assert isinstance(checkpoint_revision, str) and isinstance(prior_path, str)
+        if not commit_exists(root, prior_revision) \
+                or not commit_exists(root, target_revision) \
+                or not commit_exists(root, checkpoint_revision) \
+                or not revision_is_ancestor(root, prior_revision, target_revision) \
+                or not revision_is_ancestor(root, target_revision, checkpoint_revision) \
+                or not checked_head \
+                or not revision_is_ancestor(root, checkpoint_revision, checked_head):
+            errors.append(f"{prefix} revisions are not a resolvable ordered ancestry")
+            continue
+        prior_document, prior_bytes = cached_json(prior_revision, prior_path)
+        checkpoint_document, checkpoint_bytes = cached_json(checkpoint_revision, prior_path)
+        if prior_document is None or prior_bytes is None \
+                or hashlib.sha256(prior_bytes).hexdigest() != record["priorInventoryDigest"]:
+            errors.append(f"{prefix} prior inventory is absent or its digest has drifted")
+            continue
+        if checkpoint_document is None or checkpoint_bytes is None \
+                or hashlib.sha256(checkpoint_bytes).hexdigest() \
+                != record["identityCheckpointInventoryDigest"]:
+            errors.append(f"{prefix} identity checkpoint is absent or its digest has drifted")
+            continue
+
+        prior_active = rows(prior_document, "entries", identifier)
+        prior_retired = rows(prior_document, "retiredEntries", identifier)
+        checkpoint_active = rows(checkpoint_document, "entries", identifier)
+        checkpoint_retired = rows(checkpoint_document, "retiredEntries", identifier)
+        current_retired = retired_by_id.get(identifier, [])
+        if prior_active or len(prior_retired) != 1:
+            errors.append(f"{prefix} was not absent from active prior inventory with one retirement")
+            continue
+        if len(checkpoint_active) != 1 or len(checkpoint_retired) != 1:
+            errors.append(f"{prefix} is not an exact active/retired checkpoint collision")
+            continue
+        if len(current_retired) != 1 or current_retired[0] != prior_retired[0] \
+                or checkpoint_retired[0] != prior_retired[0] \
+                or canonical_json_digest(prior_retired[0]) != record["retiredPayloadDigest"]:
+            errors.append(f"{prefix} immutable retired payload has drifted")
+            continue
+
+        retired = prior_retired[0]
+        refresh = retired.get("sourceRefresh")
+        expected_refresh_fields = {
+            "kind", "beforeRevision", "afterRevision", "group",
+            "semanticRetirement", "duplicateAuthorityCredit",
+        }
+        before = refresh.get("beforeRevision") if isinstance(refresh, dict) else None
+        after = refresh.get("afterRevision") if isinstance(refresh, dict) else None
+        eligible = retired.get("status") == "pending-review" \
+            and retired.get("classification") is None \
+            and "removal" not in retired and "retirement" not in retired \
+            and isinstance(refresh, dict) and set(refresh) == expected_refresh_fields \
+            and refresh.get("kind") == "pending-candidate-source-refresh-v1" \
+            and refresh.get("semanticRetirement") is False \
+            and isinstance(refresh.get("duplicateAuthorityCredit"), int) \
+            and not isinstance(refresh.get("duplicateAuthorityCredit"), bool) \
+            and refresh.get("duplicateAuthorityCredit") == 0 \
+            and isinstance(refresh.get("group"), str) and bool(str(refresh.get("group")).strip()) \
+            and isinstance(before, str) and isinstance(after, str) \
+            and commit_exists(root, before) and commit_exists(root, after) \
+            and revision_is_ancestor(root, before, after) \
+            and revision_is_ancestor(root, after, prior_revision)
+        if not eligible:
+            errors.append(f"{prefix} retired row is not an eligible mechanical pending refresh")
+            continue
+
+        reconciliation_id = record.get("reconciliationId")
+        checkpoint_history = checkpoint_document.get("reconciliationHistory", [])
+        current_history = document.get("reconciliationHistory", [])
+        checkpoint_plans = [plan for plan in checkpoint_history
+                            if isinstance(plan, dict) and plan.get("id") == reconciliation_id] \
+            if isinstance(checkpoint_history, list) else []
+        current_plans = [plan for plan in current_history
+                         if isinstance(plan, dict) and plan.get("id") == reconciliation_id] \
+            if isinstance(current_history, list) else []
+        if len(checkpoint_plans) != 1 or len(current_plans) != 1 \
+                or current_plans[0] != checkpoint_plans[0]:
+            errors.append(f"{prefix} identity reconciliation is absent or changed")
+            continue
+        plan = checkpoint_plans[0]
+        additions = [item for item in plan.get("additions", [])
+                     if isinstance(item, dict) and item.get("id") == identifier] \
+            if isinstance(plan.get("additions"), list) else []
+        mapping_ids = {str(item.get(field)) for item in plan.get("mappings", [])
+                       if isinstance(item, dict) for field in ("fromId", "toId")} \
+            if isinstance(plan.get("mappings"), list) else set()
+        retirement_ids = {str(item.get("id")) for item in plan.get("retirements", [])
+                          if isinstance(item, dict)} \
+            if isinstance(plan.get("retirements"), list) else set()
+        if plan.get("issue") != record["issue"] \
+                or plan.get("sourceRevision") != prior_revision \
+                or plan.get("sourceInventoryPath") != prior_path \
+                or plan.get("sourceInventoryDigest") != record["priorInventoryDigest"] \
+                or plan.get("targetRevision") != target_revision \
+                or len(additions) != 1 or identifier in mapping_ids or identifier in retirement_ids:
+            errors.append(f"{prefix} is not the exact approved checkpoint addition")
+            continue
+        checkpoint_metadata = candidate_semantic_payload(checkpoint_active[0])
+        if checkpoint_metadata != additions[0].get("metadata") \
+                or checkpoint_metadata.get("status") == "pending-review" \
+                or checkpoint_metadata.get("classification") not in CLASSIFICATIONS \
+                or not isinstance(checkpoint_metadata.get("rationale"), str) \
+                or not str(checkpoint_metadata.get("rationale")).strip():
+            errors.append(f"{prefix} checkpoint addition metadata does not match its active row")
+            continue
+
+        candidate = discovered.get(identifier)
+        current_entry = active.get(identifier)
+        if candidate is None or current_entry is None:
+            errors.append(f"{prefix} current candidate is absent")
+            continue
+        if any(current_entry.get(key) != value for key, value in candidate.source_fields().items()):
+            errors.append(f"{prefix} current source fields do not match discovery")
+            continue
+        normalized_rows = (retired, checkpoint_active[0], current_entry)
+        if any(tuple(row.get(field) for field in NORMALIZED_IDENTITY_FIELDS)
+               != tuple(normalized_rows[0].get(field) for field in NORMALIZED_IDENTITY_FIELDS)
+               for row in normalized_rows[1:]) \
+                or candidate.evidence_digest != record["currentEvidenceDigest"]:
+            errors.append(f"{prefix} normalized source identity or evidence has drifted")
+
+    return (errors, set(records)) if not errors else (errors, set())
+
+
+REMEDIATION_DOMAIN_TITLES = {
+    "#316": "resolved execution manifest",
+    "#317": "Helm configuration contract",
+    "#318": "deployment registry and store connections",
+    "#319": "egress and external I/O",
+    "#320": "program authoring and GitHub operations",
+    "#321": "remaining baseline review and final closure",
+}
+
+
+def remediation_issue_for(entry: dict[str, object],
+                          setting_owners: dict[str, str] | None = None) -> str:
+    """Map only pending or unresolved operator rows to one ordered follow-up domain."""
+    path = str(entry.get("path", "")).lower()
+    symbol = str(entry.get("symbol", "")).lower()
+    role = str(entry.get("role", "")).lower()
+    setting = str(entry.get("setting", "")).lower()
+    if setting_owners is not None and setting in setting_owners:
+        return setting_owners[setting]
+    joined = " ".join((path, symbol, role, setting))
+    if path.startswith("deploy/helm/"):
+        return "#317"
+    if "manifest" in joined or any(token in joined for token in (
+            "graphexecutionlimits", "graphmllimits", "payloadlimits")):
+        return "#316"
+    if "/persistence/" in path or any(token in joined for token in (
+            "deploymentregistry", "storeconnection", "storeconfig", "executionstoreconfiguration")):
+        return "#318"
+    if any(token in joined for token in (
+            "externalio", "egress", "httpclient", "websocket", "webhook", "network", "outbound")):
+        return "#319"
+    if any(token in joined for token in (
+            "github", "authoring", "editor", "program", "app-commands", "graph-editor")):
+        return "#320"
+    return "#321"
+
+
+def build_remediation_domains(entries: Iterable[dict[str, object]]) -> dict[str, object]:
+    population = [entry for entry in entries if entry.get("status") == "pending-review" or (
+        entry.get("classification") == "operator-configurable"
+        and entry.get("status") in {"confirmed-hardcoded", "deferred"})]
+    unresolved = [entry for entry in population
+                  if entry.get("classification") == "operator-configurable"
+                  and entry.get("status") in {"confirmed-hardcoded", "deferred"}
+                  and isinstance(entry.get("setting"), str) and str(entry["setting"]).strip()]
+    setting_owners: dict[str, str] = {}
+    for setting in sorted({str(entry["setting"]) for entry in unresolved}):
+        owners = {str(entry.get("followUp", "")) for entry in unresolved
+                  if entry.get("setting") == setting}
+        if len(owners) != 1 or next(iter(owners)) not in REMEDIATION_DOMAIN_TITLES:
+            raise ValueError(f"unresolved setting {setting} requires one follow-up owner")
+        setting_owners[setting] = next(iter(owners))
+    domains: list[dict[str, object]] = []
+    for issue, title in REMEDIATION_DOMAIN_TITLES.items():
+        assigned = sorted((entry for entry in population
+                           if remediation_issue_for(entry, setting_owners) == issue),
+                          key=lambda item: str(item["id"]))
+        domains.append({
+            "issue": issue,
+            "title": title,
+            "candidateIds": [str(entry["id"]) for entry in assigned],
+            "statusCounts": dict(sorted(Counter(str(entry["status"]) for entry in assigned).items())),
+            "inheritedPendingReview": sum(entry.get("status") == "pending-review" for entry in assigned),
+            "confirmedUnresolvedOperatorSettings": len({str(entry.get("setting")) for entry in assigned
+                if entry.get("classification") == "operator-configurable"
+                and entry.get("status") in {"confirmed-hardcoded", "deferred"}
+                and entry.get("setting")}),
+        })
+    return {
+        "kind": "pending-and-unresolved-operator-domain-map-v1",
+        "candidateDigest": candidate_set_digest(str(entry["id"]) for entry in population),
+        "settingOwners": [
+            {"setting": setting, "issue": issue}
+            for setting, issue in sorted(setting_owners.items())
+        ],
+        "domains": domains,
+    }
+
+
+def remediation_domain_errors(document: dict[str, object]) -> list[str]:
+    if "remediationDomains" not in document:
+        if document.get("reconciliationRequired") is False \
+                and not document.get("reconciliationHistory"):
+            return []
+        return ["inventory requires a remediation domain map"]
+    entries = [entry for entry in document.get("entries", []) if isinstance(entry, dict)]
+    actual = document.get("remediationDomains")
+    if not isinstance(actual, dict) or not isinstance(actual.get("settingOwners"), list):
+        return ["remediation domain map requires setting-level ownership"]
+    ownership_rows = actual["settingOwners"]
+    settings: set[str] = set()
+    for owner in ownership_rows:
+        setting = owner.get("setting") if isinstance(owner, dict) else None
+        issue = owner.get("issue") if isinstance(owner, dict) else None
+        if not isinstance(owner, dict) or set(owner) != {"setting", "issue"} \
+                or not isinstance(setting, str) or not setting.strip() \
+                or issue not in REMEDIATION_DOMAIN_TITLES or setting in settings:
+            return ["remediation domain map has invalid or duplicate setting ownership"]
+        settings.add(setting)
+    try:
+        expected = build_remediation_domains(entries)
+    except ValueError as invalid:
+        return [str(invalid)]
+    if actual != expected:
+        return ["remediation domain map does not exactly partition the pending and unresolved operator population"]
+    candidate_ids = [identifier for domain in expected["domains"]
+                     for identifier in domain["candidateIds"]]
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return ["remediation domain map assigns a candidate more than once"]
+    return []
+
+
 def conversion_evidence_errors(identifier: str, entry: dict[str, object],
                                conversion: dict[str, object], before_source: str | None,
                                after_source: str | None) -> list[str]:
@@ -1768,6 +3615,68 @@ def conversion_evidence_errors(identifier: str, entry: dict[str, object],
     )
     if not declared_binding:
         errors.append(f"{identifier}: conversion bindingSymbol does not declare the named binding")
+    return errors
+
+
+def manifest_pin_attempt_conversion_errors(root: Path, identifier: str,
+                                           entry: dict[str, object],
+                                           conversion: dict[str, object]) -> list[str]:
+    """Verify removal of the private adapter limit and addition of the typed server authority."""
+    required = {
+        "kind", "issue", "beforeRevision", "afterRevision", "beforePath", "beforeSymbol",
+        "beforeExpression", "afterPath", "afterOwner", "afterField", "afterExpression",
+        "binding", "bindingSymbol",
+    }
+    if set(conversion) != required or conversion.get("kind") != \
+            "java-manifest-pin-attempts-conversion-v1" or conversion.get("issue") != "#316" \
+            or conversion.get("beforePath") != MANIFEST_PIN_STORE_PATH.as_posix() \
+            or conversion.get("beforeSymbol") != "MAX_PIN_ATTEMPTS" \
+            or conversion.get("afterPath") != MANIFEST_PIN_CONFIGURATION_PATH.as_posix() \
+            or conversion.get("afterOwner") != \
+            f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared" \
+            or conversion.get("afterField") != "manifestPinAttempts" \
+            or conversion.get("binding") != "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS" \
+            or conversion.get("bindingSymbol") != "MANIFEST_PIN_ATTEMPTS_VARIABLE":
+        return [f"{identifier}: manifest pin conversion has incomplete or unsupported provenance"]
+    before_revision = str(conversion["beforeRevision"])
+    after_revision = str(conversion["afterRevision"])
+    if re.fullmatch(r"[0-9a-f]{40}", before_revision) is None \
+            or re.fullmatch(r"[0-9a-f]{40}", after_revision) is None \
+            or not commit_exists(root, before_revision) or not commit_exists(root, after_revision) \
+            or not revision_is_ancestor(root, before_revision, after_revision):
+        return [f"{identifier}: manifest pin conversion revisions do not form a resolvable transition"]
+    before_store = committed_source(root, before_revision, MANIFEST_PIN_STORE_PATH.as_posix())
+    after_store = committed_source(root, after_revision, MANIFEST_PIN_STORE_PATH.as_posix())
+    before_configuration = committed_source(
+        root, before_revision, MANIFEST_PIN_CONFIGURATION_PATH.as_posix())
+    after_configuration = committed_source(
+        root, after_revision, MANIFEST_PIN_CONFIGURATION_PATH.as_posix())
+    if any(source is None for source in (
+            before_store, after_store, before_configuration, after_configuration)):
+        return [f"{identifier}: manifest pin conversion source is not resolvable"]
+    before_expression = normalized(str(conversion["beforeExpression"]))
+    after_expression = normalized(str(conversion["afterExpression"]))
+    before_store_code = normalized(strip_c_comments(before_store))
+    after_store_code = normalized(strip_c_comments(after_store))
+    before_configuration_code = normalized(strip_c_comments(before_configuration))
+    after_configuration_code = normalized(strip_c_comments(after_configuration))
+    errors: list[str] = []
+    if before_expression != "private static final int MAX_PIN_ATTEMPTS = 3;" \
+            or before_store_code.count(before_expression) != 1 \
+            or before_expression in after_store_code:
+        errors.append(f"{identifier}: manifest pin conversion does not identify the removed adapter limit")
+    expected_after = normalized(
+        "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, DEFAULT_MANIFEST_PIN_ATTEMPTS)")
+    if after_expression != expected_after or after_expression in before_configuration_code \
+            or after_configuration_code.count(after_expression) != 1:
+        errors.append(f"{identifier}: manifest pin conversion does not identify the added typed binding")
+    binding = str(conversion["binding"])
+    if re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(before_configuration)) \
+            or not re.search(rf"\b{re.escape(binding)}\b", strip_c_comments(after_configuration)):
+        errors.append(f"{identifier}: manifest pin conversion binding transition has drifted")
+    if entry.get("field") != "manifestPinAttempts" \
+            or entry.get("bindings") != [binding]:
+        errors.append(f"{identifier}: manifest pin conversion metadata disagrees with its authority")
     return errors
 
 
@@ -2590,6 +4499,2274 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
     return errors, accounted
 
 
+
+PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
+EXTERNAL_IO_POLICY_AUTHORITY_ID = "ravenroot-external-io-policy-v1"
+EXTERNAL_IO_LIMITS_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/ExternalIoLimits.java")
+EXTERNAL_IO_RESERVED_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java")
+EXTERNAL_IO_OUTBOUND_HTTP_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java")
+EXTERNAL_IO_PACKAGE_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/NodePackageEgressPolicy.java")
+EXTERNAL_IO_MANAGED_SERVICES_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/ManagedNodePackageServices.java")
+EXTERNAL_IO_NODE_CAPACITY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/NodeExternalIoCapacity.java")
+EXTERNAL_IO_CAPACITY_CAPABLE_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/ExecutionIoCapacityCapable.java")
+EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java")
+EXTERNAL_IO_GRAPH_RUNNER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java")
+EXTERNAL_IO_NODE_PACKAGES_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/NodePackages.java")
+EXTERNAL_IO_DEPLOYMENT_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultGraphDeployment.java")
+EXTERNAL_IO_APPLICATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+EXTERNAL_IO_SERVER_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+EXTERNAL_IO_GRANTS_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/plugin/EnvironmentNodePackageServiceGrants.java")
+EXTERNAL_IO_WS_PROFILE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketProfile.java")
+EXTERNAL_IO_WS_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/EnvironmentWebSocketProfileResolver.java")
+EXTERNAL_IO_WS_SEND_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketSendNodeBehavior.java")
+EXTERNAL_IO_WS_ADMISSION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketAdmissionRegistry.java")
+EXTERNAL_IO_TEAMS_PROFILE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsProfile.java")
+EXTERNAL_IO_TEAMS_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsConfiguration.java")
+EXTERNAL_IO_TEAMS_SOURCE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsOutgoingWebhookSourceBehavior.java")
+EXTERNAL_IO_MATTERMOST_PROFILE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostProfile.java")
+EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostConfiguration.java")
+EXTERNAL_IO_MATTERMOST_SOURCE_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostOutgoingWebhookSourceBehavior.java")
+
+# These files are dedicated to the external-I/O policy family, so every lexical candidate in them
+# belongs to the closed #319 cohort. Shared composition and service files use the narrower selectors
+# in external_io_policy_cohort_candidate_ids(). This lets the source proof reject a newly introduced
+# unclassified family candidate without claiming unrelated settings from large shared files.
+EXTERNAL_IO_CLOSED_COHORT_PATHS = frozenset({
+    EXTERNAL_IO_LIMITS_PATH.as_posix(),
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundHttpRequest.java",
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundWebSocketRequest.java",
+    EXTERNAL_IO_RESERVED_POLICY_PATH.as_posix(),
+    EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix(),
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java",
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java",
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressHttpClients.java",
+    EXTERNAL_IO_PACKAGE_POLICY_PATH.as_posix(),
+    EXTERNAL_IO_MATTERMOST_SOURCE_PATH.as_posix(),
+    EXTERNAL_IO_MATTERMOST_PROFILE_PATH.as_posix(),
+    EXTERNAL_IO_TEAMS_SOURCE_PATH.as_posix(),
+    EXTERNAL_IO_TEAMS_PROFILE_PATH.as_posix(),
+    EXTERNAL_IO_WS_RESOLVER_PATH.as_posix(),
+    EXTERNAL_IO_WS_PROFILE_PATH.as_posix(),
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketReceiveNodeBehavior.java",
+    EXTERNAL_IO_WS_SEND_PATH.as_posix(),
+    "ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketSettings.java",
+})
+
+
+def external_io_policy_cohort_candidate_ids(
+        discovered: dict[str, Candidate]) -> set[str]:
+    """Derive the complete scanner-visible #319 family without sweeping shared modules."""
+    result: set[str] = set()
+    reserved_carriers = {
+        "compose.yaml", "dev.sh", "docs/examples/assistant/compose.override.yaml",
+        "ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java",
+        EXTERNAL_IO_SERVER_MAIN_PATH.as_posix(), "scripts/publish_environment_reference.py",
+    }
+    for candidate in discovered.values():
+        if candidate.path in EXTERNAL_IO_CLOSED_COHORT_PATHS:
+            result.add(candidate.id)
+        elif candidate.path in reserved_carriers \
+                and candidate.expression in {
+                    "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS", "RAVENROOT_WEBSOCKET_"}:
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_SERVER_MAIN_PATH.as_posix() \
+                and candidate.kind == "environment-binding" \
+                and candidate.expression in {
+                    "RAVENROOT_HTTP_ALLOWED_HOSTS", "RAVENROOT_HTTP_ALLOWED_PORTS",
+                    "RAVENROOT_HTTP_MAX_RESPONSE_BYTES", "RAVENROOT_HTTP_MAX_REQUEST_BYTES",
+                }:
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_GRANTS_PATH.as_posix() \
+                and candidate.role == "LIMIT_KEYS":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_MANAGED_SERVICES_PATH.as_posix() \
+                and candidate.role == "MAX_WEBSOCKET_CONTROL_PAYLOAD_BYTES":
+            result.add(candidate.id)
+        elif candidate.path in {
+                EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH.as_posix(),
+                EXTERNAL_IO_TEAMS_CONFIGURATION_PATH.as_posix(),
+        } and candidate.symbol == "authority":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH.as_posix() \
+                and (candidate.role == "ravenroot.node-external-io-binding.v1"
+                     or (candidate.symbol == "State"
+                         and candidate.role in {"packageId", "capacity"})):
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_GRAPH_RUNNER_PATH.as_posix() \
+                and candidate.role == "timeoutRelinquishedObserver":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_NODE_PACKAGES_PATH.as_posix() \
+                and candidate.role == "capacity":
+            result.add(candidate.id)
+        elif candidate.path == EXTERNAL_IO_WS_ADMISSION_PATH.as_posix() \
+                and candidate.role == "references":
+            result.add(candidate.id)
+        elif candidate.path.endswith((
+                "/MattermostBehaviorDescriptors.java", "/TeamsBehaviorDescriptors.java")) \
+                and candidate.role == "OUTGOING_WEBHOOK":
+            result.add(candidate.id)
+    return result
+EXTERNAL_IO_RETAINED_PARTITION_IDS: dict[str, tuple[str, ...]] = {
+    'derived': ('oc-00249e779f14b6185363',
+ 'oc-496395e2d50c9dea517e',
+ 'oc-68303c3c9f98cdc9dd10',
+ 'oc-87eda8644338867d5958',
+ 'oc-a9a220e1100854479b64',
+ 'oc-affa4fe6bbb709fe7623',
+ 'oc-bd80cbbfd4b53b210f09',
+ 'oc-cc296544449299680e39',
+ 'oc-ee6b4ee3971d4678ac14',
+ 'oc-fbdf6700bae13ed9d57a'),
+    'presentation-text': ('oc-02657e1fdc1359975cdf',
+ 'oc-254c4a89bc0b1567ab3d',
+ 'oc-341179e6501ed94cc8c0',
+ 'oc-491f47559d807be2ce3d',
+ 'oc-4a8f8db7f276dd955d8b',
+ 'oc-51fa31bb88453e646f24',
+ 'oc-6a15de0bcb65eeef70bd',
+ 'oc-6b0ca399c1b31afb6763',
+ 'oc-8e393f6ef5b395b9dfd5',
+ 'oc-96c609db5a27afdd9064',
+ 'oc-b76b0d8414eaab44f7e7',
+ 'oc-dab19378235db06109da',
+ 'oc-dfafdd1e31d7c6d7579d',
+ 'oc-e1feb24f65b04e327e31',
+ 'oc-e3fff31616750bd17df6',
+ 'oc-f3f4069dd38b9ad611a0'),
+    'protocol-or-format-invariant': ('oc-018dbc014e462bbe931a',
+ 'oc-01ff4a23b167bfcc1c4b',
+ 'oc-02b47a95332d7a6c4066',
+ 'oc-02eb66f56fcfbffb2e6a',
+ 'oc-09ba3eace14b9a7ca77c',
+ 'oc-0dcf634f486dbb772fa5',
+ 'oc-12dd659827b1e7b02a5e',
+ 'oc-1d535af115d5f4737042',
+ 'oc-1d76c972ce9dd286b88c',
+ 'oc-24f33f27fb0b5e1022e8',
+ 'oc-2fe5d7eee27ca07e8480',
+ 'oc-34ff104aea35a3ceea57',
+ 'oc-38cd58ad356453a3bc31',
+ 'oc-3cd31adcd3cf6fdab425',
+ 'oc-3ed2a31542708e0c68da',
+ 'oc-43b904f64db4cc06fb30',
+ 'oc-45eda4bdfa4447c8ec5d',
+ 'oc-46c78451e818905e8cd3',
+ 'oc-4708827da6ffa499fece',
+ 'oc-4fd470c4936a1e1bd17d',
+ 'oc-508dee15bc3536687308',
+ 'oc-5377ddf897e4b83ce9a4',
+ 'oc-5a3108a9a96d98c4c5bc',
+ 'oc-6298831bdba1ab695de3',
+ 'oc-68dcb5ced589ea6cdc0d',
+ 'oc-6e63b93a68ec52b3ae12',
+ 'oc-6f62b6f844024fd4c0f2',
+ 'oc-7190403ca4bb99ad60f0',
+ 'oc-72d151d529809b0941fd',
+ 'oc-75c0884a0070e4e0b758',
+ 'oc-7bc6ae21b86028a069c5',
+ 'oc-7d55666c068b815f7061',
+ 'oc-8398b7441076f3a3b7ce',
+ 'oc-874f0bc86b944a589827',
+ 'oc-88cecb269f31817b544e',
+ 'oc-8913bc5d6d00227ef4b9',
+ 'oc-8de139d187313f74296e',
+ 'oc-8e999ff677f2824964ff',
+ 'oc-8ed3ba70cf48eabff474',
+ 'oc-9309ed8636e6449208e5',
+ 'oc-957b0d6d525ce2604c49',
+ 'oc-991a60a25ea923610c1d',
+ 'oc-99592977fda43f9f71db',
+ 'oc-9cca3e22d2f2f50fc18d',
+ 'oc-a2de4de099d660779d1a',
+ 'oc-a6f7f87b522646fbd7b9',
+ 'oc-a9157143af5fd69d63d6',
+ 'oc-a9bc79241b4f274fa293',
+ 'oc-ac9a388816d54e615151',
+ 'oc-ae62ba216098ff0283e8',
+ 'oc-afab6b07c5946d8696b4',
+ 'oc-afbc60a6536a40ef07af',
+ 'oc-b15855ce09072c5ff57f',
+ 'oc-b5e89a5d5fa625353667',
+ 'oc-b95ef5162376476a96c6',
+ 'oc-bc4fee5bd663795bd000',
+ 'oc-bdd7327c3f56df3f68e1',
+ 'oc-bee16de038ab2c151cee',
+ 'oc-bf04f402b1cf4997f142',
+ 'oc-c3421ecd2a1eb524d034',
+ 'oc-c45c8738341b6c992006',
+ 'oc-c590bbac0824ce64fded',
+ 'oc-dd56946dd3e1c6b3e225',
+ 'oc-e0670dea83a672b315a2',
+ 'oc-ea3215852714b90b08a0',
+ 'oc-f0a87f0c380cfff84f58',
+ 'oc-f204fd56af4db4ce4df2',
+ 'oc-face4282022761d7eb7d',
+ 'oc-fad38befb3e4c14b5180'),
+    'published-contract-description': ('oc-37a33ab43680907b6f2b', 'oc-8917781ba9e5e0fd3262'),
+    'security-ceiling-or-default': ('oc-03097ed713566a0f9a2d',
+ 'oc-04e68dc084451818e3e2',
+ 'oc-0c79686802c8f5a9f5ec',
+ 'oc-0c88aaef732f7339e6dc',
+ 'oc-0e2fb2b38a5794fbf284',
+ 'oc-1af3b58afc89d0250607',
+ 'oc-22ada0d126e70a33d227',
+ 'oc-2a24e11d9463ab9991c4',
+ 'oc-2bfa29e2a87203574ebf',
+ 'oc-327459e2c6a5446f1820',
+ 'oc-3a8b07001cd918037a80',
+ 'oc-3dbbc46d71be59c34a4c',
+ 'oc-3ea50685d66f0d89553a',
+ 'oc-4088e843b7b7e3e0560a',
+ 'oc-452952dbdf375e41fe36',
+ 'oc-56d6f0690cccbb7975f8',
+ 'oc-63f6e84f7d1bf129abca',
+ 'oc-6f3bf08057bc9eaaa644',
+ 'oc-732f25736ca294badb82',
+ 'oc-7e3b5f3c01bcb0471000',
+ 'oc-7f17c8f6bba3e51ff9e0',
+ 'oc-805fbcf42b726d7b988a',
+ 'oc-8694fd6590e69a715c08',
+ 'oc-8db9ab14683ef18bee72',
+ 'oc-92a7e7a387efac00528e',
+ 'oc-9bbe64c54001b5a2d45c',
+ 'oc-9d87343583f1667cc121',
+ 'oc-a1c1c4d8f26d64de5529',
+ 'oc-a960b7a17dbf9b412943',
+ 'oc-aa18ab15640b60ed85f5',
+ 'oc-aa7be24706f1ea823752',
+ 'oc-b376ce7e0f2ad8d7d954',
+ 'oc-bd5fd856cf03be08b254',
+ 'oc-c8f663c9728cd2664eb0',
+ 'oc-ce731262ee59dcfd729d',
+ 'oc-e0f58e9fb2df6fd827ab',
+ 'oc-e4009dbd332027b5eeac',
+ 'oc-e4ec20dd7cec0fe6d5b4',
+ 'oc-e6692248a8e5d394c6b9',
+ 'oc-eca57fbb104a765fbe93',
+ 'oc-efcbaee5017796ec2968',
+ 'oc-f318d298d21c31b58b7f',
+ 'oc-f4f5f28d0a1cedc03451',
+ 'oc-ffbc00e2c6f381b91688'),
+}
+EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS: dict[str, tuple[str, ...]] = {
+    "derived": ("oc-388ee6f97231765ed07c",),
+    "presentation-text": (
+        "oc-bee21f38b846252317a5", "oc-5fae2344a14cd331ba13",
+        "oc-adcfda23d27a8dcdb683", "oc-ce6fde7667c2906bed69",
+        "oc-adbe50a903508b508994", "oc-c9671b1923531eb6a1d7",
+        "oc-07f0b69b06c3b7632bc2", "oc-38056d4a49f7ec2b627e",
+        "oc-36f411cc96f93a83d4c8", "oc-be1c77e0b3334cec1c3e",
+        "oc-5415279369ee7558530f", "oc-dcd6ed4eb178c7214e04",
+        "oc-e42c41c9ab2cb20c804d", "oc-94a181b3f8d7f8b05af2",
+        "oc-f3f36606d72e5b6ce4e3", "oc-8784c1320f8c665dd9bc",
+        "oc-6909f620153d4088d035", "oc-1c057cf1c557104d6b82",
+        "oc-723bff59bc3dfe7d3129", "oc-26a83bfe4581de3a9dbc",
+        "oc-b9fbaeda2087c25302e2", "oc-9a2df68f7eb65855f0da",
+    ),
+    "protocol-or-format-invariant": ("oc-1cf23e723f844709e0ea",),
+    "security-ceiling-or-default": (
+        "oc-8b95f2348c416ec92e84", "oc-19d6cb049c59ad45f369",
+        "oc-b8d9052b4652a6a79b2b", "oc-33335576c3b015d33f3f",
+        "oc-48e57aee851a1071083a", "oc-dead383003f1a781723a",
+        "oc-90a125e176360d8f0532", "oc-116e8d6a0e8dd0a90d93",
+        "oc-44edabe3e285bb329ac3", "oc-4c949556383c87def51a",
+        "oc-48cdcc455eb5fbf9ebd5", "oc-645097fe95e373f6d49c",
+        "oc-9127586cddcb79edf0cc", "oc-5a00148a240c7170e232",
+        "oc-7a4ab22fcf63391380cd", "oc-2b6193e681ee3d5b965e",
+        "oc-4b1c778e90588908f015", "oc-fe191b3ad7e06e6b5ba5",
+        "oc-67f205758b533aace8a4", "oc-3ff3ad79c8e98cb69363",
+        "oc-337d7a8a97f4563f017c", "oc-c6ae26f57ab1336642b1",
+        "oc-0dca049b8f429fc6a66f", "oc-653c922a8a8d7d946f2b",
+        "oc-da60ca53395e2a9a2ccb", "oc-d185874bf5e9b7eb0e36",
+        "oc-9dfc5d4be1cee326f312", "oc-018302ebd6fcd8b3ee0b",
+        "oc-afd5b25bd087541579a0", "oc-417ef74f91f0fb611089",
+        "oc-c7ac4088cb64f659d38e", "oc-583dcbf62b31cad60e3d",
+        "oc-1bd4b76dfe0ce3e1d2f7", "oc-b1caeccf5cbd3aaff355",
+    ),
+}
+PERSISTENCE_POSTGRES_CONFIG_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java")
+PERSISTENCE_POSTGRES_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java")
+PERSISTENCE_STORE_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java")
+PERSISTENCE_SHARED_CONNECTION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/SharedStoreConnection.java")
+PERSISTENCE_SHARED_DATASOURCE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/SharedExecutionStoreDataSource.java")
+PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfiguration.java")
+PERSISTENCE_EXECUTION_OWNERSHIP_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionOwnership.java")
+PERSISTENCE_BACKUP_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/BackupRestoreConfiguration.java")
+PERSISTENCE_AUDIT_DIRECTORY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/audit/AuditTrailDirectory.java")
+PERSISTENCE_AUDIT_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/audit/AuditTrailConfiguration.java")
+PERSISTENCE_SQLITE_LOCATION_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreLocation.java")
+PERSISTENCE_REGISTRY_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicy.java")
+PERSISTENCE_IN_MEMORY_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicy.java")
+PERSISTENCE_SQLITE_CONFIG_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java")
+PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicy.java")
+PERSISTENCE_QUERY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ProcessInventoryQuery.java")
+PERSISTENCE_MANAGED_STORE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ManagedExecutionStore.java")
+PERSISTENCE_MANIFEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifest.java")
+PERSISTENCE_OPERATIONAL_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicy.java")
+PERSISTENCE_MANIFEST_DIGEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionManifestDigest.java")
+PERSISTENCE_AUTHORITY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ExecutionPersistenceAuthority.java")
+PERSISTENCE_MANIFEST_RESOLVER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java")
+PERSISTENCE_DEFAULT_APPLICATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java")
+PERSISTENCE_BOOTSTRAP_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
+PERSISTENCE_SERVER_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+PERSISTENCE_IN_MEMORY_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/deployment/registry/InMemoryDeploymentRegistry.java")
+PERSISTENCE_SQLITE_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java")
+PERSISTENCE_POSTGRES_REGISTRY_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresDeploymentRegistry.java")
+PERSISTENCE_SQLITE_ARTIFACT_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteArtifactRegistry.java")
+PERSISTENCE_SQLITE_EMBED_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java")
+PERSISTENCE_SQLITE_EXECUTION_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionStore.java")
+PERSISTENCE_POSTGRES_EXECUTION_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresExecutionStore.java")
+PERSISTENCE_STORE_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java")
+PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfigurationTest.java")
+PERSISTENCE_MANAGED_STORE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
+PERSISTENCE_CLI_SELECTOR_TEST_PATH = Path(
+    "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/cli/SharedStoreBundleRefusalTest.java")
+PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/audit/AuditTrailDirectoryTest.java")
+PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/audit/AuditTrailConfigurationTest.java")
+PERSISTENCE_DIRECTORY_PARITY_TEST_PATH = Path(
+    "ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/server/persistence/BackupRestoreDirectoryParityTest.java")
+PERSISTENCE_SQLITE_LOCATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteBackupRestoreTest.java")
+PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java")
+PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java")
+PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH = Path(
+    "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationExecutionManifestTest.java")
+
+PERSISTENCE_POSTGRES_FIELDS = (
+    ("postgres.lock-timeout", "lockTimeout", "ravenroot.postgresql.lock-timeout-ms",
+     "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS", "millis", None, "Duration.ofSeconds(5)"),
+    ("postgres.statement-timeout", "statementTimeout", "ravenroot.postgresql.statement-timeout-ms",
+     "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS", "millis", None, "Duration.ofSeconds(30)"),
+    ("postgres.serialization-retries", "serializationRetries", "ravenroot.postgresql.serialization-retries",
+     "RAVENROOT_POSTGRES_SERIALIZATION_RETRIES", "integer", "0", "3"),
+    ("postgres.max-lease-ttl", "maxLeaseTtl", "ravenroot.postgresql.max-lease-ttl-seconds",
+     "RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS", "seconds", "false", "Duration.ofMinutes(5)"),
+    ("postgres.max-payload-bytes", "maxPayloadBytes", "ravenroot.postgresql.max-payload-bytes",
+     "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES", "integer", "1", "1024 * 1024"),
+    ("postgres.max-clock-skew", "maxClockSkew", "ravenroot.postgresql.max-clock-skew-seconds",
+     "RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS", "seconds", "true", "Duration.ofSeconds(5)"),
+    ("postgres.journal-retention", "journalRetention", "ravenroot.postgresql.journal-retention-seconds",
+     "RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS", "seconds", "false", "Duration.ofHours(24)"),
+    ("postgres.max-inventory-page-size", "maxInventoryPageSize", "ravenroot.postgresql.max-inventory-page-size",
+     "RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE", "integer", "1", "100"),
+    ("postgres.terminal-retention", "terminalRetention", "ravenroot.postgresql.terminal-retention-seconds",
+     "RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS", "seconds", "false", "Duration.ofDays(7)"),
+    ("postgres.execution-result-retention", "executionResultRetention",
+     "ravenroot.postgresql.execution-result-retention-seconds",
+     "RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS", "seconds", "false", "Duration.ofDays(7)"),
+    ("graph.definition.upsert-retries", "graphDefinitionUpsertAttempts",
+     "ravenroot.postgresql.graph-definition-upsert-attempts",
+     "RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS", "integer", "1", "3"),
+)
+PERSISTENCE_IN_MEMORY_FIELDS = (
+    ("inmemory.maximum-lease-ttl", "maximumLeaseTtl", "Duration.ofMinutes(5)"),
+    ("inmemory.maximum-payload-bytes", "maximumPayloadBytes", "1024 * 1024"),
+    ("inmemory.maximum-clock-skew", "maximumClockSkew", "Duration.ofSeconds(5)"),
+    ("inmemory.journal-retention", "journalRetention", "Duration.ofHours(24)"),
+    ("inmemory.maximum-inventory-page-size", "maximumInventoryPageSize", "100"),
+    ("inmemory.terminal-retention", "terminalRetention", "Duration.ofDays(7)"),
+    ("inmemory.execution-result-retention", "executionResultRetention", "Duration.ofDays(7)"),
+)
+PERSISTENCE_SQLITE_FIELDS = (
+    ("sqlite.synchronous-mode", "synchronousMode", "SynchronousMode.FULL"),
+    ("sqlite.busy-timeout", "busyTimeout", "SqliteConnectionPolicy.DEFAULTS.busyTimeout()"),
+    ("sqlite.maximum-lease-ttl", "maxLeaseTtl", "Duration.ofMinutes(5)"),
+    ("sqlite.maximum-payload-bytes", "maxPayloadBytes", "1024 * 1024"),
+    ("sqlite.maximum-clock-skew", "maxClockSkew", "Duration.ofSeconds(5)"),
+    ("sqlite.journal-retention", "journalRetention", "Duration.ofHours(24)"),
+    ("sqlite.maximum-inventory-page-size", "maxInventoryPageSize", "100"),
+    ("sqlite.terminal-retention", "terminalRetention", "Duration.ofDays(7)"),
+    ("sqlite.execution-result-retention", "executionResultRetention", "Duration.ofDays(7)"),
+)
+
+
+def _source_digest(source: str) -> str:
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _exact_candidate_ids(discovered: dict[str, Candidate], path: Path, kind: str,
+                         expression: str) -> list[str]:
+    return sorted(candidate.id for candidate in discovered.values()
+                  if candidate.path == path.as_posix() and candidate.kind == kind
+                  and candidate.expression == expression)
+
+
+def persistence_policy_source_present(root: Path) -> bool:
+    """Distinguish true absence from any partial #318 persistence policy source family."""
+    return any((root / path).exists() for path in (
+        PERSISTENCE_POSTGRES_RESOLVER_PATH, PERSISTENCE_REGISTRY_POLICY_PATH,
+        PERSISTENCE_IN_MEMORY_POLICY_PATH, PERSISTENCE_MANAGED_STORE_PATH,
+        PERSISTENCE_AUDIT_DIRECTORY_PATH, PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+        PERSISTENCE_SQLITE_LOCATION_PATH,
+    ))
+
+
+def persistence_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed persistence policy from typed declarations and executable consumers."""
+    paths = (
+        PERSISTENCE_POSTGRES_CONFIG_PATH, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+        PERSISTENCE_STORE_CONFIGURATION_PATH, PERSISTENCE_SHARED_CONNECTION_PATH,
+        PERSISTENCE_SHARED_DATASOURCE_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+        PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
+        PERSISTENCE_BACKUP_CONFIGURATION_PATH, PERSISTENCE_AUDIT_DIRECTORY_PATH,
+        PERSISTENCE_AUDIT_CONFIGURATION_PATH, PERSISTENCE_SQLITE_LOCATION_PATH,
+        PERSISTENCE_REGISTRY_POLICY_PATH, PERSISTENCE_IN_MEMORY_POLICY_PATH,
+        PERSISTENCE_SQLITE_CONFIG_PATH, PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
+        PERSISTENCE_QUERY_PATH, PERSISTENCE_MANAGED_STORE_PATH, PERSISTENCE_MANIFEST_PATH,
+        PERSISTENCE_BOOTSTRAP_PATH, PERSISTENCE_SERVER_MAIN_PATH,
+        PERSISTENCE_IN_MEMORY_REGISTRY_PATH, PERSISTENCE_SQLITE_REGISTRY_PATH,
+        PERSISTENCE_POSTGRES_REGISTRY_PATH, PERSISTENCE_SQLITE_ARTIFACT_PATH,
+        PERSISTENCE_SQLITE_EMBED_PATH, PERSISTENCE_SQLITE_EXECUTION_PATH,
+        PERSISTENCE_POSTGRES_EXECUTION_PATH, PERSISTENCE_OPERATIONAL_POLICY_PATH,
+        PERSISTENCE_MANIFEST_DIGEST_PATH, PERSISTENCE_AUTHORITY_PATH,
+        PERSISTENCE_MANIFEST_RESOLVER_PATH,
+        PERSISTENCE_DEFAULT_APPLICATION_PATH,
+        PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+        PERSISTENCE_MANAGED_STORE_TEST_PATH, PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+        PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
+        PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+        PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH,
+        PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+        Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+        Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+        Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+        Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+    )
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except OSError:
+        return None
+    pg = sources[PERSISTENCE_POSTGRES_CONFIG_PATH]
+    resolver = sources[PERSISTENCE_POSTGRES_RESOLVER_PATH]
+    store_configuration = sources[PERSISTENCE_STORE_CONFIGURATION_PATH]
+    shared_connection = sources[PERSISTENCE_SHARED_CONNECTION_PATH]
+    shared_data_source = sources[PERSISTENCE_SHARED_DATASOURCE_PATH]
+    ownership_configuration = sources[PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH]
+    execution_ownership = sources[PERSISTENCE_EXECUTION_OWNERSHIP_PATH]
+    backup_configuration = sources[PERSISTENCE_BACKUP_CONFIGURATION_PATH]
+    audit_directory = sources[PERSISTENCE_AUDIT_DIRECTORY_PATH]
+    audit_configuration = sources[PERSISTENCE_AUDIT_CONFIGURATION_PATH]
+    sqlite_location = sources[PERSISTENCE_SQLITE_LOCATION_PATH]
+    registry = sources[PERSISTENCE_REGISTRY_POLICY_PATH]
+    in_memory = sources[PERSISTENCE_IN_MEMORY_POLICY_PATH]
+    sqlite = sources[PERSISTENCE_SQLITE_CONFIG_PATH]
+    sqlite_connection = sources[PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH]
+    query = sources[PERSISTENCE_QUERY_PATH]
+    managed = sources[PERSISTENCE_MANAGED_STORE_PATH]
+    manifest = sources[PERSISTENCE_MANIFEST_PATH]
+    bootstrap = sources[PERSISTENCE_BOOTSTRAP_PATH]
+    server_main = sources[PERSISTENCE_SERVER_MAIN_PATH]
+    in_memory_registry = sources[PERSISTENCE_IN_MEMORY_REGISTRY_PATH]
+    sqlite_registry = sources[PERSISTENCE_SQLITE_REGISTRY_PATH]
+    postgres_registry = sources[PERSISTENCE_POSTGRES_REGISTRY_PATH]
+    sqlite_artifact = sources[PERSISTENCE_SQLITE_ARTIFACT_PATH]
+    sqlite_embed = sources[PERSISTENCE_SQLITE_EMBED_PATH]
+    sqlite_execution = sources[PERSISTENCE_SQLITE_EXECUTION_PATH]
+    postgres_execution = sources[PERSISTENCE_POSTGRES_EXECUTION_PATH]
+    operational_policy = sources[PERSISTENCE_OPERATIONAL_POLICY_PATH]
+    manifest_digest = sources[PERSISTENCE_MANIFEST_DIGEST_PATH]
+    persistence_authority = sources[PERSISTENCE_AUTHORITY_PATH]
+    manifest_resolver = sources[PERSISTENCE_MANIFEST_RESOLVER_PATH]
+    default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
+    pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
+                          in PERSISTENCE_POSTGRES_FIELDS)
+    if java_record_components(pg, "PostgresStoreConfig") != pg_components \
+            or java_record_components(in_memory, "InMemoryExecutionStorePolicy") != tuple(
+                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) \
+            or java_record_components(sqlite, "SqliteStoreConfig") != tuple(
+                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) \
+            or java_record_components(registry, "DeploymentRegistryPolicy") != ("commandRetention", "limits") \
+            or java_record_components(sqlite_connection, "SqliteConnectionPolicy") != ("busyTimeout",):
+        return None
+    resolver_components = java_record_components(pg, "PostgresStoreConfig")
+    contracts: list[dict[str, object]] = []
+    for setting, field, property_name, environment, helper, constraint, approved_default in PERSISTENCE_POSTGRES_FIELDS:
+        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field)
+        call = java_constructor_component_call(
+            resolver, "PostgresStoreConfiguration", "fromSources", "PostgresStoreConfig",
+            resolver_components, field)
+        if default_span is None or call is None \
+                or normalized(default_span[0]) != normalized(approved_default):
+            return None
+        argument = normalized(call[0])
+        suffix = "" if constraint is None else f", {constraint}"
+        expected_argument = normalized(
+            f'{helper}(properties, environment, "{property_name}", "{environment}", '
+            f'defaults.{field}(){suffix})')
+        if argument != expected_argument:
+            return None
+        property_ids = _exact_candidate_ids(discovered, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                                            "property-binding", property_name)
+        environment_ids = _exact_candidate_ids(discovered, PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                                               "environment-binding", environment)
+        default_ids = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_POSTGRES_CONFIG_PATH, pg, default_span[1], default_span[2], discovered)
+        if len(property_ids) != 1 or len(environment_ids) != 1 or not default_ids:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_POSTGRES_CONFIG_PATH.as_posix()}#PostgresStoreConfig",
+            "field": field, "bindings": [property_name, environment],
+            "defaultExpression": normalized(default_span[0]),
+            "defaultCandidateIds": sorted(default_ids),
+            "candidateIds": sorted(default_ids + property_ids + environment_ids),
+            "resolverCallDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
+        })
+    for setting, field, approved_default in PERSISTENCE_IN_MEMORY_FIELDS:
+        span = java_record_default_expression_span(
+            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field)
+        if span is None or normalized(span[0]) != normalized(approved_default):
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_IN_MEMORY_POLICY_PATH.as_posix()}#InMemoryExecutionStorePolicy",
+            "field": field, "bindings": [], "defaultExpression": normalized(span[0]),
+            "defaultCandidateIds": sorted(numeric_candidate_ids_in_source_span(
+                PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
+            "candidateIds": sorted(numeric_candidate_ids_in_source_span(
+                PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
+        })
+    for setting, field, approved_default in PERSISTENCE_SQLITE_FIELDS:
+        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field)
+        if span is None or normalized(span[0]) != normalized(approved_default):
+            return None
+        default_ids = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_SQLITE_CONFIG_PATH, sqlite, span[1], span[2], discovered)
+        if field == "busyTimeout":
+            connection_default = java_record_default_expression_span(
+                sqlite_connection, "SqliteConnectionPolicy", "DEFAULTS", "busyTimeout")
+            if connection_default is None or normalized(span[0]) != \
+                    "SqliteConnectionPolicy.DEFAULTS.busyTimeout()" \
+                    or normalized(connection_default[0]) != "Duration.ofSeconds(5)":
+                return None
+            default_ids = numeric_candidate_ids_in_source_span(
+                PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH, sqlite_connection,
+                connection_default[1], connection_default[2], discovered)
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_SQLITE_CONFIG_PATH.as_posix()}#SqliteStoreConfig",
+            "field": field, "bindings": [], "defaultExpression": normalized(span[0]),
+            "defaultCandidateIds": sorted(default_ids), "candidateIds": sorted(default_ids),
+        })
+    registry_span = java_static_final_initializer(registry, "DeploymentRegistryPolicy", "DEFAULTS")
+    if registry_span is None:
+        return None
+    registry_expression = registry[registry_span[1]:registry_span[2]]
+    registry_code = strip_c_comments_and_literals(registry_expression)
+    policy_match = re.fullmatch(r"\s*new\s+DeploymentRegistryPolicy\s*\((.*)\)\s*",
+                                registry_code, re.DOTALL)
+    if policy_match is None:
+        return None
+    policy_open = registry_code.find("(")
+    policy_args = split_java_arguments(registry_expression, registry_code, policy_open)
+    if policy_args is None or len(policy_args[0]) != 2:
+        return None
+    _limits_normalized, limits_start, limits_end = policy_args[0][1]
+    limits_expression = registry_expression[limits_start:limits_end]
+    limits_code = strip_c_comments_and_literals(limits_expression)
+    limits_match = re.fullmatch(r"\s*new\s+DeploymentRegistry\.Limits\s*\((.*)\)\s*",
+                                limits_code, re.DOTALL)
+    if limits_match is None:
+        return None
+    limits_open = limits_code.find("(")
+    limits_args = split_java_arguments(limits_expression, limits_code, limits_open)
+    if limits_args is None or len(limits_args[0]) != 3:
+        return None
+    registry_settings = (
+        ("deployment.registry.command-retention", "commandRetention", policy_args[0][0],
+         "Duration.ofDays(7)", registry_span[1]),
+        ("deployment.registry.max-page-size", "limits", limits_args[0][0], "100",
+         registry_span[1] + limits_start),
+        ("deployment.registry.max-lease-ttl", "limits", limits_args[0][1],
+         "Duration.ofMinutes(5)", registry_span[1] + limits_start),
+        ("deployment.registry.max-clock-skew", "limits", limits_args[0][2],
+         "Duration.ofSeconds(5)", registry_span[1] + limits_start),
+    )
+    for setting, field, argument_span, expected_expression, base_offset in registry_settings:
+        expression, start, end = argument_span
+        if normalized(expression) != normalized(expected_expression):
+            return None
+        identifiers = numeric_candidate_ids_in_source_span(
+            PERSISTENCE_REGISTRY_POLICY_PATH, registry, base_offset + start, base_offset + end,
+            discovered)
+        if len(identifiers) != 1:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{PERSISTENCE_REGISTRY_POLICY_PATH.as_posix()}#DeploymentRegistryPolicy",
+            "field": field, "bindings": [], "defaultExpression": normalized(expression),
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+        })
+    query_default = java_static_final_initializer(query, "ProcessInventoryQuery", "DEFAULT_LIMIT")
+    query_ids = _exact_candidate_ids(discovered, PERSISTENCE_QUERY_PATH, "fixed-declaration", "50")
+    if query_default is None or normalized(query_default[0]) != "50" or len(query_ids) != 1:
+        return None
+    contracts.append({
+        "setting": "execution.inventory.default-page-size",
+        "owner": f"{PERSISTENCE_QUERY_PATH.as_posix()}#Builder", "field": "limit",
+        "bindings": ["ProcessInventoryQuery.Builder.limit(int)"], "defaultExpression": "50",
+        "defaultCandidateIds": query_ids, "candidateIds": query_ids,
+    })
+    # The eight deployment/composition settings below deliberately do not use the generic numeric
+    # record-component authorities.  Their executable contracts include a sealed selector, opaque
+    # credentials, a split pool policy, and a dynamic worker-name fallback.  Each exact method digest
+    # is an approved source shape: changing behavior cannot be blessed merely by refreshing the
+    # generated whole-file digest in inventory metadata.
+    approved_method_digests = (
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "fromSources",
+         "a039ad53983628039513d754eab7915736c73ae4fd62d5a3622070cae12ecf3d"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "selectorIn",
+         "7c2c5afebf35bf617e1cc3ed71e83f8ee0389484a80a32457ffdc2af54ef6af7"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "fromSources",
+         "3894af506beb3e9023fed14ef15e2096216d9e0fc0ee28953cc455c7a0184c00"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "poolSize",
+         "5e5b3ffa3add995faacc61f53bc2fe3e584face1c8b327a433d42da459300e96"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "poolTimeout",
+         "a88b3622bfc4791c7f08909a9987798ee154761db1caa70171f57af3af5c7bf0"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "selected",
+         "2ea7879f6b19fa0afcc348c0770bf5aba14c54dc6510de8b43ac5f6b49eee292"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "trimmed",
+         "a021259e23c302f4aaa3ac554251fb3d69322adf9b6b7eecfdfe5d243d8955f0"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "toString",
+         "01bc141b77a1150809f3100afdecf1b73408d7474b5d0341e02c9b77a912c6cd"),
+        (PERSISTENCE_SHARED_DATASOURCE_PATH, "SharedExecutionStoreDataSource", "open",
+         "6e2620dbfe05f4053025efecc0603b2dc2558d34a1388841088b9370098fa3b1"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "fromSources",
+         "a885517152cb34299e887fdc594001c67452c06f0602e3436ae32f527bddf6b0"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "leaseTtl",
+         "9e579c6bc82463894d8fc9ae854fad7ae8716b033d7ef01ec2f9fc23bcfbe81b"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "selected",
+         "d55b771b9e9e35402eeb5b2e54e9a4308bb2135e6da4309b77273d12cdd5a5f9"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "hostName",
+         "e239183f35515e56f755cebcf261b0ca55580f63c6959ee216e58b2a72686372"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "usableName",
+         "adf5c56cd390d84d4ea30aff6e5cf99d793eadc4e9d540022f303dd8fb7b88c5"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "runtimeOwnership",
+         "73754fdc86f588dcfdc0494242240230bfa7f923490fc1df482b13ac432b5b45"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "recoveryIdentity",
+         "79a701c248ce4e2af942ee2fd859ac90c724d223b3477df8c2f184355d99e2be"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
+         "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
+        (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
+         "e0ddeb698b2f2755b9fcd57f393473609859851814d4c494d4ee0aa8209fc078"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
+         "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
+         "4cf8be7a3951a412f80bd9937287b876fbd4cc2bea77de3dd100164dfbad9378"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "SqliteStoreLocation", "underConfiguredDirectory",
+         "46fed5770f116f2dc9298d7b678394b542cd53146db93d8657c0e90878763e22"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "SqliteStoreLocation", "underDirectory",
+         "41bf3e1968896c4dcf8bfac8744c432da1cd510ed983282cc838b6648c2c9f69"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "BackupRestoreConfiguration", "fromEnvironment",
+         "2382822498bda441f9bb5b63b50c36ec1a4bea3db64d67bb3b790619dce63513"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "singleHostLocation",
+         "10b29a815f02ec4ce915c796bbb7091b06f6b7687e240a13659fb8f2feccace3"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "enabledIn",
+         "c37f4a358c11a630fb93873a1ebf02d1815cfb4c0aa8b7647d59c5e895ebb52f"),
+    )
+    if any(java_method_digest(sources[path], type_symbol, method) != digest
+           for path, type_symbol, method, digest in approved_method_digests):
+        return None
+    configuration_span = java_type_span(store_configuration, "ExecutionStoreConfiguration")
+    configuration_type = strip_c_comments(
+        store_configuration[slice(*configuration_span)] if configuration_span is not None else "")
+    selector_constants_exact = all(len(re.findall(
+        rf'\bString\s+{field}\s*=\s*"{re.escape(value)}"\s*;', configuration_type)) == 1
+        for field, value in (("SQLITE_SELECTOR", "sqlite"),
+                             ("POSTGRESQL_SELECTOR", "postgresql")))
+    enabled_default_exact = len(re.findall(
+        r'\bstatic\s+final\s+String\s+DEFAULT_ENABLED_VALUE\s*=\s*"true"\s*;',
+        configuration_type)) == 1
+    compact = java_compact_constructor_span(shared_connection, "SharedStoreConnection")
+    if compact is None or java_span_digest(shared_connection, compact) != \
+            "def1d81068a369cafbe90d4975eb1fc57067f20be43bdf211a45e059dd95c864" \
+            or _source_digest(backup_configuration) != \
+            "e7992790f1a312a57ea9d888b8ca8e0107877965e2eedf3b80589812f7ca3fe0" \
+            or not selector_constants_exact or not enabled_default_exact \
+            or java_static_final_initializer(
+                shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX") is None \
+            or normalized(java_static_final_initializer(
+                shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX")[0]) != \
+            '"jdbc:postgresql:"':
+        return None
+    lease_default = java_static_final_initializer(
+        execution_ownership, "ExecutionOwnership", "DEFAULT_LEASE_TTL")
+    if lease_default is None or normalized(lease_default[0]) != "Duration.ofSeconds(30)":
+        return None
+
+    def exact_ids(specs: tuple[tuple[Path, str, str, str], ...]) -> list[str] | None:
+        identifiers: list[str] = []
+        for path, kind, expression, role in specs:
+            matched = sorted(candidate.id for candidate in discovered.values()
+                             if candidate.path == path.as_posix() and candidate.kind == kind
+                             and candidate.expression == expression and candidate.role == role)
+            if len(matched) != 1:
+                return None
+            identifiers.extend(matched)
+        return identifiers if len(identifiers) == len(set(identifiers)) else None
+
+    selector_ids = exact_ids((
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE", "RAVENROOT_EXECUTION_STORE"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_STORE"', "STORE_SELECTOR_VARIABLE"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"postgresql"', "SHARED_STORE_SELECTOR"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution-store"', "STORE_SELECTOR_PROPERTY"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store", "ravenroot.execution-store"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE", "RAVENROOT_EXECUTION_STORE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store", "ravenroot.execution-store"),
+    ))
+    url_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                          "RAVENROOT_EXECUTION_STORE_URL", "RAVENROOT_EXECUTION_STORE_URL"),))
+    user_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                           "RAVENROOT_EXECUTION_STORE_USER", "RAVENROOT_EXECUTION_STORE_USER"),))
+    password_ids = exact_ids(((PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+                               "RAVENROOT_EXECUTION_STORE_PASSWORD",
+                               "RAVENROOT_EXECUTION_STORE_PASSWORD"),))
+    pool_size_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_POOL_SIZE", "RAVENROOT_EXECUTION_STORE_POOL_SIZE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_POOL_SIZE"', "POOL_SIZE_VARIABLE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "10", "DEFAULT_POOL_SIZE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "1_000", "MAX_POOL_SIZE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"ravenroot.execution-store.pool-size"', "POOL_SIZE_PROPERTY"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store.pool-size", "ravenroot.execution-store.pool-size"),
+    ))
+    pool_timeout_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS", "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"', "POOL_TIMEOUT_VARIABLE"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "10", "DEFAULT_POOL_TIMEOUT"),
+        (PERSISTENCE_SHARED_CONNECTION_PATH, "fixed-declaration", "250", "MIN_POOL_TIMEOUT"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"ravenroot.execution-store.pool-timeout-ms"', "POOL_TIMEOUT_PROPERTY"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution-store.pool-timeout-ms",
+         "ravenroot.execution-store.pool-timeout-ms"),
+    ))
+    worker_ids = exact_ids((
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_WORKER_ID", "RAVENROOT_WORKER_ID"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_WORKER_ID"', "WORKER_ID_VARIABLE"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution.worker-id"', "WORKER_ID_PROPERTY"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution.worker-id", "ravenroot.execution.worker-id"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"unnamed-replica"', "UNRESOLVED_REPLICA_NAME"),
+    ))
+    lease_ids = exact_ids((
+        (PERSISTENCE_EXECUTION_OWNERSHIP_PATH, "fixed-declaration", "30", "DEFAULT_LEASE_TTL"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS", "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"', "LEASE_TTL_VARIABLE"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "fixed-declaration",
+         '"ravenroot.execution.lease-ttl-seconds"', "LEASE_TTL_PROPERTY"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "property-binding",
+         "ravenroot.execution.lease-ttl-seconds", "ravenroot.execution.lease-ttl-seconds"),
+    ))
+    if any(group is None for group in (selector_ids, url_ids, user_ids, password_ids,
+                                       pool_size_ids, pool_timeout_ids, worker_ids, lease_ids)):
+        return None
+    assert selector_ids is not None and url_ids is not None and user_ids is not None \
+        and password_ids is not None and pool_size_ids is not None \
+        and pool_timeout_ids is not None and worker_ids is not None and lease_ids is not None
+    # MIN_POOL_TIMEOUT mirrors HikariCP's own admissibility floor.  It is source evidence for the
+    # parser's validation, but it is neither an operator default nor part of the operator setting's
+    # candidate partition; inventory retains that atom as a fixed dependency contract.
+    pool_timeout_contract_ids = [identifier for index, identifier in enumerate(pool_timeout_ids)
+                                 if index != 3]
+    contracts.extend((
+        {
+            "setting": "execution.store.selector",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+            "field": "selector", "bindings": ["ravenroot.execution-store", "RAVENROOT_EXECUTION_STORE"],
+            "defaultExpression": "SQLITE_SELECTOR", "defaultKind": "closed-variant-fallback",
+            "defaultCandidateIds": [selector_ids[5]],
+            "candidateIds": sorted(selector_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#sharedStoreSelected",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates; absent selects sqlite; only sqlite or postgresql is accepted; CLI spelling and refusal match the server.",
+        },
+        {
+            "setting": "execution.store.url",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "url", "bindings": ["RAVENROOT_EXECUTION_STORE_URL"],
+            "defaultExpression": "required for postgresql; no fallback",
+            "defaultKind": "required-no-fallback",
+            "defaultCandidateIds": url_ids, "candidateIds": url_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Required only for postgresql and accepted only with the jdbc:postgresql: prefix; diagnostics do not echo the value.",
+        },
+        {
+            "setting": "execution.store.user",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "user", "bindings": ["RAVENROOT_EXECUTION_STORE_USER"],
+            "defaultExpression": "Optional.empty() when absent or blank",
+            "defaultKind": "optional-absent",
+            "defaultCandidateIds": user_ids, "candidateIds": user_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "An optional nonblank role is trimmed; absence delegates authentication to the URL or server.",
+        },
+        {
+            "setting": "execution.store.password",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "password", "bindings": ["RAVENROOT_EXECUTION_STORE_PASSWORD"],
+            "defaultExpression": "Optional.empty() only when absent",
+            "defaultKind": "optional-absent-opaque", "valueHandling": "secret-verbatim-redacted",
+            "defaultCandidateIds": password_ids, "candidateIds": password_ids,
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "The optional secret is opaque and every present value, including empty or whitespace, is preserved verbatim and redacted from rendering.",
+        },
+        {
+            "setting": "execution.store.pool-size",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "poolSize", "bindings": ["ravenroot.execution-store.pool-size",
+                                                  "RAVENROOT_EXECUTION_STORE_POOL_SIZE"],
+            "defaultExpression": "10", "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [pool_size_ids[2]],
+            "candidateIds": sorted(pool_size_ids),
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Property overrides environment; blank delegates to 10; accepted range is 1 through 1000 and the resolved value configures the pool.",
+        },
+        {
+            "setting": "execution.store.pool-timeout",
+            "owner": f"{PERSISTENCE_SHARED_CONNECTION_PATH.as_posix()}#SharedStoreConnection",
+            "field": "poolTimeout", "bindings": ["ravenroot.execution-store.pool-timeout-ms",
+                                                    "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS"],
+            "defaultExpression": "Duration.ofSeconds(10)",
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [pool_timeout_ids[2]],
+            "candidateIds": sorted(pool_timeout_contract_ids),
+            "consumerEvidence": [f"{PERSISTENCE_SHARED_DATASOURCE_PATH.as_posix()}#open"],
+            "sourceSemantics": "Property overrides environment; blank delegates to 10 seconds; at least 250 ms and strictly below the resolved statement timeout; the resolved duration configures the pool.",
+        },
+        {
+            "setting": "execution.worker-id",
+            "owner": f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#ExecutionOwnershipConfiguration",
+            "field": "replicaName", "bindings": ["ravenroot.execution.worker-id", "RAVENROOT_WORKER_ID"],
+            "defaultExpression": "usable host name or UNRESOLVED_REPLICA_NAME",
+            "defaultKind": "dynamic-host-fallback",
+            "defaultCandidateIds": [worker_ids[4]], "candidateIds": sorted(worker_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#runtimeOwnership",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#recoveryIdentity",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates to a validated host name or unnamed-replica; runtime and recovery identities have distinct roles.",
+        },
+        {
+            "setting": "execution.lease-ttl",
+            "owner": f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#ExecutionOwnershipConfiguration",
+            "field": "leaseTtl", "bindings": ["ravenroot.execution.lease-ttl-seconds",
+                                                "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"],
+            "defaultExpression": "ExecutionOwnership.DEFAULT_LEASE_TTL (Duration.ofSeconds(30))",
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [lease_ids[0]], "candidateIds": sorted(lease_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH.as_posix()}#requireCompatible",
+            ],
+            "sourceSemantics": "Property overrides environment; blank delegates to 30 seconds; positive whole seconds, above store skew and no greater than store max lease; used by runtime and recovery claims.",
+        },
+    ))
+    audit_ids = exact_ids((
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "environment-binding",
+         "RAVENROOT_AUDIT_DIR", "RAVENROOT_AUDIT_DIR"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "fixed-declaration",
+         '"RAVENROOT_AUDIT_DIR"', "ENVIRONMENT_VARIABLE"),
+        (PERSISTENCE_AUDIT_DIRECTORY_PATH, "fixed-declaration",
+         '"./data/audit"', "DEFAULT_DIRECTORY"),
+    ))
+    execution_directory_ids = exact_ids((
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_DIR"),
+        (PERSISTENCE_BACKUP_CONFIGURATION_PATH, "fixed-declaration",
+         '"RAVENROOT_EXECUTION_STORE_DIR"', "EXECUTION_STORE_DIR_VARIABLE"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_DIR", "RAVENROOT_EXECUTION_STORE_DIR"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "operational-declaration",
+         '"RAVENROOT_EXECUTION_STORE_DIR"', "DIRECTORY_VARIABLE"),
+        (PERSISTENCE_SQLITE_LOCATION_PATH, "fixed-declaration",
+         '"./data/execution-store"', "DEFAULT_DIRECTORY"),
+    ))
+    enabled_ids = exact_ids((
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
+         "RAVENROOT_EXECUTION_STORE_ENABLED", "RAVENROOT_EXECUTION_STORE_ENABLED"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "fixed-declaration",
+         '"true"', "DEFAULT_ENABLED_VALUE"),
+    ))
+    if audit_ids is None or execution_directory_ids is None or enabled_ids is None:
+        return None
+    contracts.extend((
+        {
+            "setting": "deployment.audit-directory",
+            "owner": f"{PERSISTENCE_AUDIT_DIRECTORY_PATH.as_posix()}#AuditTrailDirectory",
+            "field": "path", "bindings": ["RAVENROOT_AUDIT_DIR"],
+            "defaultExpression": '"./data/audit"', "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [audit_ids[2]], "candidateIds": sorted(audit_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_AUDIT_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+                f"{PERSISTENCE_SERVER_MAIN_PATH.as_posix()}#run",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+            ],
+            "sourceSemantics": "Server and offline CLI read the same environment variable; absent or blank delegates to ./data/audit, nonblank is trimmed, malformed paths are refused without disclosure, and server retention remains 24 hours.",
+        },
+        {
+            "setting": "execution.store.directory",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#SingleHost",
+            "field": "location", "bindings": ["RAVENROOT_EXECUTION_STORE_DIR"],
+            "defaultExpression": '"./data/execution-store"',
+            "defaultKind": "static-typed-default",
+            "defaultCandidateIds": [execution_directory_ids[4]],
+            "candidateIds": sorted(execution_directory_ids),
+            "consumerEvidence": [
+                f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#singleHostLocation",
+                f"{PERSISTENCE_BACKUP_CONFIGURATION_PATH.as_posix()}#fromEnvironment",
+                f"{PERSISTENCE_SQLITE_LOCATION_PATH.as_posix()}#underConfiguredDirectory",
+            ],
+            "sourceSemantics": "Server and offline CLI share one SQLite directory default and resolver; absent or blank delegates, nonblank is trimmed, malformed paths are refused without disclosure, and underDirectory supplies the fixed database filename.",
+        },
+        {
+            "setting": "execution.store.enabled",
+            "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+            "field": "enabled", "bindings": ["RAVENROOT_EXECUTION_STORE_ENABLED"],
+            "defaultExpression": 'DEFAULT_ENABLED_VALUE ("true")',
+            "defaultKind": "closed-variant-fallback", "defaultCandidateIds": [enabled_ids[1]],
+            "candidateIds": enabled_ids,
+            "consumerEvidence": [f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#fromSources"],
+            "sourceSemantics": "Absent or blank and canonical true enable the selected store; false, off, 0 and no select Disabled with the same maintenance directory; every other value is refused before composition.",
+        },
+    ))
+    # Each relation below is extracted from an executable method or direct field assignment.  Whole
+    # file digests are retained as provenance, but cannot by themselves approve a changed consumer.
+    selected_body = normalized(strip_c_comments(
+        resolver[slice(*java_method_span(resolver, "PostgresStoreConfiguration", "selected"))])) \
+        if java_method_span(resolver, "PostgresStoreConfiguration", "selected") is not None else ""
+    encode_span = java_method_span(operational_policy, "ResolvedOperationalPolicy", "encodeForManifest")
+    decode_span = java_method_span(operational_policy, "ResolvedOperationalPolicy", "decodeForManifest")
+    encode_body = normalized(strip_c_comments(operational_policy[slice(*encode_span)])) \
+        if encode_span is not None else ""
+    decode_body = normalized(strip_c_comments(operational_policy[slice(*decode_span)])) \
+        if decode_span is not None else ""
+    authority_from_span = java_method_span(
+        persistence_authority, "ExecutionPersistenceAuthority", "from")
+    authority_from_body = normalized(strip_c_comments(
+        persistence_authority[slice(*authority_from_span)])) \
+        if authority_from_span is not None else ""
+    policy_for_nodes_span = java_method_span(
+        manifest_resolver, "ExecutionManifestResolver", "operationalPolicyForNodes")
+    policy_for_nodes_body = normalized(strip_c_comments(
+        manifest_resolver[slice(*policy_for_nodes_span)])) \
+        if policy_for_nodes_span is not None else ""
+    manifest_for_resolved_span = java_method_span(
+        manifest_resolver, "ExecutionManifestResolver", "manifestForResolved")
+    manifest_for_resolved_body = normalized(strip_c_comments(
+        manifest_resolver[slice(*manifest_for_resolved_span)])) \
+        if manifest_for_resolved_span is not None else ""
+    operational_components = java_record_components(
+        operational_policy, "ResolvedOperationalPolicy")
+    persistence_argument = java_constructor_component_call(
+        manifest_resolver, "ExecutionManifestResolver", "operationalPolicyFor",
+        "ResolvedOperationalPolicy", operational_components, "persistence")
+    digest_conditions = java_method_if_conditions(
+        manifest_digest, "ExecutionManifestDigest", "of")
+    store_selection_conditions = java_method_if_conditions(
+        store_configuration, "ExecutionStoreConfiguration", "fromSources")
+    postgres_only_span = java_method_span(
+        store_configuration, "ExecutionStoreConfiguration", "postgresqlOnlyPolicyConfigured")
+    postgres_only_body = normalized(strip_c_comments(store_configuration[slice(*postgres_only_span)])) \
+        if postgres_only_span is not None else ""
+    expected_managed_authority_conditions = (
+        "!rows.next()",
+        "!authority.manifestDigest().value().equals(rows.getString(1)) || "
+        "(rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3 && "
+        "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_4)",
+        "pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()",
+    )
+    explicit_absent_capacity_refusal = normalized('''policy.persistence().orElseThrow(
+            () -> new IllegalArgumentException("persistence capacity is absent"))
+            .maximumPayloadBytes()''')
+    sqlite_managed_authority_span = java_method_span(
+        sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority")
+    postgres_managed_authority_span = java_method_span(
+        postgres_execution, "PostgresExecutionStore", "requireManagedAuthority")
+    sqlite_managed_authority_body = normalized(strip_c_comments(
+        sqlite_execution[slice(*sqlite_managed_authority_span)])) \
+        if sqlite_managed_authority_span is not None else ""
+    postgres_managed_authority_body = normalized(strip_c_comments(
+        postgres_execution[slice(*postgres_managed_authority_span)])) \
+        if postgres_managed_authority_span is not None else ""
+    expected_selected = normalized("""selected(Map<String, String> properties,
+            Map<String, String> environment, String property, String variable) {
+        String raw = properties.get(property);
+        if (!nonblank(raw)) raw = environment.get(variable);
+        return nonblank(raw) ? raw.trim() : null;
+    }""")
+    expected_postgres_only_body = normalized("""postgresqlOnlyPolicyConfigured(Map<String, String> properties,
+            Map<String, String> environment) {
+        return PostgresStoreConfiguration.anyConfigured(properties, environment)
+                || isConfigured(properties, POOL_SIZE_PROPERTY)
+                || isConfigured(properties, POOL_TIMEOUT_PROPERTY);
+        }""")
+    audit_environment = java_static_final_initializer(
+        audit_directory, "AuditTrailDirectory", "ENVIRONMENT_VARIABLE")
+    audit_default = java_static_final_initializer(
+        audit_directory, "AuditTrailDirectory", "DEFAULT_DIRECTORY")
+    audit_configuration_variable = java_static_final_initializer(
+        audit_configuration, "AuditTrailConfiguration", "DIRECTORY_VARIABLE")
+    backup_audit_variable = java_static_final_initializer(
+        backup_configuration, "BackupRestoreConfiguration", "AUDIT_DIR_VARIABLE")
+    backup_store_variable = java_static_final_initializer(
+        backup_configuration, "BackupRestoreConfiguration", "EXECUTION_STORE_DIR_VARIABLE")
+    sqlite_directory_default = java_static_final_initializer(
+        sqlite_location, "SqliteStoreLocation", "DEFAULT_DIRECTORY")
+    sqlite_file_name = java_static_final_initializer(
+        sqlite_location, "SqliteStoreLocation", "DEFAULT_FILE_NAME")
+    configuration_constants_exact = all(len(re.findall(
+        rf'\bString\s+{field}\s*=\s*{re.escape(value)}\s*;', configuration_type)) == 1
+        for field, value in (
+            ("ENABLED_VARIABLE", '"RAVENROOT_EXECUTION_STORE_ENABLED"'),
+            ("DIRECTORY_VARIABLE", '"RAVENROOT_EXECUTION_STORE_DIR"'),
+            ("DEFAULT_DIRECTORY", "SqliteStoreLocation.DEFAULT_DIRECTORY"),
+        ))
+    if selected_body != expected_selected \
+            or postgres_only_body != expected_postgres_only_body \
+            or java_record_components(audit_directory, "AuditTrailDirectory") != ("path",) \
+            or java_record_components(audit_configuration, "AuditTrailConfiguration") != ("directory",) \
+            or audit_environment is None or normalized(audit_environment[0]) != '"RAVENROOT_AUDIT_DIR"' \
+            or audit_default is None or normalized(audit_default[0]) != '"./data/audit"' \
+            or audit_configuration_variable is None \
+            or normalized(audit_configuration_variable[0]) != \
+                "AuditTrailDirectory.ENVIRONMENT_VARIABLE" \
+            or backup_audit_variable is None or normalized(backup_audit_variable[0]) != \
+                "AuditTrailDirectory.ENVIRONMENT_VARIABLE" \
+            or backup_store_variable is None or normalized(backup_store_variable[0]) != \
+                '"RAVENROOT_EXECUTION_STORE_DIR"' \
+            or sqlite_directory_default is None \
+            or normalized(sqlite_directory_default[0]) != '"./data/execution-store"' \
+            or sqlite_file_name is None \
+            or normalized(sqlite_file_name[0]) != '"ravenroot-execution-store.db"' \
+            or not configuration_constants_exact \
+            or store_selection_conditions is None \
+            or normalized("!POSTGRESQL_SELECTOR.equals(selector) && "
+                          "postgresqlOnlyPolicyConfigured(properties, environment)") \
+                not in store_selection_conditions \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "ai.ravenroot.server.persistence.ManagedExecutionStore.protect") != (
+                "executionStoreOwner.store()", "executionStoreOwner.executionManifestStore()") \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "AuditTrailConfiguration.fromEnvironment") != ("System.getenv()",) \
+            or java_invocation_arguments(server_main, "RavenrootServerMain", "run",
+                                         "new FileAuditTrail") != (
+                "auditDirectory.path()", "java.time.Clock.systemUTC()", "Duration.ofHours(24)") \
+            or java_invocation_arguments(audit_configuration, "AuditTrailConfiguration",
+                                         "fromEnvironment", "AuditTrailDirectory.resolve") != (
+                "environment.get(DIRECTORY_VARIABLE)",) \
+            or java_invocation_arguments(backup_configuration, "BackupRestoreConfiguration",
+                                         "fromEnvironment", "AuditTrailDirectory.resolve") != (
+                "environment.get(AUDIT_DIR_VARIABLE)",) \
+            or java_invocation_arguments(backup_configuration, "BackupRestoreConfiguration",
+                                         "fromEnvironment",
+                                         "SqliteStoreLocation.underConfiguredDirectory") != (
+                "environment.get(EXECUTION_STORE_DIR_VARIABLE)",) \
+            or java_invocation_arguments(store_configuration, "ExecutionStoreConfiguration",
+                                         "singleHostLocation",
+                                         "SqliteStoreLocation.underConfiguredDirectory") != (
+                "environment.get(DIRECTORY_VARIABLE)",) \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresExecutionStore") != (
+                "pool.dataSource()", "clock", "storeConfig", "humanTaskPolicy") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresGraphDefinitionStore") != (
+                "pool.dataSource()", "clock",
+                "ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE",
+                "graphMlLimits.maxBytes()", "storeConfig") \
+            or java_invocation_arguments(bootstrap, "ExecutionStoreBootstrap", "openShared",
+                                         "new PostgresExecutionManifestStore") != (
+                "pool.dataSource()", "clock",
+                "ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE",
+                "configuration.manifestPinAttempts()", "storeConfig") \
+            or java_invocation_arguments(sqlite_artifact, "SqliteArtifactRegistry", "prepare",
+                                         "connectionPolicy.apply") != ("connection",) \
+            or java_invocation_arguments(sqlite_embed, "SqliteEmbedRegistrationStore", "prepare",
+                                         "connectionPolicy.apply") != ("opened",) \
+            or java_type_assignment_expressions(sqlite_registry, "SqliteDeploymentRegistry",
+                                                "commandRetention") != ("policy.commandRetention()",) \
+            or java_type_assignment_expressions(sqlite_registry, "SqliteDeploymentRegistry",
+                                                "limits") != ("policy.limits()",) \
+            or java_type_assignment_expressions(postgres_registry, "PostgresDeploymentRegistry",
+                                                "commandRetention") != ("policy.commandRetention()",) \
+            or java_type_assignment_expressions(postgres_registry, "PostgresDeploymentRegistry",
+                                                "limits") != ("policy.limits()",) \
+            or java_type_assignment_expressions(in_memory_registry, "InMemoryDeploymentRegistry",
+                                                "limits") != ("Objects.requireNonNull(limits, \"limits\")",) \
+            or java_constructor_delegation_arguments(
+                in_memory_registry, "InMemoryDeploymentRegistry", ("clock",)) != (
+                    "clock", "tenant -> DeploymentId.of(UUID.randomUUID().toString())",
+                    "DeploymentRegistryPolicy.inMemoryLimits()") \
+            or java_constructor_delegation_arguments(
+                in_memory_registry, "InMemoryDeploymentRegistry", ("clock", "ids")) != (
+                    "clock", "ids", "DeploymentRegistryPolicy.inMemoryLimits()") \
+            or java_constructor_delegation_arguments(
+                sqlite_registry, "SqliteDeploymentRegistry", ("databaseFile", "clock", "ids")) != (
+                    "SqliteStoreLocation.ofFile(databaseFile)", "clock", "ids",
+                    "DeploymentRegistryPolicy.DEFAULTS") \
+            or java_constructor_delegation_arguments(
+                postgres_registry, "PostgresDeploymentRegistry", ("dataSource", "clock", "ids")) != (
+                    "dataSource", "clock", "ids", "DeploymentRegistryPolicy.DEFAULTS",
+                    "PostgresStoreConfig.defaults()") \
+            or java_direct_return_expression(in_memory_registry, "InMemoryDeploymentRegistry", "limits") != "limits" \
+            or java_direct_return_expression(sqlite_registry, "SqliteDeploymentRegistry", "limits") != "limits" \
+            or java_direct_return_expression(postgres_registry, "PostgresDeploymentRegistry", "limits") != "limits" \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "applyManaged",
+                                         "applyInternal") != ("batch", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "applyManaged",
+                                         "applyInternal") != ("batch", "authority") \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "applyLocked",
+                                         "requireManagedAuthority") != ("key", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "applyLocked",
+                                         "requireManagedAuthority") != ("connection", "key", "authority") \
+            or java_invocation_arguments(sqlite_execution, "SqliteExecutionStore", "claimManaged",
+                                         "requireManagedAuthority") != ("key", "authority") \
+            or java_invocation_arguments(postgres_execution, "PostgresExecutionStore", "claimManaged",
+                                         "requireManagedAuthority") != ("connection", "key", "authority") \
+            or java_method_if_conditions(
+                sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority") \
+                != expected_managed_authority_conditions \
+            or java_method_if_conditions(
+                postgres_execution, "PostgresExecutionStore", "requireManagedAuthority") \
+                != expected_managed_authority_conditions \
+            or explicit_absent_capacity_refusal not in sqlite_managed_authority_body \
+            or explicit_absent_capacity_refusal not in postgres_managed_authority_body \
+            or java_invocation_arguments(
+                sqlite_execution, "SqliteExecutionStore", "requireManagedAuthority",
+                "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
+            or java_invocation_arguments(
+                postgres_execution, "PostgresExecutionStore", "requireManagedAuthority",
+                "decodeForManifest") != ("rows.getString(3)", "rows.getInt(2)") \
+            or java_invocation_arguments(managed, "ManagedExecutionStore", "apply",
+                                         "delegate.applyManaged") != ("batch", "authority") \
+            or java_invocation_arguments(managed, "ManagedExecutionStore", "collectAuthorities",
+                                         "delegate.managedClaimCandidates") != (
+                "tenantId", "workerId", "pageSize", "ttl", "timersOnly", "scan.nextAfter()") \
+            or java_invocation_arguments(default_application, "DefaultRavenrootApplication",
+                                         "executionManifests",
+                                         "ai.ravenroot.core.manifest.ExecutionManifestResolver.completeManaged") != (
+                "engine", "executionStore.capabilities()", "resultPayloadBytes",
+                "executionStore.maxPayloadBytes()", "behaviors", "unknownBehaviors",
+                "graphExecutionLimits", "programRuntime") \
+            or java_invocation_arguments(default_application, "DefaultRavenrootApplication",
+                                         "executionManifests",
+                                         "executionStore.protectsManagedPersistence") != () \
+            or java_invocation_arguments(manifest_digest, "ExecutionManifestDigest", "of",
+                                         "manifest.operationalPolicy().encodeForManifest") != (
+                "manifest.formatVersion()",) \
+            or digest_conditions is None \
+            or normalized("manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_2 || "
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3 || "
+                          "manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_4") \
+                not in digest_conditions \
+            or authority_from_body != normalized("""from(StoredExecutionManifest stored) {
+                Objects.requireNonNull(stored, "stored");
+                ExecutionManifest manifest = stored.manifest();
+                if ((manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3
+                        && manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_4)
+                        || manifest.operationalPolicy() == null
+                        || manifest.operationalPolicy().persistence().isEmpty()) {
+                    throw new IllegalArgumentException("execution manifest has no generic persistence capacity");
+                }
+                return new ExecutionPersistenceAuthority(stored.digest(), manifest.operationalPolicy()
+                        .persistence().orElseThrow().maximumPayloadBytes());
+            }""") \
+            or policy_for_nodes_body != normalized("""operationalPolicyForNodes(Collection<GraphNode> nodes) {
+                Objects.requireNonNull(nodes, "nodes");
+                var behaviorNames = nodes.stream().filter(node -> node.behavior() != null)
+                        .map(GraphNode::behavior).collect(java.util.stream.Collectors.toSet());
+                ResolvedOperationalPolicy base = operationalPolicyFor(behaviorNames);
+                return new ResolvedOperationalPolicy(base.graph(), base.results(), base.builtInHttp(),
+                        base.nodePackages(), base.persistence(),
+                        behaviors.nodeExternalIoCapacitiesFor(nodes));
+            }""") \
+            or manifest_for_resolved_body != normalized("""manifestForResolved(ExecutionKey key,
+                    GraphContentId graphContentId, GraphDefinitionIdentity graphIdentity,
+                    ExecutionPolicy policy, Instant pinnedAt, ResolvedOperationalPolicy operational) {
+                Objects.requireNonNull(policy, "policy");
+                Objects.requireNonNull(operational, "operational");
+                var runtime = runtime(policy, executionLimitsDigestOf(operational.graph()));
+                List<PinnedNodePackage> packages = operational.nodePackages().stream()
+                        .map(entry -> behaviors.nodePackageBinding(entry.packageId()).orElseThrow().identity())
+                        .toList();
+                return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key, graphContentId,
+                        graphIdentity, runtime, packages, pinnedAt, operational);
+            }""") \
+            or persistence_argument is None \
+            or normalized(persistence_argument[0]) != normalized(
+                "java.util.Optional.ofNullable(maximumPersistencePayloadBytes)"
+                " .map(ResolvedOperationalPolicy.PersistenceLimits::new)") \
+            or encode_body != normalized("""encodeForManifest(int manifestFormatVersion) {
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2
+                        && persistence.isEmpty() && nodeExternalIo.isEmpty()
+                        && hasLegacyDecompressionAuthority()) {
+                    return encodeVersion(ENCODING_VERSION_1);
+                }
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_3
+                        && persistence.isPresent() && hasLegacyDecompressionAuthority()) {
+                    if (!nodeExternalIo.isEmpty()) {
+                        throw new IllegalArgumentException("manifest format 3 cannot carry new external-I/O capacity");
+                    }
+                    return encodeVersion(ENCODING_VERSION_2);
+                }
+                if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_4
+                        && hasCompleteDecompressionAuthority()) {
+                    return encodeVersion(ENCODING_VERSION_3);
+                }
+                throw new IllegalArgumentException("operational policy does not match manifest format");
+            }""") \
+            or decode_body != normalized("""decodeForManifest(String encoded, int manifestFormatVersion) {
+                return decodeVersion(encoded, switch (manifestFormatVersion) {
+                    case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
+                    case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;
+                    case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_3;
+                    default -> throw new IllegalArgumentException("manifest format has no operational policy");
+                });
+            }""") \
+            or java_static_final_initializer(manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION") is None \
+            or normalized(java_static_final_initializer(
+                manifest, "ExecutionManifest", "CURRENT_FORMAT_VERSION")[0]) != "FORMAT_VERSION_4" \
+            or any(java_static_final_initializer(manifest, "ExecutionManifest", field) is None
+                   or normalized(java_static_final_initializer(
+                       manifest, "ExecutionManifest", field)[0]) != value
+                   for field, value in (("FORMAT_VERSION_1", "1"), ("FORMAT_VERSION_2", "2"),
+                                        ("FORMAT_VERSION_3", "3"), ("FORMAT_VERSION_4", "4"))):
+        return None
+    candidate_ids = sorted(identifier for contract in contracts for identifier in contract["candidateIds"])
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return None
+    test_methods = (
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "postgresqlPolicyUsesPropertiesBeforeEnvironmentAndOneResolvedStatementBound"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "everyPostgresqlPolicyFieldIsResolvedOnceFromTheDocumentedPropertyFamily"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "anExplicitSqliteSelectorIsTheSameAsNoSelector"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "anUnknownSelectorFailsClosedWithoutEchoingIt"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "theSharedStoreRequiresAUrlAndRefusesAnotherDriversUrl"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "poolSettingsDefaultAndAreBoundedOnBothSides"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "theConnectionNeverRendersItsUrlOrPassword"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "aPasswordIsNotTrimmedBecauseItIsOpaque"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theTtlDefaultsToTheValueThatUsedToBeHardCoded"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "aMalformedTtlFailsClosedRatherThanFallingBackToTheDefault"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "anUnsetNameStillProducesAUsableIdentity"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "aMalformedNameIsRefusedAgainstTheVariableTheOperatorSet"),
+        (PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH, "ExecutionOwnershipConfigurationTest",
+         "theTtlIsCheckedAgainstTheComposedStoresOwnPublishedBounds"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "theSelectorSpellingMatchesTheServersOwn"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "selectorPropertyOverridesEnvironmentForBundleRefusal"),
+        (PERSISTENCE_CLI_SELECTOR_TEST_PATH, "SharedStoreBundleRefusalTest",
+         "backupAndRestoreAreRefusedUnderTheSharedStore"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "absentAndBlankValuesResolveToTheSoleDefault"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "aConfiguredPathIsTrimmedOnceBeforeParsing"),
+        (PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH, "AuditTrailDirectoryTest",
+         "anInvalidPathIsRefusedWithoutRepeatingIt"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH, "AuditTrailConfigurationTest",
+         "serverCompositionUsesTheSharedDefaultBlankAndTrimRules"),
+        (PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH, "AuditTrailConfigurationTest",
+         "malformedServerAuditDirectoryIsRefusedBeforeOpeningTheTrail"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer"),
+        (PERSISTENCE_DIRECTORY_PARITY_TEST_PATH, "BackupRestoreDirectoryParityTest",
+         "bothCompositionRootsRefuseTheSameMalformedPaths"),
+        (PERSISTENCE_SQLITE_LOCATION_TEST_PATH, "SqliteBackupRestoreTest",
+         "configuredDirectoriesShareOneDefaultAndBlankTrimRule"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "malformedEnabledValueIsRejectedWithoutEchoOrCause"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "disabledKeepsTheConfiguredDirectoryAsTheMaintenanceAuthority"),
+        (PERSISTENCE_STORE_CONFIGURATION_TEST_PATH, "ExecutionStoreConfigurationTest",
+         "malformedDirectoryIsRejectedWithoutRepeatingTheEnvironmentValue"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "matchingReplayAuthorityReachesAdapterBeforeLiveCapacityComparison"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "boundedSweepsAdvancePastEightIncompatiblePages"),
+        (PERSISTENCE_MANAGED_STORE_TEST_PATH, "ManagedExecutionStoreTest",
+         "everyExecutionStoreMethodHasAnExplicitManagedRoute"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+         "DeploymentRegistryPolicyTest", "defaultsAreOneTypedDurableRegistryDecision"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+         "InMemoryExecutionStorePolicyTest", "explicitPolicyControlsTheReferenceStoreWithoutClaimingManagedPersistence"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+         "SqliteConnectionPolicyTest", "oneTypedPolicyControlsArtifactAndEmbedConnectionWaits"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "fencingThenMatchingReplayPrecedeAChangedLiveCapacityCheck"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "individualManagedClaimsRefuseMissingStaleAndLegacyAuthorityWithoutLeasing"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "individualManagedClaimRefusesReopenedCapacityDriftWithoutLeasing"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract", "restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest", "processCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "formatFourRoundTripsExplicitPersistenceDispositionAndNodeBoundIo"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "nodeIoStructuralBoundaryFitsTheCodecAndOneMoreIsRefused"),
+        (PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH, "ResolvedOperationalPolicyTest",
+         "olderManifestCodecCannotDiscardANodeIoSnapshot"),
+        (PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH, "ExecutionManifestResolverEnginePolicyTest",
+         "formatFourPinsExactNodeIoWhileOlderRowsRefuseOnlyAffectedGraphs"),
+        (PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+         "DefaultRavenrootApplicationExecutionManifestTest",
+         "rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "exactFormatFourAuthorityCreatesAndClaimsIndividualAndRestrictedWork"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute"),
+        (Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+         "ManagedExecutionStoreContract",
+         "formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanCleanupSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+         "SqliteManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanPurgeSerializeAcrossTheManifestLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanCleanupSerializeAcrossTheManifestRowLock"),
+        (Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+         "PostgresManagedExecutionStoreContractTest",
+         "formatFourProcessCreationAndOrphanPurgeSerializeAcrossTheManifestRowLock"),
+    )
+    approved_new_test_digests = {
+        "anExplicitSqliteSelectorIsTheSameAsNoSelector": "ae9e843851cccb75ebfd373f4b4fc2890f59e280fbaabcee3ccee6c78aa8aeb4",
+        "anUnknownSelectorFailsClosedWithoutEchoingIt": "3c048de0c904f8f210a2e89b0c0e05f9c884e177f045df0268d7aba80e37329e",
+        "theSharedStoreRequiresAUrlAndRefusesAnotherDriversUrl": "18ce8ec8f9490e849603cd0ef1bb914974a27a96d9ad4bb537541683581ba541",
+        "poolSettingsDefaultAndAreBoundedOnBothSides": "1956e0e920ab339bc87c2f5066009ca91e80800ad60142ccab895b20aadad6fe",
+        "theConnectionNeverRendersItsUrlOrPassword": "917716431ddb7e3291a12f59921917b224d4c22d5642547dfda6ed07cd6a32a9",
+        "aPasswordIsNotTrimmedBecauseItIsOpaque": "e5bc520883ba15972c312eecfed1150202a3094b86fd37d78c0b6497aa0df345",
+        "theTtlDefaultsToTheValueThatUsedToBeHardCoded": "07ad8a3b60da4835e6262575c5c48e303c7682ce61c5190f241299d89a8c7914",
+        "ownershipPropertiesOverrideEnvironmentAndBlankPropertiesDelegate": "b3133e9a0c521aab63f5ccbef19974bb614cf29f7e8190528c5fdb0bbfe91517",
+        "aMalformedTtlFailsClosedRatherThanFallingBackToTheDefault": "aba1426f81a999845f700f745fc52e986d8bb71587db4b6efa0596b97a887cd1",
+        "theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct": "d94ce04c84dbd4215f0a79072398ef44b4b0c093929414796021263db88aa178",
+        "anUnsetNameStillProducesAUsableIdentity": "3be679136b89ee7081de5a8150c0b4ee9b3b8ef61d07ed4463e222873817790c",
+        "aMalformedNameIsRefusedAgainstTheVariableTheOperatorSet": "1fe0af9b6877c12c78a7e3324a831f15c8f6b470d0ab8839c79ed17e853d1091",
+        "theTtlIsCheckedAgainstTheComposedStoresOwnPublishedBounds": "81f3e4d0b75c4974ba60bad0ef528fb49436feebb926f497bece7fa84718c5e0",
+        "theSelectorSpellingMatchesTheServersOwn": "caf7902ec0f9f11a8c1706b22f294aa828ea5716c6463717fed7a10a0e30165e",
+        "selectorPropertyOverridesEnvironmentForBundleRefusal": "21355efcd75acec2071f4be9c8c2c65499afc6f12d987d14678efc04e03b6745",
+        "backupAndRestoreAreRefusedUnderTheSharedStore": "6adff2e480e35b2fec11c2433462ea2d442e71f81e6537628912ede299e9dcd0",
+        "absentAndBlankValuesResolveToTheSoleDefault": "723506176b197283fe82f3bda91fcad41dc46e68c720b240c31362d2ccbc0875",
+        "aConfiguredPathIsTrimmedOnceBeforeParsing": "b01243e10c701e9d2aabe2b1f4395eb4be023e5e2d0dbc1f7a694293d7c55dea",
+        "anInvalidPathIsRefusedWithoutRepeatingIt": "11a0afb17c679f68c8b79adb58372a0465c47a19d9f81a36132d407b6fb4e5ee",
+        "serverCompositionUsesTheSharedDefaultBlankAndTrimRules": "8d3e9493c705f53d33dcef1789c71ff74f2a96407332f72ff966afcb374f3d04",
+        "malformedServerAuditDirectoryIsRefusedBeforeOpeningTheTrail": "bc0d93dadcf86d2b7ac71f5e60e49ad14a9a27a6d5dbf4103d04ef0feeadcb02",
+        "auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer": "9f11784459d8ee120a9599fe081391d67446c84e48060fae8b272478954e995b",
+        "executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer": "b08e6b5417fd6a9aa66c3a8c36db5513d5b87bedfa5e089b60628ebb7f65f01d",
+        "bothCompositionRootsRefuseTheSameMalformedPaths": "14f23154a56a7ece244059662c587c9b4f7046e066f35d96c12df60d972f24b9",
+        "configuredDirectoriesShareOneDefaultAndBlankTrimRule": "8c6e524f4734caa56fb87dea79ce57382a264dd383c67bd5d24d5e1fa5d4ab67",
+        "absentBlankAndPaddedDirectoriesUseTheSharedSqliteRule": "1dd9d27888784f7258ddb392c04b08b25a6512b6a3309fe72f67f6740090478f",
+        "acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases": "b42172c272bc28a45e40990f643b9f02f9e717334992efd5ac22dd1be9e53037",
+        "malformedEnabledValueIsRejectedWithoutEchoOrCause": "29cba941a77b6eb7dc66fc8b9c78fa102dac12cc42fae36c8d0b51e9c1c2871e",
+        "disabledKeepsTheConfiguredDirectoryAsTheMaintenanceAuthority": "eb981d95c3160561bd00b421ec5d6ff27aa0bfc060afb3af81bc656ac518f3f8",
+        "malformedDirectoryIsRejectedWithoutRepeatingTheEnvironmentValue": "5e496c8c8a9c25e4461c54aa23fc322c4027e5aecaf7a5e540a086bf73817441",
+    }
+    test_evidence: list[dict[str, str]] = []
+    for path, type_symbol, method in test_methods:
+        source = sources[path]
+        digest = java_method_digest(source, type_symbol, method)
+        if digest is None or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            return None
+        if method in approved_new_test_digests and approved_new_test_digests[method] != digest:
+            return None
+        test_evidence.append({"path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
+    return {
+        "kind": "java-persistence-policy-family-v1",
+        "contracts": contracts,
+        "candidateIds": candidate_ids,
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "testEvidence": test_evidence,
+    }
+
+
+def persistence_policy_authority_errors(root: Path, authorities: object,
+                                        entries: dict[str, dict[str, object]],
+                                        discovered: dict[str, Candidate]) -> list[str]:
+    """Require the complete source-derived #318 policy even when inventory markers are removed."""
+    if not persistence_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["persistence policy authority exists without its typed resolver source"])
+    expected = persistence_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["persistence policy source family is incomplete or unsupported"]
+    errors: list[str] = []
+    if not isinstance(authorities, dict) or set(authorities) != {PERSISTENCE_POLICY_AUTHORITY_ID} \
+            or authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID) != expected:
+        errors.append("persistence settings require the exact mandatory source-derived authority")
+    expected_by_id = {
+        str(identifier): contract for contract in expected["contracts"]
+        for identifier in contract["candidateIds"]
+    }
+    missing = set(expected_by_id) - set(entries)
+    if missing:
+        errors.append("persistence authority current source candidate set is incomplete")
+    reviewed_ids = {identifier for identifier in expected_by_id
+                    if entries.get(identifier, {}).get("status") != "pending-review"}
+    marked = {identifier: entry for identifier, entry in entries.items()
+              if entry.get("persistenceAuthority") is not None}
+    if set(marked) != reviewed_ids:
+        errors.append("persistence authority candidate partition is missing, duplicated, or foreign")
+    for identifier, contract in expected_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None:
+            continue
+        if entry.get("status") == "pending-review":
+            continue
+        if entry.get("status") != "already-centralized" \
+                or entry.get("classification") != "operator-configurable":
+            errors.append(f"{identifier}: persistence authority requires one reviewed operator setting")
+        if entry.get("persistenceAuthority") != PERSISTENCE_POLICY_AUTHORITY_ID \
+                or entry.get("setting") != contract["setting"]:
+            errors.append(f"{identifier}: persistence authority setting assignment has drifted")
+        default_evidence = entry.get("defaultEvidence")
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"] \
+                or entry.get("bindings") != contract["bindings"] \
+                or not isinstance(default_evidence, list) \
+                or sorted(str(item) for item in default_evidence) != contract["defaultCandidateIds"]:
+            errors.append(f"{identifier}: persistence owner, binding, or default evidence has drifted")
+    return errors
+
+
+def external_io_policy_source_present(root: Path) -> bool:
+    """Recognize the complete #319 source family without relying on inventory markers."""
+    return any((root / path).exists() for path in (
+        EXTERNAL_IO_LIMITS_PATH, EXTERNAL_IO_PACKAGE_POLICY_PATH,
+        EXTERNAL_IO_WS_RESOLVER_PATH, EXTERNAL_IO_DEPLOYMENT_PATH,
+    ))
+
+
+def external_io_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed platform external-I/O settings and their decisive consumers."""
+    paths = (
+        Path("compose.yaml"), Path("dev.sh"),
+        Path("docs/examples/assistant/compose.override.yaml"),
+        Path("scripts/publish_environment_reference.py"),
+        Path("ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java"),
+        EXTERNAL_IO_LIMITS_PATH, EXTERNAL_IO_RESERVED_POLICY_PATH,
+        EXTERNAL_IO_NODE_CAPACITY_PATH, EXTERNAL_IO_CAPACITY_CAPABLE_PATH,
+        EXTERNAL_IO_OUTBOUND_HTTP_PATH, EXTERNAL_IO_PACKAGE_POLICY_PATH,
+        EXTERNAL_IO_MANAGED_SERVICES_PATH, EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH,
+        EXTERNAL_IO_GRAPH_RUNNER_PATH, EXTERNAL_IO_NODE_PACKAGES_PATH,
+        EXTERNAL_IO_DEPLOYMENT_PATH,
+        EXTERNAL_IO_APPLICATION_PATH, EXTERNAL_IO_SERVER_MAIN_PATH,
+        EXTERNAL_IO_GRANTS_PATH, EXTERNAL_IO_WS_PROFILE_PATH,
+        EXTERNAL_IO_WS_RESOLVER_PATH, EXTERNAL_IO_WS_SEND_PATH,
+        EXTERNAL_IO_WS_ADMISSION_PATH, EXTERNAL_IO_TEAMS_PROFILE_PATH,
+        EXTERNAL_IO_TEAMS_CONFIGURATION_PATH, EXTERNAL_IO_TEAMS_SOURCE_PATH,
+        EXTERNAL_IO_MATTERMOST_PROFILE_PATH, EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH,
+        EXTERNAL_IO_MATTERMOST_SOURCE_PATH,
+        Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundHttpRequest.java"),
+        Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/OutboundWebSocketRequest.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/BoundedBodyHandlers.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressHttpClients.java"),
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/ReservedNetworkPolicy.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketReceiveNodeBehavior.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketSettings.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsBehaviorDescriptors.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-mattermost/src/main/java/ai/ravenroot/extensions/mattermost/MattermostBehaviorDescriptors.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/node/service/ExternalIoLimitsTest.java"),
+        Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java"),
+        Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/test/java/ai/ravenroot/extensions/websocket/WebSocketAdmissionConcurrencyTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/test/java/ai/ravenroot/extensions/websocket/WebSocketSendNodeBehaviorTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-teams/src/test/java/ai/ravenroot/extensions/teams/TeamsConfigurationTest.java"),
+        Path("ravenroot/ravenroot-extensions/ravenroot-mattermost/src/test/java/ai/ravenroot/extensions/mattermost/MattermostConfigurationTest.java"),
+    )
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in paths}
+    except OSError:
+        return None
+
+    def exact(path: Path, *, kind: str | None = None, role: str | None = None,
+              expression: str | None = None) -> list[str]:
+        return sorted(candidate.id for candidate in discovered.values()
+                      if candidate.path == path.as_posix()
+                      and (kind is None or candidate.kind == kind)
+                      and (role is None or candidate.role == role)
+                      and (expression is None or candidate.expression == expression))
+
+    def required(path: Path, *, kind: str | None = None, role: str | None = None,
+                 expression: str | None = None) -> list[str] | None:
+        identifiers = exact(path, kind=kind, role=role, expression=expression)
+        return identifiers if identifiers else None
+
+    def camel_to_kebab(value: str) -> str:
+        return re.sub(r"(?<!^)(?=[A-Z])", "-", value).lower()
+
+    contracts: list[dict[str, object]] = []
+
+    reserved_paths = (
+        Path("compose.yaml"), Path("docs/examples/assistant/compose.override.yaml"),
+        Path("ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java"),
+        EXTERNAL_IO_RESERVED_POLICY_PATH,
+        Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/egress/EgressAddressGuard.java"),
+        EXTERNAL_IO_SERVER_MAIN_PATH,
+    )
+    reserved_ids = sorted(identifier for path in reserved_paths for identifier in exact(
+        path, expression="RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"))
+    reserved_ids.extend(sorted(candidate.id for candidate in discovered.values()
+                               if candidate.path == "dev.sh"
+                               and candidate.expression == "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"
+                               and (candidate.evidence.startswith((
+                                   "if [ -z", "export RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"))
+                                    or candidate.evidence
+                                    == "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS=$BENCH_EXCEPTIONS")))
+    reserved_ids.extend(exact(EXTERNAL_IO_RESERVED_POLICY_PATH,
+                              role="EXCEPTIONS_ENVIRONMENT_VARIABLE",
+                              expression='"RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"'))
+    reserved_default = required(
+        EXTERNAL_IO_RESERVED_POLICY_PATH, role="DEFAULT_EXCEPTIONS",
+        expression='"localhost:LOOPBACK"')
+    if not reserved_ids or reserved_default is None:
+        return None
+    reserved_ids = sorted(set(reserved_ids + reserved_default))
+    contracts.append({
+        "setting": "egress.reserved-network-exceptions",
+        "owner": f"{EXTERNAL_IO_RESERVED_POLICY_PATH.as_posix()}#ReservedNetworkPolicy",
+        "field": "DEFAULT_EXCEPTIONS", "bindings": ["RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"],
+        "defaultExpression": '"localhost:LOOPBACK"', "defaultCandidateIds": reserved_default,
+        "candidateIds": reserved_ids,
+        "scope": "Live deployment authorization; graphs and manifests cannot widen it.",
+        "pinning": "Current authorization is checked at each connection and is not manifest-pinned.",
+    })
+
+    server_bindings = {
+        "builtin-http.allowed-hosts": ("RAVENROOT_HTTP_ALLOWED_HOSTS", "allowedHosts"),
+        "builtin-http.allowed-ports": ("RAVENROOT_HTTP_ALLOWED_PORTS", "allowedPorts"),
+        "builtin-http.maximum-response-bytes": ("RAVENROOT_HTTP_MAX_RESPONSE_BYTES", "maximumResponseBytes"),
+        "builtin-http.maximum-request-bytes": ("RAVENROOT_HTTP_MAX_REQUEST_BYTES", "maximumRequestBytes"),
+    }
+    http_defaults = {
+        "builtin-http.allowed-ports": ("DEFAULT_ALLOWED_PORTS",),
+        "builtin-http.maximum-response-bytes": ("DEFAULT_MAX_RESPONSE_BYTES",),
+        "builtin-http.maximum-request-bytes": ("DEFAULT_MAX_REQUEST_BYTES",),
+    }
+    for setting, (environment, field) in server_bindings.items():
+        binding = required(EXTERNAL_IO_SERVER_MAIN_PATH, kind="environment-binding",
+                           expression=environment)
+        if binding is None:
+            return None
+        default_ids = binding
+        if setting in http_defaults:
+            default_ids = sorted(identifier for role in http_defaults[setting]
+                                 for identifier in exact(EXTERNAL_IO_OUTBOUND_HTTP_PATH, role=role))
+            if not default_ids:
+                return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix()}#OutboundHttpPolicy",
+            "field": field, "bindings": [environment],
+            "defaultExpression": "deny all when absent" if setting.endswith("allowed-hosts")
+                else "typed OutboundHttpPolicy default",
+            "defaultCandidateIds": default_ids,
+            "candidateIds": sorted(set(binding + default_ids)),
+            "scope": "Built-in HTTP deployment policy; destination reach remains live.",
+            "pinning": "Host and port authorization stay live; request and response byte limits are pinned.",
+        })
+    timeout_defaults = sorted(set(
+        exact(EXTERNAL_IO_OUTBOUND_HTTP_PATH, role="maximumTimeout", expression="30")
+        + exact(EXTERNAL_IO_OUTBOUND_HTTP_PATH, kind="inline-operational-call", expression="30")))
+    if not timeout_defaults:
+        return None
+    contracts.append({
+        "setting": "builtin-http.maximum-timeout",
+        "owner": f"{EXTERNAL_IO_OUTBOUND_HTTP_PATH.as_posix()}#OutboundHttpPolicy",
+        "field": "maximumTimeout", "bindings": [],
+        "defaultExpression": "Duration.ofSeconds(30)",
+        "defaultCandidateIds": timeout_defaults, "candidateIds": timeout_defaults,
+        "scope": "Built-in HTTP execution duration ceiling.",
+        "pinning": "Resolved once and pinned for managed execution and recovery.",
+    })
+
+    external_limits_source = sources[EXTERNAL_IO_LIMITS_PATH]
+    external_components = java_record_components(external_limits_source, "ExternalIoLimits")
+    if external_components != (
+            "maximumRequestBytes", "maximumEncodedResponseBytes", "maximumDecodedResponseBytes",
+            "maximumOutputBytes", "maximumDecompressionRatio", "maximumDuration",
+            "cancellationBound", "acceptedMediaTypes", "acceptedContentEncodings"):
+        return None
+    external_defaults: dict[str, tuple[str, list[str]]] = {}
+    for field in external_components:
+        span = java_record_default_expression_span(
+            external_limits_source, "ExternalIoLimits", "MANAGED_HTTP_DEFAULTS", field)
+        if span is None:
+            return None
+        expression, start, end = span
+        ids = candidate_ids_in_source_span(
+            EXTERNAL_IO_LIMITS_PATH, external_limits_source, start, end,
+            "fixed-declaration", "MANAGED_HTTP_DEFAULTS", discovered)
+        external_defaults[field] = (expression, sorted(ids))
+    duration_default = required(EXTERNAL_IO_LIMITS_PATH, role="DEFAULT_MANAGED_HTTP_DURATION",
+                                expression="30")
+    cancellation_default = required(EXTERNAL_IO_LIMITS_PATH, role="COOPERATIVE_CANCELLATION_BOUND",
+                                    expression="2")
+    if duration_default is None or cancellation_default is None:
+        return None
+    external_defaults["maximumDuration"] = (
+        "DEFAULT_MANAGED_HTTP_DURATION", duration_default)
+    external_defaults["cancellationBound"] = (
+        "COOPERATIVE_CANCELLATION_BOUND", cancellation_default)
+    for field in external_components:
+        expression, identifiers = external_defaults[field]
+        contracts.append({
+            "setting": f"external-io.compatibility-{camel_to_kebab(field)}",
+            "owner": f"{EXTERNAL_IO_LIMITS_PATH.as_posix()}#ExternalIoLimits",
+            "field": field, "bindings": [], "defaultExpression": expression,
+            "defaultCandidateIds": identifiers,
+            "candidateIds": [] if field == "acceptedContentEncodings" else identifiers,
+            "scope": "Finite caller compatibility envelope intersected with trusted package policy.",
+            "pinning": "Caller narrowing is per operation; the trusted execution envelope is pinned separately.",
+        })
+
+    package_fields = (
+        ("node-package.maximum-request-bytes", "maximumRequestBytes", "DEFAULT_MAX_REQUEST_BYTES", "maxRequestBytes"),
+        ("node-package.maximum-response-bytes", "maximumResponseBytes", "DEFAULT_MAX_RESPONSE_BYTES", "maxResponseBytes"),
+        ("node-package.maximum-websocket-message-bytes", "maximumWebSocketMessageBytes", "DEFAULT_MAX_WEBSOCKET_MESSAGE_BYTES", "maxWebSocketMessageBytes"),
+        ("node-package.maximum-websocket-fragments", "maximumWebSocketFragments", "maximumWebSocketFragments", "maxWebSocketFragments"),
+        ("node-package.maximum-concurrent-operations", "maximumConcurrentOperations", "maximumConcurrentOperations", "maxConcurrentOperations"),
+        ("node-package.maximum-concurrent-per-tenant", "maximumConcurrentPerTenant", "maximumConcurrentPerTenant", "maxConcurrentPerTenant"),
+        ("node-package.maximum-queued-websocket-sends", "maximumQueuedWebSocketSends", "maximumQueuedWebSocketSends", "maxQueuedWebSocketSends"),
+        ("node-package.maximum-decompression-ratio", "maximumDecompressionRatio", "DEFAULT_MAX_DECOMPRESSION_RATIO", "maxDecompressionRatio"),
+        ("node-package.maximum-deadline", "maximumDeadline", "maximumDeadline", "maxDeadlineMs"),
+        ("node-package.maximum-websocket-lifetime", "maximumWebSocketLifetime", "maximumWebSocketLifetime", "maxWebSocketLifetimeMs"),
+        ("node-package.maximum-websocket-idle", "maximumWebSocketIdle", "maximumWebSocketIdle", "maxWebSocketIdleMs"),
+    )
+    for setting, field, default_role, binding_name in package_fields:
+        # The constructor uses several field names twice: once as a numeric default and once as
+        # quoted diagnostic text. Only the numeric expression owns the setting.
+        default_ids = sorted(identifier for identifier in exact(
+            EXTERNAL_IO_PACKAGE_POLICY_PATH, role=default_role)
+            if not discovered[identifier].expression.startswith(('"', "'")))
+        binding_ids = required(EXTERNAL_IO_GRANTS_PATH, role="LIMIT_KEYS", expression=f'"{binding_name}"')
+        if not default_ids or binding_ids is None:
+            return None
+        contracts.append({
+            "setting": setting,
+            "owner": f"{EXTERNAL_IO_PACKAGE_POLICY_PATH.as_posix()}#NodePackageEgressPolicy",
+            "field": field, "bindings": [binding_name],
+            "defaultExpression": "NodePackageEgressPolicy.Builder default",
+            "defaultCandidateIds": default_ids,
+            "candidateIds": sorted(set(default_ids + binding_ids)),
+            "scope": "One package's managed HTTP and WebSocket service envelope.",
+            "pinning": "Quantitative capacity is pinned; destinations, methods, headers and credentials stay live.",
+        })
+
+    ws_binding = required(EXTERNAL_IO_WS_RESOLVER_PATH, kind="environment-binding",
+                          expression="RAVENROOT_WEBSOCKET_PROFILE_")
+    if ws_binding is None:
+        return None
+    contracts.append({
+        "setting": "websocket.profile.binding",
+        "owner": f"{EXTERNAL_IO_WS_PROFILE_PATH.as_posix()}#WebSocketProfile",
+        "field": "name", "bindings": ["RAVENROOT_WEBSOCKET_PROFILE_<hex-name>"],
+        "defaultExpression": "no profile; the behavior is unavailable",
+        "defaultCandidateIds": ws_binding,
+        "candidateIds": ws_binding,
+        "scope": "One strictly decoded named WebSocket profile.",
+        "pinning": "The binding selects a profile; each field has its own authorization or capacity lifetime.",
+    })
+    ws_fields = (
+        ("destination", "live destination authorization", "Current authorization; never manifest-pinned."),
+        ("headers", "live header authorization", "Current authorization; never manifest-pinned."),
+        ("subprotocols", "live subprotocol authorization", "Current authorization; never manifest-pinned."),
+        ("credentialBindingId", "live credential binding identity", "Current authorization; never manifest-pinned."),
+        ("credentialReference", "live credential reference", "Current authorization; never manifest-pinned."),
+        ("maximumMessageBytes", "WebSocket send and receive capacity", "Pinned per send node; receive sources use the current deployment profile."),
+        ("maximumFragments", "WebSocket send and receive capacity", "Pinned per send node; receive sources use the current deployment profile."),
+        ("timeoutMs", "WebSocket send and receive timeout", "Pinned per send node; receive sources use the current deployment profile."),
+        ("maxConcurrency", "WebSocket send and receive concurrency", "Pinned per send node; receive sources use the current deployment profile."),
+        ("reconnectBackoffMs", "WebSocket receive lifecycle backoff", "Current source lifecycle; not execution-pinned."),
+        ("maxBufferedEvents", "WebSocket receive buffer capacity", "Current source lifecycle; not execution-pinned."),
+    )
+    for field, scope, pinning in ws_fields:
+        identifiers = required(EXTERNAL_IO_WS_RESOLVER_PATH, role="FIELDS", expression=f'"{field}"')
+        if identifiers is None:
+            return None
+        contracts.append({
+            "setting": f"websocket.profile.{camel_to_kebab(field)}",
+            "owner": f"{EXTERNAL_IO_WS_PROFILE_PATH.as_posix()}#WebSocketProfile",
+            "field": field, "bindings": ["RAVENROOT_WEBSOCKET_PROFILE_<hex-name>"],
+            "defaultExpression": "required field in a named profile",
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+            "scope": scope, "pinning": pinning,
+        })
+
+    for setting, profile_path, field, expression in (
+        ("mattermost.maximum-ack-timeout", EXTERNAL_IO_MATTERMOST_PROFILE_PATH,
+         "ackTimeoutMs", "2_800"),
+        ("teams.maximum-ack-timeout", EXTERNAL_IO_TEAMS_PROFILE_PATH,
+         "ackTimeoutMs", "4_500"),
+    ):
+        identifiers = required(profile_path, role="MAX_ACK_TIMEOUT_MS", expression=expression)
+        if identifiers is None:
+            return None
+        contracts.append({
+            "setting": setting, "owner": f"{profile_path.as_posix()}#{profile_path.stem}",
+            "field": field, "bindings": [], "defaultExpression": expression,
+            "defaultCandidateIds": identifiers, "candidateIds": identifiers,
+            "scope": "Deployment-lifecycle webhook acknowledgement budget below the provider window.",
+            "pinning": "A source lifecycle limit; it is not part of execution replay.",
+        })
+
+    operator_candidate_ids = [identifier for contract in contracts for identifier in contract["candidateIds"]]
+    if len(operator_candidate_ids) != len(set(operator_candidate_ids)):
+        return None
+    retained_partitions: list[dict[str, object]] = []
+    retained_candidate_ids: list[str] = []
+    semantic_partition_names = {
+        "derived": "derived-runtime-value",
+        "presentation-text": "diagnostic-presentation",
+        "protocol-or-format-invariant": "protocol-and-structural-format",
+        "published-contract-description": "generated-public-contract",
+        "security-ceiling-or-default": "fixed-security-and-parser-safety",
+    }
+    for classification, baseline_identifiers in EXTERNAL_IO_RETAINED_PARTITION_IDS.items():
+        identifiers = baseline_identifiers + EXTERNAL_IO_RETAINED_ADDITIONAL_PARTITION_IDS.get(
+            classification, ())
+        if any(identifier not in discovered for identifier in identifiers):
+            return None
+        retained_candidate_ids.extend(identifiers)
+        retained_partitions.append({
+            "classification": classification, "status": "retained",
+            "semanticPartition": semantic_partition_names[classification],
+            "candidateIds": list(identifiers),
+        })
+    if len(retained_candidate_ids) != len(set(retained_candidate_ids)) \
+            or set(retained_candidate_ids) & set(operator_candidate_ids):
+        return None
+    candidate_ids = sorted(operator_candidate_ids + retained_candidate_ids)
+    if set(candidate_ids) != external_io_policy_cohort_candidate_ids(discovered):
+        return None
+
+    capacity_source = sources[EXTERNAL_IO_NODE_CAPACITY_PATH]
+    if java_record_components(capacity_source, "NodeExternalIoCapacity") != (
+            "maximumMessageBytes", "maximumFragments", "maximumTimeout",
+            "maximumConcurrency"):
+        return None
+    compact_span = java_compact_constructor_span(capacity_source, "NodeExternalIoCapacity")
+    expected_compact = normalized("""NodeExternalIoCapacity {
+        if (maximumMessageBytes < 1) throw new IllegalArgumentException("maximumMessageBytes must be positive");
+        if (maximumFragments < 1) throw new IllegalArgumentException("maximumFragments must be positive");
+        if (maximumConcurrency < 1) throw new IllegalArgumentException("maximumConcurrency must be positive");
+        Objects.requireNonNull(maximumTimeout, "maximumTimeout");
+        if (maximumTimeout.isZero() || maximumTimeout.isNegative()) {
+            throw new IllegalArgumentException("maximumTimeout must be positive");
+        }
+        try {
+            maximumTimeout.toNanos();
+        } catch (ArithmeticException tooLarge) {
+            throw new IllegalArgumentException("maximumTimeout is too large", tooLarge);
+        }
+    }""")
+    if compact_span is None or normalized(strip_c_comments(
+            capacity_source[slice(*compact_span)])) != expected_compact:
+        return None
+    expected_spi = normalized("""package ai.ravenroot.api.node;
+        import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
+        import ai.ravenroot.api.node.service.NodePackageServices;
+        public interface ExecutionIoCapacityCapable {
+            NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration);
+            NodeAction create(NodeConfiguration configuration, NodePackageServices services,
+                              NodeExternalIoCapacity capacity);
+        }""")
+    if normalized(strip_c_comments(sources[EXTERNAL_IO_CAPACITY_CAPABLE_PATH])) != expected_spi:
+        return None
+
+    approved_methods = (
+        (EXTERNAL_IO_RESERVED_POLICY_PATH, "ReservedNetworkPolicy", "fromCommaSeparatedExceptions",
+         "7eb09df9e906ca3eb3fe7597ba0205a58341d2a0f5ff09b405330ccdfd9ee520"),
+        (EXTERNAL_IO_SERVER_MAIN_PATH, "RavenrootServerMain", "byteCeiling",
+         "f13441d5ade83b65753af2f6bc4f8c0387eb504abe01694360429a13501707ab"),
+        (EXTERNAL_IO_GRANTS_PATH, "EnvironmentNodePackageServiceGrants", "applyLimits",
+         "1bde5228c75298d77783b0e22ad485800e98778a6c14d4de0c1351cefdb07bd1"),
+        (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "nodeExternalIoCapacitiesFor",
+         "e3285ab11843b4fae3085058d7cb5a5d5f0c0a2bfa2593da3b0fc73fe0bbb9da"),
+        (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "requiresExternalIoCapacity",
+         "26ad07dec14f887ff245e7e306cf1d7444fa878292528f0f252d77ca14b69f39"),
+        (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
+         "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
+        (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
+         "8c259d0cbe9588b242bf82e395288abe1f388d12a6e26e4318cc7e52c7b2ff97"),
+        (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
+         "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
+        (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
+         "74950914d80d6c00ed13dc7e502d6464af7e99cf537d1900648eb2f48bdd32c1"),
+        (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "executeHttp",
+         "f8baedda556637f780f48d6619ef5cfdd5aba613c710a38f0a5aa586055baf2f"),
+        (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "openWebSocket",
+         "31f5c92efaa99d3fd68aa6c7e1008baf5fe3d443de400183517a5b29437fb593"),
+        (EXTERNAL_IO_WS_RESOLVER_PATH, "EnvironmentWebSocketProfileResolver", "resolve",
+         "de8a9ef8aac5ad1a3f74c0cb71c7baef571fef12561d2ac75caae8909c4801f3"),
+        (EXTERNAL_IO_WS_SEND_PATH, "WebSocketSendNodeBehavior", "resolveExecutionIoCapacity",
+         "f1b7eb0d8e7a74e3c9dd7b11994ae1313cf66324d6fbdb2f2c447443c8513690"),
+    )
+    if any(java_method_digest(sources[path], type_symbol, method) != digest
+           for path, type_symbol, method, digest in approved_methods):
+        return None
+
+    # Four execution entry points bind the exact resolved policy before dispatch.  Keeping the
+    # cardinality explicit prevents a new hosted/recovery path from silently bypassing the pin.
+    if sources[EXTERNAL_IO_GRAPH_RUNNER_PATH].count(
+            "behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(") != 4:
+        return None
+
+    structural_fragments = {
+        EXTERNAL_IO_OUTBOUND_HTTP_PATH: (
+            "return fromCommaSeparated(hosts, ports, maximumResponseBytes, 0);",
+            "Duration.ofSeconds(30), parsedPorts, maximumResponseBytes, maximumRequestBytes",
+        ),
+        EXTERNAL_IO_WS_ADMISSION_PATH: (
+            "if (active >= maximum) return false;",
+            "if (!gate.tryAcquire(maximum)) {",
+        ),
+        EXTERNAL_IO_WS_SEND_PATH: (
+            "return new NodeExternalIoCapacity(settings.maximumMessageBytes(), settings.maximumFragments(),",
+            "lease = admission.tryAcquire(message.tenantId(), settings.profile().name(),",
+        ),
+        EXTERNAL_IO_GRAPH_RUNNER_PATH: (
+            ".whenComplete((ignored, failure) -> behaviors.releaseOperationalPolicy(traversalId));",
+        ),
+        EXTERNAL_IO_APPLICATION_PATH: (
+            "policyForNodeAdmission(behaviorNodes)",
+            "manifests.pinResolved(key, contentId,",
+        ),
+        EXTERNAL_IO_TEAMS_CONFIGURATION_PATH: (
+            "TeamsValues.number(limits.get(\"ackTimeoutMs\"), 100,",
+            "profile.ackTimeoutMs() > authority.requestTimeout().toMillis()",
+        ),
+        EXTERNAL_IO_MATTERMOST_CONFIGURATION_PATH: (
+            "MattermostValues.number(limits.get(\"requestTimeoutMs\"), 100,",
+            "profile.requestTimeoutMs() > authority.requestTimeout().toMillis()",
+        ),
+    }
+    if any(any(source.count(fragment) != 1 for fragment in fragments)
+           for path, fragments in structural_fragments.items()
+           for source in (sources[path],)):
+        return None
+
+    test_methods = (
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "malformedDeclaredPropertyDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "missingCapabilityDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "forbiddenRuntimeNatureDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExternalIoAdmissionOrderingTest.java"),
+         "ExternalIoAdmissionOrderingTest", "complexityRefusalDoesNotReachCapacityOrAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+         "HostedExternalIoPolicyTest", "oldThenNewPinsCoexistOnOneHostedRunner"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+         "HostedExternalIoPolicyTest", "newThenOldPinsCoexistOnOneHostedRunner"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/HostedExternalIoPolicyTest.java"),
+         "HostedExternalIoPolicyTest", "bypassedWebSocketSendNeverResolvesItsMissingProfileOrCreatesAnAction"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "noOpSourceStopRevokesTheFullManagedSessionAcrossStopRestartAndUndeploy"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "createThrowAndNullReturnRevokeTheirProvisionalAuthorities"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "secondSourceStartFailureRevokesItAndRollsBackTheReadySibling"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "startFailureRevokesReadySiblingsBeforeTheCurrentRollbackCanBlock"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "sourceStartFailureRetiresRouteAcquiredBeforeHandleOwnership"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "managedIngressFailureRevokesEverySiblingBeforeCallbacksAndRollsBackEachOnce"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultGraphDeploymentSourceAuthorityIntegrationTest.java"),
+         "DefaultGraphDeploymentSourceAuthorityIntegrationTest", "stopRevokesEverySiblingAndSessionBeforeTheFirstCallbackCanBlock"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/node/service/ExternalIoLimitsTest.java"),
+         "ExternalIoLimitsTest", "compatibilityFactoriesShareOneFiniteHttpLifetimeAndCooperativeCancellationRequest"),
+        (Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/persistence/ResolvedOperationalPolicyTest.java"),
+         "ResolvedOperationalPolicyTest", "formatFourRoundTripsExplicitPersistenceDispositionAndNodeBoundIo"),
+        (Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/manifest/ExecutionManifestResolverEnginePolicyTest.java"),
+         "ExecutionManifestResolverEnginePolicyTest", "formatFourPinsExactNodeIoWhileOlderRowsRefuseOnlyAffectedGraphs"),
+        (Path("ravenroot/ravenroot-extensions/ravenroot-websocket/src/test/java/ai/ravenroot/extensions/websocket/WebSocketAdmissionConcurrencyTest.java"),
+         "WebSocketAdmissionConcurrencyTest", "overlappingPinnedRevisionsShareOneCounterUsingEachCallersThreshold"),
+        (Path("ravenroot/ravenroot-extensions/ravenroot-teams/src/test/java/ai/ravenroot/extensions/teams/TeamsConfigurationTest.java"),
+         "TeamsConfigurationTest", "rejectsUnknownFieldsQuerySecretsAndAuthorityWidening"),
+        (Path("ravenroot/ravenroot-extensions/ravenroot-mattermost/src/test/java/ai/ravenroot/extensions/mattermost/MattermostConfigurationTest.java"),
+         "MattermostConfigurationTest", "rejectsUnknownFieldsDuplicateRoutesAndOriginPaths"),
+    )
+    test_evidence: list[dict[str, str]] = []
+    for path, type_symbol, method in test_methods:
+        source = sources[path]
+        digest = java_method_digest(source, type_symbol, method)
+        annotations = java_method_annotations(source, type_symbol, method)
+        inline_test = re.search(rf"@Test\s+(?:public\s+)?void\s+{re.escape(method)}\s*\(", source)
+        if digest is None or (annotations != ("@Test",) and inline_test is None):
+            return None
+        test_evidence.append({"path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
+
+    return {
+        "kind": "java-platform-external-io-policy-family-v1",
+        "contracts": contracts, "semanticPartitions": retained_partitions,
+        "candidateIds": candidate_ids,
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(source)}
+                          for path, source in sources.items()],
+        "testEvidence": test_evidence,
+    }
+
+
+def external_io_policy_authority_errors(root: Path, authorities: object,
+                                        entries: dict[str, dict[str, object]],
+                                        discovered: dict[str, Candidate]) -> list[str]:
+    """Require the source-derived #319 operator family even if every marker is removed."""
+    if not external_io_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["external-I/O policy authority exists without its source family"])
+    expected = external_io_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["external-I/O policy source family is incomplete or unsupported"]
+    errors: list[str] = []
+    if not isinstance(authorities, dict) or set(authorities) != {EXTERNAL_IO_POLICY_AUTHORITY_ID} \
+            or authorities.get(EXTERNAL_IO_POLICY_AUTHORITY_ID) != expected:
+        errors.append("external-I/O settings require the exact mandatory source-derived authority")
+    operator_by_id = {str(identifier): contract for contract in expected["contracts"]
+                      for identifier in contract["candidateIds"]}
+    retained_by_id = {str(identifier): partition
+                      for partition in expected["semanticPartitions"]
+                      for identifier in partition["candidateIds"]}
+    expected_by_id = {**operator_by_id, **retained_by_id}
+    if set(expected_by_id) != set(expected["candidateIds"]):
+        errors.append("external-I/O authority source partition overlaps or is incomplete")
+    if set(expected_by_id) - set(entries):
+        errors.append("external-I/O authority current source candidate set is incomplete")
+    reviewed_ids = {identifier for identifier in expected_by_id
+                    if entries.get(identifier, {}).get("status") != "pending-review"}
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("externalIoPolicyAuthority") is not None}
+    if marked != reviewed_ids:
+        errors.append("external-I/O authority candidate partition is missing, duplicated, or foreign")
+    for identifier, contract in operator_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None or entry.get("status") == "pending-review":
+            continue
+        if entry.get("status") != "already-centralized" \
+                or entry.get("classification") != "operator-configurable":
+            errors.append(f"{identifier}: external-I/O authority requires one reviewed operator setting")
+        if entry.get("externalIoPolicyAuthority") != EXTERNAL_IO_POLICY_AUTHORITY_ID \
+                or entry.get("setting") != contract["setting"]:
+            errors.append(f"{identifier}: external-I/O authority setting assignment has drifted")
+        default_evidence = entry.get("defaultEvidence")
+        if entry.get("owner") != contract["owner"] or entry.get("field") != contract["field"] \
+                or entry.get("bindings") != contract["bindings"] \
+                or not isinstance(default_evidence, list) \
+                or sorted(str(item) for item in default_evidence) != contract["defaultCandidateIds"]:
+            errors.append(f"{identifier}: external-I/O owner, binding, or default evidence has drifted")
+    for identifier, partition in retained_by_id.items():
+        entry = entries.get(identifier)
+        if entry is None or entry.get("status") == "pending-review":
+            continue
+        if entry.get("status") != partition["status"] \
+                or entry.get("classification") != partition["classification"]:
+            errors.append(f"{identifier}: external-I/O retained semantic partition has drifted")
+        if entry.get("externalIoPolicyAuthority") != EXTERNAL_IO_POLICY_AUTHORITY_ID:
+            errors.append(f"{identifier}: external-I/O retained evidence marker has drifted")
+    return errors
+
+
+MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
+MANIFEST_PIN_CONFIGURATION_PATH = PERSISTENCE_STORE_CONFIGURATION_PATH
+MANIFEST_PIN_BOOTSTRAP_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
+MANIFEST_PIN_STORE_PATH = Path(
+    "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/"
+    "PostgresExecutionManifestStore.java")
+
+
+def manifest_pin_attempt_authorities(root: Path,
+                                     discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed nested Shared-setting authority from its exact executable source."""
+    try:
+        configuration = (root / MANIFEST_PIN_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        bootstrap = (root / MANIFEST_PIN_BOOTSTRAP_PATH).read_text(encoding="utf-8")
+        store = (root / MANIFEST_PIN_STORE_PATH).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    components = ("connection", "manifestPinAttempts", "storeConfig")
+    if java_record_components(configuration, "Shared") != components or not exact_import_identity(
+            configuration, "ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore"):
+        return None
+    call = java_constructor_component_call(
+        configuration, "ExecutionStoreConfiguration", "fromSources", "Shared",
+        components, "manifestPinAttempts")
+    expected_call = "positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE, DEFAULT_MANIFEST_PIN_ATTEMPTS)"
+    helper_span = java_method_span(configuration, "ExecutionStoreConfiguration", "positiveInt")
+    compact_span = java_compact_constructor_span(configuration, "Shared")
+    if call is None or normalized(call[0]) != normalized(expected_call) \
+            or helper_span is None or compact_span is None:
+        return None
+    helper_code = normalized(strip_c_comments(configuration[slice(*helper_span)]))
+    compact_code = normalized(strip_c_comments(configuration[slice(*compact_span)]))
+    expected_helper = normalized("""positiveInt(Map<String, String> environment, String variable, int fallback) {
+        String raw = environment.get(variable);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) throw new NumberFormatException();
+            return value;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException(variable + " must be a positive integer");
+        }
+    }""")
+    expected_compact = normalized("""Shared {
+        Objects.requireNonNull(connection, "connection");
+        Objects.requireNonNull(storeConfig, "storeConfig");
+        if (manifestPinAttempts < 1) {
+            throw new IllegalArgumentException("manifestPinAttempts must be positive");
+        }
+    }""")
+    if java_method_header(configuration, "ExecutionStoreConfiguration", "fromSources") != \
+            "private static ExecutionStoreConfiguration fromSources(Map<String, String> properties, Map<String, String> environment)" \
+            or java_method_header(configuration, "ExecutionStoreConfiguration", "positiveInt") != \
+            "private static int positiveInt(Map<String, String> environment, String variable, int fallback)" \
+            or helper_code != expected_helper or compact_code != expected_compact:
+        return None
+    environment = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"
+    def ids(kind: str, expression: str, role: str | None = None) -> list[str]:
+        return sorted(candidate.id for candidate in discovered.values()
+                      if candidate.path == MANIFEST_PIN_CONFIGURATION_PATH.as_posix()
+                      and candidate.kind == kind and candidate.expression == expression
+                      and (role is None or candidate.role == role))
+    environment_candidates = ids("environment-binding", environment)
+    declaration_candidates = ids("operational-declaration", f'"{environment}"',
+                                "MANIFEST_PIN_ATTEMPTS_VARIABLE")
+    terminal_candidates = sorted(
+        candidate.id for candidate in discovered.values()
+        if candidate.path == MANIFEST_PIN_STORE_PATH.as_posix()
+        and candidate.kind == "fixed-declaration"
+        and candidate.role == "DEFAULT_MAX_PIN_ATTEMPTS" and candidate.expression == "3")
+    terminal = java_static_final_initializer(store, "PostgresExecutionManifestStore",
+                                             "DEFAULT_MAX_PIN_ATTEMPTS")
+    alias = re.findall(r"\bint\s+DEFAULT_MANIFEST_PIN_ATTEMPTS\s*=\s*"
+                       r"PostgresExecutionManifestStore\.DEFAULT_MAX_PIN_ATTEMPTS\s*;",
+                       strip_c_comments(configuration))
+    if any(len(group) != 1 for group in (environment_candidates, declaration_candidates,
+                                         terminal_candidates)) \
+            or terminal is None or normalized(terminal[0]) != "3" or len(alias) != 1:
+        return None
+    bootstrap_span = java_method_span(bootstrap, "ExecutionStoreBootstrap", "openShared")
+    bootstrap_code = normalized(strip_c_comments(
+        bootstrap[slice(*bootstrap_span)] if bootstrap_span is not None else ""))
+    expected_bootstrap_call = normalized("""new PostgresExecutionManifestStore(pool.dataSource(), clock,
+        ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
+        configuration.manifestPinAttempts(), storeConfig)""")
+    if bootstrap_span is None or bootstrap_code.count(expected_bootstrap_call) != 1:
+        return None
+    tests = (
+        ("typedParsing", Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+                              "persistence/ExecutionStoreConfigurationTest.java"),
+         "ExecutionStoreConfigurationTest", "manifestPinRepairAttemptsAreTypedAndPostgresqlOnly"),
+        ("selectorConflict", Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+                                  "ReplicaTopologyStartupCheckTest.java"),
+         "ReplicaTopologyStartupCheckTest", "manifestPinAttemptsWithoutTheSharedSelectorAreRefused"),
+        ("bootstrapPropagation", Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/"
+                                     "persistence/SharedExecutionStoreBootstrapSmokeTest.java"),
+         "SharedExecutionStoreBootstrapSmokeTest", "theSharedSelectorComposesThreeStoresOverOneRealDatabase"),
+    )
+    test_evidence: list[dict[str, object]] = []
+    for role, path, type_symbol, method in tests:
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            return None
+        digest = java_method_digest(source, type_symbol, method)
+        if digest is None:
+            return None
+        test_evidence.append({"role": role, "path": path.as_posix(), "type": type_symbol,
+                              "method": method, "methodDigest": digest})
+    owner = f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared"
+    binding = {
+        "kind": "java-shared-manifest-pin-attempts-v1",
+        "sourceOwner": owner,
+        "factoryOwner": f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+        "method": "fromSources", "constructorType": "Shared",
+        "component": "manifestPinAttempts", "componentIndex": 1,
+        "helper": "positiveInt", "environmentSymbol": "MANIFEST_PIN_ATTEMPTS_VARIABLE",
+        "environment": environment, "environmentCandidateId": environment_candidates[0],
+        "declarationCandidateIds": declaration_candidates,
+        "callDigest": hashlib.sha256(call[0].encode("utf-8")).hexdigest(),
+        "factoryBodyDigest": java_method_digest(configuration, "ExecutionStoreConfiguration", "fromSources"),
+        "helperBodyDigest": java_method_digest(configuration, "ExecutionStoreConfiguration", "positiveInt"),
+        "compactConstructorDigest": java_span_digest(configuration, compact_span),
+        "bootstrapBodyDigest": java_method_digest(bootstrap, "ExecutionStoreBootstrap", "openShared"),
+        "tests": test_evidence,
+    }
+    default = {
+        "kind": "java-interface-alias-static-final-v1", "owner": owner,
+        "instanceSymbol": "DEFAULT_MANIFEST_PIN_ATTEMPTS", "field": "manifestPinAttempts",
+        "sourceExpression": "PostgresExecutionManifestStore.DEFAULT_MAX_PIN_ATTEMPTS",
+        "candidateIds": terminal_candidates,
+        "aliasOwner": f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
+        "aliasField": "DEFAULT_MANIFEST_PIN_ATTEMPTS",
+        "terminalOwner": f"{MANIFEST_PIN_STORE_PATH.as_posix()}#PostgresExecutionManifestStore",
+        "terminalField": "DEFAULT_MAX_PIN_ATTEMPTS", "terminalSourceExpression": "3",
+        "evaluatedDefault": {"kind": "integer", "value": 3},
+    }
+    all_ids = environment_candidates + declaration_candidates + terminal_candidates
+    return {"bindingAuthority": binding, "defaultAuthority": default,
+            "candidateIds": sorted(all_ids)}
+
+def manifest_pin_attempt_authority_errors(root: Path, setting: str,
+                                          contract: dict[str, object],
+                                          setting_entries: list[dict[str, object]],
+                                          entries: dict[str, dict[str, object]],
+                                          discovered: dict[str, Candidate]) -> list[str]:
+    if setting != MANIFEST_PIN_ATTEMPTS_SETTING:
+        return [f"{setting}: unsupported shared manifest-pin authority"]
+    expected = manifest_pin_attempt_authorities(root, discovered)
+    if expected is None:
+        return [f"{setting}: nested Shared authority source or coverage has drifted"]
+    errors: list[str] = []
+    if contract.get("owner") != \
+            f"{MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared" \
+            or contract.get("field") != "manifestPinAttempts" \
+            or contract.get("bindings") != ["RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"]:
+        errors.append(f"{setting}: typed owner, field, or environment binding has drifted")
+    if contract.get("bindingAuthority") != expected["bindingAuthority"]:
+        errors.append(f"{setting}: nested Shared binding authority has drifted")
+    if contract.get("defaultAuthority") != expected["defaultAuthority"] \
+            or contract.get("defaultEvidence") != expected["defaultAuthority"]["candidateIds"] \
+            or contract.get("default") != "3 attempts":
+        errors.append(f"{setting}: single adapter default authority has drifted")
+    actual_ids = sorted(str(entry["id"]) for entry in setting_entries)
+    if actual_ids != expected["candidateIds"] \
+            or any(entries.get(identifier, {}).get("setting") != setting
+                   for identifier in expected["candidateIds"]):
+        errors.append(f"{setting}: source candidate partition has drifted")
+    return errors
+
+
 def environment_binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
                                          setting_entries: list[dict[str, object]],
                                          entries: dict[str, dict[str, object]],
@@ -2802,6 +6979,11 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
     environment_candidates = [
         entry for entry in setting_entries if entry.get("kind") == "environment-binding"
     ]
+    authority = contract.get("bindingAuthority")
+    if isinstance(authority, dict) \
+            and authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
+        return manifest_pin_attempt_authority_errors(
+            root, setting, contract, setting_entries, entries, discovered)
     if property_candidates:
         return dual_source_binding_authority_errors(
             root, setting, contract, entries, discovered, resolver_authorities,
@@ -2890,6 +7072,9 @@ def default_authority_errors(root: Path, setting: str, contract: dict[str, objec
     property_bound = any(entry.get("setting") == setting and entry.get("kind") == "property-binding"
                          for entry in entries.values())
     binding_authority = contract.get("bindingAuthority")
+    if isinstance(binding_authority, dict) \
+            and binding_authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
+        return []
     environment_bound = isinstance(binding_authority, dict) \
         and binding_authority.get("kind") == "java-environment-constructor-v1"
     authority = contract.get("defaultAuthority")
@@ -3124,6 +7309,8 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
 
 
 ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
+ENVIRONMENT_REFERENCE_AUTHORITY_ID = "environment-reference-generator-v1"
+ENVIRONMENT_REFERENCE_PATH = Path("scripts/publish_environment_reference.py")
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -3141,23 +7328,53 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-68d83961ae8fd9333d39": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-87cc337254d84e793594":
+    "oc-0b67657cac8e5b904054": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-7ab123337eeb18906fc2":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-72d27bee3c7d60226c09": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-af3a93f860fc52c46a00": (
+    "oc-7bab59779a16e10b10d7": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-418656067bc7b4ad0c5c": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-e29595d4bc323f7da368": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8eed875577d7d07c6447": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-68d83961ae8fd9333d39": "/v1/events",
-    "oc-87cc337254d84e793594": "/v1/events",
-    "oc-72d27bee3c7d60226c09": "/v1/events",
-    "oc-af3a93f860fc52c46a00": "/v1/events/recent",
-    "oc-e29595d4bc323f7da368": "/v1/events/recent",
+    "oc-0b67657cac8e5b904054": "/v1/events",
+    "oc-7ab123337eeb18906fc2": "/v1/events",
+    "oc-7bab59779a16e10b10d7": "/v1/events",
+    "oc-418656067bc7b4ad0c5c": "/v1/events/recent",
+    "oc-8eed875577d7d07c6447": "/v1/events/recent",
 }
+
+
+def environment_reference_description_candidate_ids(
+        root: Path, candidates: Iterable[Candidate]) -> set[str]:
+    """Return source-derived atoms that route real production bindings into the reference page."""
+    production_names: set[str] = set()
+    source_root = root / "ravenroot"
+    if source_root.is_dir():
+        for source in sorted(source_root.rglob("src/main/java/**/*.java")):
+            production_names.update(ENVIRONMENT_BINDING.findall(
+                source.read_text(encoding="utf-8")))
+    identifiers: set[str] = set()
+    for candidate in candidates:
+        expression = candidate.expression
+        if len(expression) >= 2 and expression[0] == expression[-1] \
+                and expression[0] in {'"', "'"}:
+            expression = expression[1:-1]
+        if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                and candidate.symbol == "group" \
+                and candidate.kind in {
+                    "binding-default", "environment-binding", "inline-script-operational",
+                } \
+                and expression in production_names:
+            identifiers.add(candidate.id)
+        if candidate.path == ENVIRONMENT_REFERENCE_PATH.as_posix() \
+                and candidate.symbol == "boundary" \
+                and candidate.kind == "environment-binding" \
+                and any(name.startswith(expression) for name in production_names):
+            identifiers.add(candidate.id)
+    return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
 ASSISTANT_CONFIGURATION_TEST_PATH = Path(
@@ -3372,6 +7589,70 @@ def route_table_candidate_partitions(source: str) -> tuple[
             "statusValues": status_values, "candidateIds": role_ids,
         })
     return partitions, details, by_id
+
+
+def current_route_table_authority(root: Path) -> dict[str, object]:
+    """Build the exact closed RouteTable authority from current typed sources and runnable tests."""
+    source = (root / ROUTE_TABLE_PATH).read_text(encoding="utf-8")
+    parsed = route_table_candidate_partitions(source)
+    if parsed is None:
+        raise ValueError("cannot derive the current RouteTable positional authority")
+    partitions, details, _candidates = parsed
+    descriptor = (root / ROUTE_DESCRIPTOR_PATH).read_text(encoding="utf-8")
+    generator = (root / OPENAPI_GENERATOR_PATH).read_text(encoding="utf-8")
+    publication = (root / ROUTE_TABLE_TEST_PATH).read_text(encoding="utf-8")
+    stable_test = (root / STABLE_EDGE_TEST_PATH).read_text(encoding="utf-8")
+    wire_test = (root / STABLE_EDGE_WIRE_TEST_PATH).read_text(encoding="utf-8")
+    compact = java_compact_constructor_span(descriptor, "RouteDescriptor")
+    authority = {
+        "kind": "java-route-descriptor-publication-v1",
+        "candidateIdsByRole": partitions,
+        "descriptorCandidateIds": [
+            {"ordinal": item["ordinal"], "path": item["path"],
+             "candidateIds": item["candidateIds"]}
+            for item in details
+        ],
+        "consumerBodyDigests": {
+            "routeDescriptorValidation": java_span_digest(descriptor, compact),
+            "openApiGenerate": java_method_digest(generator, "OpenApiSpecGenerator", "generate"),
+            "openApiPathEntry": java_method_digest(generator, "OpenApiSpecGenerator", "pathEntry"),
+            "openApiOperationEntry": java_method_digest(generator, "OpenApiSpecGenerator", "operationEntry"),
+            "openApiSuccessResponse": java_method_digest(generator, "OpenApiSpecGenerator", "successResponse"),
+        },
+        "publicationTestAuthority": {
+            "testBodyDigest": java_method_digest(
+                publication, "RouteTableSpecServerAgreementTest",
+                "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow"),
+            "checkedInSpecBodyDigest": java_method_digest(
+                publication, "RouteTableSpecServerAgreementTest", "checkedInSpec"),
+        },
+        "boundTestBodyDigests": {
+            "StableEdgeIdContractTest": {
+                method: java_method_digest(stable_test, "StableEdgeIdContractTest", method)
+                for method in (
+                    "acceptsTheExactUtf8BoundWithoutChangingIdentityAndRejectsOneByteMore",
+                    "auxiliaryReserveIsEnforcedAsOneCombinedEscapedByteBudget",
+                )
+            },
+            "StableEdgeIdWireContractTest": {
+                method: java_method_digest(wire_test, "StableEdgeIdWireContractTest", method)
+                for method in (
+                    "worstCaseEscapedMaximumFitsTheCompleteRuntimeClientFrame",
+                    "saturatedLiveAndLogFieldsStillFitWithTheMaximumEscapedIdentity",
+                    "saturatedDurableProjectionAndPayloadStayInsideTheirExplicitBounds",
+                )
+            },
+        },
+        "publishedBoundClauses": {
+            identifier: list(fields) for identifier, fields in ROUTE_BOUND_CANDIDATES.items()
+        },
+    }
+    if any(value is None for value in authority["consumerBodyDigests"].values()) \
+            or any(value is None for value in authority["publicationTestAuthority"].values()) \
+            or any(value is None for methods in authority["boundTestBodyDigests"].values()
+                   for value in methods.values()):
+        raise ValueError("cannot derive complete RouteTable consumer/test evidence")
+    return authority
 
 
 def exact_import_identity(source: str, qualified: str) -> bool:
@@ -3865,9 +8146,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54}
+    expected_counts = {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54}
     if len(details) != 53 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 53/508 positional shape")
+        errors.append("RouteTable authority no longer has the reviewed 53/515 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):
@@ -4719,6 +9000,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         entries[identifier] = entry
 
     discovered = {candidate.id: candidate for candidate in candidates}
+    environment_reference_descriptions = environment_reference_description_candidate_ids(
+        root, candidates)
     assistant_authorities = document.get("assistantLimitAuthorities")
     assistant_settings = {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}
     assistant_family = assistant_limit_family_index(assistant_authorities)
@@ -4756,14 +9039,17 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append(f"{identifier}: test-fixture surface must remain a retained test-fixture")
         if classification == "test-fixture" and candidate.surface != "test-fixture":
             errors.append(f"{identifier}: only a test-fixture surface may use the test-fixture classification")
-        if classification == "published-contract-description" and (
-                candidate.path != ROUTE_TABLE_PATH.as_posix()
-                or entry.get("retainedAuthority") != ROUTE_TABLE_AUTHORITY_ID):
-            errors.append(
-                f"{identifier}: published-contract-description requires the closed RouteTable authority")
+        if classification == "published-contract-description":
+            route_publication = candidate.path == ROUTE_TABLE_PATH.as_posix() \
+                and entry.get("retainedAuthority") == ROUTE_TABLE_AUTHORITY_ID
+            environment_publication = identifier in environment_reference_descriptions \
+                and entry.get("retainedAuthority") == ENVIRONMENT_REFERENCE_AUTHORITY_ID
+            if not route_publication and not environment_publication:
+                errors.append(
+                    f"{identifier}: published-contract-description requires a closed publication authority")
         if classification == "operator-configurable" and status != "pending-review":
-            for field in ("setting", "owner", "field", "default", "validation", "scope", "pinning",
-                          "coverage"):
+            unresolved_authority = entry.get("authorityStatus") == "unresolved"
+            for field in ("setting", "default", "validation", "scope", "pinning", "coverage"):
                 if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
                     errors.append(f"{identifier}: reviewed operator setting requires {field}")
             bindings = entry.get("bindings")
@@ -4775,11 +9061,32 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     not isinstance(evidence_id, str) or not evidence_id.strip()
                     for evidence_id in default_evidence):
                 errors.append(f"{identifier}: reviewed operator setting requires defaultEvidence candidate ids")
-            owner = str(entry.get("owner", ""))
-            if current_source_owner(root, owner) is None:
-                errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
-            elif not current_source_field(root, owner, str(entry.get("field", ""))):
-                errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
+            if unresolved_authority:
+                if status != "deferred":
+                    errors.append(f"{identifier}: unresolved configuration authority must remain deferred")
+                for field in ("prospectiveOwner", "unresolvedEvidence"):
+                    if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
+                        errors.append(f"{identifier}: unresolved configuration authority requires {field}")
+                if "owner" in entry or "field" in entry:
+                    errors.append(f"{identifier}: unresolved configuration authority must not claim an owner or field")
+            else:
+                for field in ("owner", "field"):
+                    if not isinstance(entry.get(field), str) or not str(entry[field]).strip():
+                        errors.append(f"{identifier}: reviewed operator setting requires {field}")
+                owner = str(entry.get("owner", ""))
+                helm_authority = entry.get("helmAuthority")
+                if helm_authority is not None:
+                    if helm_authority != HELM_AUTHORITY_ID \
+                            or not owner.startswith(HELM_VALUES_PATH + "#"):
+                        errors.append(f"{identifier}: unsupported Helm authority owner: {owner}")
+                elif entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+                    pass
+                elif entry.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+                    pass
+                elif current_source_owner(root, owner) is None:
+                    errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
+                elif not current_source_field(root, owner, str(entry.get("field", ""))):
+                    errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
             if status == "converted":
                 conversion = entry.get("conversion")
                 setting = str(entry.get("setting", ""))
@@ -4788,6 +9095,12 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if family is None or conversion != family["conversion"]:
                         errors.append(
                             f"{identifier}: converted assistant row must cite its exact family conversion")
+                    continue
+                if setting == MANIFEST_PIN_ATTEMPTS_SETTING \
+                        and isinstance(conversion, dict) \
+                        and conversion.get("kind") == "java-manifest-pin-attempts-conversion-v1":
+                    errors.extend(manifest_pin_attempt_conversion_errors(
+                        root, identifier, entry, conversion))
                     continue
                 required = ("issue", "beforeRevision", "afterRevision", "path", "symbol",
                             "binding", "bindingSymbol", "field", "beforeExpression", "afterExpression")
@@ -4816,6 +9129,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if identifier not in discovered:
             errors.append(f"stale inventory entry: {identifier} ({entry.get('path', 'unknown path')})")
 
+    reappearance_errors, allowed_reappearances = normalized_identity_reappearance_errors(
+        root, document, candidates)
+    errors.extend(reappearance_errors)
+
     retired_entries = document.get("retiredEntries", [])
     assert isinstance(retired_entries, list)
     retired_ids: set[str] = set()
@@ -4824,7 +9141,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append("retired inventory entry has no string id")
             continue
         identifier = str(entry["id"])
-        if identifier in retired_ids or identifier in entries:
+        if identifier in retired_ids \
+                or (identifier in entries and identifier not in allowed_reappearances):
             errors.append(f"duplicate active/retired inventory id: {identifier}")
         retired_ids.add(identifier)
         if not isinstance(entry.get("retirementRationale"), str) \
@@ -4892,13 +9210,18 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append(f"inventory migration source counts mismatch: {source_revision}:{source_path}")
 
     authorities: dict[str, tuple[str, tuple[object, ...]]] = {}
-    authority_fields = ("owner", "field", "default", "validation", "scope", "pinning", "coverage")
+    unresolved_groups: dict[str, list[dict[str, object]]] = defaultdict(list)
+    authority_fields = ("authorityStatus", "owner", "field", "prospectiveOwner",
+                        "unresolvedEvidence", "default", "validation", "scope", "pinning", "coverage")
     for identifier, entry in entries.items():
         if entry.get("classification") != "operator-configurable" or entry.get("status") == "pending-review":
             continue
         owner = str(entry.get("owner", "")).strip()
         setting = str(entry.get("setting", "")).strip()
         if not setting:
+            continue
+        if entry.get("authorityStatus") == "unresolved":
+            unresolved_groups[setting].append(entry)
             continue
         metadata = tuple(entry.get(field) for field in authority_fields) + (
             tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
@@ -4907,6 +9230,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             json.dumps(entry.get("schemaEvidence"), sort_keys=True),
             json.dumps(entry.get("coverageEvidence"), sort_keys=True),
             json.dumps(entry.get("carrierEvidence"), sort_keys=True),
+            entry.get("helmAuthority"),
+            entry.get("persistenceAuthority"),
+            entry.get("externalIoPolicyAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -4916,6 +9242,37 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             )
         else:
             authorities[setting] = (identifier, metadata)
+
+    for setting, setting_entries in unresolved_groups.items():
+        expected_ids = {str(entry["id"]) for entry in setting_entries}
+        expected_bindings = {str(entry["expression"]) for entry in setting_entries
+                             if entry.get("kind") == "environment-binding"}
+        common_fields = (
+            "authorityStatus", "prospectiveOwner", "unresolvedEvidence", "default",
+            "validation", "scope", "pinning", "coverage", "followUp", "rationale",
+        )
+        first = setting_entries[0]
+        common_metadata = tuple(first.get(field) for field in common_fields) + (
+            tuple(first.get("bindings", [])), tuple(first.get("defaultEvidence", [])),
+        )
+        for entry in setting_entries:
+            metadata = tuple(entry.get(field) for field in common_fields) + (
+                tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
+            )
+            if metadata != common_metadata:
+                errors.append(
+                    f"inconsistent unresolved configuration metadata for {setting}: "
+                    f"{first['id']} and {entry['id']}")
+            if len(setting_entries) > 1 and (
+                    not isinstance(entry.get("sourceFact"), str)
+                    or not str(entry["sourceFact"]).strip()):
+                errors.append(f"{entry['id']}: multi-row unresolved setting requires a sourceFact")
+            if set(entry.get("defaultEvidence", [])) != expected_ids:
+                errors.append(
+                    f"{entry['id']}: unresolved {setting} defaultEvidence must equal its exact setting rows")
+            if set(entry.get("bindings", [])) != expected_bindings:
+                errors.append(
+                    f"{entry['id']}: unresolved {setting} bindings must equal its exact environment evidence")
 
     resolver_authorities = document.get("resolverAuthorities")
     if resolver_authorities is not None:
@@ -4929,6 +9286,15 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(graph_limit_authority_errors(
         root, document.get("graphLimitAuthorities"), entries, discovered,
     ))
+    errors.extend(helm_authority_errors(
+        root, document.get("helmAuthorities"), entries, candidates,
+    ))
+    errors.extend(persistence_policy_authority_errors(
+        root, document.get("persistencePolicyAuthorities"), entries, discovered,
+    ))
+    errors.extend(external_io_policy_authority_errors(
+        root, document.get("externalIoPolicyAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -4937,6 +9303,21 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         setting_ids = {str(entry["id"]) for entry in setting_entries}
         representative = entries[authorities[setting][0]]
         representatives[setting] = representative
+        if representative.get("authorityStatus") == "unresolved":
+            continue
+        if representative.get("helmAuthority") == HELM_AUTHORITY_ID:
+            for entry in setting_entries:
+                evidence_ids = entry.get("defaultEvidence", [])
+                if isinstance(evidence_ids, list):
+                    for evidence_id in evidence_ids:
+                        if evidence_id not in setting_ids:
+                            errors.append(
+                                f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
+            continue
+        if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+            continue
+        if representative.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+            continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
             evidenced_bindings = {str(entry.get("expression")) for entry in setting_entries
@@ -4965,6 +9346,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if evidence_id not in setting_ids:
                         errors.append(f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
     errors.extend(environment_resolver_group_errors(root, representatives, resolver_authorities))
+    errors.extend(reconciliation_history_errors(root, document, candidates))
+    errors.extend(remediation_domain_errors(document))
     return errors
 
 
@@ -4990,11 +9373,25 @@ def render_report(document: dict[str, object]) -> str:
     assert isinstance(retired, list)
     migrations = document.get("migrationHistory", [])
     assert isinstance(migrations, list)
+    reconciliations = document.get("reconciliationHistory", [])
+    assert isinstance(reconciliations, list)
+    reappearances = document.get("normalizedIdentityReappearanceHistory", [])
+    assert isinstance(reappearances, list)
     duplicate_settings = {str(entry["setting"]) for entry in retired if isinstance(entry, dict)
                           and entry.get("status") == "duplicate-removed" and entry.get("setting")}
     duplicates = len(duplicate_settings)
     deferred = statuses["deferred"]
     hardcoded = statuses["confirmed-hardcoded"]
+    helm_authorities = document.get("helmAuthorities")
+    helm_authority = helm_authorities.get(HELM_AUTHORITY_ID) \
+        if isinstance(helm_authorities, dict) else None
+    helm_contracts = helm_authority.get("contracts", []) \
+        if isinstance(helm_authority, dict) else []
+    helm_source_fields = len(helm_contracts) if isinstance(helm_contracts, list) else 0
+    helm_inventory_fields = sum(
+        1 for contract in helm_contracts
+        if isinstance(contract, dict) and isinstance(contract.get("candidateIds"), list)
+        and bool(contract["candidateIds"]))
     complete = statuses["pending-review"] == 0 and deferred == 0 and hardcoded == 0
     lines = [
         "# Operational configuration audit", "",
@@ -5027,6 +9424,9 @@ def render_report(document: dict[str, object]) -> str:
         "## Reproducible counts", "",
         "| Measure | Count |", "|---|---:|",
         f"| Atomic operational candidates discovered | {len(typed)} |",
+        f"| Source-proven Helm operator fields | {helm_source_fields} |",
+        f"| Helm operator fields represented by lexical inventory rows | {helm_inventory_fields} |",
+        f"| Source-proven Helm fields outside lexical candidate patterns | {helm_source_fields - helm_inventory_fields} |",
         f"| Reviewed | {reviewed} |",
         f"| Pending review | {statuses['pending-review']} |",
         f"| Confirmed hard-coded candidates awaiting remediation | {hardcoded} |",
@@ -5036,39 +9436,135 @@ def render_report(document: dict[str, object]) -> str:
         f"| Retained security ceilings or defaults | {classifications['security-ceiling-or-default']} |",
         f"| Retained protocol or format invariants | {classifications['protocol-or-format-invariant']} |",
         f"| Retained published contract descriptions | {retained_classifications['published-contract-description']} |",
+        f"| Retained presentation text | {retained_classifications['presentation-text']} |",
         f"| Retained derived values | {classifications['derived']} |",
         f"| Test fixtures | {classifications['test-fixture']} |",
         f"| Intentionally deferred | {deferred} |", "",
         f"Retired source candidates preserved in inventory history: {len(retired)}.", "",
+        f"Approved normalized-identity reappearances: {len(reappearances)}. Active candidates and",
+        "retired historical payloads remain counted separately; an approval records identity reuse only.", "",
         f"Checked inventory-schema migrations: {len(migrations)}. Validation requires the recorded source",
         "revision to be present locally; CI must fetch that history before enabling this gate.", "",
+        f"Checked source reconciliations: {len(reconciliations)}.", "",
         "Surface counts are derived from the same inventory:", "",
     ]
     lines.extend(f"- `{name}`: {count}" for name, count in sorted(surfaces.items()))
+    if reconciliations:
+        latest = reconciliations[-1]
+        mappings = latest.get("mappings", [])
+        retirements = latest.get("retirements", [])
+        additions = latest.get("additions", [])
+        source_count = len(typed) - len(additions) + len(retirements)
+        unchanged = source_count - len(mappings) - len(retirements)
+        lines.extend(("", "## Latest reconciliation", "",
+                      "The current inventory was reconciled from a committed source inventory. Every changed",
+                      "identity and retirement has its own approved record in the machine-readable inventory.", "",
+                      "| Partition | Count |", "|---|---:|",
+                      f"| Source inventory candidates | {source_count} |",
+                      f"| Unchanged identities | {unchanged} |",
+                      f"| Approved identity migrations | {len(mappings)} |",
+                      f"| Approved retirements | {len(retirements)} |",
+                      f"| Semantically classified additions | {len(additions)} |",
+                      f"| Current candidates | {len(typed)} |"))
+    domain_map = document.get("remediationDomains", {})
+    domains = domain_map.get("domains", []) if isinstance(domain_map, dict) else []
+    lines.extend(("", "## Follow-up domain ownership", "",
+                  "This map covers inherited pending review and confirmed unresolved operator settings only.",
+                  "Retained invariants, fixtures, descriptions, and presentation text are outside remediation ownership.", "",
+                  "| Issue | Domain | Candidates | Inherited pending review | Confirmed unresolved settings |",
+                  "|---|---|---:|---:|---:|"))
+    for domain in domains:
+        lines.append(f"| {domain['issue']} | {domain['title']} | {len(domain['candidateIds'])} | "
+                     f"{domain['inheritedPendingReview']} | {domain['confirmedUnresolvedOperatorSettings']} |")
     lines.extend(("", "## Operator settings", "",
         "Every reviewed operator setting must name one typed owner, bindings, default, validation,",
                   "scope, pinning policy, and deployment/reference coverage. Pending candidates do not appear",
                   "in this table.", "",
-                  "| Setting | State | Owner | Field | Bindings | Default | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|"))
+                  "| Setting | State | Owner | Field | Bindings | Default | Source facts | Validation | Scope | Pinning | Coverage |", "|---|---|---|---|---|---|---|---|---|---|---|"))
     if operator_entries:
         canonical: dict[str, list[dict[str, object]]] = {}
         for entry in operator_entries:
             canonical.setdefault(str(entry["setting"]), []).append(entry)
         for setting, setting_entries in sorted(canonical.items()):
+            setting_entries.sort(key=lambda item: str(item["id"]))
             entry = setting_entries[0]
             item_states = {str(item["status"]) for item in setting_entries}
             states = "converted" if "converted" in item_states else ", ".join(sorted(item_states))
             bindings = ", ".join(f"`{value}`" for value in entry.get("bindings", []))
-            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {validation} | {scope} | {pinning} | {coverage} |".format(
-                setting=setting, status=states, owner=entry.get("owner", ""),
-                field=entry.get("field", ""),
-                bindings=bindings or "none", default=entry.get("default", ""), validation=entry.get("validation", ""),
+            unresolved = entry.get("authorityStatus") == "unresolved"
+            owner = entry.get("prospectiveOwner", "") if unresolved else entry.get("owner", "")
+            field = "unresolved" if unresolved else entry.get("field", "")
+            source_facts = "<br>".join(
+                f"`{item['id']}`: {str(item.get('sourceFact', item.get('expression', ''))).replace('|', '&#124;')}"
+                for item in setting_entries
+            )
+            lines.append("| {setting} | {status} | `{owner}` | `{field}` | {bindings} | {default} | {source_facts} | {validation} | {scope} | {pinning} | {coverage} |".format(
+                setting=setting, status=states, owner=owner,
+                field=field,
+                bindings=bindings or "none", default=entry.get("default", ""),
+                source_facts=source_facts,
+                validation=entry.get("validation", ""),
                 scope=entry.get("scope", ""), pinning=entry.get("pinning", ""),
                 coverage=entry.get("coverage", "")))
     else:
-        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |")
+        lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
+    persistence_authorities = document.get("persistencePolicyAuthorities", {})
+    persistence_authority = (persistence_authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID)
+                             if isinstance(persistence_authorities, dict) else None)
+    persistence_contracts = (persistence_authority.get("contracts", [])
+                             if isinstance(persistence_authority, dict) else [])
+    lines.extend(("", "## Source-proven persistence policy", "",
+                  "The closed roster includes typed programmatic fields even when the lexical scanner finds",
+                  "no candidate atom for that field. Candidate counts therefore describe inventory evidence,",
+                  "not the number of supported policy fields.", "",
+                  "| Setting | Typed owner | Field | Bindings | Default source | Inventory candidates |",
+                  "|---|---|---|---|---|---:|"))
+    if isinstance(persistence_contracts, list) and persistence_contracts:
+        for contract in sorted(persistence_contracts, key=lambda item: str(item.get("setting", ""))):
+            bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", [])) or "none"
+            lines.append(
+                f"| {contract.get('setting', '')} | `{contract.get('owner', '')}` | "
+                f"`{contract.get('field', '')}` | {bindings} | "
+                f"`{contract.get('defaultExpression', '')}` | "
+                f"{len(contract.get('candidateIds', []))} |")
+    else:
+        lines.append("| _No source-proven persistence policy_ |  |  |  |  |  |")
+    external_authorities = document.get("externalIoPolicyAuthorities", {})
+    external_authority = (external_authorities.get(EXTERNAL_IO_POLICY_AUTHORITY_ID)
+                          if isinstance(external_authorities, dict) else None)
+    external_contracts = (external_authority.get("contracts", [])
+                          if isinstance(external_authority, dict) else [])
+    external_partitions = (external_authority.get("semanticPartitions", [])
+                           if isinstance(external_authority, dict) else [])
+    lines.extend(("", "## Source-proven external-I/O policy", "",
+                  "The closed roster separates operator-controlled capacities and authorization from",
+                  "protocol, safety, derived, and presentation atoms. Pinning is recorded per setting",
+                  "because live destination authority and replay-affecting numeric capacity have different",
+                  "lifetimes.", "",
+                  "| Setting | Typed owner | Field | Bindings | Default source | Inventory candidates | Pinning |",
+                  "|---|---|---|---|---|---:|---|"))
+    if isinstance(external_contracts, list) and external_contracts:
+        for contract in sorted(external_contracts, key=lambda item: str(item.get("setting", ""))):
+            bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", [])) or "none"
+            lines.append(
+                f"| {contract.get('setting', '')} | `{contract.get('owner', '')}` | "
+                f"`{contract.get('field', '')}` | {bindings} | "
+                f"`{contract.get('defaultExpression', '')}` | "
+                f"{len(contract.get('candidateIds', []))} | {contract.get('pinning', '')} |")
+    else:
+        lines.append("| _No source-proven external-I/O policy_ |  |  |  |  |  |  |")
+    if isinstance(external_partitions, list) and external_partitions:
+        lines.extend(("", "Retained external-I/O evidence is closed by semantic role:", "",
+                      "| Semantic partition | Classification | Candidates |", "|---|---|---:|"))
+        for partition in external_partitions:
+            lines.append(f"| {partition.get('semanticPartition', '')} | "
+                         f"{partition.get('classification', '')} | "
+                         f"{len(partition.get('candidateIds', []))} |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
-    deferred_entries = [entry for entry in typed if entry.get("status") == "deferred"]
+    deferred_entries = sorted(
+        (entry for entry in typed if entry.get("status") == "deferred"),
+        key=lambda item: (str(item["path"]), int(item["line"]), str(item["id"])),
+    )
     if deferred_entries:
         for entry in deferred_entries:
             lines.append(f"| `{entry['path']}:{entry['line']}` | {entry.get('followUp', 'missing')} | {entry['rationale']} |")
@@ -5101,16 +9597,47 @@ def render_report(document: dict[str, object]) -> str:
 
 
 def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
-                      *, accept_retired_pending: bool = False) -> tuple[list[str], dict[str, int]]:
+                      *, accept_retired_pending: bool = False,
+                      reconciliation_plan: dict[str, object] | None = None) -> tuple[list[str], dict[str, int]]:
     """Refresh source metadata without discarding a semantic review decision.
 
-    A changed expression has a new stable ID. Pending entries may be retired only through the
-    explicit command flag; a reviewed entry additionally needs an in-inventory ``retirement``
-    object with ``approved: true`` and a nonblank rationale. Every retired row stays in history.
+    A changed expression has a new stable ID. Every retired entry needs an in-inventory
+    ``retirement`` object with ``approved: true`` and a nonblank row-specific rationale. The
+    command flag records intent only; it never supplies approval evidence. Every retired row stays
+    in history.
     """
-    document = load_inventory(inventory_path, allow_previous_schema=True)
+    document = load_inventory(
+        inventory_path, allow_previous_schema=True, allow_unreconciled=True)
     raw_entries = document["entries"]
     assert isinstance(raw_entries, list)
+    candidates = discover(root)
+    if reconciliation_plan is not None:
+        refreshed, plan_errors = apply_reconciliation(root, document, candidates, reconciliation_plan)
+        summary = {
+            "added": len(reconciliation_plan.get("additions", [])),
+            "retired": len(reconciliation_plan.get("retirements", [])),
+            "migrated": len(reconciliation_plan.get("mappings", [])),
+            "preserved": len(raw_entries) - len(reconciliation_plan.get("retirements", [])),
+        }
+        if plan_errors or refreshed is None:
+            return plan_errors, summary
+        refreshed["remediationDomains"] = build_remediation_domains(
+            entry for entry in refreshed["entries"] if isinstance(entry, dict))
+        validation_errors = inventory_errors(root, refreshed, candidates)
+        if validation_errors:
+            return validation_errors, summary
+        inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
+        report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
+        inventory_temporary.write_text(
+            json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        report_temporary.write_text(render_report(refreshed), encoding="utf-8")
+        inventory_temporary.replace(inventory_path)
+        report_temporary.replace(report_path)
+        return [], summary
+    if document.get("reconciliationRequired") is not False:
+        return ["source identity changes require an explicit reconciliation plan"], {
+            "added": 0, "retired": 0, "preserved": len(raw_entries),
+        }
     migrating_schema = document.get("schemaVersion") != SCHEMA_VERSION
     migration_record: dict[str, object] | None = None
     if migrating_schema:
@@ -5131,15 +9658,12 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
             "rationale": "Candidate identity schema changed; pending and mechanical fixture rows were reissued without claiming semantic review.",
         }
     old = {str(entry["id"]): entry for entry in raw_entries if isinstance(entry, dict) and "id" in entry}
-    candidates = discover(root)
     discovered = {candidate.id: candidate for candidate in candidates}
     removed = [entry for identifier, entry in old.items() if identifier not in discovered]
     errors: list[str] = []
     for entry in removed:
         identifier = str(entry["id"])
         if entry.get("classification") == "test-fixture" and entry.get("status") == "retained":
-            continue
-        if entry.get("status") == "pending-review" and accept_retired_pending:
             continue
         retirement = entry.get("retirement")
         approved = isinstance(retirement, dict) and retirement.get("approved") is True \
@@ -5149,7 +9673,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
         if entry.get("status") == "pending-review":
             errors.append(
                 f"refresh would retire pending candidate {identifier} {entry.get('path')}:{entry.get('line')}; "
-                "review the diff and rerun with --accept-retired-pending"
+                "add retirement.approved=true and a row-specific retirement.rationale to that exact entry"
             )
         else:
             errors.append(
@@ -5190,7 +9714,8 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
             rationale = (f"Candidate identity retired during inventory schema v{SCHEMA_VERSION} migration."
                          if migrating_schema else "Mechanically classified test-fixture candidate retired after source refresh.")
         elif entry.get("status") == "pending-review":
-            rationale = "Pending candidate retired after an explicitly accepted source refresh."
+            assert isinstance(retirement, dict)
+            rationale = str(retirement["rationale"]).strip()
         else:
             assert isinstance(retirement, dict)
             rationale = str(retirement["rationale"]).strip()
@@ -5203,6 +9728,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
 
     refreshed = dict(document)
     refreshed["schemaVersion"] = SCHEMA_VERSION
+    refreshed["reconciliationRequired"] = False
     refreshed["entries"] = merged
     refreshed["retiredEntries"] = retired_history
     migration_history = list(document.get("migrationHistory", []))
@@ -5235,6 +9761,7 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
     candidates = discover(root)
     document = {
         "schemaVersion": SCHEMA_VERSION,
+        "reconciliationRequired": False,
         "description": "Machine-reviewed fixed operational candidates; counts and report are generated.",
         "entries": [candidate.inventory_entry() for candidate in candidates],
         "evidenceRecords": {
@@ -5250,9 +9777,9 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
 
 
 def check(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
-          *, require_complete: bool = True) -> list[str]:
+          *, require_complete: bool = True, allow_unreconciled: bool = False) -> list[str]:
     try:
-        document = load_inventory(inventory_path)
+        document = load_inventory(inventory_path, allow_unreconciled=allow_unreconciled)
     except ValueError as invalid:
         return [str(invalid)]
     candidates = discover(root)
@@ -5291,9 +9818,13 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--bootstrap", action="store_true", help="create the initial inventory and report")
     parser.add_argument("--accept-retired-pending", action="store_true",
                         help="with --refresh-inventory, explicitly archive removed pending entries")
+    parser.add_argument("--reconciliation-plan", type=Path,
+                        help="with --refresh-inventory, apply an explicit reviewed reconciliation JSON")
     args = parser.parse_args(argv)
     if args.accept_retired_pending and not args.refresh_inventory:
         parser.error("--accept-retired-pending requires --refresh-inventory")
+    if args.reconciliation_plan is not None and not args.refresh_inventory:
+        parser.error("--reconciliation-plan requires --refresh-inventory")
     root = args.root.resolve()
     inventory = root / "scripts" / INVENTORY.name
     report = root / "docs" / "architecture" / REPORT.name
@@ -5303,8 +9834,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Bootstrapped {len(discover(root))} operational candidates.")
             return 0
         if args.refresh_inventory:
+            reconciliation_plan = None
+            if args.reconciliation_plan is not None:
+                loaded_plan = json.loads(args.reconciliation_plan.read_text(encoding="utf-8"))
+                if not isinstance(loaded_plan, dict):
+                    raise ValueError("reconciliation plan must be a JSON object")
+                reconciliation_plan = loaded_plan
             errors, summary = refresh_inventory(
                 root, inventory, report, accept_retired_pending=args.accept_retired_pending,
+                reconciliation_plan=reconciliation_plan,
             )
             if errors:
                 for error in errors:

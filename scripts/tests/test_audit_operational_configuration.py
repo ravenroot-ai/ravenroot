@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import io
 import copy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -60,7 +62,1602 @@ def classify_non_pending(root: Path) -> None:
         audit.render_report(document), encoding="utf-8")
 
 
+REAPPEARANCE_PRIOR_REVISION = "0596c618ac2cb7c55851c6891f7321b407e9686c"
+REAPPEARANCE_TARGET_REVISION = "2ab60f03cb1563a69d245e2b81b5f7cb3b056f95"
+REAPPEARANCE_CHECKPOINT_REVISION = "c2317c6643378e3f82a4f46d638ac03a157b0461"
+
+
+def committed_inventory(revision: str) -> tuple[dict[str, object], bytes]:
+    relative = audit.INVENTORY.relative_to(audit.ROOT).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{relative}"], cwd=ROOT, check=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout), result.stdout
+
+
+def production_reappearance_fixture() -> tuple[
+        dict[str, object], tuple[audit.Candidate, ...], list[dict[str, object]],
+        dict[str, object], bytes, dict[str, object], bytes]:
+    document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+    candidates = audit.discover(ROOT)
+    prior, prior_raw = committed_inventory(REAPPEARANCE_PRIOR_REVISION)
+    checkpoint, checkpoint_raw = committed_inventory(REAPPEARANCE_CHECKPOINT_REVISION)
+    active_ids = {entry["id"] for entry in document["entries"]}
+    retired = {entry["id"]: entry for entry in document["retiredEntries"]}
+    collisions = sorted(active_ids & set(retired))
+    candidate_by_id = {candidate.id: candidate for candidate in candidates}
+    records = [{
+        "kind": audit.REAPPEARANCE_KIND,
+        "issue": "#317",
+        "candidateId": identifier,
+        "approved": True,
+        "rationale": (
+            f"The pending schema atom {retired[identifier]['expression']} reappeared with the same "
+            "normalized identity after the closed Helm schema moved its source line; this approval "
+            "does not inherit semantic review from the retired row."
+        ),
+        "priorInventoryRevision": REAPPEARANCE_PRIOR_REVISION,
+        "priorInventoryPath": audit.INVENTORY.relative_to(audit.ROOT).as_posix(),
+        "priorInventoryDigest": audit.hashlib.sha256(prior_raw).hexdigest(),
+        "targetSourceRevision": REAPPEARANCE_TARGET_REVISION,
+        "identityCheckpointRevision": REAPPEARANCE_CHECKPOINT_REVISION,
+        "identityCheckpointInventoryDigest": audit.hashlib.sha256(checkpoint_raw).hexdigest(),
+        "reconciliationId": "issue-317-closed-helm-contract-v1",
+        "retiredPayloadDigest": audit.canonical_json_digest(retired[identifier]),
+        "currentEvidenceDigest": candidate_by_id[identifier].evidence_digest,
+    } for identifier in collisions]
+    return document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw
+
+
+def external_io_reviewed_entries(
+        candidates: tuple[audit.Candidate, ...] | list[audit.Candidate],
+        authority: dict[str, object]) -> dict[str, dict[str, object]]:
+    """Build truthful reviewed metadata for the closed source-derived #319 cohort."""
+    discovered = {candidate.id: candidate for candidate in candidates}
+    contracts = {identifier: contract for contract in authority["contracts"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in authority["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
+    entries: dict[str, dict[str, object]] = {}
+    for identifier, contract in contracts.items():
+        entry = discovered[identifier].inventory_entry()
+        entry.update(
+            status="already-centralized", classification="operator-configurable",
+            setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+            bindings=contract["bindings"], default=contract["defaultExpression"],
+            defaultEvidence=contract["defaultCandidateIds"],
+            validation="The typed policy validates the value before external I/O is admitted.",
+            scope=contract["scope"], pinning=contract["pinning"],
+            coverage="Source-derived owner, default, binding, consumer and test evidence.",
+            rationale="The closed platform external-I/O policy is the source authority.",
+            externalIoPolicyAuthority=audit.EXTERNAL_IO_POLICY_AUTHORITY_ID,
+        )
+        entries[identifier] = entry
+    for identifier, partition in retained.items():
+        entry = discovered[identifier].inventory_entry()
+        entry.update(
+            status=partition["status"], classification=partition["classification"],
+            rationale=("The closed external-I/O source proof assigns this exact candidate to "
+                       f"the {partition['semanticPartition']} partition."),
+            externalIoPolicyAuthority=audit.EXTERNAL_IO_POLICY_AUTHORITY_ID,
+        )
+        if partition["classification"] == "published-contract-description":
+            entry["retainedAuthority"] = audit.ENVIRONMENT_REFERENCE_AUTHORITY_ID
+        entries[identifier] = entry
+    return entries
+
+
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        self.assertEqual({
+            "apiVersion": "v2", "name": "ravenroot", "type": "application",
+        }, {field: authority["chartMetadata"][field]
+            for field in ("apiVersion", "name", "type")})
+        self.assertEqual(authority["chartMetadata"]["version"],
+                         authority["chartMetadata"]["appVersion"])
+        chart_candidate_ids = {
+            candidate.id for candidate in candidates if candidate.path == audit.HELM_CHART_PATH}
+        contract_candidate_ids = {
+            identifier for contract in authority["contracts"]
+            for identifier in contract["candidateIds"]}
+        self.assertTrue(chart_candidate_ids)
+        self.assertTrue(chart_candidate_ids <= set(authority["candidateIds"]))
+        self.assertTrue(chart_candidate_ids.isdisjoint(contract_candidate_ids))
+        entries = {
+            identifier: {
+                "id": identifier, "setting": contract["setting"],
+                "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["defaultDisplay"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "helmAuthority": audit.HELM_AUTHORITY_ID,
+            }
+            for contract in authority["contracts"] for identifier in contract["candidateIds"]
+        }
+        self.assertEqual([], audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"] = altered["candidateIds"][:-1]
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"].append("oc-foreign")
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        altered = copy.deepcopy(authority)
+        altered["candidateIds"].append(altered["candidateIds"][0])
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: altered}, entries, candidates))
+        wrong_entries = copy.deepcopy(entries)
+        next(iter(wrong_entries.values()))["owner"] = "Example.java#Example"
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
+        wrong_entries = copy.deepcopy(entries)
+        next(iter(wrong_entries.values()))["setting"] = "deployment.unsupported"
+        self.assertTrue(audit.helm_authority_errors(
+            ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
+
+        self.assertTrue(audit.helm_authority_errors(ROOT, None, {}, candidates))
+
+    def test_helm_authority_distinguishes_absent_partial_and_invalid_charts(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            self.assertEqual([], audit.helm_authority_errors(root, None, {}, ()))
+            self.assertTrue(audit.helm_authority_errors(
+                root, {audit.HELM_AUTHORITY_ID: {}}, {}, ()))
+            self.assertTrue(audit.helm_authority_errors(
+                root, None, {"oc-owned": {"helmAuthority": audit.HELM_AUTHORITY_ID}}, ()))
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            target = root / audit.HELM_VALUES_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / audit.HELM_VALUES_PATH, target)
+            errors = audit.helm_authority_errors(root, None, {}, ())
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            target = root / audit.HELM_CHART_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("apiVersion: v2\n", encoding="utf-8")
+            errors = audit.helm_authority_errors(root, None, {}, ())
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        candidates = audit.discover(ROOT)
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authority = audit.helm_authority_from_source(ROOT, candidates)
+            self.assertIsNotNone(authority)
+            assert authority is not None
+            for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                         audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                         *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                         authority["timeoutRuntime"]["path"]}:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            schema = root / audit.HELM_SCHEMA_PATH
+            schema.write_text(schema.read_text(encoding="utf-8").replace(
+                '"const": true', '"const": false', 1), encoding="utf-8")
+            errors = audit.helm_authority_errors(root, None, {}, candidates)
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        chart_mutations = (
+            ("apiVersion: v2", "apiVersion: v1"),
+            ("name: ravenroot", "name: another-chart"),
+            ("type: application", "type: library"),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.\n", ""),
+            ("version: 0.1.0-alpha.1\n", ""),
+            ('appVersion: "0.1.0-alpha.1"\n', ""),
+            ('kubeVersion: ">=1.25.0-0"\n', ""),
+            ("apiVersion: v2", "apiVersion: ["),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+             "description: broken: metadata"),
+            ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
+             "description: 'broken' metadata'"),
+        )
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                    audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                    *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                    authority["timeoutRuntime"]["path"]}
+        for before, after in chart_mutations:
+            with self.subTest(chart_mutation=before):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    chart = root / audit.HELM_CHART_PATH
+                    source = chart.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    chart.write_text(source.replace(before, after, 1), encoding="utf-8")
+                    errors = audit.helm_authority_errors(root, None, {}, candidates)
+                    self.assertTrue(any("violate the closed authority" in error
+                                        for error in errors), errors)
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            for path in required:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            chart = root / audit.HELM_CHART_PATH
+            source = chart.read_text(encoding="utf-8")
+            source = source.replace("version: 0.1.0-alpha.1",
+                                    "version: 0.1.0-alpha.1+build.7", 1)
+            source = source.replace('appVersion: "0.1.0-alpha.1"',
+                                    'appVersion: "0.1.0-alpha.1+build.7"', 1)
+            chart.write_text(source, encoding="utf-8")
+            self.assertIsNotNone(audit.helm_authority_from_source(root, candidates))
+
+    def test_helm_authority_rejects_source_contract_and_executable_evidence_drift(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        entries = {
+            identifier: {
+                "id": identifier, "setting": contract["setting"],
+                "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["defaultDisplay"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "helmAuthority": audit.HELM_AUTHORITY_ID,
+            }
+            for contract in authority["contracts"] for identifier in contract["candidateIds"]
+        }
+        mutations = (
+            (audit.HELM_VALUES_PATH, "programTimeoutMs: 15000", "programTimeoutMs: 15001"),
+            (audit.HELM_VALUES_PATH, "runAsNonRoot: true", "runAsNonRoot: false"),
+            (audit.HELM_VALUES_PATH, "allowPrivilegeEscalation: false", "allowPrivilegeEscalation: true"),
+            (audit.HELM_VALUES_PATH, "readOnlyRootFilesystem: true", "readOnlyRootFilesystem: false"),
+            (audit.HELM_SCHEMA_PATH, '"maximum": 300000', '"maximum": 300001'),
+            (audit.HELM_SCHEMA_PATH,
+             '"pattern": "^[\\u0009-\\u000D\\u001C-\\u0020\\u1680',
+             '"pattern": "^[\\u0009-\\u000D\\u0020'),
+            (audit.HELM_SCHEMA_PATH, '"additionalProperties": false', '"additionalProperties": true'),
+            (audit.HELM_SCHEMA_PATH, '"required": ["replicaCount"', '"required": ["image"'),
+            (audit.HELM_SCHEMA_PATH, '"enum": ["RuntimeDefault"]',
+             '"enum": ["RuntimeDefault", "Unconfined"]'),
+            (audit.HELM_SCHEMA_PATH, '"runAsNonRoot": { "type": "boolean", "const": true }',
+             '"runAsNonRoot": { "type": "boolean" }'),
+            (audit.HELM_SCHEMA_PATH,
+             '"allowPrivilegeEscalation": { "type": "boolean", "const": false }',
+             '"allowPrivilegeEscalation": { "type": "boolean" }'),
+            (audit.HELM_SCHEMA_PATH,
+             '"readOnlyRootFilesystem": { "type": "boolean", "const": true }',
+             '"readOnlyRootFilesystem": { "type": "boolean" }'),
+            (audit.HELM_TEMPLATE_PATHS[1],
+             '          resources:\n            {{- toYaml .Values.resources | nindent 12 }}',
+             '      resources:\n        {{- toYaml .Values.resources | nindent 8 }}'),
+            (audit.HELM_TEMPLATE_PATHS[1], '- name: RAVENROOT_PROGRAM_TIMEOUT_MS',
+             '# - name: RAVENROOT_PROGRAM_TIMEOUT_MS'),
+            ("scripts/tests/test_program_timeout_helm_contract.sh",
+             "for invalid in 99 300001; do", "for invalid in 99; do"),
+            ("scripts/tests/test_helm_values_contract.sh",
+             '--set-string image.tag=release-test \\\n  --set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"',
+             '--set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             '--set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"',
+             '--set-string image.digest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \\\n  >"$TEMP_DIR/tag-only.yaml"'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             'if tag_image != "registry.example.test/ravenroot:release-test":',
+             'if False:'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             "securityContext.readOnlyRootFilesystem=false \\",
+             "securityContext.readOnlyRootFilesystem=not-a-boolean \\",),
+            (authority["timeoutRuntime"]["path"],
+             'Duration timeout = Duration.ofMillis(', '// Duration timeout = Duration.ofMillis('),
+            (authority["timeoutRuntime"]["path"],
+             'static GraalVmProgramRuntime fromEnvironment(java.util.Map<String, String> environment)',
+             'static GraalVmProgramRuntime fromChangedEnvironment(java.util.Map<String, String> environment)'),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(relative=relative, before=before):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                                audit.HELM_VALUES_PATH,
+                                audit.HELM_SCHEMA_PATH,
+                                *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                                authority["timeoutRuntime"]["path"]}
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    target = root / relative
+                    source = target.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                    self.assertTrue(audit.helm_authority_errors(
+                        root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+        for removed in (audit.HELM_CHART_PATH, audit.HELM_TEMPLATE_PATHS[0],
+                        "scripts/tests/test_helm_values_contract.sh",
+                        authority["timeoutRuntime"]["path"]):
+            with self.subTest(removed=removed):
+                with tempfile.TemporaryDirectory() as location:
+                    root = Path(location)
+                    required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                                audit.HELM_VALUES_PATH,
+                                audit.HELM_SCHEMA_PATH,
+                                *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                                authority["timeoutRuntime"]["path"]}
+                    for path in required:
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(ROOT / path, target)
+                    self.assertEqual(authority, audit.helm_authority_from_source(root, candidates))
+                    (root / removed).unlink()
+                    self.assertTrue(audit.helm_authority_errors(
+                        root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
+                         audit.HELM_VALUES_PATH,
+                         *audit.HELM_TEMPLATE_PATHS,
+                         *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            target = root / audit.HELM_SCHEMA_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('{"type":"object","properties":[]}', encoding="utf-8")
+            self.assertTrue(audit.helm_authority_errors(
+                root, {audit.HELM_AUTHORITY_ID: authority}, entries, candidates))
+
+    def test_inventory_errors_routes_only_exact_helm_owned_rows_through_helm_proof(self) -> None:
+        candidates = audit.discover(ROOT)
+        authority = audit.helm_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        document = copy.deepcopy(audit.load_inventory(allow_previous_schema=True))
+        document["entries"] = []
+        document["evidenceRecords"] = {
+            candidate.evidence_digest: candidate.evidence for candidate in candidates}
+        for candidate in candidates:
+            entry = {**candidate.source_fields(), "status": "pending-review", "classification": None}
+            if candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture")
+            document["entries"].append(entry)
+        by_id = {entry["id"]: entry for entry in document["entries"]}
+        for contract in authority["contracts"]:
+            for identifier in contract["candidateIds"]:
+                by_id[identifier].update(
+                    status="already-centralized", classification="operator-configurable",
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], default=contract["defaultDisplay"],
+                    defaultEvidence=contract["candidateIds"], validation=contract["validation"],
+                    scope=contract["scope"], pinning=contract["pinning"],
+                    coverage=contract["coverage"], helmAuthority=audit.HELM_AUTHORITY_ID,
+                    rationale="The closed Helm values authority proves this deployment setting.",
+                )
+        document["helmAuthorities"] = {audit.HELM_AUTHORITY_ID: authority}
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("Helm" in error for error in errors), errors)
+
+        removed = copy.deepcopy(document)
+        removed.pop("helmAuthorities")
+        helm_fields = {
+            "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+            "validation", "scope", "pinning", "coverage", "helmAuthority",
+        }
+        for entry in removed["entries"]:
+            if entry.get("helmAuthority") == audit.HELM_AUTHORITY_ID:
+                for field in helm_fields:
+                    entry.pop(field, None)
+                entry.update(status="retained", classification="protocol-or-format-invariant",
+                             rationale="Incorrectly relabelled as retained.")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("Helm settings require" in error for error in errors), errors)
+
+        altered = copy.deepcopy(document)
+        marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))
+        marked.pop("helmAuthority")
+        errors = audit.inventory_errors(ROOT, altered, candidates)
+        self.assertTrue(any("Helm candidate coverage" in error for error in errors), errors)
+
+        altered = copy.deepcopy(document)
+        marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))
+        marked["owner"] = (
+            "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/"
+            "GraphExecutionLimits.java#GraphExecutionLimits")
+        errors = audit.inventory_errors(ROOT, altered, candidates)
+        self.assertTrue(any("unsupported Helm authority owner" in error for error in errors), errors)
+
+    def test_helm_live_candidate_references_remap_without_touching_history_or_prose(self) -> None:
+        document = {
+            "helmAuthorities": {audit.HELM_AUTHORITY_ID: {
+                "candidateIds": ["oc-old"],
+                "contracts": [{"candidateIds": ["oc-old"]}],
+                "evidence": "oc-old remains historical prose",
+            }},
+            "semanticReviewHistory": [{"candidateIds": ["oc-old"]}],
+            "normalizedIdentityReappearanceHistory": [{
+                "candidateId": "oc-old", "rationale": "Immutable historical identity evidence.",
+            }],
+        }
+        locations = audit.candidate_reference_locations(document, {"oc-old"})
+        self.assertTrue(all(audit.allowed_migrated_reference(path)
+                            or audit.immutable_historical_reference(path)
+                            or path[-1] == "evidence" for path in locations))
+        audit.remap_declared_candidate_references(document, {"oc-old": "oc-new"})
+        authority = document["helmAuthorities"][audit.HELM_AUTHORITY_ID]
+        self.assertEqual(["oc-new"], authority["candidateIds"])
+        self.assertEqual(["oc-new"], authority["contracts"][0]["candidateIds"])
+        self.assertEqual(["oc-old"], document["semanticReviewHistory"][0]["candidateIds"])
+        self.assertEqual(
+            "oc-old", document["normalizedIdentityReappearanceHistory"][0]["candidateId"])
+        self.assertEqual("oc-old remains historical prose", authority["evidence"])
+
+    def test_normalized_identity_reappearance_is_exact_source_anchored_and_nonsemantic(self) -> None:
+        document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw = \
+            production_reappearance_fixture()
+        self.assertEqual(21, len(records))
+        document["normalizedIdentityReappearanceHistory"] = copy.deepcopy(records)
+
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, document, candidates)
+        self.assertEqual([], errors)
+        self.assertEqual({record["candidateId"] for record in records}, allowed)
+
+        malformed_collection = copy.deepcopy(document)
+        malformed_collection["normalizedIdentityReappearanceHistory"] = {}
+        self.assertEqual(
+            ["normalizedIdentityReappearanceHistory must be an array"],
+            audit.normalized_identity_reappearance_errors(
+                ROOT, malformed_collection, candidates)[0])
+
+        # Exercise the production routing without paying the unrelated append-only semantic-review
+        # validation cost. The source-anchored reappearance validator itself remains unmocked.
+        with mock.patch.object(audit, "reconciliation_history_errors", return_value=[]), \
+                mock.patch.object(audit, "remediation_domain_errors", return_value=[]):
+            routed = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("duplicate active/retired inventory id" in error for error in routed), routed)
+
+        inventory_path = audit.INVENTORY.relative_to(audit.ROOT).as_posix()
+
+        def anchored_errors(value, discovered=candidates, prior_document=prior,
+                            prior_bytes=prior_raw, checkpoint_document=checkpoint,
+                            checkpoint_bytes=checkpoint_raw):
+            def committed(_root, revision, path):
+                if path != inventory_path:
+                    return None, None
+                if revision == REAPPEARANCE_PRIOR_REVISION:
+                    return prior_document, prior_bytes
+                if revision == REAPPEARANCE_CHECKPOINT_REVISION:
+                    return checkpoint_document, checkpoint_bytes
+                return None, None
+            with mock.patch.object(audit, "committed_json", side_effect=committed):
+                return audit.normalized_identity_reappearance_errors(
+                    ROOT, value, discovered)[0]
+
+        absent = copy.deepcopy(document)
+        absent["normalizedIdentityReappearanceHistory"].pop()
+        self.assertTrue(any("missing active/retired collisions" in error
+                            for error in anchored_errors(absent)))
+        self.assertEqual(set(), audit.normalized_identity_reappearance_errors(
+            ROOT, absent, candidates)[1], "a partial record set must grant no duplicate exception")
+        collision_id = records[0]["candidateId"]
+        collision_candidate = next(item for item in candidates if item.id == collision_id)
+        collision_document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": [copy.deepcopy(next(
+                entry for entry in document["entries"] if entry["id"] == collision_id))],
+            "retiredEntries": [copy.deepcopy(next(
+                entry for entry in document["retiredEntries"] if entry["id"] == collision_id))],
+            "migrationHistory": [],
+            "evidenceRecords": {collision_candidate.evidence_digest: collision_candidate.evidence},
+        }
+        with mock.patch.object(audit, "route_table_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "graph_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "environment_resolver_group_errors", return_value=[]), \
+                mock.patch.object(audit, "reconciliation_history_errors", return_value=[]), \
+                mock.patch.object(audit, "remediation_domain_errors", return_value=[]):
+            collision_errors = audit.inventory_errors(
+                ROOT, collision_document, (collision_candidate,))
+        self.assertIn(f"duplicate active/retired inventory id: {collision_id}", collision_errors)
+
+        duplicate = copy.deepcopy(document)
+        duplicate["normalizedIdentityReappearanceHistory"].append(
+            copy.deepcopy(duplicate["normalizedIdentityReappearanceHistory"][0]))
+        self.assertTrue(any("duplicate normalized identity" in error
+                            for error in anchored_errors(duplicate)))
+
+        foreign = copy.deepcopy(document)
+        foreign["normalizedIdentityReappearanceHistory"][0]["candidateId"] = "oc-foreign"
+        self.assertTrue(any("non-colliding candidates" in error
+                            for error in anchored_errors(foreign)))
+
+        for field, value in (
+                ("approved", False), ("rationale", " "), ("issue", "317"),
+                ("priorInventoryPath", "../inventory.json"),
+                ("priorInventoryRevision", "deadbeef"),
+                ("priorInventoryDigest", "0" * 64),
+                ("identityCheckpointInventoryDigest", "0" * 64),
+                ("reconciliationId", "missing-reconciliation"),
+                ("retiredPayloadDigest", "0" * 64),
+                ("currentEvidenceDigest", "0" * 64)):
+            with self.subTest(record_field=field):
+                changed = copy.deepcopy(document)
+                changed["normalizedIdentityReappearanceHistory"][0][field] = value
+                self.assertTrue(anchored_errors(changed))
+
+        extra_field = copy.deepcopy(document)
+        extra_field["normalizedIdentityReappearanceHistory"][0]["owner"] = "forbidden"
+        self.assertTrue(any("unsupported or incomplete shape" in error
+                            for error in anchored_errors(extra_field)))
+
+        with mock.patch.object(audit, "revision_is_ancestor", return_value=False):
+            self.assertTrue(any("ordered ancestry" in error for error in anchored_errors(document)))
+
+        identifier = records[0]["candidateId"]
+        checkpoint_entry = next(entry for entry in checkpoint["entries"]
+                                if entry["id"] == identifier)
+
+        prior_active = copy.deepcopy(prior)
+        prior_active["entries"].append(copy.deepcopy(checkpoint_entry))
+        prior_active_raw = json.dumps(prior_active).encode("utf-8")
+        changed = copy.deepcopy(document)
+        for record in changed["normalizedIdentityReappearanceHistory"]:
+            record["priorInventoryDigest"] = audit.hashlib.sha256(prior_active_raw).hexdigest()
+        self.assertTrue(any("absent from active prior inventory" in error for error in
+                            anchored_errors(changed, prior_document=prior_active,
+                                            prior_bytes=prior_active_raw)))
+
+        prior_without_retirement = copy.deepcopy(prior)
+        prior_without_retirement["retiredEntries"] = [
+            entry for entry in prior_without_retirement["retiredEntries"]
+            if entry.get("id") != identifier]
+        prior_without_raw = json.dumps(prior_without_retirement).encode("utf-8")
+        changed = copy.deepcopy(document)
+        for record in changed["normalizedIdentityReappearanceHistory"]:
+            record["priorInventoryDigest"] = audit.hashlib.sha256(prior_without_raw).hexdigest()
+        self.assertTrue(any("one retirement" in error for error in
+                            anchored_errors(changed, prior_document=prior_without_retirement,
+                                            prior_bytes=prior_without_raw)))
+
+        current_retired_tamper = copy.deepcopy(document)
+        next(entry for entry in current_retired_tamper["retiredEntries"]
+             if entry["id"] == identifier)["retirementRationale"] = "Rewritten history."
+        self.assertTrue(any("immutable retired payload has drifted" in error for error in
+                            anchored_errors(current_retired_tamper)))
+
+        def eligibility_errors(mutator):
+            changed = copy.deepcopy(document)
+            prior_changed = copy.deepcopy(prior)
+            checkpoint_changed = copy.deepcopy(checkpoint)
+            retired_rows = [
+                next(entry for entry in changed["retiredEntries"] if entry["id"] == identifier),
+                next(entry for entry in prior_changed["retiredEntries"] if entry["id"] == identifier),
+                next(entry for entry in checkpoint_changed["retiredEntries"]
+                     if entry["id"] == identifier),
+            ]
+            for row in retired_rows:
+                mutator(row)
+            prior_changed_raw = json.dumps(prior_changed).encode("utf-8")
+            checkpoint_changed_raw = json.dumps(checkpoint_changed).encode("utf-8")
+            for record in changed["normalizedIdentityReappearanceHistory"]:
+                record["priorInventoryDigest"] = audit.hashlib.sha256(prior_changed_raw).hexdigest()
+                record["identityCheckpointInventoryDigest"] = audit.hashlib.sha256(
+                    checkpoint_changed_raw).hexdigest()
+                if record["candidateId"] == identifier:
+                    record["retiredPayloadDigest"] = audit.canonical_json_digest(retired_rows[0])
+            return anchored_errors(
+                changed, prior_document=prior_changed, prior_bytes=prior_changed_raw,
+                checkpoint_document=checkpoint_changed, checkpoint_bytes=checkpoint_changed_raw)
+
+        eligibility_mutations = (
+            lambda row: row.update(status="retained"),
+            lambda row: row.update(classification="protocol-or-format-invariant"),
+            lambda row: row.update(removal={"kind": "duplicate-removed"}),
+            lambda row: row["sourceRefresh"].update(semanticRetirement=True),
+            lambda row: row["sourceRefresh"].update(duplicateAuthorityCredit=1),
+            lambda row: row["sourceRefresh"].update(
+                kind="semantic-candidate-retirement-v1"),
+        )
+        for index, mutation in enumerate(eligibility_mutations):
+            with self.subTest(eligibility=index):
+                self.assertTrue(any("not an eligible mechanical pending refresh" in error
+                                    for error in eligibility_errors(mutation)))
+
+        def mutate_checkpoint_plan(mutator):
+            changed = copy.deepcopy(document)
+            checkpoint_changed = copy.deepcopy(checkpoint)
+            checkpoint_plan = next(plan for plan in checkpoint_changed["reconciliationHistory"]
+                                   if plan["id"] == "issue-317-closed-helm-contract-v1")
+            current_plan = next(plan for plan in changed["reconciliationHistory"]
+                                if plan["id"] == "issue-317-closed-helm-contract-v1")
+            mutator(checkpoint_plan)
+            mutator(current_plan)
+            checkpoint_changed_raw = json.dumps(checkpoint_changed).encode("utf-8")
+            for record in changed["normalizedIdentityReappearanceHistory"]:
+                record["identityCheckpointInventoryDigest"] = audit.hashlib.sha256(
+                    checkpoint_changed_raw).hexdigest()
+            return anchored_errors(
+                changed, checkpoint_document=checkpoint_changed,
+                checkpoint_bytes=checkpoint_changed_raw)
+
+        for plan_field, value in (
+                ("sourceRevision", REAPPEARANCE_TARGET_REVISION),
+                ("sourceInventoryPath", "inventory.json"),
+                ("sourceInventoryDigest", "0" * 64),
+                ("targetRevision", REAPPEARANCE_PRIOR_REVISION)):
+            with self.subTest(checkpoint_plan_field=plan_field):
+                def mutate_anchor(plan, field=plan_field, replacement=value):
+                    plan[field] = replacement
+                self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                                    mutate_checkpoint_plan(mutate_anchor)))
+
+        self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                            mutate_checkpoint_plan(lambda plan: plan.__setitem__(
+                                "additions", [item for item in plan["additions"]
+                                              if item["id"] != identifier]))))
+
+        def replace_addition_with_mapping(plan):
+            plan["additions"] = [item for item in plan["additions"] if item["id"] != identifier]
+            plan["mappings"].append({
+                "fromId": identifier, "toId": identifier, "approved": True,
+                "rationale": "Invalid same-id mapping.", "equivalence": {},
+            })
+        self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                            mutate_checkpoint_plan(replace_addition_with_mapping)))
+
+        unapproved = copy.deepcopy(document)
+        unapproved["reconciliationHistory"] = [
+            plan for plan in unapproved["reconciliationHistory"]
+            if plan.get("id") != "issue-317-closed-helm-contract-v1"]
+        self.assertTrue(any("identity reconciliation is absent" in error
+                            for error in anchored_errors(unapproved)))
+
+        candidate = next(candidate for candidate in candidates if candidate.id == identifier)
+        active = next(entry for entry in document["entries"] if entry["id"] == identifier)
+        source_mutations = {
+            "path": ("path", "deploy/helm/ravenroot/other.json"),
+            "symbol": ("symbol", "other"),
+            "kind": ("kind", "fixed-declaration"),
+            "role": ("role", "other"),
+            "expression": ("expression", '"other"'),
+            "expressionDigest": ("expression_digest", "0" * 64),
+            "evidenceDigest": ("evidence_digest", "0" * 64),
+            "surface": ("surface", "java"),
+        }
+        for entry_field, (candidate_field, value) in source_mutations.items():
+            with self.subTest(source_field=entry_field):
+                changed = copy.deepcopy(document)
+                next(entry for entry in changed["entries"]
+                     if entry["id"] == identifier)[entry_field] = value
+                changed_candidates = tuple(
+                    audit.replace(item, **{candidate_field: value}) if item.id == identifier else item
+                    for item in candidates)
+                self.assertTrue(anchored_errors(changed, discovered=changed_candidates))
+
+        missing_candidate = tuple(item for item in candidates if item.id != identifier)
+        self.assertTrue(any("current candidate is absent" in error
+                            for error in anchored_errors(document, discovered=missing_candidate)))
+
+        moved = copy.deepcopy(document)
+        next(entry for entry in moved["entries"] if entry["id"] == identifier)["line"] = active["line"] + 1
+        moved_candidates = tuple(
+            audit.replace(item, line=item.line + 1) if item.id == identifier else item
+            for item in candidates)
+        self.assertEqual([], anchored_errors(moved, discovered=moved_candidates))
+
+    def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
+        discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
+        expected = audit.manifest_pin_attempt_authorities(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        contract = {
+            "owner": f"{audit.MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared",
+            "field": "manifestPinAttempts",
+            "bindings": ["RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"],
+            "default": "3 attempts",
+            "defaultEvidence": expected["defaultAuthority"]["candidateIds"],
+            "bindingAuthority": expected["bindingAuthority"],
+            "defaultAuthority": expected["defaultAuthority"],
+        }
+        entries = {
+            identifier: {"id": identifier, "setting": audit.MANIFEST_PIN_ATTEMPTS_SETTING}
+            for identifier in expected["candidateIds"]
+        }
+        self.assertEqual([], audit.manifest_pin_attempt_authority_errors(
+            ROOT, audit.MANIFEST_PIN_ATTEMPTS_SETTING, contract,
+            list(entries.values()), entries, discovered))
+
+        mutations = (
+            ("field", "anotherField"),
+            ("bindingAuthority.environmentSymbol", "ANOTHER_VARIABLE"),
+            ("defaultAuthority.terminalField", "ANOTHER_DEFAULT"),
+        )
+        for field, value in mutations:
+            altered = copy.deepcopy(contract)
+            target = altered
+            parts = field.split(".")
+            for part in parts[:-1]:
+                target = target[part]
+            target[parts[-1]] = value
+            self.assertTrue(audit.manifest_pin_attempt_authority_errors(
+                ROOT, audit.MANIFEST_PIN_ATTEMPTS_SETTING, altered,
+                list(entries.values()), entries, discovered), field)
+
+    def test_inventory_routes_manifest_pin_setting_through_its_closed_authority(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.manifest_pin_attempt_authorities(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        authority_metadata = {
+            "status": "already-centralized", "classification": "operator-configurable",
+            "setting": audit.MANIFEST_PIN_ATTEMPTS_SETTING,
+            "owner": f"{audit.MANIFEST_PIN_CONFIGURATION_PATH.as_posix()}#Shared",
+            "field": "manifestPinAttempts",
+            "bindings": ["RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS"],
+            "default": "3 attempts", "defaultEvidence": expected["defaultAuthority"]["candidateIds"],
+            "bindingAuthority": expected["bindingAuthority"],
+            "defaultAuthority": expected["defaultAuthority"],
+            "validation": "A positive whole number of lost-race repair attempts.",
+            "scope": "Each PostgreSQL execution-manifest store instance.",
+            "pinning": "Read when the shared store is composed.",
+            "coverage": "Typed parsing, selector conflict, and adapter propagation are source-backed.",
+            "rationale": "The typed server setting controls PostgreSQL manifest pin repair attempts.",
+        }
+        entries = []
+        for candidate in candidates:
+            entry = candidate.inventory_entry()
+            if candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture",
+                             rationale="Executable audit fixture.")
+            if candidate.id in expected["candidateIds"]:
+                entry.update(copy.deepcopy(authority_metadata))
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in candidates
+            },
+            "routeTableAuthorities": {
+                audit.ROUTE_TABLE_AUTHORITY_ID: audit.current_route_table_authority(ROOT),
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        baseline = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error for error in baseline), baseline)
+
+        mutations = (
+            ("bindingAuthority", "environmentSymbol", "ANOTHER_VARIABLE", "binding authority"),
+            ("defaultAuthority", "terminalField", "ANOTHER_DEFAULT", "default authority"),
+        )
+        for section, field, value, expected_error in mutations:
+            altered = copy.deepcopy(document)
+            for entry in altered["entries"]:
+                if entry.get("setting") == audit.MANIFEST_PIN_ATTEMPTS_SETTING:
+                    entry[section][field] = value
+            errors = audit.inventory_errors(ROOT, altered, candidates)
+            self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
+                                and expected_error in error for error in errors), errors)
+
+        incomplete = copy.deepcopy(document)
+        terminal = expected["defaultAuthority"]["candidateIds"][0]
+        next(entry for entry in incomplete["entries"] if entry["id"] == terminal).pop("setting")
+        errors = audit.inventory_errors(ROOT, incomplete, candidates)
+        self.assertTrue(any(audit.MANIFEST_PIN_ATTEMPTS_SETTING in error
+                            and "partition" in error for error in errors), errors)
+
+    def test_external_io_policy_authority_is_closed_over_source_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.external_io_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        assert expected is not None
+        self.assertEqual(40, len(expected["contracts"]))
+        self.assertEqual(81, sum(len(contract["candidateIds"])
+                                 for contract in expected["contracts"]))
+        self.assertEqual({
+            "derived": 11, "presentation-text": 38,
+            "protocol-or-format-invariant": 70,
+            "published-contract-description": 2,
+            "security-ceiling-or-default": 78,
+        }, {partition["classification"]: len(partition["candidateIds"])
+            for partition in expected["semanticPartitions"]})
+        self.assertEqual(280, len(expected["candidateIds"]))
+        self.assertEqual(set(expected["candidateIds"]),
+                         audit.external_io_policy_cohort_candidate_ids(discovered))
+
+        entries = external_io_reviewed_entries(candidates, expected)
+        authorities = {audit.EXTERNAL_IO_POLICY_AUTHORITY_ID: expected}
+        self.assertEqual([], audit.external_io_policy_authority_errors(
+            ROOT, authorities, entries, discovered))
+
+        missing = copy.deepcopy(authorities)
+        missing.clear()
+        self.assertTrue(audit.external_io_policy_authority_errors(
+            ROOT, missing, entries, discovered))
+
+        operator_id = expected["contracts"][0]["candidateIds"][0]
+        relabelled_operator = copy.deepcopy(entries)
+        relabelled_operator[operator_id].update(
+            status="retained", classification="protocol-or-format-invariant")
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, relabelled_operator, discovered)
+        self.assertTrue(any("requires one reviewed operator setting" in error
+                            for error in errors), errors)
+
+        retained_id = expected["semanticPartitions"][0]["candidateIds"][0]
+        relabelled_retained = copy.deepcopy(entries)
+        relabelled_retained[retained_id]["classification"] = "protocol-or-format-invariant"
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, relabelled_retained, discovered)
+        self.assertTrue(any("retained semantic partition has drifted" in error
+                            for error in errors), errors)
+
+        unmarked = copy.deepcopy(entries)
+        unmarked[operator_id].pop("externalIoPolicyAuthority")
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, unmarked, discovered)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+        missing_entry = copy.deepcopy(entries)
+        missing_entry.pop(retained_id)
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, missing_entry, discovered)
+        self.assertTrue(any("current source candidate set is incomplete" in error
+                            for error in errors), errors)
+
+        foreign = copy.deepcopy(entries)
+        outsider = next(candidate for candidate in candidates
+                        if candidate.id not in expected["candidateIds"])
+        foreign[outsider.id] = {
+            **outsider.inventory_entry(), "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Unrelated fixed vocabulary.",
+            "externalIoPolicyAuthority": audit.EXTERNAL_IO_POLICY_AUTHORITY_ID,
+        }
+        errors = audit.external_io_policy_authority_errors(
+            ROOT, authorities, foreign, discovered)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+        missing_contract = copy.deepcopy(authorities)
+        missing_contract[audit.EXTERNAL_IO_POLICY_AUTHORITY_ID]["contracts"].pop()
+        self.assertTrue(audit.external_io_policy_authority_errors(
+            ROOT, missing_contract, entries, discovered))
+        missing_partition = copy.deepcopy(authorities)
+        missing_partition[audit.EXTERNAL_IO_POLICY_AUTHORITY_ID]["semanticPartitions"].pop()
+        self.assertTrue(audit.external_io_policy_authority_errors(
+            ROOT, missing_partition, entries, discovered))
+
+    def test_inventory_routes_mandatory_external_io_authority_without_markers(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        authority = audit.external_io_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        reviewed = external_io_reviewed_entries(candidates, authority)
+        entries = []
+        for candidate in candidates:
+            entry = reviewed.get(candidate.id, candidate.inventory_entry())
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                for candidate in candidates},
+            "externalIoPolicyAuthorities": {
+                audit.EXTERNAL_IO_POLICY_AUTHORITY_ID: authority,
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        target_ids = set(authority["candidateIds"])
+        target_settings = {contract["setting"] for contract in authority["contracts"]}
+        target_errors = [error for error in errors
+                         if "external-I/O" in error or "externalIo" in error
+                         or any(token in error for token in target_ids | target_settings)]
+        self.assertEqual([], target_errors)
+        self.assertTrue(errors, "the synthetic document deliberately omits unrelated authorities")
+        unrelated = [error for error in errors if error not in target_errors]
+        self.assertEqual([], [error for error in unrelated if not (
+            error == "AssistantConfiguration operational limits require one closed family authority"
+            or error == "Helm settings require the exact source-derived closed values authority"
+            or error == "persistence settings require the exact mandatory source-derived authority"
+            or (error.startswith("deployment.")
+                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
+        )], unrelated)
+
+        removed = copy.deepcopy(document)
+        removed.pop("externalIoPolicyAuthorities")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error
+                            for error in errors), errors)
+
+        markerless = copy.deepcopy(document)
+        markerless.pop("externalIoPolicyAuthorities")
+        markerless["entries"] = [entry for entry in markerless["entries"]
+                                 if entry["id"] not in target_ids]
+        markerless["remediationDomains"] = audit.build_remediation_domains(markerless["entries"])
+        errors = audit.inventory_errors(ROOT, markerless, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error
+                            or "current source candidate set is incomplete" in error
+                            for error in errors), errors)
+
+        relabelled = copy.deepcopy(document)
+        operator_id = authority["contracts"][0]["candidateIds"][0]
+        next(entry for entry in relabelled["entries"] if entry["id"] == operator_id).update(
+            status="retained", classification="protocol-or-format-invariant")
+        errors = audit.inventory_errors(ROOT, relabelled, candidates)
+        self.assertTrue(any("requires one reviewed operator setting" in error
+                            for error in errors), errors)
+
+        retained_id = authority["semanticPartitions"][0]["candidateIds"][0]
+        retained_relabel = copy.deepcopy(document)
+        next(entry for entry in retained_relabel["entries"]
+             if entry["id"] == retained_id)["classification"] = "protocol-or-format-invariant"
+        errors = audit.inventory_errors(ROOT, retained_relabel, candidates)
+        self.assertTrue(any("retained semantic partition has drifted" in error
+                            for error in errors), errors)
+
+    def test_external_io_policy_authority_rejects_partial_or_drifted_source(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.external_io_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        assert expected is not None
+        paths = tuple(Path(item["path"]) for item in expected["sourceDigests"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]],
+                           cwd=root, check=True)
+
+            def derives() -> bool:
+                current = {candidate.id: candidate for candidate in audit.discover(root)}
+                return audit.external_io_policy_authority_from_source(root, current) is not None
+
+            self.assertTrue(derives())
+
+            def rejects(relative: Path, before: str, after: str) -> None:
+                target = root / relative
+                source = target.read_text(encoding="utf-8")
+                self.assertEqual(1, source.count(before), (relative, before))
+                target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                try:
+                    self.assertFalse(derives(), relative)
+                finally:
+                    target.write_text(source, encoding="utf-8")
+
+            rejects(audit.EXTERNAL_IO_LIMITS_PATH,
+                    "DEFAULT_MANAGED_HTTP_DURATION = Duration.ofSeconds(30)",
+                    "DEFAULT_MANAGED_HTTP_DURATION = Duration.ofSeconds(31)")
+            rejects(audit.EXTERNAL_IO_NODE_CAPACITY_PATH,
+                    "int maximumMessageBytes, int maximumFragments,\n"
+                    "                                     Duration maximumTimeout, int maximumConcurrency",
+                    "int maximumMessageBytes, int maximumConcurrency,\n"
+                    "                                     Duration maximumTimeout, int maximumFragments")
+            rejects(audit.EXTERNAL_IO_NODE_CAPACITY_PATH,
+                    "maximumTimeout.toNanos();", "maximumTimeout.toMillis();")
+            rejects(audit.EXTERNAL_IO_CAPACITY_CAPABLE_PATH,
+                    "NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration);",
+                    "NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration, "
+                    "NodePackageServices services);")
+            rejects(audit.EXTERNAL_IO_SERVER_MAIN_PATH,
+                    "if (value < 1) throw new NumberFormatException(\"nonpositive\");",
+                    "if (value < 0) throw new NumberFormatException(\"negative\");")
+            rejects(audit.EXTERNAL_IO_APPLICATION_PATH,
+                    "policyForNodeAdmission(behaviorNodes)",
+                    "policyForNodes(behaviorNodes)")
+            rejects(audit.EXTERNAL_IO_WS_ADMISSION_PATH,
+                    "if (active >= maximum) return false;",
+                    "if (active > maximum) return false;")
+            rejects(audit.EXTERNAL_IO_TEAMS_PROFILE_PATH, "MAX_ACK_TIMEOUT_MS = 4_500",
+                    "MAX_ACK_TIMEOUT_MS = 4_600")
+            rejects(audit.EXTERNAL_IO_MATTERMOST_PROFILE_PATH, "MAX_ACK_TIMEOUT_MS = 2_800",
+                    "MAX_ACK_TIMEOUT_MS = 2_900")
+
+            test_path = Path(
+                "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/"
+                "HostedExternalIoPolicyTest.java")
+            rejects(test_path, "@Test void oldThenNewPinsCoexistOnOneHostedRunner()",
+                    "void oldThenNewPinsCoexistOnOneHostedRunner()")
+
+            capacity_path = root / audit.EXTERNAL_IO_NODE_CAPACITY_PATH
+            capacity_bytes = capacity_path.read_bytes()
+            capacity_path.unlink()
+            try:
+                self.assertFalse(derives())
+            finally:
+                capacity_path.write_bytes(capacity_bytes)
+
+            # A new scanner-visible setting in a dedicated family source must not be omitted merely
+            # because every previously reviewed identifier and method digest still matches.
+            target = root / audit.EXTERNAL_IO_LIMITS_PATH
+            source = target.read_text(encoding="utf-8")
+            target.write_text(source.rsplit("}", 1)[0]
+                              + "    static final int UNREVIEWED_EXTERNAL_IO_LIMIT = 17;\n}\n",
+                              encoding="utf-8")
+            self.assertFalse(derives())
+
+    def test_persistence_policy_authority_is_closed_over_source_and_candidates(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        expected = audit.persistence_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(expected)
+        self.assertEqual(43, len(expected["contracts"]))
+        self.assertEqual(97, len(expected["candidateIds"]))
+        self.assertEqual(
+            "471891f10e915939b5d29ae276a5ece19c8ada9abc8513f2ccf24beef9872e83",
+            hashlib.sha256(json.dumps(expected["contracts"][:40], sort_keys=True,
+                                      separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "the accepted 40-contract prefix must not be rewritten to add the new path policies",
+        )
+        self.assertEqual(
+            {
+                "execution.store.selector", "execution.store.url", "execution.store.user",
+                "execution.store.password", "execution.store.pool-size",
+                "execution.store.pool-timeout", "execution.worker-id", "execution.lease-ttl",
+                "deployment.audit-directory", "execution.store.directory",
+                "execution.store.enabled",
+            },
+            {contract["setting"] for contract in expected["contracts"][-11:]},
+        )
+        entries = {}
+        contracts = {identifier: contract for contract in expected["contracts"]
+                     for identifier in contract["candidateIds"]}
+        for identifier, contract in contracts.items():
+            entry = discovered[identifier].inventory_entry()
+            entry.update(
+                status="already-centralized", classification="operator-configurable",
+                setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                bindings=contract["bindings"], default="source-derived typed default",
+                defaultEvidence=contract["defaultCandidateIds"],
+                validation="The typed policy validates this value before work.",
+                scope="One explicitly composed adapter or caller.",
+                pinning="Resolved before managed work where replay can observe it.",
+                coverage="Source-derived owner, default, binding, consumer and test evidence.",
+                rationale="The closed persistence policy is the source authority.",
+                persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+            )
+            entries[identifier] = entry
+        hikari_minimum = "oc-0c1ca37de0bb555b5298"
+        self.assertNotIn(hikari_minimum, expected["candidateIds"])
+        sqlite_file_name = [candidate.id for candidate in candidates
+                            if candidate.path == audit.PERSISTENCE_SQLITE_LOCATION_PATH.as_posix()
+                            and candidate.kind == "fixed-declaration"
+                            and candidate.expression == '"ravenroot-execution-store.db"']
+        self.assertEqual(1, len(sqlite_file_name))
+        self.assertNotIn(sqlite_file_name[0], expected["candidateIds"])
+        minimum_entry = discovered[hikari_minimum].inventory_entry()
+        minimum_entry.update(
+            status="retained", classification="protocol-or-format-invariant",
+            rationale="HikariCP's minimum accepted pool-acquisition timeout is a fixed dependency contract.",
+        )
+        entries[hikari_minimum] = minimum_entry
+        authorities = {audit.PERSISTENCE_POLICY_AUTHORITY_ID: expected}
+        self.assertEqual([], audit.persistence_policy_authority_errors(
+            ROOT, authorities, entries, discovered))
+
+        missing = copy.deepcopy(authorities)
+        missing.clear()
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, missing, entries, discovered))
+        relabelled = copy.deepcopy(entries)
+        for entry in relabelled.values():
+            if entry["id"] in contracts:
+                entry.update(status="retained", classification="protocol-or-format-invariant")
+        self.assertTrue(any("requires one reviewed operator setting" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, relabelled, discovered)))
+        unmarked = copy.deepcopy(relabelled)
+        for entry in unmarked.values():
+            if entry["id"] in contracts:
+                entry.pop("persistenceAuthority")
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, unmarked, discovered)))
+        malformed = copy.deepcopy(entries)
+        first = next(iter(malformed.values()))
+        first["defaultEvidence"] = "not-an-array"
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, authorities, malformed, discovered))
+        duplicated = copy.deepcopy(authorities)
+        duplicated_contract = duplicated[audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"][-1]
+        duplicated_contract["candidateIds"].append(duplicated_contract["candidateIds"][0])
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, duplicated, entries, discovered))
+        missing_contract = copy.deepcopy(authorities)
+        missing_contract[audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"].pop()
+        self.assertTrue(audit.persistence_policy_authority_errors(
+            ROOT, missing_contract, entries, discovered))
+        missing_entry = copy.deepcopy(entries)
+        missing_entry.pop(next(iter(missing_entry)))
+        self.assertTrue(any("current source candidate set is incomplete" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, missing_entry, discovered)))
+        foreign = copy.deepcopy(entries)
+        outsider = next(candidate for candidate in candidates if candidate.id not in contracts)
+        foreign[outsider.id] = {
+            **outsider.inventory_entry(), "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Unrelated fixed vocabulary.",
+            "persistenceAuthority": audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+        }
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, foreign, discovered)))
+
+    def test_inventory_routes_mandatory_persistence_authority_without_markers(self) -> None:
+        candidates = audit.discover(ROOT)
+        discovered = {candidate.id: candidate for candidate in candidates}
+        authority = audit.persistence_policy_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(authority)
+        entries = []
+        protected = set(authority["candidateIds"])
+        contracts = {identifier: contract for contract in authority["contracts"]
+                     for identifier in contract["candidateIds"]}
+        for candidate in candidates:
+            entry = candidate.inventory_entry()
+            contract = contracts.get(candidate.id)
+            if contract is not None:
+                entry.update(
+                    status="already-centralized", classification="operator-configurable",
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], default=contract["defaultExpression"],
+                    defaultEvidence=contract["defaultCandidateIds"],
+                    validation="The typed policy validates this value before work.",
+                    scope="One explicitly composed adapter or caller.",
+                    pinning="Resolved before managed work where replay can observe it.",
+                    coverage="Source-derived owner, default, binding, consumer and test evidence.",
+                    rationale="The closed persistence policy is the source authority.",
+                    persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+                )
+            elif candidate.surface == "test-fixture":
+                entry.update(status="retained", classification="test-fixture",
+                             rationale="Executable audit fixture.")
+            entries.append(entry)
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": entries, "retiredEntries": [], "migrationHistory": [],
+            "reconciliationHistory": [], "semanticReviewHistory": [],
+            "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                for candidate in candidates},
+            "persistencePolicyAuthorities": {
+                audit.PERSISTENCE_POLICY_AUTHORITY_ID: authority,
+            },
+        }
+        document["remediationDomains"] = audit.build_remediation_domains(entries)
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        target_tokens = protected | {contract["setting"] for contract in authority["contracts"]}
+        target_errors = [error for error in errors
+                         if "persistence policy" in error or "persistence authority" in error
+                         or any(token in error for token in target_tokens)]
+        self.assertEqual([], target_errors)
+        self.assertTrue(errors, "the synthetic document deliberately omits unrelated family authorities")
+        unrelated = [error for error in errors if error not in target_errors]
+        self.assertTrue(unrelated, "the synthetic document deliberately omits unrelated authorities")
+        self.assertIn(
+            "external-I/O settings require the exact mandatory source-derived authority",
+            unrelated,
+        )
+        self.assertEqual([], [error for error in unrelated if not (
+            error == "AssistantConfiguration operational limits require one closed family authority"
+            or error == "Helm settings require the exact source-derived closed values authority"
+            or error == "external-I/O settings require the exact mandatory source-derived authority"
+            or (error.startswith("deployment.")
+                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
+        )], unrelated)
+
+        enabled = next(contract for contract in authority["contracts"]
+                       if contract["setting"] == "execution.store.enabled")
+        self.assertEqual(1, len(enabled["defaultCandidateIds"]))
+        self.assertIn(enabled["defaultCandidateIds"][0], enabled["candidateIds"])
+        missing_default = copy.deepcopy(document)
+        for entry in missing_default["entries"]:
+            if entry.get("setting") == "execution.store.enabled":
+                entry["defaultEvidence"] = []
+        errors = audit.inventory_errors(ROOT, missing_default, candidates)
+        self.assertTrue(any("execution.store.enabled" in error or identifier in error
+                            for identifier in enabled["candidateIds"] for error in errors), errors)
+
+        removed = copy.deepcopy(document)
+        removed.pop("persistencePolicyAuthorities")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("exact mandatory source-derived authority" in error for error in errors))
+
+        relabelled = copy.deepcopy(document)
+        for entry in relabelled["entries"]:
+            if entry["id"] in protected:
+                entry.update(status="retained", classification="protocol-or-format-invariant",
+                             rationale="Incorrectly hidden as a fixed protocol value.")
+        errors = audit.inventory_errors(ROOT, relabelled, candidates)
+        self.assertTrue(any("requires one reviewed operator setting" in error for error in errors),
+                        errors)
+        unmarked = copy.deepcopy(relabelled)
+        for entry in unmarked["entries"]:
+            if entry["id"] in protected:
+                entry.pop("persistenceAuthority")
+        errors = audit.inventory_errors(ROOT, unmarked, candidates)
+        self.assertTrue(any("candidate partition" in error for error in errors), errors)
+
+    def test_persistence_policy_authority_rejects_partial_or_drifted_source(self) -> None:
+        paths = (
+            audit.PERSISTENCE_POSTGRES_CONFIG_PATH, audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+            audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+            audit.PERSISTENCE_SHARED_CONNECTION_PATH, audit.PERSISTENCE_SHARED_DATASOURCE_PATH,
+            audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+            audit.PERSISTENCE_EXECUTION_OWNERSHIP_PATH,
+            audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+            audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+            audit.PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+            audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+            audit.PERSISTENCE_REGISTRY_POLICY_PATH, audit.PERSISTENCE_IN_MEMORY_POLICY_PATH,
+            audit.PERSISTENCE_SQLITE_CONFIG_PATH, audit.PERSISTENCE_SQLITE_CONNECTION_POLICY_PATH,
+            audit.PERSISTENCE_QUERY_PATH, audit.PERSISTENCE_MANAGED_STORE_PATH,
+            audit.PERSISTENCE_MANIFEST_PATH, audit.PERSISTENCE_BOOTSTRAP_PATH,
+            audit.PERSISTENCE_SERVER_MAIN_PATH, audit.PERSISTENCE_IN_MEMORY_REGISTRY_PATH,
+            audit.PERSISTENCE_SQLITE_REGISTRY_PATH, audit.PERSISTENCE_POSTGRES_REGISTRY_PATH,
+            audit.PERSISTENCE_SQLITE_ARTIFACT_PATH, audit.PERSISTENCE_SQLITE_EMBED_PATH,
+            audit.PERSISTENCE_SQLITE_EXECUTION_PATH, audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+            audit.PERSISTENCE_OPERATIONAL_POLICY_PATH, audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
+            audit.PERSISTENCE_AUTHORITY_PATH, audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+            audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+            audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_MANAGED_STORE_TEST_PATH,
+            audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+            audit.PERSISTENCE_AUDIT_DIRECTORY_TEST_PATH,
+            audit.PERSISTENCE_AUDIT_CONFIGURATION_TEST_PATH,
+            audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+            audit.PERSISTENCE_SQLITE_LOCATION_TEST_PATH,
+            audit.PERSISTENCE_OPERATIONAL_POLICY_TEST_PATH,
+            audit.PERSISTENCE_MANIFEST_RESOLVER_TEST_PATH,
+            audit.PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+            Path("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/deployment/registry/DeploymentRegistryPolicyTest.java"),
+            Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java"),
+            Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteConnectionPolicyTest.java"),
+            Path("ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+            Path("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/SqliteManagedExecutionStoreContractTest.java"),
+            Path("ravenroot/ravenroot-persistence-postgresql/src/test/java/ai/ravenroot/persistence/postgresql/PostgresManagedExecutionStoreContractTest.java"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+            discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+            self.assertIsNotNone(audit.persistence_policy_authority_from_source(root, discovered))
+
+            resolver = root / audit.PERSISTENCE_POSTGRES_RESOLVER_PATH
+            original = resolver.read_text(encoding="utf-8")
+            resolver.write_text(original.replace(
+                "String raw = properties.get(property);",
+                "String raw = environment.get(variable);", 1), encoding="utf-8")
+            changed = {candidate.id: candidate for candidate in audit.discover(root)}
+            self.assertIsNone(audit.persistence_policy_authority_from_source(root, changed))
+            resolver.write_text(original, encoding="utf-8")
+
+            def rejects(relative: Path, before: str, after: str) -> None:
+                target = root / relative
+                source = target.read_text(encoding="utf-8")
+                self.assertEqual(1, source.count(before), (relative, before))
+                target.write_text(source.replace(before, after, 1), encoding="utf-8")
+                try:
+                    current = {candidate.id: candidate for candidate in audit.discover(root)}
+                    self.assertIsNone(audit.persistence_policy_authority_from_source(root, current),
+                                      relative)
+                finally:
+                    target.write_text(source, encoding="utf-8")
+
+            rejects(audit.PERSISTENCE_POSTGRES_RESOLVER_PATH,
+                    "defaults.maxClockSkew(), true)", "defaults.maxClockSkew(), false)")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "|| isConfigured(properties, POOL_TIMEOUT_PROPERTY);",
+                    "|| false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'static final String DEFAULT_ENABLED_VALUE = "true";',
+                    'static final String DEFAULT_ENABLED_VALUE = "false";')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "? DEFAULT_ENABLED_VALUE\n                : raw.trim()",
+                    '? "true"\n                : raw.trim()')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "return SQLITE_SELECTOR;", "return POSTGRESQL_SELECTOR;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'String SQLITE_SELECTOR = "sqlite";',
+                    'String SQLITE_SELECTOR = "single-host";')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'String POSTGRESQL_SELECTOR = "postgresql";',
+                    'String POSTGRESQL_SELECTOR = "shared";')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    ".orElseThrow(() -> new IllegalArgumentException(",
+                    ".orElseGet(() -> String.valueOf(")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    'private static final String REQUIRED_URL_PREFIX = "jdbc:postgresql:";',
+                    'private static final String REQUIRED_URL_PREFIX = "jdbc:";')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "if (!url.startsWith(REQUIRED_URL_PREFIX)) {",
+                    "if (!url.endsWith(REQUIRED_URL_PREFIX)) {")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "trimmed(environment, ExecutionStoreConfiguration.USER_VARIABLE),",
+                    "Optional.ofNullable(environment.get(ExecutionStoreConfiguration.USER_VARIABLE)),")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "Optional.ofNullable(environment.get(ExecutionStoreConfiguration.PASSWORD_VARIABLE)),",
+                    "trimmed(environment, ExecutionStoreConfiguration.PASSWORD_VARIABLE),")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    'return "SharedStoreConnection[url=<redacted>, user="',
+                    'return "SharedStoreConnection[url=" + url + ", user="')
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final int DEFAULT_POOL_SIZE = 10;",
+                    "private static final int DEFAULT_POOL_SIZE = 11;")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final int MAX_POOL_SIZE = 1_000;",
+                    "private static final int MAX_POOL_SIZE = 999;")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(250);",
+                    "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(251);")
+            rejects(audit.PERSISTENCE_SHARED_CONNECTION_PATH,
+                    "connection.poolTimeout().compareTo(storeConfig.statementTimeout()) >= 0",
+                    "connection.poolTimeout().compareTo(storeConfig.statementTimeout()) > 0")
+            rejects(audit.PERSISTENCE_SHARED_DATASOURCE_PATH,
+                    "config.setMaximumPoolSize(connection.poolSize());",
+                    "config.setMaximumPoolSize(10);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "? hostName() : configured.trim();",
+                    "? UNRESOLVED_REPLICA_NAME : configured.trim();")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "WorkerIdentity.of(replicaName, WorkerIdentity.Role.RUNTIME);",
+                    "WorkerIdentity.of(replicaName, WorkerIdentity.Role.RECOVERY);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "return WorkerIdentity.of(replicaName, WorkerIdentity.Role.RECOVERY);",
+                    "return WorkerIdentity.of(replicaName, WorkerIdentity.Role.RUNTIME);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "return ExecutionOwnership.DEFAULT_LEASE_TTL;",
+                    "return Duration.ofSeconds(1);")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "if (seconds < 1) {", "if (seconds < 0) {")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH,
+                    "if (leaseTtl.compareTo(store.maxLeaseTtl()) > 0) {",
+                    "if (leaseTtl.compareTo(store.maxLeaseTtl()) >= 0) {")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "executionOwnershipConfiguration.requireCompatible(managedExecutionStore);",
+                    "/* ownership compatibility omitted */")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "return raw != null && SHARED_STORE_SELECTOR.equals(raw.trim().toLowerCase(java.util.Locale.ROOT));",
+                    "return false;")
+            rejects(audit.PERSISTENCE_POSTGRES_CONFIG_PATH,
+                    "Duration.ofSeconds(30), 3", "Duration.ofSeconds(31), 3")
+            rejects(audit.PERSISTENCE_REGISTRY_POLICY_PATH,
+                    "Duration.ofMinutes(5)", "Duration.ofSeconds(5)")
+            rejects(audit.PERSISTENCE_BOOTSTRAP_PATH,
+                    "configuration.manifestPinAttempts(), storeConfig)",
+                    "configuration.manifestPinAttempts(), PostgresStoreConfig.defaults())")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "executionStoreOwner.store(), executionStoreOwner.executionManifestStore())",
+                    "executionStoreOwner.store(), null)")
+            rejects(audit.PERSISTENCE_SQLITE_ARTIFACT_PATH,
+                    "connectionPolicy.apply(connection);", "SqliteConnectionPolicy.DEFAULTS.apply(connection);")
+            rejects(audit.PERSISTENCE_SQLITE_EMBED_PATH,
+                    "connectionPolicy.apply(opened);", "SqliteConnectionPolicy.DEFAULTS.apply(opened);")
+            rejects(audit.PERSISTENCE_SQLITE_REGISTRY_PATH,
+                    "this.limits = policy.limits();", "this.limits = DeploymentRegistryPolicy.DEFAULTS.limits();")
+            rejects(audit.PERSISTENCE_POSTGRES_REGISTRY_PATH,
+                    "this.commandRetention = policy.commandRetention();",
+                    "this.commandRetention = DeploymentRegistryPolicy.DEFAULTS.commandRetention();")
+            rejects(audit.PERSISTENCE_IN_MEMORY_REGISTRY_PATH,
+                    "this.limits = Objects.requireNonNull(limits, \"limits\");",
+                    "this.limits = DeploymentRegistryPolicy.inMemoryLimits();")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    "return applyInternal(batch, authority);", "return apply(batch);")
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    "if (authority != null) {\n            requireManagedAuthority(connection, key, authority);\n            requireBatchPayloads(batch);\n        }",
+                    "if (authority != null) {\n            requireManagedAuthority(connection, key, ExecutionPersistenceAuthority.from(null));\n            requireBatchPayloads(batch);\n        }")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3",
+                    "rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_2")
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    "pinned != config.maxPayloadBytes()",
+                    "pinned < config.maxPayloadBytes()")
+            rejects(audit.PERSISTENCE_SQLITE_EXECUTION_PATH,
+                    'policy.persistence().orElseThrow(\n'
+                    '                            () -> new IllegalArgumentException('
+                    '"persistence capacity is absent"))',
+                    'policy.persistence().orElseThrow()')
+            rejects(audit.PERSISTENCE_POSTGRES_EXECUTION_PATH,
+                    'policy.persistence().orElseThrow(\n'
+                    '                            () -> new IllegalArgumentException('
+                    '"persistence capacity is absent"))',
+                    'policy.persistence().orElseThrow()')
+            rejects(audit.PERSISTENCE_DEFAULT_APPLICATION_PATH,
+                    "ExecutionManifestResolver.completeManaged(engine,",
+                    "ExecutionManifestResolver.complete(engine,")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    ".map(ResolvedOperationalPolicy.PersistenceLimits::new)",
+                    ".map(ignored -> new ResolvedOperationalPolicy.PersistenceLimits(1))")
+            rejects(audit.PERSISTENCE_MANIFEST_DIGEST_PATH,
+                    "|| manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3",
+                    "&& manifest.formatVersion() == ExecutionManifest.FORMAT_VERSION_3")
+            rejects(audit.PERSISTENCE_AUTHORITY_PATH,
+                    "manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_4",
+                    "manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    "base.nodePackages(), base.persistence(), behaviors.nodeExternalIoCapacitiesFor(nodes)",
+                    "base.nodePackages(), java.util.Optional.empty(), behaviors.nodeExternalIoCapacitiesFor(nodes)")
+            rejects(audit.PERSISTENCE_MANIFEST_RESOLVER_PATH,
+                    "return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key,",
+                    "return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_3, key,")
+            rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
+                    "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_2;",
+                    "case ExecutionManifest.FORMAT_VERSION_3 -> ENCODING_VERSION_1;")
+            rejects(audit.PERSISTENCE_OPERATIONAL_POLICY_PATH,
+                    "case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_3;",
+                    "case ExecutionManifest.FORMAT_VERSION_4 -> ENCODING_VERSION_2;")
+            rejects(Path(
+                    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+                    "@Test\n    void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()",
+                    "void poolPropertiesArePostgresqlOnlyWhileBlankValuesDelegate()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
+                    "final void restrictedPendingWorkClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(audit.PERSISTENCE_APPLICATION_MANIFEST_TEST_PATH,
+                    "@Test\n    void rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity()",
+                    "void rawEmbeddedAdmissionAndRecoveryCarryV4NodeIoWithoutInventingPersistenceCapacity()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()",
+                    "final void restrictedDueTimerClaimsAreAtomicAndExcludeUnverifiedNewKeys()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute()",
+                    "final void formatFourWithoutPersistenceCapacityRefusesEveryManagedMutationRoute()")
+            rejects(Path(
+                    "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/ManagedExecutionStoreContract.java"),
+                    "@Test\n    final void formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess()",
+                    "final void formatFourCleanupThatWinsBeforeCreationLeavesNoAuthorityToCreateTheProcess()")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void aPasswordIsNotTrimmedBecauseItIsOpaque()",
+                    "void aPasswordIsNotTrimmedBecauseItIsOpaque()")
+            rejects(audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct()",
+                    "void theConfiguredNameIsUsedForBothRolesAndTheRolesStayDistinct()")
+            rejects(audit.PERSISTENCE_CLI_SELECTOR_TEST_PATH,
+                    "@Test\n    void theSelectorSpellingMatchesTheServersOwn()",
+                    "void theSelectorSpellingMatchesTheServersOwn()")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    'public static final String ENVIRONMENT_VARIABLE = "RAVENROOT_AUDIT_DIR";',
+                    'public static final String ENVIRONMENT_VARIABLE = "RAVENROOT_AUDIT_PATH";')
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    'public static final String DEFAULT_DIRECTORY = "./data/audit";',
+                    'public static final String DEFAULT_DIRECTORY = "./audit";')
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim()",
+                    "raw == null ? DEFAULT_DIRECTORY : raw.trim()")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "DEFAULT_DIRECTORY : raw.trim()",
+                    "DEFAULT_DIRECTORY : raw")
+            rejects(audit.PERSISTENCE_AUDIT_DIRECTORY_PATH,
+                    "return new AuditTrailDirectory(Path.of(selected));",
+                    "return new AuditTrailDirectory(Path.of(DEFAULT_DIRECTORY));")
+            rejects(audit.PERSISTENCE_AUDIT_CONFIGURATION_PATH,
+                    "AuditTrailDirectory.resolve(environment.get(DIRECTORY_VARIABLE))",
+                    "AuditTrailDirectory.resolve(null)")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "AuditTrailConfiguration.fromEnvironment(System.getenv()).directory()",
+                    "AuditTrailConfiguration.fromEnvironment(Map.of()).directory()")
+            rejects(audit.PERSISTENCE_SERVER_MAIN_PATH,
+                    "new FileAuditTrail(auditDirectory.path(), java.time.Clock.systemUTC(),",
+                    "new FileAuditTrail(Path.of(\"./data/audit\"), java.time.Clock.systemUTC(),")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "AuditTrailDirectory.resolve(environment.get(AUDIT_DIR_VARIABLE)).path()",
+                    "AuditTrailDirectory.resolve(null).path()")
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    'public static final String DEFAULT_DIRECTORY = "./data/execution-store";',
+                    'public static final String DEFAULT_DIRECTORY = "./execution-store";')
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    "raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim()",
+                    "raw == null ? DEFAULT_DIRECTORY : raw.trim()")
+            rejects(audit.PERSISTENCE_SQLITE_LOCATION_PATH,
+                    "return underDirectory(Path.of(selected));",
+                    "return underDirectory(Path.of(DEFAULT_DIRECTORY));")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "SqliteStoreLocation.underConfiguredDirectory(environment.get(DIRECTORY_VARIABLE))",
+                    "SqliteStoreLocation.underConfiguredDirectory(null)")
+            rejects(audit.PERSISTENCE_BACKUP_CONFIGURATION_PATH,
+                    "SqliteStoreLocation.underConfiguredDirectory(\n                environment.get(EXECUTION_STORE_DIR_VARIABLE))",
+                    "SqliteStoreLocation.underConfiguredDirectory(\n                null)")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "case \"false\", \"off\", \"0\", \"no\" -> false;",
+                    "case \"false\", \"off\", \"0\" -> false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "default -> throw new IllegalArgumentException(ENABLED_VARIABLE",
+                    "default -> throw new UnsupportedOperationException(ENABLED_VARIABLE")
+            rejects(audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+                    "@Test\n    void auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()",
+                    "void auditDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()")
+            rejects(audit.PERSISTENCE_DIRECTORY_PARITY_TEST_PATH,
+                    "@Test\n    void executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()",
+                    "void executionStoreDirectoryDefaultBlankAndNondefaultResolutionMatchesTheServer()")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_TEST_PATH,
+                    "@Test\n    void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases()",
+                    "void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases()")
+
+            test_path = root / Path(
+                "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ManagedExecutionStoreTest.java")
+            test_bytes = test_path.read_bytes()
+            test_path.unlink()
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+            test_path.write_bytes(test_bytes)
+            ownership_path = root / audit.PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH
+            ownership_bytes = ownership_path.read_bytes()
+            ownership_path.unlink()
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+            ownership_path.write_bytes(ownership_bytes)
+            resolver.unlink()
+            self.assertTrue(audit.persistence_policy_source_present(root))
+            self.assertIsNone(audit.persistence_policy_authority_from_source(
+                root, {candidate.id: candidate for candidate in audit.discover(root)}))
+
+    def test_manifest_pin_authority_rejects_behavior_changes_that_keep_old_markers(self) -> None:
+        paths = (
+            audit.MANIFEST_PIN_CONFIGURATION_PATH, audit.MANIFEST_PIN_BOOTSTRAP_PATH,
+            audit.MANIFEST_PIN_STORE_PATH,
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java"),
+            Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/SharedExecutionStoreBootstrapSmokeTest.java"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / relative).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+
+            def authority() -> object:
+                discovered = {candidate.id: candidate for candidate in audit.discover(root)}
+                return audit.manifest_pin_attempt_authorities(root, discovered)
+
+            self.assertIsNotNone(authority())
+            configuration = root / audit.MANIFEST_PIN_CONFIGURATION_PATH
+            original = configuration.read_text(encoding="utf-8")
+            mutations = (
+                ("if (raw == null || raw.isBlank()) return fallback;",
+                 "if (raw == null) return fallback; if (raw.isBlank()) return 1;"),
+                ("return value;\n        } catch", "return fallback;\n        } catch"),
+                ("throw new IllegalArgumentException(variable + \" must be a positive integer\");",
+                 "return fallback;"),
+                ("if (manifestPinAttempts < 1) {",
+                 "if (false && manifestPinAttempts < 1) {"),
+            )
+            for before, after in mutations:
+                with self.subTest(before=before):
+                    self.assertEqual(1, original.count(before))
+                    configuration.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    self.assertIsNone(authority())
+                    configuration.write_text(original, encoding="utf-8")
     def route_table_authority_fixture(self, root: Path):
         paths = (
             audit.ROUTE_TABLE_PATH, audit.ROUTE_DESCRIPTOR_PATH, audit.OPENAPI_GENERATOR_PATH,
@@ -160,10 +1757,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
             self.assertEqual(53, len(details))
             self.assertEqual(
-                {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54},
+                {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(508, len(entries))
+            self.assertEqual(515, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -193,7 +1790,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     self.assertTrue(any("exact candidate-specific authorities" in error
                                         for error in errors), errors)
             wrong_subset = copy.deepcopy(authority)
-            wrong_subset["publishedBoundClauses"]["oc-68d83961ae8fd9333d39"] = [
+            wrong_subset["publishedBoundClauses"][next(iter(audit.ROUTE_BOUND_CANDIDATES))] = [
                 "StableEdgeId.MAX_UTF8_BYTES", "StableEdgeId.SSE_FRAME_MAX_BYTES",
             ]
             errors = self.route_table_errors(root, wrong_subset, entries, candidates)
@@ -616,8 +2213,52 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 retainedAuthority=audit.ROUTE_TABLE_AUTHORITY_ID,
             )
             errors = audit.inventory_errors(root, document, audit.discover(root))
-            self.assertTrue(any("published-contract-description requires the closed RouteTable authority"
+            self.assertTrue(any("published-contract-description requires a closed publication authority"
                                 in error for error in errors), errors)
+
+    def test_environment_reference_publication_authority_has_source_derived_membership(self) -> None:
+        candidates = audit.discover(ROOT)
+        eligible = audit.environment_reference_description_candidate_ids(ROOT, candidates)
+        websocket_boundary = next(candidate for candidate in candidates
+                                  if candidate.path == audit.ENVIRONMENT_REFERENCE_PATH.as_posix()
+                                  and candidate.symbol == "boundary"
+                                  and candidate.role == "RAVENROOT_WEBSOCKET_")
+        self.assertIn(websocket_boundary.id, eligible)
+        unsupported_boundary = audit.Candidate(
+            id="oc-unsupported-boundary", path=audit.ENVIRONMENT_REFERENCE_PATH.as_posix(),
+            line=1, symbol="boundary", kind="environment-binding",
+            role="RAVENROOT_NOT_A_REAL_FAMILY_", expression="RAVENROOT_NOT_A_REAL_FAMILY_",
+            expression_digest="expression", evidence="unsupported",
+            evidence_digest="evidence", surface="script",
+        )
+        off_path_boundary = audit.Candidate(
+            id="oc-off-path-boundary", path="scripts/other_generator.py",
+            line=1, symbol="boundary", kind="environment-binding",
+            role="RAVENROOT_WEBSOCKET_", expression="RAVENROOT_WEBSOCKET_",
+            expression_digest="expression", evidence="off path",
+            evidence_digest="evidence", surface="script",
+        )
+        widened = audit.environment_reference_description_candidate_ids(
+            ROOT, (*candidates, unsupported_boundary, off_path_boundary))
+        self.assertNotIn(unsupported_boundary.id, widened)
+        self.assertNotIn(off_path_boundary.id, widened)
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        authorized = {entry["id"] for entry in document["entries"]
+                      if entry.get("retainedAuthority") ==
+                      audit.ENVIRONMENT_REFERENCE_AUTHORITY_ID}
+        self.assertEqual(authorized, authorized & eligible)
+
+        arbitrary = next(entry for entry in document["entries"]
+                         if entry.get("path") == audit.ENVIRONMENT_REFERENCE_PATH.as_posix()
+                         and entry["id"] not in eligible)
+        arbitrary.update(
+            status="retained", classification="published-contract-description",
+            rationale="Arbitrary text in the generator is not a published environment row.",
+            retainedAuthority=audit.ENVIRONMENT_REFERENCE_AUTHORITY_ID,
+        )
+        errors = audit.inventory_errors(ROOT, document, candidates)
+        self.assertTrue(any("published-contract-description requires a closed publication authority"
+                            in error for error in errors), errors)
 
     def assistant_limit_authority_fixture(self, root: Path):
         paths = (
@@ -835,6 +2476,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         selected = tuple(candidate for candidate in candidates.values() if candidate.id in entries)
         return ({
             "schemaVersion": audit.SCHEMA_VERSION,
+            "reconciliationRequired": False,
             "entries": [copy.deepcopy(entries[identifier]) for identifier in sorted(entries)],
             "retiredEntries": [], "migrationHistory": [],
             "evidenceRecords": {
@@ -843,7 +2485,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }, selected)
 
     def test_assistant_two_limit_inventory_adapter_preserves_generic_checks(self) -> None:
-        with tempfile.TemporaryDirectory() as location:
+        # The assistant fixture has only its synthetic deployment carriers; the complete chart
+        # authority is exercised by the unmocked Helm tests.
+        with tempfile.TemporaryDirectory() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
             document, selected = self.assistant_limit_inventory_document(
@@ -1574,6 +3219,104 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         errors = audit.check(ROOT, require_complete=False)
         self.assertEqual([], errors, "\n".join(errors[:20]))
 
+    def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        owners = document["remediationDomains"]["settingOwners"]
+        expected_owners = {
+            "embed.enabled": "#321",
+            "ui.monitoring.max-deployment-event-streams": "#321",
+        }
+        expected_unresolved_settings = len(expected_owners)
+        self.assertEqual(expected_unresolved_settings, len(owners))
+        self.assertEqual(len(owners), len({item["setting"] for item in owners}))
+        self.assertEqual(expected_owners, {item["setting"]: item["issue"] for item in owners})
+        self.assertEqual(
+            expected_unresolved_settings,
+            sum(domain["confirmedUnresolvedOperatorSettings"]
+                for domain in document["remediationDomains"]["domains"]),
+        )
+        self.assertNotIn("execution.lease-ttl", {item["setting"] for item in owners})
+        lease_rows = [entry for entry in document["entries"]
+                      if entry.get("setting") == "execution.lease-ttl"]
+        self.assertEqual(5, len(lease_rows))
+        for entry in lease_rows:
+            with self.subTest(lease_candidate=entry["id"]):
+                self.assertEqual("already-centralized", entry["status"])
+                self.assertEqual("operator-configurable", entry["classification"])
+                self.assertEqual("ravenroot-persistence-policy-v1", entry["persistenceAuthority"])
+                self.assertEqual(
+                    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/"
+                    "ExecutionOwnershipConfiguration.java#ExecutionOwnershipConfiguration",
+                    entry["owner"],
+                )
+                self.assertEqual("leaseTtl", entry["field"])
+                self.assertNotIn("authorityStatus", entry)
+                self.assertNotIn("followUp", entry)
+        unresolved_rows = [entry for entry in document["entries"]
+                           if entry.get("authorityStatus") == "unresolved"]
+        self.assertEqual(expected_unresolved_settings,
+                         len({entry["setting"] for entry in unresolved_rows}))
+        self.assertTrue(all(entry.get("sourceFact") for entry in unresolved_rows))
+        self.assertFalse(any(str(entry["default"]).startswith("Current internal source value:")
+                             for entry in unresolved_rows))
+
+        missing = copy.deepcopy(document)
+        del missing["remediationDomains"]
+        self.assertTrue(any("requires a remediation domain map" in error
+                            for error in audit.remediation_domain_errors(missing)))
+        duplicate = copy.deepcopy(document)
+        duplicate["remediationDomains"]["settingOwners"].append(
+            copy.deepcopy(duplicate["remediationDomains"]["settingOwners"][0]))
+        self.assertTrue(any("duplicate setting ownership" in error
+                            for error in audit.remediation_domain_errors(duplicate)))
+        split = copy.deepcopy(document)
+        conflicting_owner = copy.deepcopy(unresolved_rows[0])
+        conflicting_owner.update(id="oc-split-owner", followUp="#318")
+        split["entries"].append(conflicting_owner)
+        self.assertTrue(any("requires one follow-up owner" in error
+                            for error in audit.remediation_domain_errors(split)))
+
+        delimiter = next(entry for entry in document["entries"]
+                         if entry["id"] == "oc-7f698b1972e9090b6f1b")
+        self.assertEqual("protocol-or-format-invariant", delimiter["classification"])
+        self.assertIn("CR/LF", delimiter["rationale"])
+
+        postgres_defaults = {
+            "postgres.lock-timeout": "Duration.ofSeconds(5)",
+            "postgres.statement-timeout": "Duration.ofSeconds(30)",
+            "postgres.serialization-retries": "3",
+            "postgres.max-lease-ttl": "Duration.ofMinutes(5)",
+            "postgres.max-payload-bytes": "1024 * 1024",
+            "postgres.max-clock-skew": "Duration.ofSeconds(5)",
+            "postgres.journal-retention": "Duration.ofHours(24)",
+            "postgres.max-inventory-page-size": "100",
+            "postgres.terminal-retention": "Duration.ofDays(7)",
+            "postgres.execution-result-retention": "Duration.ofDays(7)",
+        }
+        source_candidates = {candidate.id: candidate for candidate in audit.discover(ROOT)}
+        persistence_authority = audit.persistence_policy_authority_from_source(ROOT, source_candidates)
+        self.assertIsNotNone(persistence_authority)
+        contracts = {contract["setting"]: contract
+                     for contract in persistence_authority["contracts"]}
+        for setting, expected in postgres_defaults.items():
+            with self.subTest(postgres_default=setting):
+                rows = [entry for entry in document["entries"]
+                        if entry.get("setting") == setting]
+                self.assertTrue(rows)
+                self.assertEqual({expected}, {entry["default"] for entry in rows})
+                contract = contracts[setting]
+                self.assertEqual(expected, contract["defaultExpression"])
+                self.assertEqual(set(contract["candidateIds"]), {entry["id"] for entry in rows})
+                self.assertTrue(contract["defaultCandidateIds"])
+                for entry in rows:
+                    self.assertEqual("already-centralized", entry["status"])
+                    self.assertEqual("operator-configurable", entry["classification"])
+                    self.assertEqual(audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+                                     entry["persistenceAuthority"])
+                    self.assertEqual(contract["defaultCandidateIds"], entry["defaultEvidence"])
+                    self.assertEqual(source_candidates[entry["id"]].evidence_digest,
+                                     entry["evidenceDigest"])
+
     def test_default_completion_gate_rejects_pending_review(self) -> None:
         errors = audit.check(ROOT)
         self.assertTrue(any("audit is incomplete" in error and "pending-review" in error
@@ -1593,12 +3336,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             (root / "docs/architecture/operational-configuration-audit.md").write_text(
                 audit.render_report(document), encoding="utf-8")
             errors = audit.check(root, inventory,
-                                 root / "docs/architecture/operational-configuration-audit.md")
+                                 root / "docs/architecture/operational-configuration-audit.md",
+                                 allow_unreconciled=True)
         self.assertTrue(any("audit is incomplete" in error and "1 deferred" in error
                             for error in errors), errors)
 
     def test_environment_authority_is_candidate_driven_bijective_and_closed(self) -> None:
-        with synthetic_repository() as location:
+        # This resolver fixture uses partial carrier files, not a complete Helm chart.
+        # Keep its target-family and generic checks independent of the Helm authority tests.
+        with synthetic_repository() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             document, discovered, _source, _tests = self.environment_authority_fixture(root)
             self.assertEqual([], audit.inventory_errors(root, document, discovered))
@@ -1682,7 +3429,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("every checker-owned carrier group" in error for error in errors), errors)
 
     def test_environment_authority_source_test_and_carrier_mutations_fail(self) -> None:
-        with synthetic_repository() as location:
+        # Isolate the unrelated chart proof while mutating the synthetic environment carriers.
+        # The dedicated Helm tests exercise the production chart gate without this patch.
+        with synthetic_repository() as location, \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]):
             root = Path(location)
             document, discovered, source_path, test_path = self.environment_authority_fixture(root)
             original_source = source_path.read_text(encoding="utf-8")
@@ -2045,6 +3795,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def graph_limit_inventory_document(self, authorities, entries, candidates):
         return {
             "schemaVersion": audit.SCHEMA_VERSION,
+            "reconciliationRequired": False,
             "entries": [copy.deepcopy(entries[identifier]) for identifier in sorted(entries)],
             "retiredEntries": [], "migrationHistory": [],
             "evidenceRecords": {
@@ -2055,9 +3806,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
 
     def graph_limit_inventory_errors(self, document, candidates):
-        # This fixture intentionally contains only graph rows. Assistant's separately mandatory
-        # fixed family is covered by its own general-entrypoint tests.
-        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+        # This fixture intentionally contains only graph rows. The separately mandatory assistant,
+        # Helm, persistence and external-I/O authorities have unmocked general-entrypoint tests.
+        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -2300,7 +4054,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 341 |",
+                "| Retained published contract descriptions | 348 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -2308,13 +4062,29 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 340 |",
+                "| Retained published contract descriptions | 347 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
             "| Retained published contract descriptions | 0 |",
             audit.render_report({"entries": [], "retiredEntries": [], "migrationHistory": []}),
         )
+
+    def test_report_counts_active_retired_and_reappearance_history_separately(self) -> None:
+        document = {
+            "entries": [{
+                "id": "oc-active", "path": "runtime/Policy.java", "line": 1,
+                "symbol": "Policy", "surface": "java", "status": "retained",
+                "classification": "protocol-or-format-invariant", "rationale": "Protocol token.",
+            }],
+            "retiredEntries": [{"id": "oc-retired"}, {"id": "oc-active"}],
+            "migrationHistory": [], "reconciliationHistory": [],
+            "normalizedIdentityReappearanceHistory": [{"candidateId": "oc-active"}],
+        }
+        report = audit.render_report(document)
+        self.assertIn("| Atomic operational candidates discovered | 1 |", report)
+        self.assertIn("Retired source candidates preserved in inventory history: 2.", report)
+        self.assertIn("Approved normalized-identity reappearances: 1.", report)
 
     def test_new_named_operational_constant_is_rejected(self) -> None:
         with synthetic_repository() as location:
@@ -2324,7 +4094,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "}\n", "  static final int WORKER_CAPACITY = 37;\n}\n"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("unclassified operational candidate" in error and "WORKER_CAPACITY" in error
                             for error in errors), errors)
 
@@ -2336,7 +4106,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "}\n", "  Object value() { return java.time.Duration.ofSeconds(37); }\n}\n"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("unclassified operational candidate" in error and "ofSeconds(37)" in error
                             for error in errors), errors)
 
@@ -2439,7 +4209,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                          if candidate.role == "timeunit-get")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
             source.write_text(source.read_text(encoding="utf-8").replace(
                 "future.get(37,", "future.get(38,"), encoding="utf-8")
             second = next(candidate for candidate in audit.discover(root)
@@ -2457,7 +4227,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "WAIT_TIMEOUT=${RAVENROOT_WAIT_TIMEOUT:-37}\nsleep 37\n", encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("service.sh" in error and "RAVENROOT_WAIT_TIMEOUT" in error
                             for error in errors), errors)
 
@@ -2468,7 +4238,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "FROM scratch\nUSER 12345:12345\nEXPOSE 31337\n", encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("container-directive" in error and "12345" in error for error in errors), errors)
         self.assertTrue(any("container-directive" in error and "31337" in error for error in errors), errors)
 
@@ -2480,7 +4250,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "}\n", "  Object value() { return new RetryPolicy(7); }\n}\n"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("inline-operational-call" in error and "7" in error for error in errors), errors)
 
     def test_environment_binding_is_discovered_without_default_or_operational_name(self) -> None:
@@ -2492,7 +4262,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("environment-binding" in error and "RAVENROOT_RUNTIME_INSTANCE" in error
                             for error in errors), errors)
 
@@ -2517,7 +4287,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             source.write_text(source.read_text(encoding="utf-8").replace("1 << 4", "1 + 4"), encoding="utf-8")
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
                                  root / "docs/architecture/operational-configuration-audit.md",
-                                 require_complete=False)
+                                 require_complete=False, allow_unreconciled=True)
         self.assertTrue(any("unclassified operational candidate" in error for error in errors), errors)
         self.assertTrue(any("stale inventory entry" in error for error in errors), errors)
 
@@ -2540,7 +4310,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root = Path(location)
             classify_non_pending(root)
             errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
-                                 root / "docs/architecture/operational-configuration-audit.md")
+                                 root / "docs/architecture/operational-configuration-audit.md",
+                                 allow_unreconciled=True)
             document = json.loads((root / "scripts/operational-configuration-inventory.json")
                                   .read_text(encoding="utf-8"))
         self.assertEqual([], errors)
@@ -2712,7 +4483,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
             report = root / "docs/architecture/operational-configuration-audit.md"
             report.write_text(audit.render_report(document), encoding="utf-8")
-            errors = audit.check(root, inventory, report)
+            errors = audit.check(root, inventory, report, allow_unreconciled=True)
         self.assertTrue(any("confirmed-hardcoded" in error for error in errors), errors)
 
     def test_converted_setting_requires_resolvable_source_revisions(self) -> None:
@@ -2758,6 +4529,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_migration_history_rejects_unsafe_revision_or_source_path_before_git(self) -> None:
         base = {
             "schemaVersion": audit.SCHEMA_VERSION,
+            "reconciliationRequired": False,
             "entries": [],
             "retiredEntries": [],
             "evidenceRecords": {},
@@ -2880,6 +4652,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ).stdout.strip()
             document = {
                 "schemaVersion": audit.SCHEMA_VERSION,
+                "reconciliationRequired": False,
                 "entries": [],
                 "retiredEntries": [],
                 "evidenceRecords": {},
@@ -3723,8 +5496,17 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             refused, plan = audit.refresh_inventory(
                 root, inventory, root / "docs/architecture/operational-configuration-audit.md",
             )
-            self.assertTrue(any("--accept-retired-pending" in error for error in refused), refused)
+            self.assertTrue(any("retirement.approved=true" in error for error in refused), refused)
             self.assertGreaterEqual(plan["added"], 1)
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            current_ids = {candidate.id for candidate in audit.discover(root)}
+            for entry in document["entries"]:
+                if entry["id"] not in current_ids:
+                    entry["retirement"] = {
+                        "approved": True,
+                        "rationale": f"Reviewed source replacement for {entry['id']}.",
+                    }
+            inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
             accepted, summary = audit.refresh_inventory(
                 root, inventory, root / "docs/architecture/operational-configuration-audit.md",
                 accept_retired_pending=True,
@@ -3734,6 +5516,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(plan["added"], summary["added"])
         self.assertEqual(plan["retired"], summary["retired"])
         self.assertEqual(summary["retired"], len(document["retiredEntries"]))
+        self.assertTrue(all(entry["retirementRationale"].startswith("Reviewed source replacement")
+                            for entry in document["retiredEntries"]))
 
     def test_refresh_requires_per_entry_rationale_before_retiring_reviewed_candidate(self) -> None:
         with synthetic_repository() as location:
@@ -3760,6 +5544,296 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(1, summary["retired"])
         self.assertEqual("Wire version advanced by reviewed protocol change.",
                          refreshed["retiredEntries"][0]["retirementRationale"])
+
+    def test_reconciliation_requires_complete_approved_source_backed_partitions(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            inventory.parent.mkdir(parents=True)
+            old_entry = {
+                "id": "oc-old", "path": "runtime/Policy.java", "line": 1,
+                "symbol": "Policy", "kind": "fixed-declaration", "role": "TOKEN",
+                "expression": '"v1"', "expressionDigest": audit.hashlib.sha256(b'"v1"').hexdigest(),
+                "evidenceDigest": audit.hashlib.sha256(b"old evidence").hexdigest(),
+                "surface": "java", "status": "retained",
+                "classification": "protocol-or-format-invariant",
+                "rationale": "Stable protocol token.",
+                "defaultEvidence": ["oc-old"],
+            }
+            source_document = {
+                "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+                "entries": [old_entry],
+                "retiredEntries": [{
+                    "id": "oc-legacy-retired", "retirementRationale": "Earlier approved removal.",
+                }],
+                "migrationHistory": [{
+                    "fromSchema": 3, "toSchema": 4, "sourceRevision": "a" * 40,
+                    "sourcePath": "scripts/operational-configuration-inventory.json",
+                    "sourceFileDigest": "b" * 64, "candidateCount": 1,
+                    "statusCounts": {"retained": 1}, "rationale": "Earlier schema migration.",
+                }],
+                "reconciliationHistory": [{
+                    "id": "earlier-reconciliation",
+                    "additions": [{"id": "oc-old"}],
+                }],
+                "normalizedIdentityReappearanceHistory": [{
+                    "candidateId": "oc-old", "rationale": "Anchored historical reference fixture.",
+                }],
+                "evidenceRecords": {old_entry["evidenceDigest"]: "old evidence"},
+            }
+            inventory.write_text(json.dumps(source_document, indent=2) + "\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "scripts/operational-configuration-inventory.json"],
+                           cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "source inventory"],
+                           cwd=root, check=True)
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            source_raw = inventory.read_bytes()
+            candidate = audit.Candidate(
+                "oc-new", "runtime/Policy.java", 2, "Policy", "fixed-declaration", "TOKEN",
+                '"v1"', audit.hashlib.sha256(b'"v1"').hexdigest(), "new evidence",
+                audit.hashlib.sha256(b"new evidence").hexdigest(), "java",
+            )
+            plan = {
+                "id": "synthetic-reconciliation", "issue": "#316",
+                "sourceRevision": revision, "targetRevision": revision,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": audit.hashlib.sha256(source_raw).hexdigest(),
+                "targetCandidateDigest": audit.candidate_set_digest([candidate.id]),
+                "mappings": [{
+                    "fromId": "oc-old", "toId": "oc-new", "approved": True,
+                    "rationale": "The same source atom moved.",
+                    "equivalence": {
+                        "kind": "same-atom-v1",
+                        "beforeEvidenceDigest": old_entry["evidenceDigest"],
+                        "afterEvidenceDigest": candidate.evidence_digest,
+                    },
+                }],
+                "retirements": [], "additions": [],
+            }
+            self.assertEqual([], audit.reconciliation_plan_errors(
+                root, source_document, (candidate,), plan)[0])
+
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                remapped, remap_errors = audit.apply_reconciliation(
+                    root, source_document, (candidate,), plan)
+            self.assertEqual([], remap_errors)
+            self.assertIsNotNone(remapped)
+            self.assertEqual(["oc-new"], remapped["entries"][0]["defaultEvidence"])
+            self.assertEqual("oc-old", remapped["reconciliationHistory"][0]["additions"][0]["id"],
+                             "anchored history must never be rewritten")
+            self.assertEqual(
+                "oc-old", remapped["normalizedIdentityReappearanceHistory"][0]["candidateId"],
+                "reappearance history must never be rewritten")
+
+            malformed_issue = copy.deepcopy(plan)
+            malformed_issue["issue"] = "316"
+            self.assertTrue(any("unsupported or incomplete shape" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), malformed_issue)[0]))
+            for invalid_issue in (True, " #316", "#316 "):
+                malformed_issue = copy.deepcopy(plan)
+                malformed_issue["issue"] = invalid_issue
+                self.assertTrue(any("unsupported or incomplete shape" in error for error in
+                                    audit.reconciliation_plan_errors(
+                                        root, source_document, (candidate,), malformed_issue)[0]))
+
+            partial = copy.deepcopy(plan)
+            partial["mappings"] = []
+            self.assertTrue(any("partition" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), partial)[0]))
+
+            refused = copy.deepcopy(plan)
+            refused["mappings"][0]["approved"] = False
+            self.assertTrue(any("row-level approval" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), refused)[0]))
+
+            arbitrary = copy.deepcopy(plan)
+            arbitrary["mappings"][0]["equivalence"]["beforeEvidenceDigest"] = "0" * 64
+            self.assertTrue(any("same source atom" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), arbitrary)[0]))
+
+            referenced = copy.deepcopy(source_document)
+            referenced["description"] = "oc-old"
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                _ignored, reference_errors = audit.apply_reconciliation(
+                    root, referenced, (candidate,), plan)
+            self.assertTrue(any("undeclared reference field" in error
+                                for error in reference_errors), reference_errors)
+
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                refreshed, errors = audit.apply_reconciliation(
+                    root, source_document, (candidate,), plan)
+            self.assertEqual([], errors)
+            self.assertIsNotNone(refreshed)
+            assert refreshed is not None
+            self.assertIs(refreshed["reconciliationRequired"], True)
+            active = refreshed["entries"][0]
+            self.assertEqual("Stable protocol token.", active["rationale"])
+            self.assertEqual({"history": plan["id"], "fromId": "oc-old"},
+                             active["identityMigration"])
+            self.assertEqual([], audit.reconciliation_history_errors(
+                root, refreshed, (candidate,)))
+
+            tampered = copy.deepcopy(refreshed)
+            tampered["reconciliationHistory"].insert(0, {"id": "forged-prior-record"})
+            self.assertTrue(any("append-only chain" in error for error in
+                                audit.reconciliation_history_errors(root, tampered, (candidate,))))
+
+            tampered_reappearance = copy.deepcopy(refreshed)
+            tampered_reappearance["normalizedIdentityReappearanceHistory"][0]["rationale"] = \
+                "Changed later."
+            self.assertTrue(any("normalizedIdentityReappearanceHistory is not an append-only chain"
+                                in error for error in audit.reconciliation_history_errors(
+                                    root, tampered_reappearance, (candidate,))))
+
+            missing_retirement = copy.deepcopy(refreshed)
+            missing_retirement["retiredEntries"] = []
+            self.assertTrue(any("retiredEntries is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, missing_retirement, (candidate,))))
+
+            tampered_retirement = copy.deepcopy(refreshed)
+            tampered_retirement["retiredEntries"][0]["retirementRationale"] = "Changed later."
+            self.assertTrue(any("retiredEntries is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, tampered_retirement, (candidate,))))
+
+            missing_migration = copy.deepcopy(refreshed)
+            missing_migration["migrationHistory"] = []
+            self.assertTrue(any("migrationHistory is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, missing_migration, (candidate,))))
+
+            tampered_migration = copy.deepcopy(refreshed)
+            tampered_migration["migrationHistory"][0]["rationale"] = "Changed later."
+            self.assertTrue(any("migrationHistory is not the exact anchored ledger" in error
+                                for error in audit.reconciliation_history_errors(
+                                    root, tampered_migration, (candidate,))))
+
+            inventory.write_text(json.dumps(refreshed, indent=2) + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", "scripts/operational-configuration-inventory.json"],
+                           cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "reconciled inventory"],
+                           cwd=root, check=True)
+            review_revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                             capture_output=True, text=True).stdout.strip()
+            reviewed = copy.deepcopy(refreshed)
+            before_metadata = audit.candidate_semantic_payload(reviewed["entries"][0])
+            after_metadata = copy.deepcopy(before_metadata)
+            after_metadata["rationale"] = "Approved later semantic evidence."
+            reviewed["entries"][0]["rationale"] = after_metadata["rationale"]
+            reviewed["semanticReviewHistory"] = [{
+                "candidateId": "oc-new", "approved": True,
+                "rationale": "Later review approved stronger evidence.",
+                "sourceRevision": review_revision,
+                "beforeMetadata": before_metadata, "afterMetadata": after_metadata,
+            }]
+            self.assertEqual([], audit.reconciliation_history_errors(
+                root, reviewed, (candidate,)))
+
+    def test_unresolved_operator_authority_stays_deferred_and_exact(self) -> None:
+        candidate = audit.Candidate(
+            "oc-unresolved", "runtime/Policy.java", 1, "Policy", "fixed-declaration",
+            "MAX_RETRIES", "3", audit.hashlib.sha256(b"3").hexdigest(),
+            "static final int MAX_RETRIES = 3;",
+            audit.hashlib.sha256(b"static final int MAX_RETRIES = 3;").hexdigest(), "java",
+        )
+        binding = audit.Candidate(
+            "oc-unresolved-binding", "runtime/Policy.java", 2, "Policy",
+            "environment-binding", "RAVENROOT_MAX_RETRIES", "RAVENROOT_MAX_RETRIES",
+            audit.hashlib.sha256(b"RAVENROOT_MAX_RETRIES").hexdigest(),
+            'String name = "RAVENROOT_MAX_RETRIES";',
+            audit.hashlib.sha256(b'String name = "RAVENROOT_MAX_RETRIES";').hexdigest(), "java",
+        )
+        shared = {
+            "status": "deferred", "classification": "operator-configurable",
+            "setting": "runtime.max-retries", "authorityStatus": "unresolved",
+            "prospectiveOwner": "runtime/Policy.java#Policy",
+            "unresolvedEvidence": "The literal exists without an operator binding.",
+            "bindings": ["RAVENROOT_MAX_RETRIES"],
+            "default": "3 attempts; RAVENROOT_MAX_RETRIES is the proposed binding.",
+            "defaultEvidence": [candidate.id, binding.id],
+            "validation": "No operator validation contract.",
+            "scope": "Runtime scope unresolved.", "pinning": "Pinning unresolved.",
+            "coverage": "Deployment coverage unresolved.", "followUp": "#318",
+            "rationale": "Operational retry policy lacks a complete authority.",
+        }
+        entry = {
+            **candidate.source_fields(), "status": "deferred",
+            **shared, "sourceFact": "Shipped default: 3 attempts.",
+        }
+        binding_entry = {
+            **binding.source_fields(), **shared,
+            "sourceFact": "Proposed environment binding: RAVENROOT_MAX_RETRIES.",
+        }
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": [entry, binding_entry], "retiredEntries": [], "migrationHistory": [],
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence,
+                binding.evidence_digest: binding.evidence,
+            },
+        }
+        def errors(value):
+            # These two unresolved rows contain no assistant, Helm, persistence or external-I/O family.
+            with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]):
+                return audit.inventory_errors(ROOT, value, (candidate, binding))
+
+        self.assertEqual([], errors(document))
+        self.assertIn("in progress", audit.render_report(document))
+        self.assertEqual(
+            audit.render_report(document),
+            audit.render_report({**document, "entries": list(reversed(document["entries"]))}),
+        )
+        report = audit.render_report(document)
+        self.assertIn("Shipped default: 3 attempts.", report)
+        self.assertIn("Proposed environment binding: RAVENROOT_MAX_RETRIES.", report)
+
+        resolved = copy.deepcopy(document)
+        for item in resolved["entries"]:
+            item["status"] = "already-centralized"
+        self.assertTrue(any("must remain deferred" in error for error in
+                            errors(resolved)))
+
+        incomplete = copy.deepcopy(document)
+        incomplete["entries"][0]["defaultEvidence"] = ["oc-other"]
+        self.assertTrue(any("inconsistent unresolved configuration metadata" in error
+                            or "must equal its exact setting rows" in error for error in
+                            errors(incomplete)))
+
+        inconsistent = copy.deepcopy(document)
+        inconsistent["entries"][1]["default"] = "RAVENROOT_MAX_RETRIES"
+        self.assertTrue(any("inconsistent unresolved configuration metadata" in error
+                            for error in errors(inconsistent)))
+
+    def test_public_check_rejects_disabled_reconciliation_history(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            report = root / "docs/architecture/operational-configuration-audit.md"
+            inventory.parent.mkdir(parents=True)
+            report.parent.mkdir(parents=True)
+            document = {
+                "schemaVersion": audit.SCHEMA_VERSION,
+                "reconciliationRequired": False,
+                "reconciliationHistory": [],
+                "entries": [], "retiredEntries": [], "migrationHistory": [],
+                "evidenceRecords": {},
+            }
+            inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+            report.write_text(audit.render_report(document), encoding="utf-8")
+            errors = audit.check(root, inventory, report, require_complete=False)
+        self.assertTrue(any("requires reconciliationRequired=true" in error for error in errors), errors)
 
     def test_yaml_duplicate_default_removal_is_tied_to_exact_path_and_typed_default(self) -> None:
         with synthetic_repository() as location:

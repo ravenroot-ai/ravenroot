@@ -123,13 +123,20 @@ public final class SqliteArtifactRegistry implements ArtifactRegistry, AutoClose
     }
 
     public static SqliteArtifactRegistry openUnder(Path directory, ArtifactProvenanceVerifier verifier) {
+        return openUnder(directory, verifier, SqliteConnectionPolicy.DEFAULTS);
+    }
+
+    /** Opens with an explicit connection contention policy. */
+    public static SqliteArtifactRegistry openUnder(Path directory, ArtifactProvenanceVerifier verifier,
+                                                   SqliteConnectionPolicy connectionPolicy) {
+        java.util.Objects.requireNonNull(connectionPolicy, "connectionPolicy");
         if (directory == null || verifier == null) throw new IllegalArgumentException("directory and verifier are required");
         Path file = directory.toAbsolutePath().normalize().resolve(FILE_NAME);
         Connection opened = null;
         try {
             Files.createDirectories(file.getParent());
             opened = DriverManager.getConnection("jdbc:sqlite:" + file);
-            prepare(opened);
+            prepare(opened, connectionPolicy);
             return new SqliteArtifactRegistry(opened, file, verifier);
         } catch (SQLException | java.io.IOException | RuntimeException failure) {
             if (opened != null) {
@@ -139,7 +146,8 @@ public final class SqliteArtifactRegistry implements ArtifactRegistry, AutoClose
         }
     }
 
-    private static void prepare(Connection connection) throws SQLException {
+    private static void prepare(Connection connection, SqliteConnectionPolicy connectionPolicy)
+            throws SQLException {
         try (Statement statement = connection.createStatement()) {
             try (ResultSet mode = statement.executeQuery("PRAGMA journal_mode=WAL")) {
                 if (!mode.next() || !"wal".equalsIgnoreCase(mode.getString(1))) {
@@ -148,7 +156,7 @@ public final class SqliteArtifactRegistry implements ArtifactRegistry, AutoClose
             }
             statement.execute("PRAGMA synchronous=FULL");
             statement.execute("PRAGMA foreign_keys=ON");
-            statement.execute("PRAGMA busy_timeout=5000");
+            connectionPolicy.apply(connection);
             integrityCheck(statement);
             int version;
             try (ResultSet result = statement.executeQuery("PRAGMA user_version")) {

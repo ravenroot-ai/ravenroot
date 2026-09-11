@@ -109,29 +109,6 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class InMemoryExecutionStore implements ExecutionStore {
 
-    private static final Duration DEFAULT_MAX_LEASE_TTL = Duration.ofMinutes(5);
-    private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024;
-    private static final Duration DEFAULT_MAX_CLOCK_SKEW = Duration.ofSeconds(5);
-    /**
-     * Journal retention default. Twenty-four hours is an operational default and not a product
-     * promise — ADR 0010 leaves concrete retention values to configuration — but it has to be
-     * <em>some</em> declared number, because {@link #journalRetention()} is what a consumer reads to
-     * learn how long it may be disconnected and still resume.
-     */
-    private static final Duration DEFAULT_JOURNAL_RETENTION = Duration.ofHours(24);
-    /**
-     * The largest inventory page this adapter returns, matching the deployment registry's own page
-     * bound so a caller does not learn two different maxima from one product.
-     */
-    private static final int DEFAULT_MAX_INVENTORY_PAGE_SIZE = 100;
-    /**
-     * Terminal-instance retention default. Seven days, matching {@code SqliteStoreConfig}, so swapping
-     * adapters does not silently change how long a completed execution stays discoverable. The reason
-     * for the number is in that record's Javadoc; it is repeated as a constant rather than shared,
-     * because core must not depend on a persistence adapter.
-     */
-    private static final Duration DEFAULT_TERMINAL_RETENTION = Duration.ofDays(7);
-
     private final Object monitor = new Object();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
     private final Map<IdempotencyKey, IdempotencyRecord> idempotency = new LinkedHashMap<>();
@@ -170,6 +147,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final int maxPayloadBytes;
     private final Duration maxClockSkew;
     private final Duration journalRetention;
+    private final int maxInventoryPageSize;
     private final Duration terminalRetention;
     private final Duration executionResultRetention;
     private final HumanTaskPolicy humanTaskPolicy;
@@ -177,33 +155,38 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
-        this(Clock.systemUTC(), DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
+        this(Clock.systemUTC(), InMemoryExecutionStorePolicy.DEFAULTS);
     }
 
     public InMemoryExecutionStore(Clock clock) {
-        this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
+        this(clock, InMemoryExecutionStorePolicy.DEFAULTS);
     }
 
     /** Reference store using the supplied Human Task page policy. */
     public InMemoryExecutionStore(Clock clock, HumanTaskPolicy humanTaskPolicy) {
-        this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW,
-                DEFAULT_JOURNAL_RETENTION, DEFAULT_TERMINAL_RETENTION, DEFAULT_TERMINAL_RETENTION,
-                humanTaskPolicy);
+        this(clock, InMemoryExecutionStorePolicy.DEFAULTS, humanTaskPolicy);
+    }
+
+    /** Reference store using one explicit typed store policy. */
+    public InMemoryExecutionStore(Clock clock, InMemoryExecutionStorePolicy policy) {
+        this(clock, policy, HumanTaskPolicy.DEFAULTS);
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes) {
-        this(clock, maxLeaseTtl, maxPayloadBytes, DEFAULT_MAX_CLOCK_SKEW);
+        this(clock, maxLeaseTtl, maxPayloadBytes,
+                InMemoryExecutionStorePolicy.DEFAULTS.maximumClockSkew());
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew) {
-        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, DEFAULT_JOURNAL_RETENTION);
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
+                InMemoryExecutionStorePolicy.DEFAULTS.journalRetention());
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention) {
         this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
-                DEFAULT_TERMINAL_RETENTION);
+                InMemoryExecutionStorePolicy.DEFAULTS.terminalRetention());
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
@@ -241,56 +224,24 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                                   Duration maxClockSkew, Duration journalRetention,
                                   Duration terminalRetention, Duration executionResultRetention,
                                   HumanTaskPolicy humanTaskPolicy) {
-        this.executionResultRetention =
-                Objects.requireNonNull(executionResultRetention, "executionResultRetention");
-        if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
-            throw new IllegalArgumentException("executionResultRetention must be positive");
-        }
-        if (terminalRetention != null && terminalRetention.compareTo(executionResultRetention) < 0) {
-            // The same guard SqliteStoreConfig applies, on both adapters for the reason the journal
-            // guard is on both: it is a property of the contract rather than of the medium. A result
-            // names the instance and traversal it belongs to, so a result outliving its instance names
-            // a row the inventory can no longer describe. Enforcing it in only one adapter would let a
-            // deployment reach a state through the reference store that the durable store refuses, and
-            // discover the difference on the day it swapped them.
-            throw new IllegalArgumentException("terminalRetention " + terminalRetention
-                    + " cannot be shorter than executionResultRetention " + executionResultRetention
-                    + ": results would outlive the instance they name");
-        }
-        this.terminalRetention = Objects.requireNonNull(terminalRetention, "terminalRetention");
-        if (terminalRetention.isZero() || terminalRetention.isNegative()) {
-            throw new IllegalArgumentException("terminalRetention must be positive");
-        }
-        this.journalRetention = Objects.requireNonNull(journalRetention, "journalRetention");
-        if (journalRetention.isZero() || journalRetention.isNegative()) {
-            throw new IllegalArgumentException("journalRetention must be positive");
-        }
-        if (terminalRetention.compareTo(journalRetention) < 0) {
-            // The same guard SqliteStoreConfig's canonical constructor applies, and it belongs on both
-            // adapters because the reason for it is a property of the contract rather than of the
-            // medium: a terminal instance pruned while its own events are still readable leaves the
-            // journal naming an instance the inventory can no longer describe, and every event
-            // replayed from there resolves to "never existed". Enforcing it in only one adapter would
-            // let a deployment reach a state through the reference store that the durable store
-            // refuses, and discover the difference on the day it swapped them.
-            throw new IllegalArgumentException("terminalRetention " + terminalRetention
-                    + " cannot be shorter than journalRetention " + journalRetention
-                    + ": events would outlive the instance they name");
-        }
+        this(clock, new InMemoryExecutionStorePolicy(maxLeaseTtl, maxPayloadBytes, maxClockSkew,
+                journalRetention, InMemoryExecutionStorePolicy.DEFAULTS.maximumInventoryPageSize(),
+                terminalRetention, executionResultRetention), humanTaskPolicy);
+    }
+
+    /** Reference store using explicit store and Human Task policies. */
+    public InMemoryExecutionStore(Clock clock, InMemoryExecutionStorePolicy policy,
+                                  HumanTaskPolicy humanTaskPolicy) {
         this.clock = Objects.requireNonNull(clock, "clock");
-        this.maxLeaseTtl = Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");
-        if (maxLeaseTtl.isZero() || maxLeaseTtl.isNegative()) {
-            throw new IllegalArgumentException("maxLeaseTtl must be positive");
-        }
-        if (maxPayloadBytes < 1) {
-            throw new IllegalArgumentException("maxPayloadBytes must be positive");
-        }
-        this.maxPayloadBytes = maxPayloadBytes;
-        this.maxClockSkew = Objects.requireNonNull(maxClockSkew, "maxClockSkew");
+        policy = Objects.requireNonNull(policy, "policy");
+        this.maxLeaseTtl = policy.maximumLeaseTtl();
+        this.maxPayloadBytes = policy.maximumPayloadBytes();
+        this.maxClockSkew = policy.maximumClockSkew();
+        this.journalRetention = policy.journalRetention();
+        this.maxInventoryPageSize = policy.maximumInventoryPageSize();
+        this.terminalRetention = policy.terminalRetention();
+        this.executionResultRetention = policy.executionResultRetention();
         this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
-        if (maxClockSkew.isNegative()) {
-            throw new IllegalArgumentException("maxClockSkew cannot be negative");
-        }
     }
 
     @Override
@@ -921,7 +872,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     @Override
     public int maxInventoryPageSize() {
-        return DEFAULT_MAX_INVENTORY_PAGE_SIZE;
+        return maxInventoryPageSize;
     }
 
     @Override
@@ -1124,10 +1075,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return recordExecutionResult(result, maxPayloadBytes);
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
         return complete(() -> {
             requireCapability(StoreCapability.EXECUTION_RESULTS);
             Objects.requireNonNull(result, "result");
-            requireResultPayloadWithinLimit(result);
+            requireResultPayloadWithinLimit(result, resolvedMaximumPayloadBytes);
             DurableExecutionResult candidate = result.withRetainedUntil(
                     plusClamped(result.endedAt(), executionResultRetention));
             var lookup = new ResultKey(result.key().tenantId(), result.traversalId());
@@ -1229,11 +1186,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
-    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result, int maximumPayloadBytes) {
+        if (maximumPayloadBytes < 1) throw new IllegalArgumentException("maximumPayloadBytes must be positive");
         ExecutionResultPayload payload = result.payload();
-        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maxPayloadBytes) {
+        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maximumPayloadBytes) {
             throw new ExecutionStoreException(
-                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maxPayloadBytes));
+                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maximumPayloadBytes));
         }
         if (payload.state() == ResultPayloadState.EXPIRED) {
             throw new ExecutionStoreException(ExecutionStoreFailure.invalid(

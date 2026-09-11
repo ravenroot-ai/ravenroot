@@ -91,7 +91,7 @@ public final class ExecutionStoreBootstrap {
                 case ExecutionStoreConfiguration.SingleHost singleHost ->
                         openSingleHost(singleHost.location(), true, clock, graphMlLimits, humanTaskPolicy);
                 case ExecutionStoreConfiguration.Shared shared ->
-                        openShared(shared.connection(), clock, graphMlLimits, humanTaskPolicy);
+                        openShared(shared, clock, graphMlLimits, humanTaskPolicy);
             };
         } catch (RuntimeException failed) {
             throw new StartupException(classify(failed));
@@ -169,18 +169,20 @@ public final class ExecutionStoreBootstrap {
      * is {@link ExecutionStoreConfiguration.Disabled}, which the parser never produces alongside the
      * shared selector.</p>
      */
-    private static Opened openShared(SharedStoreConnection connection, Clock clock,
+    private static Opened openShared(ExecutionStoreConfiguration.Shared configuration, Clock clock,
                                      GraphMlLimits graphMlLimits,
                                      ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        SharedStoreConnection connection = configuration.connection();
+        PostgresStoreConfig storeConfig = configuration.storeConfig();
         var pool = SharedExecutionStoreDataSource.open(connection);
         try {
             var store = new PostgresExecutionStore(pool.dataSource(), clock,
-                    PostgresStoreConfig.defaults(), humanTaskPolicy);
+                    storeConfig, humanTaskPolicy);
             GraphDefinitionStore definitions;
             try {
                 definitions = new PostgresGraphDefinitionStore(pool.dataSource(), clock,
                         ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE,
-                        graphMlLimits.maxBytes());
+                        graphMlLimits.maxBytes(), storeConfig);
             } catch (RuntimeException failed) {
                 store.close();
                 throw failed;
@@ -188,7 +190,8 @@ public final class ExecutionStoreBootstrap {
             ExecutionManifestStore manifests;
             try {
                 manifests = new PostgresExecutionManifestStore(pool.dataSource(), clock,
-                        ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE);
+                        ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE,
+                        configuration.manifestPinAttempts(), storeConfig);
             } catch (RuntimeException failed) {
                 try {
                     definitions.close();

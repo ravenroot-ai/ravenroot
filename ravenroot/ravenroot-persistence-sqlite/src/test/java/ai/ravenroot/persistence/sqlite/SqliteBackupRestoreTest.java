@@ -236,6 +236,18 @@ class SqliteBackupRestoreTest {
         }
     }
 
+    @Test
+    void configuredDirectoriesShareOneDefaultAndBlankTrimRule() {
+        var expectedDefault = SqliteStoreLocation.underDirectory(
+                Path.of(SqliteStoreLocation.DEFAULT_DIRECTORY));
+        assertEquals(expectedDefault, SqliteStoreLocation.underConfiguredDirectory(null));
+        for (String blank : new String[] {"", "  ", "\t"}) {
+            assertEquals(expectedDefault, SqliteStoreLocation.underConfiguredDirectory(blank));
+        }
+        assertEquals(SqliteStoreLocation.underDirectory(Path.of("/srv/ravenroot/store")),
+                SqliteStoreLocation.underConfiguredDirectory("  /srv/ravenroot/store  "));
+    }
+
     private static long countInstances(Path database) throws SQLException {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
              Statement statement = connection.createStatement();

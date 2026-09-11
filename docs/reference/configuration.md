@@ -2,6 +2,24 @@
 
 Configuration is environment-owned. A graph cannot select an engine, authentication mode, browser origin, credential backend, adapter, sandbox, or egress policy.
 
+## Helm values compatibility
+
+The Helm values schema is closed over the fields published in `values.yaml`. Older chart revisions
+allowed additional nested keys under `resources`, `podSecurityContext`, `securityContext`, and
+`probes` to pass through `toYaml` without a chart contract. Those undocumented extensions are no
+longer accepted. Before upgrading, remove such keys or apply the required Kubernetes fields with a
+post-renderer or maintained chart/template customization. Supported resource quantities, pod and container
+identity fields, probe timing, storage, image, Service, OIDC, and runtime-policy carriers remain
+available as named values and reject invalid input before a workload is rendered. The packaged chart
+now fixes `engine=pekko`, `podSecurityContext.runAsNonRoot=true`, RuntimeDefault seccomp,
+`securityContext.allowPrivilegeEscalation=false`, `securityContext.readOnlyRootFilesystem=true`,
+capability drop `ALL`, and positive pod/container user and group IDs. Previously valid overrides that
+weakened those named pod-security controls or selected a different packaged-image contract must use
+the post-renderer or maintained chart/template customization path. Quote resource
+quantities in values files and use `--set-string` for unitless quantities, such as
+`--set-string resources.limits.cpu=2`; numeric YAML quantities that older charts passed through must
+be changed to strings before upgrading.
+
 ## Runtime and behavior resolution
 
 | Variable | Default | Accepted contract |
@@ -211,6 +229,13 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_ARTIFACT_DUAL_CONTROL` | strict Boolean `false` | `true` requires a second approval authority |
 | `RAVENROOT_ARTIFACT_PROVENANCE` | `refusing` | `unverified` is an explicit unsafe-development opt-out; other values refuse |
 
+The Java baseline for `RAVENROOT_PROGRAM_TIMEOUT_MS` is `5000` ms. The Helm chart deliberately sets
+`programTimeoutMs: 15000` as its F30 cold-start bridge, while Compose uses a `30000` ms local-development
+profile. Helm validates configured integers from `100` through `300000`; an explicit blank Helm overlay
+delegates to the Java baseline. The program deadline participates in the execution compatibility
+fingerprint, so retain `15000` explicitly when work must keep the Helm profile rather than assuming a
+changed deadline can resume it.
+
 Allowed hosts and allowed agent tools are operator allowlists. Empty or absent privileged configuration does not expand access.
 
 ## Agent authority and budgets
@@ -359,9 +384,9 @@ API keys and tokens never belong in GraphML. Credential POST writes secret mater
 | `RAVENROOT_CREDENTIAL_<REFERENCE_UTF8_HEX>` | legacy operator secret family for exact opaque references; absent means unavailable |
 | `RAVENROOT_HTTP_ALLOWED_HOSTS` | comma-separated exact outbound hosts; empty denies every host |
 | `RAVENROOT_HTTP_ALLOWED_PORTS` | comma-separated ports; blank selects the bounded default `80,443` |
-| `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | request-body byte ceiling; blank, zero, or negative selects 1 MiB (`1048576`) |
-| `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | response-body byte ceiling; blank, zero, or negative selects 8 MiB (`8388608`) |
-| `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | comma-separated reviewed reserved-network exceptions; empty |
+| `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | request-body byte ceiling; unset or blank selects 1 MiB (`1048576`); an explicit value must be a positive whole number of bytes |
+| `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | response-body byte ceiling; unset or blank selects 8 MiB (`8388608`); an explicit value must be a positive whole number of bytes |
+| `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | comma-separated reviewed reserved-network exceptions; unset or blank preserves `localhost:LOOPBACK` |
 | `RAVENROOT_TOKEN` | remote CLI bearer token when `--token-file` is absent; no default |
 
 Environment credentials are startup configuration. User credentials stored through the governed API
@@ -377,6 +402,10 @@ persist in the credential database and can rotate without rebuilding GraphML. Se
 | `RAVENROOT_AUDIT_DIR` | tamper-evident audit directory; `./data/audit` |
 | `RAVENROOT_CREDENTIAL_DIR` | credential database directory; `./data/credentials` |
 | `RAVENROOT_ARTIFACT_STORE_DIR` | artifact database directory; `/opt/ravenroot/data/artifact-store` |
+
+The audit and execution-store directory values are trimmed. Unset or blank values delegate to the
+listed defaults in both the server and the offline backup/restore CLI, so both composition roots
+address the same files.
 
 Directory changes require restart and do not migrate existing data. Stop the service before offline
 backup or restore and use the [persistence lifecycle](../operator-guide/persistence-lifecycle.md).

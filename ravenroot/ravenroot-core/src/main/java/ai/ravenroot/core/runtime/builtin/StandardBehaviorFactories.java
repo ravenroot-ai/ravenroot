@@ -55,6 +55,18 @@ public final class StandardBehaviorFactories {
                                                 PublicationAuditSink publicationAudit,
                                                 ai.ravenroot.core.humantask.HumanTaskService humanTasks,
                                                 ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        return all(environment, publicationPolicies, publicationAudit, humanTasks, humanTaskPolicy, null);
+    }
+
+    /** Core catalog with a runtime-owned resolver for execution-scoped operational values. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit,
+                                                ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                                java.util.function.Function<ai.ravenroot.api.execution.NodeMessage,
+                                                        ai.ravenroot.api.persistence.ResolvedOperationalPolicy>
+                                                        operationalPolicies) {
         return List.of(
                 new LogNodeBehaviorFactory(),
                 new DelayNodeBehaviorFactory(),
@@ -65,7 +77,7 @@ public final class StandardBehaviorFactories {
                 new CelDecisionNodeBehaviorFactory(),
                 new JsonPathNodeBehaviorFactory(),
                 new HttpRequestNodeBehaviorFactory(environment.outboundHttpPolicy(), environment.credentials(),
-                        environment.toolPolicy()),
+                        environment.toolPolicy(), operationalPolicies),
                 new ProgramNodeBehaviorFactory(environment.artifacts(), environment.programRuntime(),
                         environment.toolPolicy()),
                 new BoundaryGuardNodeBehaviorFactory(

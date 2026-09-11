@@ -61,11 +61,10 @@ reports the differing dimensions and nothing else, which answers whether a calle
 still be reproduced without answering what is installed on the servers running it.
 
 Before initial dispatch and before every recovery, resume, restart after a hold and ownership
-takeover, the manifest is read back, re-digested from its stored fields, and compared for equality
-against what the runtime resolves now. Every dimension is compared exactly; there is no
-"close enough" rule, because this contract has no basis for deciding which differences are harmless.
-A package installed since acceptance that the execution never used is not a difference: the document
-decides which behaviors run and the document is pinned exactly.
+takeover, the manifest is read back and re-digested from its stored fields. Identity and compatibility
+dimensions are compared exactly. Format 2's operational values are restored instead of compared with
+current defaults. A package installed since acceptance that the execution never used is not a
+difference: the document decides which behaviors run and the document is pinned exactly.
 
 A missing, corrupt, digest-mismatched or incompatible manifest fails closed with a typed outcome and
 a bounded diagnostic naming each differing dimension and both of its values. No similar graph,
@@ -74,16 +73,108 @@ neither dispatched nor acknowledged: it stays claimable, which is that loop's ex
 answer, and the refusal is logged because a boolean `supports` cannot carry the reason and the
 condition never resolves on its own.
 
-**The two reachable defects above are detected and refused, not repaired.** The pinned recovery
-runner still hard-codes the standard policy and still takes today's limits; what changes is that a
-composition holding a manifest refuses to reach it rather than running it. That distinction is
-load-bearing in both directions. A deployment that composes a manifest store gets a refusal instead
-of a silent substitution. A deployment that composes none — which is every constructor except the
-widest one, and therefore the default an embedder gets — verifies nothing, and both substitutions
-still happen exactly as before. Repairing them is separate work with its own decisions to make: a
-resumed pass-through traversal has no defined meaning today, and restoring limits would require the
-manifest to carry their values rather than a digest, which is a different disclosure decision than
-the one taken below.
+Before format 2, format 1 detected and refused the two reachable defects above without repairing
+them. The format 1 recovery runner hard-coded the standard policy and took the then-current limits;
+a composition holding a manifest refused mismatches before reaching it, while a composition with no
+manifest store performed no verification. That historical boundary is why a format 1 row cannot be
+silently promoted: it never contained the values that format 2 restores.
+
+### Operational policy format 2
+
+Manifest format 2 closes that deferred work for new executions. In addition to the format 1
+identities and digests, it stores the complete resolved `GraphExecutionLimits` tuple, whether durable
+results are enabled and their maximum retained payload size, and the finite byte, duration,
+concurrency and queue capacities for each node package the accepted graph actually uses. Package
+capacity records explicitly distinguish a package with no managed egress from one with bounded
+managed egress. A graph-scoped record also stores the request, response and timeout ceilings for the
+core `http-request` behavior when that behavior is present. These records never contain destinations,
+headers, credential references, credentials,
+allowlists, bearer material or an authorization decision.
+
+The stored values are the authority for every dispatch and continuation of that process instance.
+Current environment defaults neither widen nor narrow them. Request-specific external-I/O limits may
+narrow the stored capacities, while destination authorization, credential resolution and revocation
+remain live checks. The runtime resolves policy from the stored manifest and binds it to the trusted
+execution and traversal identity before a package handler can run; values carried by a package-created
+message are not an authority. Durable result encoding and adapter validation use the same stored
+payload maximum.
+
+| Pinned field family | Typed acceptance-time authority | Resolution precedence |
+| --- | --- | --- |
+| Graph parsing, payload and traversal limits | `GraphExecutionLimits` | A new process snapshots the composed value. Every manifest-backed dispatch and continuation uses the stored tuple; current environment values apply only to later process instances. |
+| Durable-result availability and payload cap | `ExecutionStore.capabilities()` and `ExecutionStore.maxExecutionResultPayloadBytes()` | Acceptance snapshots the composed adapter decision. Result encoding and the adapter validate against that stored cap even when the current adapter default is higher or lower. |
+| Managed node-package I/O capacities | `NodePackageServices.egressCapacityProfile()` as `NodePackageEgressCapacityProfile` | Acceptance stores profiles only for packages used by the graph. A request may narrow its stored profile; current numeric service defaults cannot replace it. |
+| Core `http-request` request, response and timeout ceilings | `BehaviorEnvironment.outboundHttpPolicy()` as `OutboundHttpPolicy` | Acceptance stores the values only when the graph uses `http-request`. The stored ceilings control its later requests; current destination, port, tool and credential authorization still run independently. |
+
+Format 1 remains byte-for-byte readable and keeps its original digest calculation. A format 1
+execution may continue only when its legacy digest proves the current graph-limit tuple is identical,
+the legacy store digest proves durable results were disabled, and trusted behavior registration proves
+that its graph cannot call any operationally bounded external I/O, including the core HTTP behavior.
+If either newly required numeric policy could matter, the
+runtime returns `LEGACY_OPERATIONAL_POLICY_UNAVAILABLE`; it does not fill the missing value from the
+current environment and does not overwrite the write-once format 1 row with format 2.
+
+### Generic persistence capacity format 3
+
+Manifest format 3 adds the execution store's generic maximum payload size as a separate persisted
+value. It is deliberately distinct from the durable-result limit: results may be disabled, and a
+custom result accessor may impose a different maximum from the store that persists process events,
+timers, approvals and authority budgets. A server-managed process therefore snapshots the actual
+composed execution store capacity at acceptance. The managed store verifies the pinned manifest
+identity and capacity atomically with the first process write, and requires the immutable live store
+capacity to equal the pin before later new writes or claims. A higher current capacity cannot widen
+the accepted policy, and a lower one cannot silently make only some continuations writable.
+
+Fencing and matching idempotent replay retain their existing precedence. A matching committed replay
+returns its recorded result without creating a new fold even when the current capacity differs;
+stale fencing still refuses. Candidate discovery is read-only, but pending-work and timer claims are
+restricted transactionally to keys whose format 3 manifest and generic capacity were verified. Live
+authorization and tenant isolation remain independent checks.
+
+Formats 1 and 2 remain byte-for-byte readable with their original digests. They did not record a
+generic persistence capacity, and the durable-result field cannot establish it. Server-managed paths
+therefore refuse new writes and claims for those rows with a typed missing-policy outcome rather than
+inventing a historical value. Before format 4, unmanaged adapter compositions kept their format 2
+contract, and new process instances pinned format 3 only when the composed execution store provided
+the managed atomic manifest/process boundary. Format 4 changes the new-admission representation as
+described below without changing those stored rows.
+
+### External-I/O execution envelope format 4
+
+Manifest format 4 adds the decompression-ratio component of each used node package's capacity and
+the quantitative envelope of each non-bypassed pin-capable graph node. A node entry contains a
+canonical digest of its graph node, package and behavior binding together with message bytes,
+fragment count, timeout and concurrency. It does not contain the profile destination, headers,
+subprotocols, credential reference or secret. Those remain live authorization and can revoke a
+recovered operation.
+
+The runtime validates the graph before calling package capacity code, resolves the quantitative
+values once for admission, and reuses that exact snapshot for the manifest and handler construction.
+A hosted deployment materializes pin-capable handlers once per active traversal, selected by the
+runtime's process, traversal and node identity; overlapping executions accepted under different
+profile revisions therefore keep their own bounds. Their sends still compete in the same
+tenant-and-profile admission counter, with each operation applying its own pinned maximum.
+
+Format 4 represents generic persistence capacity separately and explicitly. A server-managed
+execution carries the capacity and retains format 3's atomic first-write and claim checks. An
+unmanaged embedded composition carries an absent persistence disposition rather than inventing a
+store limit, while still pinning external-I/O values. Managed writes continue to refuse that absent
+authority.
+
+Formats 1 through 3 keep their original bytes and digests. The historical package policy admitted
+caller decompression ratios through the fixed platform ceiling of 1000, so decoding a format 2 or 3
+package record restores exactly 1000 rather than the new-admission default of 100. Older manifests
+did not carry node-bound I/O. Recovery therefore refuses an older row when its graph contains a
+non-bypassed pin-capable node, and does not fill the missing values from today's profile. An authored
+bypass remains a structural statement that the behavior is neither resolved nor constructed.
+
+Inbound sources have no execution key and do not put their receive-loop settings into a manifest.
+Their core-issued context is instead bound to one deployment activation generation. Construction is
+deny-only, activation occurs immediately before start, and rollback, stop, restart or undeploy revoke
+ingress, health reporting, credential lookups, new transport calls and handed-off managed sessions
+before package cleanup callbacks run. Cancellation requests are cooperative; admission remains held
+until the managed resource actually settles, rather than claiming that arbitrary plugin or JDK work
+has stopped within a fixed wall-clock duration.
 
 A comparison covers the dependency profile and the node packages. It does not cover the graph content
 address or the logical graph identity, because a caller obtains the "current" side by describing the
@@ -114,8 +205,8 @@ substitution this record exists to prevent.
 - Enabling manifests on a database that already holds accepted executions makes those executions
   unrecoverable through the paths that verify. They remain readable and remain retained; what is
   refused is resuming them.
-- The two reachable recovery defects remain live wherever no manifest store is composed, which is
-  every composition that does not opt in. The manifest makes them refusable, not absent.
+- The two reachable recovery defects remain live wherever no manifest store is composed. Format 2
+  removes them where a manifest is present by restoring the values that were accepted.
 - Three dependency classes are pinned less than completely, and the manifest's wording claims only
   what it records. A node package is pinned by id and by a digest of its declared version and SDK
   contract, never by a digest of its content, so a package republished under an unchanged version is not
@@ -135,6 +226,18 @@ substitution this record exists to prevent.
   list. It is never the deployment's current inventory, it appears only once packages already
   differ, and it is bounded. Collapsing the duplicates would hide whether one package changed or
   five, which is worth more to the caller than the residual costs it.
-- The comparison is intolerant by design, so an operator changing an execution limit, an engine
-  capability or an installed package version will find retained work refusing to resume until that
-  change is reverted or the work is abandoned deliberately.
+- Identity and compatibility comparisons remain intolerant. Changing an engine capability or a used
+  package version refuses retained work. Changing a current numeric default does not alter a format 2
+  execution; format 1 still requires its original graph-limit digest to match exactly.
+- Format 3 makes generic persistence capacity an explicit compatibility boundary for managed server
+  execution. Increasing or decreasing that deployment value refuses new managed effects for an
+  existing process, while an already committed matching replay remains observable. Formats 1 and 2
+  are retained but cannot authorize managed persistence after upgrade because neither format proves
+  the historical generic capacity.
+- Format 4 makes quantitative package decompression and pin-capable node I/O reproducible without
+  freezing destinations or credentials. Existing format 2 and 3 rows remain recoverable when the
+  graph has no non-bypassed pin-capable node; affected rows refuse rather than inheriting current
+  profile values.
+- Source receive loops keep deployment-lifecycle settings rather than execution-manifest settings.
+  Their authority is narrower in a different dimension: a retained context cannot mutate ingress,
+  health, credentials or managed transport after its activation generation is retired.

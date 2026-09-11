@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import sys
 from dataclasses import dataclass
@@ -14,6 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "ravenroot"
 OUTPUT = ROOT / "docs" / "reference" / "environment-variables.md"
 VARIABLE = re.compile(r'"(RAVENROOT_[A-Z0-9_]+)"')
+
+# This reviewed literal is a startsWith namespace guard, not an environment key
+# or an open dynamic family. Pin the complete source so even a benign file change
+# requires re-review: a new use of the same literal must never be silently hidden.
+NAMESPACE_GUARDS = {
+    "RAVENROOT_POSTGRES_": (
+        Path("ravenroot-server/src/main/java/ai/ravenroot/server/persistence/PostgresStoreConfiguration.java"),
+        "e3a609fbe2ac3ba67429c08b3a18465210a75a35ee4b8ab25f17548571289f45",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -70,6 +81,20 @@ ROW_BOUNDARIES = {
     ),
     "RAVENROOT_PLUGINS_INSTALL_DIR": "installed-bundle directory; unset defaults to `/opt/ravenroot/plugins`",
     "RAVENROOT_REPLICAS": "positive replica count; unset defaults to `1`",
+    "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS": (
+        "PostgreSQL-only positive lost-race repair bound; unset defaults to `3`"
+    ),
+    "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS": "PostgreSQL lock wait in positive whole milliseconds; default `5000`",
+    "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS": "PostgreSQL statement bound in positive whole milliseconds; default `30000` and no shorter than lock timeout",
+    "RAVENROOT_POSTGRES_SERIALIZATION_RETRIES": "PostgreSQL serialization/deadlock retry count; default `3`, zero allowed",
+    "RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS": "PostgreSQL execution-store lease ceiling; default `300` seconds",
+    "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES": "PostgreSQL generic payload capacity; default `1048576` bytes and pinned for new managed executions",
+    "RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS": "PostgreSQL lease clock-skew budget; default `5` seconds, zero allowed",
+    "RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS": "PostgreSQL journal retention; default `86400` seconds",
+    "RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE": "PostgreSQL inventory page ceiling; default `100` rows",
+    "RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS": "PostgreSQL terminal-process retention; default `604800` seconds",
+    "RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS": "PostgreSQL durable-result retention; default `604800` seconds",
+    "RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS": "PostgreSQL definition insert/removal race attempts; default `3`",
     "RAVENROOT_TRUSTED_PROXY_ADDRESSES": (
         "comma-separated exact IP literals trusted as proxy peers; blank trusts none"
     ),
@@ -92,7 +117,11 @@ BUNDLE_PREFIXES = (
 def variables() -> dict[str, tuple[Path, ...]]:
     found: dict[str, set[Path]] = {}
     for source in sorted(SOURCE.rglob("src/main/java/**/*.java")):
-        for name in VARIABLE.findall(source.read_text(encoding="utf-8")):
+        content = source.read_bytes()
+        source_identity = (source.relative_to(SOURCE), hashlib.sha256(content).hexdigest())
+        for name in VARIABLE.findall(content.decode("utf-8")):
+            if NAMESPACE_GUARDS.get(name) == source_identity:
+                continue
             found.setdefault(name, set()).add(source)
     return {name: tuple(sorted(paths)) for name, paths in sorted(found.items())}
 
@@ -141,8 +170,23 @@ def group(name: str) -> str:
     if name.startswith(("RAVENROOT_GRAAL_", "RAVENROOT_PROGRAM_", "RAVENROOT_ARTIFACT_")):
         return "program"
     if name.startswith("RAVENROOT_EXECUTION_STORE") \
+            or name == "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS" \
             or name in {"RAVENROOT_AUDIT_DIR", "RAVENROOT_CREDENTIAL_DIR",
                         "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS", "RAVENROOT_WORKER_ID"}:
+        return "persistence"
+    if name in {
+        "RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS",
+        "RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS",
+        "RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS",
+        "RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS",
+        "RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS",
+        "RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE",
+        "RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS",
+        "RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES",
+        "RAVENROOT_POSTGRES_SERIALIZATION_RETRIES",
+        "RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS",
+        "RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS",
+    }:
         return "persistence"
     if name.startswith(("RAVENROOT_ENABLED_PLUGINS", "RAVENROOT_NODE_PACKAGE_SERVICES_")) \
             or name in {"RAVENROOT_NODE_PACKAGES", "RAVENROOT_PLUGINS_INSTALL_DIR"}:
@@ -171,9 +215,10 @@ def render() -> str:
     body = [
         "# Production environment-variable inventory", "",
         "This generated inventory covers every literal `RAVENROOT_*` environment name read by",
-        "production Java at the documented development baseline. Prefixes ending in `_` are dynamic",
+        "production Java at the documented development baseline. Published prefixes ending in `_` are dynamic",
         "families completed by a profile, tenant, credential, or package key as described by the linked",
-        "contract. Repository shell tooling has its own environment table in the",
+        "contract. Reviewed namespace guards that do not read a key or define a dynamic family are excluded.",
+        "Repository shell tooling has its own environment table in the",
         "[command-line tools manual](command-line-tools.md).", "",
         "<!-- Generated by scripts/publish_environment_reference.py; do not edit directly. -->", "",
         "Environment values are generally read at process startup; a row can identify lazy package parsing",

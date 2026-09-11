@@ -1,11 +1,14 @@
 package ai.ravenroot.server.persistence;
 
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
+import ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore;
+import ai.ravenroot.persistence.postgresql.PostgresStoreConfig;
 
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 
 /**
  * Which execution store this server composes, and where it lives.
@@ -50,6 +53,7 @@ public sealed interface ExecutionStoreConfiguration {
      * has no matching deployment shape.</p>
      */
     String SELECTOR_VARIABLE = "RAVENROOT_EXECUTION_STORE";
+    String SELECTOR_PROPERTY = "ravenroot.execution-store";
 
     /** Set to {@code true}, or to {@code false} (or {@code off}/{@code 0}/{@code no}). */
     String ENABLED_VARIABLE = "RAVENROOT_EXECUTION_STORE_ENABLED";
@@ -68,9 +72,16 @@ public sealed interface ExecutionStoreConfiguration {
 
     /** Largest number of connections this replica's pool opens against the shared database. */
     String POOL_SIZE_VARIABLE = "RAVENROOT_EXECUTION_STORE_POOL_SIZE";
+    String POOL_SIZE_PROPERTY = "ravenroot.execution-store.pool-size";
 
     /** How long a caller waits for a pooled connection before the operation is reported unavailable. */
     String POOL_TIMEOUT_VARIABLE = "RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS";
+    String POOL_TIMEOUT_PROPERTY = "ravenroot.execution-store.pool-timeout-ms";
+
+    /** Lost-race repair attempts for write-once PostgreSQL execution manifests. */
+    String MANIFEST_PIN_ATTEMPTS_VARIABLE = "RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS";
+
+    int DEFAULT_MANIFEST_PIN_ATTEMPTS = PostgresExecutionManifestStore.DEFAULT_MAX_PIN_ATTEMPTS;
 
     /** The selector value naming the single-host store; also the value assumed when unset. */
     String SQLITE_SELECTOR = "sqlite";
@@ -79,7 +90,10 @@ public sealed interface ExecutionStoreConfiguration {
     String POSTGRESQL_SELECTOR = "postgresql";
 
     /** The single-host directory used when {@link #DIRECTORY_VARIABLE} is unset. */
-    String DEFAULT_DIRECTORY = "./data/execution-store";
+    String DEFAULT_DIRECTORY = SqliteStoreLocation.DEFAULT_DIRECTORY;
+
+    /** The enabled state selected when {@link #ENABLED_VARIABLE} is absent or blank. */
+    static final String DEFAULT_ENABLED_VALUE = "true";
 
     /**
      * No execution store at all, with a single-host location retained as maintenance-lock authority.
@@ -108,9 +122,22 @@ public sealed interface ExecutionStoreConfiguration {
      *
      * @param connection everything needed to build a pool against that database.
      */
-    record Shared(SharedStoreConnection connection) implements ExecutionStoreConfiguration {
+    record Shared(SharedStoreConnection connection, int manifestPinAttempts, PostgresStoreConfig storeConfig)
+            implements ExecutionStoreConfiguration {
         public Shared {
             Objects.requireNonNull(connection, "connection");
+            Objects.requireNonNull(storeConfig, "storeConfig");
+            if (manifestPinAttempts < 1) {
+                throw new IllegalArgumentException("manifestPinAttempts must be positive");
+            }
+        }
+
+        public Shared(SharedStoreConnection connection) {
+            this(connection, DEFAULT_MANIFEST_PIN_ATTEMPTS, PostgresStoreConfig.defaults());
+        }
+
+        public Shared(SharedStoreConnection connection, int manifestPinAttempts) {
+            this(connection, manifestPinAttempts, PostgresStoreConfig.defaults());
         }
     }
 
@@ -122,8 +149,31 @@ public sealed interface ExecutionStoreConfiguration {
      * @throws IllegalArgumentException when any setting is malformed or two settings contradict.
      */
     static ExecutionStoreConfiguration fromEnvironment(Map<String, String> environment) {
+        return fromSources(Map.of(), environment);
+    }
+
+    /** Resolves system properties before environment variables; blank values delegate. */
+    static ExecutionStoreConfiguration fromSystem(Properties properties, Map<String, String> environment) {
+        Objects.requireNonNull(properties, "properties");
+        Map<String, String> propertyValues = properties.stringPropertyNames().stream()
+                .collect(java.util.stream.Collectors.toMap(name -> name, properties::getProperty));
+        return fromSources(propertyValues, environment);
+    }
+
+    private static ExecutionStoreConfiguration fromSources(Map<String, String> properties,
+                                                           Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
-        String selector = selectorIn(environment);
+        String selector = selectorIn(properties, environment);
+        if (!POSTGRESQL_SELECTOR.equals(selector)
+                && postgresqlOnlyPolicyConfigured(properties, environment)) {
+            throw new IllegalArgumentException("PostgreSQL policy requires " + SELECTOR_VARIABLE
+                    + "=" + POSTGRESQL_SELECTOR);
+        }
+        if (!POSTGRESQL_SELECTOR.equals(selector)
+                && isConfigured(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE)) {
+            throw new IllegalArgumentException(MANIFEST_PIN_ATTEMPTS_VARIABLE + " requires "
+                    + SELECTOR_VARIABLE + "=" + POSTGRESQL_SELECTOR);
+        }
         if (!enabledIn(environment)) {
             if (POSTGRESQL_SELECTOR.equals(selector)) {
                 // Refused rather than resolved in favour of one of the two. "Off" is not simply
@@ -143,7 +193,12 @@ public sealed interface ExecutionStoreConfiguration {
         }
         return switch (selector) {
             case SQLITE_SELECTOR -> new SingleHost(singleHostLocation(environment));
-            case POSTGRESQL_SELECTOR -> new Shared(SharedStoreConnection.fromEnvironment(environment));
+            case POSTGRESQL_SELECTOR -> {
+                PostgresStoreConfig config = PostgresStoreConfiguration.fromSources(properties, environment);
+                yield new Shared(SharedStoreConnection.fromSources(properties, environment, config),
+                    positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE,
+                            DEFAULT_MANIFEST_PIN_ATTEMPTS), config);
+            }
             // Unreachable: selectorIn rejects everything else. Present because the switch is over a
             // String and a future third selector must fail here rather than fall through to null.
             default -> throw new IllegalArgumentException(SELECTOR_VARIABLE + " is not supported");
@@ -163,8 +218,9 @@ public sealed interface ExecutionStoreConfiguration {
      * checked. Case is folded because {@code Postgresql} and {@code POSTGRESQL} are the same
      * intention, and refusing them would be pedantry rather than caution.
      */
-    private static String selectorIn(Map<String, String> environment) {
-        String raw = environment.get(SELECTOR_VARIABLE);
+    private static String selectorIn(Map<String, String> properties, Map<String, String> environment) {
+        String raw = properties.get(SELECTOR_PROPERTY);
+        if (raw == null || raw.isBlank()) raw = environment.get(SELECTOR_VARIABLE);
         if (raw == null || raw.isBlank()) {
             return SQLITE_SELECTOR;
         }
@@ -179,16 +235,7 @@ public sealed interface ExecutionStoreConfiguration {
     }
 
     private static SqliteStoreLocation singleHostLocation(Map<String, String> environment) {
-        String raw = environment.get(DIRECTORY_VARIABLE);
-        Path directory;
-        try {
-            directory = Path.of(raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim());
-        } catch (RuntimeException invalidPath) {
-            // Do not retain the cause: an uncaught InvalidPathException repeats the raw environment
-            // value in its message, while the only useful startup answer is that this setting is invalid.
-            throw new IllegalArgumentException("Invalid execution store directory configuration");
-        }
-        return SqliteStoreLocation.underDirectory(directory);
+        return SqliteStoreLocation.underConfiguredDirectory(environment.get(DIRECTORY_VARIABLE));
     }
 
     /**
@@ -198,14 +245,39 @@ public sealed interface ExecutionStoreConfiguration {
      */
     private static boolean enabledIn(Map<String, String> environment) {
         String raw = environment.get(ENABLED_VARIABLE);
-        if (raw == null || raw.isBlank()) {
-            return true;
-        }
-        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+        String selected = raw == null || raw.isBlank()
+                ? DEFAULT_ENABLED_VALUE
+                : raw.trim().toLowerCase(Locale.ROOT);
+        return switch (selected) {
             case "true" -> true;
             case "false", "off", "0", "no" -> false;
             default -> throw new IllegalArgumentException(ENABLED_VARIABLE
                     + " must be 'true', 'false', 'off', '0', or 'no'");
         };
+    }
+
+    /** A blank value has the same meaning as an absent optional environment setting. */
+    private static boolean isConfigured(Map<String, String> environment, String variable) {
+        String raw = environment.get(variable);
+        return raw != null && !raw.isBlank();
+    }
+
+    private static boolean postgresqlOnlyPolicyConfigured(Map<String, String> properties,
+                                                          Map<String, String> environment) {
+        return PostgresStoreConfiguration.anyConfigured(properties, environment)
+                || isConfigured(properties, POOL_SIZE_PROPERTY)
+                || isConfigured(properties, POOL_TIMEOUT_PROPERTY);
+    }
+
+    private static int positiveInt(Map<String, String> environment, String variable, int fallback) {
+        String raw = environment.get(variable);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) throw new NumberFormatException();
+            return value;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalArgumentException(variable + " must be a positive integer");
+        }
     }
 }

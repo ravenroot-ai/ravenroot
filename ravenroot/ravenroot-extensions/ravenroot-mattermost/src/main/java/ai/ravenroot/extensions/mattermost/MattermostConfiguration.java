@@ -67,7 +67,8 @@ record MattermostConfiguration(IngressAuthorityDeclaration authority,
                 (int) MattermostValues.number(value.get("maxConcurrentRequests"), 1, 1_024),
                 MattermostValues.number(value.get("maxRequestBytes"), 1, 16L * 1024 * 1024),
                 MattermostValues.number(value.get("maxResponseBytes"), 1, 16L * 1024 * 1024),
-                Duration.ofMillis(MattermostValues.number(value.get("requestTimeoutMs"), 100, 2_800)));
+                Duration.ofMillis(MattermostValues.number(value.get("requestTimeoutMs"), 100,
+                        MattermostProfile.MAX_ACK_TIMEOUT_MS)));
     }
     private static IngressRequestProjectionPolicy projection(Map<String, Object> value) {
         MattermostValues.exact(value, Set.of("maxRelativePathBytes", "maxQueryParameters", "maxQueryBytes",
@@ -106,7 +107,8 @@ record MattermostConfiguration(IngressAuthorityDeclaration authority,
                 (int) MattermostValues.number(limits.get("maxResponseBytes"), 1, 1024 * 1024),
                 (int) MattermostValues.number(limits.get("maxConcurrency"), 1, 64),
                 (int) MattermostValues.number(limits.get("maxPerSecond"), 1, 100),
-                (int) MattermostValues.number(limits.get("requestTimeoutMs"), 100, 2_800),
+                (int) MattermostValues.number(limits.get("requestTimeoutMs"), 100,
+                        MattermostProfile.MAX_ACK_TIMEOUT_MS),
                 (int) MattermostValues.number(limits.get("retries"), 0, 3));
     }
     record StorePolicy(Path path, int maxDeliveries, int retentionHours) {

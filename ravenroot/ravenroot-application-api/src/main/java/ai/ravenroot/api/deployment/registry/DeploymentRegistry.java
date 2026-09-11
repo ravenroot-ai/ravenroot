@@ -368,7 +368,8 @@ public interface DeploymentRegistry extends AutoCloseable {
         public Limits {
             if (maximumPageSize < 1 || maximumLeaseTtl == null || maximumLeaseTtl.isNegative()
                     || maximumLeaseTtl.isZero() || maxClockSkew == null || maxClockSkew.isNegative()
-                    || maxClockSkew.compareTo(maximumLeaseTtl) >= 0)
+                    || maxClockSkew.compareTo(maximumLeaseTtl) >= 0
+                    || maximumPageSize == Integer.MAX_VALUE)
                 throw new IllegalArgumentException("invalid limits");
         }
     }

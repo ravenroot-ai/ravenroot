@@ -43,7 +43,7 @@ import java.util.concurrent.TimeoutException;
 
 /** Token-authenticated, restart-safe Mattermost outgoing-webhook source. */
 final class MattermostOutgoingWebhookSourceBehavior implements NodeBehavior, InboundSourceCapable {
-    private static final Duration HARD_ACK_BUDGET = Duration.ofMillis(2_800);
+    private static final Duration HARD_ACK_BUDGET = Duration.ofMillis(MattermostProfile.MAX_ACK_TIMEOUT_MS);
     private static final Set<String> CALLBACK_FIELDS = Set.of("token", "team_id", "team_domain", "channel_id",
             "channel_name", "timestamp", "user_id", "user_name", "post_id", "text", "trigger_word");
     private static final Set<String> REQUIRED_FIELDS = Set.of("token", "team_id", "channel_id", "timestamp",

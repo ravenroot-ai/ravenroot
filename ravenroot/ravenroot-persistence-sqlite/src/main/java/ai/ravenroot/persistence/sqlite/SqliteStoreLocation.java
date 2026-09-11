@@ -37,6 +37,9 @@ import java.util.Objects;
  */
 public record SqliteStoreLocation(Path databaseFile) {
 
+    /** The single-host directory selected when a composition root receives no configured path. */
+    public static final String DEFAULT_DIRECTORY = "./data/execution-store";
+
     /** The file name {@link #underDirectory(Path)} uses, so two deployments agree without configuring it. */
     public static final String DEFAULT_FILE_NAME = "ravenroot-execution-store.db";
 
@@ -58,6 +61,16 @@ public record SqliteStoreLocation(Path databaseFile) {
     public static SqliteStoreLocation underDirectory(Path directory) {
         Objects.requireNonNull(directory, "directory");
         return new SqliteStoreLocation(directory.resolve(DEFAULT_FILE_NAME));
+    }
+
+    /** Absent or blank selects the default directory; a supplied path is trimmed before parsing. */
+    public static SqliteStoreLocation underConfiguredDirectory(String raw) {
+        String selected = raw == null || raw.isBlank() ? DEFAULT_DIRECTORY : raw.trim();
+        try {
+            return underDirectory(Path.of(selected));
+        } catch (RuntimeException invalidPath) {
+            throw new IllegalArgumentException("Invalid execution store directory configuration");
+        }
     }
 
     /** The directory holding the database and its sidecars. */

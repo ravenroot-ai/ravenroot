@@ -14,9 +14,32 @@ import static ai.ravenroot.extensions.websocket.WebSocketTestSupport.failure;
 import static ai.ravenroot.extensions.websocket.WebSocketTestSupport.message;
 import static ai.ravenroot.extensions.websocket.WebSocketTestSupport.text;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WebSocketAdmissionConcurrencyTest {
+    @Test void overlappingPinnedRevisionsShareOneCounterUsingEachCallersThreshold() {
+        WebSocketAdmissionRegistry admission = new WebSocketAdmissionRegistry();
+
+        WebSocketAdmissionRegistry.Lease oldFirst = admission.tryAcquire("tenant-a", "shared", 2);
+        assertNotNull(oldFirst);
+        assertNull(admission.tryAcquire("tenant-a", "shared", 1),
+                "the newer narrower pin sees the old revision's active lease");
+        oldFirst.close();
+        assertEquals(0, admission.size());
+
+        WebSocketAdmissionRegistry.Lease newFirst = admission.tryAcquire("tenant-a", "shared", 1);
+        assertNotNull(newFirst);
+        WebSocketAdmissionRegistry.Lease oldSecond = admission.tryAcquire("tenant-a", "shared", 2);
+        assertNotNull(oldSecond,
+                "the older wider pin may use its second shared slot without a configuration conflict");
+        assertNull(admission.tryAcquire("tenant-a", "shared", 2));
+        newFirst.close();
+        oldSecond.close();
+        assertEquals(0, admission.size());
+    }
+
     @Test void concurrentSendSendHasExactlyMaximumWinnersAndOneRefusal() throws Exception {
         WebSocketAdmissionRegistry admission = new WebSocketAdmissionRegistry();
         WebSocketProfile profile = WebSocketTestSupport.profile(2, 2);

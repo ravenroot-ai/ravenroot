@@ -26,12 +26,42 @@ exists to prevent.
 | `RAVENROOT_EXECUTION_STORE_PASSWORD` | unset | Never logged, never trimmed, and never rendered by any diagnostic. |
 | `RAVENROOT_EXECUTION_STORE_POOL_SIZE` | `10` | Connections this replica may hold. See the pool sizing section. |
 | `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | `10000` | How long a caller waits for a connection. Must stay below the statement timeout, so that waiting for a connection is distinguishable from waiting on a lock. |
+| `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | `3` | Positive number of attempts used to repair a write-once manifest pin that loses a race with concurrent removal. PostgreSQL only. |
 | `RAVENROOT_WORKER_ID` | the host name | The replica half of the identity every lease is taken under. |
 | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | `30` | How long a replica's claim on an execution outlives its last renewal. Bounded by what the store publishes and required to exceed the clock-skew budget. |
+
+Non-secret policy also has a system-property spelling. A nonblank property takes precedence over its
+environment variable; a blank value delegates to the environment and then to the typed default.
+Connection URL, user, and password remain environment-only deployment data and are never persisted in
+an execution manifest.
+
+| System property | Environment variable | Default |
+|---|---|---|
+| `ravenroot.execution-store` | `RAVENROOT_EXECUTION_STORE` | `sqlite` |
+| `ravenroot.execution-store.pool-size` | `RAVENROOT_EXECUTION_STORE_POOL_SIZE` | `10` |
+| `ravenroot.execution-store.pool-timeout-ms` | `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | `10000` ms |
+| `ravenroot.execution.worker-id` | `RAVENROOT_WORKER_ID` | host name |
+| `ravenroot.execution.lease-ttl-seconds` | `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | `30` seconds |
+| `ravenroot.postgresql.lock-timeout-ms` | `RAVENROOT_POSTGRES_LOCK_TIMEOUT_MS` | `5000` ms |
+| `ravenroot.postgresql.statement-timeout-ms` | `RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS` | `30000` ms |
+| `ravenroot.postgresql.serialization-retries` | `RAVENROOT_POSTGRES_SERIALIZATION_RETRIES` | `3` retries |
+| `ravenroot.postgresql.max-lease-ttl-seconds` | `RAVENROOT_POSTGRES_MAX_LEASE_TTL_SECONDS` | `300` seconds |
+| `ravenroot.postgresql.max-payload-bytes` | `RAVENROOT_POSTGRES_MAX_PAYLOAD_BYTES` | `1048576` bytes |
+| `ravenroot.postgresql.max-clock-skew-seconds` | `RAVENROOT_POSTGRES_MAX_CLOCK_SKEW_SECONDS` | `5` seconds |
+| `ravenroot.postgresql.journal-retention-seconds` | `RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS` | `86400` seconds |
+| `ravenroot.postgresql.max-inventory-page-size` | `RAVENROOT_POSTGRES_MAX_INVENTORY_PAGE_SIZE` | `100` rows |
+| `ravenroot.postgresql.terminal-retention-seconds` | `RAVENROOT_POSTGRES_TERMINAL_RETENTION_SECONDS` | `604800` seconds |
+| `ravenroot.postgresql.execution-result-retention-seconds` | `RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS` | `604800` seconds |
+| `ravenroot.postgresql.graph-definition-upsert-attempts` | `RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS` | `3` attempts |
 
 `RAVENROOT_EXECUTION_STORE_DIR` belongs to the single-host store, and setting it while selecting this
 one refuses startup instead of being ignored: the two name different stores, and a deployment that set
 both has not decided which it wants.
+
+The current Helm chart deploys the SQLite store only and does not expose this PostgreSQL-only bound.
+Set it directly in a PostgreSQL deployment that also supplies the supported store selector and
+connection configuration; the server rejects a nonblank value for every other store selection before
+it starts work.
 
 ### Which replica holds an execution
 
@@ -130,9 +160,25 @@ concurrent start into a failure.
 - `statement_timeout` bounds any single statement, so a pathological query cannot hold a row lock for
   longer than that.
 
+All durations must be whole, representable values in the units named above. Lock and statement
+timeouts are positive, maximum clock skew may be zero, and statement timeout cannot be shorter than
+lock timeout. Pool wait is at least 250 ms and strictly below the resolved statement timeout. Lease,
+payload, retention, page, and graph-definition repair bounds are positive; terminal retention is at
+least both journal and execution-result retention. The page maximum leaves one integer slot for
+pagination lookahead. Invalid or contradictory settings refuse startup before a connection pool is
+opened. Diagnostics never repeat secret connection values or malformed raw input; normalized,
+non-secret cross-field values may be included when they explain a relationship such as retention order.
+
 Transactions that PostgreSQL aborts with a serialization failure or a deadlock are retried inside the
 adapter, a bounded number of times, and then reported as unavailability. A retry is safe because a
 retried transaction re-reads the state it decides on.
+
+Execution-manifest pinning has a separate lost-race bound. If a concurrent reclamation removes the
+row after the pinning transaction loses its insert race, the adapter retries the write-once decision
+up to `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` times. This value does not control transaction
+serialization retries, node attempts, or recovery delivery attempts. It applies only when
+`RAVENROOT_EXECUTION_STORE=postgresql`; setting it with another store selector refuses startup rather
+than being ignored.
 
 ## Schema migration
 

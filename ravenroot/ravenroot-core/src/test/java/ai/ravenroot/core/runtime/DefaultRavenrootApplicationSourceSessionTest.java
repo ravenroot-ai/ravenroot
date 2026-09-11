@@ -172,9 +172,9 @@ class DefaultRavenrootApplicationSourceSessionTest {
             SourceSessionStatus failed = awaitState(
                     application, TENANT_A.tenantId(), "partial", SourceSessionState.FAILED);
             assertEquals("source session startup failed in this process", failed.diagnostic().orElseThrow());
-            assertEquals(List.of("start:a-source", "start:b-source", "rollback:a-source"),
+            assertEquals(List.of("start:a-source", "start:b-source", "rollback:b-source", "rollback:a-source"),
                     behavior.lifecycle,
-                    "source startup and partial rollback must be deterministic by node id");
+                    "the failed current source is cleaned up before earlier sources roll back in deterministic node order");
         } finally {
             application.close();
         }

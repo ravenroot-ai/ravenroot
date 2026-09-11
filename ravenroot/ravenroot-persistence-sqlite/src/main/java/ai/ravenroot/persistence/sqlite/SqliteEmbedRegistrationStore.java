@@ -147,15 +147,27 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
     }
 
     public static SqliteEmbedRegistrationStore openUnder(Path directory, Clock clock,
-                                                         EmbedProjectionBudget budget) {
-        return openUnder(directory, clock, budget, CommitBoundary.NONE);
+                                                           EmbedProjectionBudget budget) {
+        return openUnder(directory, clock, budget, SqliteConnectionPolicy.DEFAULTS, CommitBoundary.NONE);
+    }
+
+    /** Opens with an explicit connection contention policy. */
+    public static SqliteEmbedRegistrationStore openUnder(Path directory, Clock clock,
+            EmbedProjectionBudget budget, SqliteConnectionPolicy connectionPolicy) {
+        return openUnder(directory, clock, budget, connectionPolicy, CommitBoundary.NONE);
     }
 
     static SqliteEmbedRegistrationStore openUnder(Path directory, Clock clock, EmbedProjectionBudget budget,
-                                                  CommitBoundary commitBoundary) {
+                                                    CommitBoundary commitBoundary) {
+        return openUnder(directory, clock, budget, SqliteConnectionPolicy.DEFAULTS, commitBoundary);
+    }
+
+    static SqliteEmbedRegistrationStore openUnder(Path directory, Clock clock, EmbedProjectionBudget budget,
+            SqliteConnectionPolicy connectionPolicy, CommitBoundary commitBoundary) {
         Objects.requireNonNull(directory, "directory");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(budget, "budget");
+        Objects.requireNonNull(connectionPolicy, "connectionPolicy");
         Objects.requireNonNull(commitBoundary, "commitBoundary");
         Path databaseFile = directory.toAbsolutePath().normalize().resolve(FILE_NAME);
         try {
@@ -167,7 +179,7 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
         Connection opened = null;
         try {
             opened = DriverManager.getConnection("jdbc:sqlite:" + databaseFile);
-            prepare(opened);
+            prepare(opened, connectionPolicy);
             restrictPermissions(databaseFile);
             return new SqliteEmbedRegistrationStore(opened, clock, budget, commitBoundary, databaseFile);
         } catch (SQLException failed) {
@@ -180,7 +192,7 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
         }
     }
 
-    private static void prepare(Connection opened) throws SQLException {
+    private static void prepare(Connection opened, SqliteConnectionPolicy connectionPolicy) throws SQLException {
         try (Statement statement = opened.createStatement()) {
             String journalMode;
             try (ResultSet rows = statement.executeQuery("PRAGMA journal_mode=WAL")) {
@@ -195,7 +207,7 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
             // the one durability gap in this store that has a security consequence rather than an
             // operational one, so the fsync is not negotiable here even though it costs.
             statement.execute("PRAGMA synchronous=FULL");
-            statement.execute("PRAGMA busy_timeout=5000");
+            connectionPolicy.apply(opened);
             int version;
             try (ResultSet rows = statement.executeQuery("PRAGMA user_version")) {
                 version = rows.next() ? rows.getInt(1) : 0;

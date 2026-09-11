@@ -9,6 +9,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -33,10 +34,20 @@ class SharedStoreBundleRefusalTest {
         // imported by the shipped CLI. This assertion is what stops the two copies drifting apart.
         assertEquals(ExecutionStoreConfiguration.SELECTOR_VARIABLE,
                 BackupRestoreConfiguration.STORE_SELECTOR_VARIABLE);
+        assertEquals(ExecutionStoreConfiguration.SELECTOR_PROPERTY,
+                BackupRestoreConfiguration.STORE_SELECTOR_PROPERTY);
         assertEquals(ExecutionStoreConfiguration.POSTGRESQL_SELECTOR,
                 BackupRestoreConfiguration.SHARED_STORE_SELECTOR);
         assertEquals(ExecutionStoreConfiguration.DIRECTORY_VARIABLE,
                 BackupRestoreConfiguration.EXECUTION_STORE_DIR_VARIABLE);
+    }
+
+    @Test
+    void selectorPropertyOverridesEnvironmentForBundleRefusal() {
+        var properties = new Properties();
+        properties.setProperty(BackupRestoreConfiguration.STORE_SELECTOR_PROPERTY, "postgresql");
+        assertTrue(BackupRestoreConfiguration.sharedStoreSelected(properties,
+                Map.of(BackupRestoreConfiguration.STORE_SELECTOR_VARIABLE, "sqlite")));
     }
 
     @Test

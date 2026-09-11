@@ -4,6 +4,8 @@ import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionManifest;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
+import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.security.AuthorizationAction;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
@@ -99,7 +101,7 @@ class ExecutionManifestHttpTest {
                 assertTrue(body.contains("\"incompatibleDimensions\":[]"), body);
                 assertTrue(body.contains("\"graphVersion\":\"" + graphVersion + "\""),
                         () -> "the caller's own submitted graph address must be echoed back: " + body);
-                assertTrue(body.contains("\"manifestFormatVersion\":1"), body);
+                assertTrue(body.contains("\"manifestFormatVersion\":4"), body);
                 assertTrue(Pattern.compile("\"manifestDigest\":\"[0-9a-f]{64}\"").matcher(body).find(),
                         () -> "the manifest's own address identifies it to its owner: " + body);
                 assertTrue(body.contains("\"dimensionsTruncated\":false"), body);
@@ -136,10 +138,16 @@ class ExecutionManifestHttpTest {
                 // The same runtime, under a second execution, accepted when a package this deployment
                 // no longer has was installed.
                 var key = new ExecutionKey("tenant-a", UUID.randomUUID());
+                var privatePolicy = new ResolvedOperationalPolicy(
+                        matching.operationalPolicy().graph(),
+                        matching.operationalPolicy().results(),
+                        matching.operationalPolicy().builtInHttp(),
+                        List.of(new ResolvedOperationalPolicy.PackageCapacity(PRIVATE_PACKAGE,
+                                NodePackageEgressCapacityProfile.noManagedEgress())));
                 var withPrivatePackage = new ExecutionManifest(matching.formatVersion(), key,
                         matching.graphContentId(), matching.graphIdentity(), matching.runtime(),
                         List.of(PinnedNodePackage.of(PRIVATE_PACKAGE, PRIVATE_VERSION, "node-sdk-1")),
-                        matching.pinnedAt());
+                        matching.pinnedAt(), privatePolicy);
                 manifests.pin(withPrivatePackage).toCompletableFuture().join();
 
                 var response = getAs(server,

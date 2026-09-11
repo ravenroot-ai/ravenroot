@@ -247,17 +247,18 @@ final class PublishedNodeContractTest {
         assertEquals(privateSet("LIMIT_KEYS"), schema.get("limits"));
 
         NodePackageEgressPolicy defaults = NodePackageEgressPolicy.builder().build();
-        Map<String, String> actualDefaults = Map.of(
-                "maxRequestBytes", Long.toString(defaults.maximumRequestBytes()),
-                "maxResponseBytes", Long.toString(defaults.maximumResponseBytes()),
-                "maxWebSocketMessageBytes", Long.toString(defaults.maximumWebSocketMessageBytes()),
-                "maxWebSocketFragments", Integer.toString(defaults.maximumWebSocketFragments()),
-                "maxQueuedWebSocketSends", Integer.toString(defaults.maximumQueuedWebSocketSends()),
-                "maxConcurrentOperations", Integer.toString(defaults.maximumConcurrentOperations()),
-                "maxConcurrentPerTenant", Integer.toString(defaults.maximumConcurrentPerTenant()),
-                "maxDeadlineMs", Long.toString(defaults.maximumDeadline().toMillis()),
-                "maxWebSocketLifetimeMs", Long.toString(defaults.maximumWebSocketLifetime().toMillis()),
-                "maxWebSocketIdleMs", Long.toString(defaults.maximumWebSocketIdle().toMillis()));
+        Map<String, String> actualDefaults = Map.ofEntries(
+                Map.entry("maxRequestBytes", Long.toString(defaults.maximumRequestBytes())),
+                Map.entry("maxResponseBytes", Long.toString(defaults.maximumResponseBytes())),
+                Map.entry("maxWebSocketMessageBytes", Long.toString(defaults.maximumWebSocketMessageBytes())),
+                Map.entry("maxWebSocketFragments", Integer.toString(defaults.maximumWebSocketFragments())),
+                Map.entry("maxQueuedWebSocketSends", Integer.toString(defaults.maximumQueuedWebSocketSends())),
+                Map.entry("maxConcurrentOperations", Integer.toString(defaults.maximumConcurrentOperations())),
+                Map.entry("maxConcurrentPerTenant", Integer.toString(defaults.maximumConcurrentPerTenant())),
+                Map.entry("maxDeadlineMs", Long.toString(defaults.maximumDeadline().toMillis())),
+                Map.entry("maxWebSocketLifetimeMs", Long.toString(defaults.maximumWebSocketLifetime().toMillis())),
+                Map.entry("maxWebSocketIdleMs", Long.toString(defaults.maximumWebSocketIdle().toMillis())),
+                Map.entry("maxDecompressionRatio", Integer.toString(defaults.maximumDecompressionRatio())));
         assertEquals(actualDefaults, documentedGrantDefaults(guide));
 
         String rules = marked(guide, "node-package-egress-rules");

@@ -8,7 +8,7 @@ The Helm values schema is closed over the fields published in `values.yaml`. Old
 allowed additional nested keys under `resources`, `podSecurityContext`, `securityContext`, and
 `probes` to pass through `toYaml` without a chart contract. Those undocumented extensions are no
 longer accepted. Before upgrading, remove such keys or apply the required Kubernetes fields with a
-post-renderer or a maintained chart overlay. Supported resource quantities, pod and container
+post-renderer or maintained chart/template customization. Supported resource quantities, pod and container
 identity fields, probe timing, storage, image, Service, OIDC, and runtime-policy carriers remain
 available as named values and reject malformed input before a workload is rendered. Quote resource
 quantities in values files and use `--set-string` for unitless quantities, such as

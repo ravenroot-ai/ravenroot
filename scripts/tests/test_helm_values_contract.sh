@@ -168,7 +168,7 @@ for document_path, expected in [(Path(sys.argv[2]), values), (Path(sys.argv[3]),
 dockerfile = (root / "Dockerfile").read_text()
 raw = (root / "deploy/kubernetes/ravenroot.yaml").read_text()
 documentation = (root / "docs/reference/configuration.md").read_text()
-for required in ("Helm values compatibility", "post-renderer", "maintained chart overlay",
+for required in ("Helm values compatibility", "post-renderer", "maintained chart/template customization",
                  "--set-string resources.limits.cpu=2"):
     if required not in documentation:
         raise SystemExit("closed Helm values migration guidance is incomplete")

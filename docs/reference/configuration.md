@@ -10,7 +10,12 @@ allowed additional nested keys under `resources`, `podSecurityContext`, `securit
 longer accepted. Before upgrading, remove such keys or apply the required Kubernetes fields with a
 post-renderer or maintained chart/template customization. Supported resource quantities, pod and container
 identity fields, probe timing, storage, image, Service, OIDC, and runtime-policy carriers remain
-available as named values and reject malformed input before a workload is rendered. Quote resource
+available as named values and reject invalid input before a workload is rendered. The packaged chart
+now fixes `engine=pekko`, `podSecurityContext.runAsNonRoot=true`, RuntimeDefault seccomp,
+`securityContext.allowPrivilegeEscalation=false`, `securityContext.readOnlyRootFilesystem=true`,
+capability drop `ALL`, and positive pod/container user and group IDs. Previously valid overrides that
+weakened those named pod-security controls or selected a different packaged-image contract must use
+the post-renderer or maintained chart/template customization path. Quote resource
 quantities in values files and use `--set-string` for unitless quantities, such as
 `--set-string resources.limits.cpu=2`; numeric YAML quantities that older charts passed through must
 be changed to strings before upgrading.

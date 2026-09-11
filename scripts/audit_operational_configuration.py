@@ -136,6 +136,7 @@ DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS = {
     "rawKubernetes": frozenset({"deploy/kubernetes/ravenroot.yaml"}),
 }
 HELM_AUTHORITY_ID = "ravenroot-helm-values-v1"
+HELM_CHART_PATH = "deploy/helm/ravenroot/Chart.yaml"
 HELM_VALUES_PATH = "deploy/helm/ravenroot/values.yaml"
 HELM_SCHEMA_PATH = "deploy/helm/ravenroot/values.schema.json"
 HELM_TEMPLATE_PATHS = (
@@ -146,7 +147,7 @@ HELM_TEMPLATE_PATHS = (
 )
 HELM_TEST_ROLES = {
     "scripts/tests/test_helm_values_contract.sh": (
-        "closed-schema", "default-render", "nondefault-render", "refusal"),
+        "closed-schema", "default-render", "nondefault-render", "tag-only-render", "refusal"),
     "scripts/tests/test_program_timeout_helm_contract.sh": (
         "timeout-default", "timeout-nondefault", "timeout-blank", "timeout-refusal"),
     "scripts/tests/test_execution_manifest_pin_helm_contract.sh": (
@@ -171,11 +172,8 @@ HELM_OPERATOR_VALUE_CONTRACTS = (
     ("resources.requests.memory", "deployment.resources.requests.memory", "256Mi", "quantity", "resources"),
     ("resources.limits.cpu", "deployment.resources.limits.cpu", '"1"', "quantity", "resources"),
     ("resources.limits.memory", "deployment.resources.limits.memory", "1Gi", "quantity", "resources"),
-    ("podSecurityContext.runAsNonRoot", "deployment.pod-security.run-as-non-root", "true", "boolean", "pod-security"),
     ("podSecurityContext.fsGroup", "deployment.pod-security.fs-group", "10001", "positive-id", "pod-security"),
     ("podSecurityContext.fsGroupChangePolicy", "deployment.pod-security.fs-group-change-policy", "OnRootMismatch", "fs-group-policy", "pod-security"),
-    ("securityContext.allowPrivilegeEscalation", "deployment.container-security.allow-privilege-escalation", "false", "boolean", "container-security"),
-    ("securityContext.readOnlyRootFilesystem", "deployment.container-security.read-only-root-filesystem", "true", "boolean", "container-security"),
     ("securityContext.runAsUser", "deployment.container-security.run-as-user", "10001", "positive-id", "container-security"),
     ("securityContext.runAsGroup", "deployment.container-security.run-as-group", "10001", "positive-id", "container-security"),
     ("probes.readiness.initialDelaySeconds", "deployment.probe.readiness-initial-delay-seconds", "3", "probe-initial", "readiness-probe"),
@@ -189,7 +187,10 @@ HELM_OPERATOR_VALUE_CONTRACTS = (
 HELM_FIXED_VALUE_CONTRACTS = {
     "replicaCount": "1",
     "engine": "pekko",
+    "podSecurityContext.runAsNonRoot": "true",
     "podSecurityContext.seccompProfile.type": "RuntimeDefault",
+    "securityContext.allowPrivilegeEscalation": "false",
+    "securityContext.readOnlyRootFilesystem": "true",
 }
 HELM_FIXED_LIST_CONTRACTS = {
     "securityContext.capabilities.drop.0": "ALL",
@@ -1931,6 +1932,7 @@ def helm_test_evidence_errors(root: Path) -> list[str]:
     requirements = (
         (values, r'^helm_base >"\$TEMP_DIR/default\.yaml"$', "default render"),
         (values, r'^helm_base \\$', "nondefault render"),
+        (values, r'^  >"\$TEMP_DIR/tag-only\.yaml"$', "tag-only render"),
         (values, r'^for invalid in \\$', "invalid-value refusal"),
         (values, r'set\(schema\.get\("required", \[\]\)\) != expected_top', "required closure"),
         (timeout, r'^for value in 100 15000 300000; do$', "timeout boundaries"),
@@ -1951,13 +1953,39 @@ def helm_test_evidence_errors(root: Path) -> list[str]:
             "default resource requirements did not render", "default probe timing values did not render",
             "default tmpfs size limit did not render",
             "default persistent-volume contract did not render", "nondefault image values did not render",
+            "tag-only image values did not render",
             "nondefault Service values did not render", "nondefault resource requirements did not render",
             "nondefault pod security values did not render", "nondefault container identity values did not render",
             "nondefault probe timing values did not render", "nondefault tmpfs size limit did not render",
             "nondefault persistent-volume values did not render"):
         if assertion not in values:
             errors.append(f"Helm authority test evidence lacks executable assertion: {assertion}")
+    for refusal in (
+            "podSecurityContext.runAsNonRoot=false",
+            "securityContext.allowPrivilegeEscalation=true",
+            "securityContext.readOnlyRootFilesystem=false"):
+        if refusal not in values:
+            errors.append(f"Helm authority test evidence lacks fixed-hardening refusal: {refusal}")
+    tag_only_case = (
+        'helm_base \\\n'
+        '  --set-string image.repository=registry.example.test/ravenroot \\\n'
+        '  --set-string image.tag=release-test \\\n'
+        '  --set-string image.digest= \\\n'
+        '  >"$TEMP_DIR/tag-only.yaml"')
+    tag_only_assertion = (
+        'tag_image = tag_deployment["spec"]["template"]["spec"]["containers"][0]["image"]\n'
+        'if tag_image != "registry.example.test/ravenroot:release-test":\n'
+        '    raise SystemExit("tag-only image values did not render")')
+    if values.count(tag_only_case) != 1 or values.count(tag_only_assertion) != 1:
+        errors.append("Helm authority test evidence lacks the exact executable tag-only image case")
     return errors
+
+
+def helm_chart_present(root: Path, candidates: tuple[Candidate, ...]) -> bool:
+    """Distinguish true chart absence from a partial or invalid supported chart."""
+    chart_paths = {HELM_CHART_PATH, HELM_VALUES_PATH, HELM_SCHEMA_PATH, *HELM_TEMPLATE_PATHS}
+    return any((root / path).exists() for path in chart_paths) \
+        or any(candidate.path in chart_paths for candidate in candidates)
 
 
 def helm_timeout_runtime_evidence(root: Path) -> dict[str, object] | None:
@@ -2089,7 +2117,10 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
     fixed_schema = {
         "replicaCount": {"type": "integer", "minimum": 1, "maximum": 1},
         "engine": {"type": "string", "enum": ["pekko"]},
+        "podSecurityContext.runAsNonRoot": {"type": "boolean", "const": True},
         "podSecurityContext.seccompProfile.type": {"type": "string", "enum": ["RuntimeDefault"]},
+        "securityContext.allowPrivilegeEscalation": {"type": "boolean", "const": False},
+        "securityContext.readOnlyRootFilesystem": {"type": "boolean", "const": True},
     }
     if any(helm_schema_contract(schema, path) != contract
            for path, contract in fixed_schema.items()):
@@ -2131,11 +2162,12 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
 def helm_authority_errors(root: Path, authorities: object,
                           entries: dict[str, dict[str, object]],
                           candidates: tuple[Candidate, ...]) -> list[str]:
+    chart_present = helm_chart_present(root, candidates)
     expected = helm_authority_from_source(root, candidates)
     helm_entries = [entry for entry in entries.values() if entry.get("helmAuthority") is not None]
-    if not helm_entries:
-        return ([] if authorities in (None, {})
-                else ["Helm authority exists without Helm-owned inventory rows"])
+    if not chart_present:
+        return ([] if authorities in (None, {}) and not helm_entries else
+                ["Helm authority or owned rows exist without a supported Helm chart"])
     errors: list[str] = []
     if expected is None:
         return ["Helm values, schema, templates, runtime, or executable tests violate the closed authority"]
@@ -2761,8 +2793,8 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["routeTableAuthorities"] = {
         ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
     }
-    if any(isinstance(entry, dict) and entry.get("helmAuthority") == HELM_AUTHORITY_ID
-           for entry in merged):
+    chart_present = helm_chart_present(root, candidates)
+    if chart_present:
         helm_authority = helm_authority_from_source(root, candidates)
         if helm_authority is None:
             return None, ["cannot derive the closed Helm values authority from current source"]

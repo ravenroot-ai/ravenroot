@@ -27,11 +27,8 @@ helm_base \
   --set resources.requests.memory=384Mi \
   --set-string resources.limits.cpu=2 \
   --set resources.limits.memory=2Gi \
-  --set podSecurityContext.runAsNonRoot=false \
   --set podSecurityContext.fsGroup=10002 \
   --set podSecurityContext.fsGroupChangePolicy=Always \
-  --set securityContext.allowPrivilegeEscalation=true \
-  --set securityContext.readOnlyRootFilesystem=false \
   --set securityContext.runAsUser=10002 \
   --set securityContext.runAsGroup=10002 \
   --set probes.readiness.initialDelaySeconds=4 \
@@ -43,12 +40,18 @@ helm_base \
   --set-string persistence.storageClass=fast-rwo \
   >"$TEMP_DIR/nondefault.yaml"
 
+helm_base \
+  --set-string image.repository=registry.example.test/ravenroot \
+  --set-string image.tag=release-test \
+  --set-string image.digest= \
+  >"$TEMP_DIR/tag-only.yaml"
+
 if helm template ravenroot "$CHART" >"$TEMP_DIR/missing-auth.out" 2>&1; then
   echo "Helm accepted a release without required OIDC values" >&2
   exit 1
 fi
 
-python3 - "$PROJECT_DIR" "$TEMP_DIR/default.yaml" "$TEMP_DIR/nondefault.yaml" <<'PY'
+python3 - "$PROJECT_DIR" "$TEMP_DIR/default.yaml" "$TEMP_DIR/nondefault.yaml" "$TEMP_DIR/tag-only.yaml" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -147,12 +150,12 @@ for document_path, expected in [(Path(sys.argv[2]), values), (Path(sys.argv[3]),
             raise SystemExit("nondefault Service values did not render")
         if container["resources"] != {"requests": {"cpu": "200m", "memory": "384Mi"}, "limits": {"cpu": "2", "memory": "2Gi"}}:
             raise SystemExit("nondefault resource requirements did not render")
-        if pod["securityContext"]["runAsNonRoot"] is not False \
+        if pod["securityContext"]["runAsNonRoot"] is not True \
                 or pod["securityContext"]["fsGroup"] != 10002 \
                 or pod["securityContext"]["fsGroupChangePolicy"] != "Always":
             raise SystemExit("nondefault pod security values did not render")
-        if container["securityContext"]["allowPrivilegeEscalation"] is not True \
-                or container["securityContext"]["readOnlyRootFilesystem"] is not False \
+        if container["securityContext"]["allowPrivilegeEscalation"] is not False \
+                or container["securityContext"]["readOnlyRootFilesystem"] is not True \
                 or container["securityContext"]["runAsUser"] != 10002 \
                 or container["securityContext"]["runAsGroup"] != 10002:
             raise SystemExit("nondefault container identity values did not render")
@@ -164,6 +167,12 @@ for document_path, expected in [(Path(sys.argv[2]), values), (Path(sys.argv[3]),
             raise SystemExit("nondefault tmpfs size limit did not render")
         if pvc["spec"]["resources"]["requests"]["storage"] != "2Gi" or pvc["spec"].get("storageClassName") != "fast-rwo":
             raise SystemExit("nondefault persistent-volume values did not render")
+
+tag_documents = [item for item in yaml.safe_load_all(Path(sys.argv[4]).read_text()) if item]
+tag_deployment = next(item for item in tag_documents if item["kind"] == "Deployment")
+tag_image = tag_deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+if tag_image != "registry.example.test/ravenroot:release-test":
+    raise SystemExit("tag-only image values did not render")
 
 dockerfile = (root / "Dockerfile").read_text()
 raw = (root / "deploy/kubernetes/ravenroot.yaml").read_text()
@@ -197,6 +206,9 @@ for invalid in \
   persistence.size=-1Gi \
   persistence.size=0 \
   persistence.accessModes[0]=ReadOnlyMany \
+  podSecurityContext.runAsNonRoot=false \
+  securityContext.allowPrivilegeEscalation=true \
+  securityContext.readOnlyRootFilesystem=false \
   podSecurityContext.runAsNonRoot=not-a-boolean \
   podSecurityContext.fsGroup=0 \
   podSecurityContext.fsGroupChangePolicy=Never \

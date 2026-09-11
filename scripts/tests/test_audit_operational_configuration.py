@@ -101,6 +101,46 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(audit.helm_authority_errors(
             ROOT, {audit.HELM_AUTHORITY_ID: authority}, wrong_entries, candidates))
 
+        self.assertTrue(audit.helm_authority_errors(ROOT, None, {}, candidates))
+
+    def test_helm_authority_distinguishes_absent_partial_and_invalid_charts(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            self.assertEqual([], audit.helm_authority_errors(Path(location), None, {}, ()))
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            target = root / audit.HELM_VALUES_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / audit.HELM_VALUES_PATH, target)
+            errors = audit.helm_authority_errors(root, None, {}, ())
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            target = root / audit.HELM_CHART_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("apiVersion: v2\n", encoding="utf-8")
+            errors = audit.helm_authority_errors(root, None, {}, ())
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
+        candidates = audit.discover(ROOT)
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authority = audit.helm_authority_from_source(ROOT, candidates)
+            self.assertIsNotNone(authority)
+            assert authority is not None
+            for path in {audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
+                         *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
+                         authority["timeoutRuntime"]["path"]}:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / path, target)
+            schema = root / audit.HELM_SCHEMA_PATH
+            schema.write_text(schema.read_text(encoding="utf-8").replace(
+                '"const": true', '"const": false', 1), encoding="utf-8")
+            errors = audit.helm_authority_errors(root, None, {}, candidates)
+            self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
+
     def test_helm_authority_rejects_source_contract_and_executable_evidence_drift(self) -> None:
         candidates = audit.discover(ROOT)
         authority = audit.helm_authority_from_source(ROOT, candidates)
@@ -119,6 +159,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
         mutations = (
             (audit.HELM_VALUES_PATH, "programTimeoutMs: 15000", "programTimeoutMs: 15001"),
+            (audit.HELM_VALUES_PATH, "runAsNonRoot: true", "runAsNonRoot: false"),
+            (audit.HELM_VALUES_PATH, "allowPrivilegeEscalation: false", "allowPrivilegeEscalation: true"),
+            (audit.HELM_VALUES_PATH, "readOnlyRootFilesystem: true", "readOnlyRootFilesystem: false"),
             (audit.HELM_SCHEMA_PATH, '"maximum": 300000', '"maximum": 300001'),
             (audit.HELM_SCHEMA_PATH,
              '"pattern": "^[\\u0009-\\u000D\\u001C-\\u0020\\u1680',
@@ -127,6 +170,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             (audit.HELM_SCHEMA_PATH, '"required": ["replicaCount"', '"required": ["image"'),
             (audit.HELM_SCHEMA_PATH, '"enum": ["RuntimeDefault"]',
              '"enum": ["RuntimeDefault", "Unconfined"]'),
+            (audit.HELM_SCHEMA_PATH, '"runAsNonRoot": { "type": "boolean", "const": true }',
+             '"runAsNonRoot": { "type": "boolean" }'),
+            (audit.HELM_SCHEMA_PATH,
+             '"allowPrivilegeEscalation": { "type": "boolean", "const": false }',
+             '"allowPrivilegeEscalation": { "type": "boolean" }'),
+            (audit.HELM_SCHEMA_PATH,
+             '"readOnlyRootFilesystem": { "type": "boolean", "const": true }',
+             '"readOnlyRootFilesystem": { "type": "boolean" }'),
             (audit.HELM_TEMPLATE_PATHS[1],
              '          resources:\n            {{- toYaml .Values.resources | nindent 12 }}',
              '      resources:\n        {{- toYaml .Values.resources | nindent 8 }}'),
@@ -134,6 +185,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
              '# - name: RAVENROOT_PROGRAM_TIMEOUT_MS'),
             ("scripts/tests/test_program_timeout_helm_contract.sh",
              "for invalid in 99 300001; do", "for invalid in 99; do"),
+            ("scripts/tests/test_helm_values_contract.sh",
+             '--set-string image.tag=release-test \\\n  --set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"',
+             '--set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             '--set-string image.digest= \\\n  >"$TEMP_DIR/tag-only.yaml"',
+             '--set-string image.digest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \\\n  >"$TEMP_DIR/tag-only.yaml"'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             'if tag_image != "registry.example.test/ravenroot:release-test":',
+             'if False:'),
+            ("scripts/tests/test_helm_values_contract.sh",
+             "securityContext.readOnlyRootFilesystem=false \\",
+             "securityContext.readOnlyRootFilesystem=not-a-boolean \\",),
             (authority["timeoutRuntime"]["path"],
              'Duration timeout = Duration.ofMillis(', '// Duration timeout = Duration.ofMillis('),
             (authority["timeoutRuntime"]["path"],
@@ -219,6 +282,21 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         document["helmAuthorities"] = {audit.HELM_AUTHORITY_ID: authority}
         errors = audit.inventory_errors(ROOT, document, candidates)
         self.assertFalse(any("Helm" in error for error in errors), errors)
+
+        removed = copy.deepcopy(document)
+        removed.pop("helmAuthorities")
+        helm_fields = {
+            "setting", "owner", "field", "bindings", "default", "defaultEvidence",
+            "validation", "scope", "pinning", "coverage", "helmAuthority",
+        }
+        for entry in removed["entries"]:
+            if entry.get("helmAuthority") == audit.HELM_AUTHORITY_ID:
+                for field in helm_fields:
+                    entry.pop(field, None)
+                entry.update(status="retained", classification="protocol-or-format-invariant",
+                             rationale="Incorrectly relabelled as retained.")
+        errors = audit.inventory_errors(ROOT, removed, candidates)
+        self.assertTrue(any("Helm settings require" in error for error in errors), errors)
 
         altered = copy.deepcopy(document)
         marked = next(entry for entry in altered["entries"] if entry.get("helmAuthority"))

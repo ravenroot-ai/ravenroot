@@ -402,7 +402,7 @@
       "additionalProperties": false,
       "required": ["runAsNonRoot", "fsGroup", "fsGroupChangePolicy", "seccompProfile"],
       "properties": {
-        "runAsNonRoot": { "type": "boolean" },
+        "runAsNonRoot": { "type": "boolean", "const": true },
         "fsGroup": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
         "fsGroupChangePolicy": { "type": "string", "enum": ["Always", "OnRootMismatch"] },
         "seccompProfile": {
@@ -420,8 +420,8 @@
       "additionalProperties": false,
       "required": ["allowPrivilegeEscalation", "readOnlyRootFilesystem", "capabilities", "runAsUser", "runAsGroup"],
       "properties": {
-        "allowPrivilegeEscalation": { "type": "boolean" },
-        "readOnlyRootFilesystem": { "type": "boolean" },
+        "allowPrivilegeEscalation": { "type": "boolean", "const": false },
+        "readOnlyRootFilesystem": { "type": "boolean", "const": true },
         "capabilities": {
           "type": "object",
           "additionalProperties": false,

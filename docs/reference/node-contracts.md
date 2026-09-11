@@ -795,6 +795,8 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `profile` | Mail profile | Opaque tenant-scoped operator profile; endpoint and credentials never enter the graph. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `consumerId` | Consumer identity | Stable case-sensitive token (1–128 ASCII letters, digits, dot, underscore or hyphen; first character alphanumeric). Empty keeps legacy deployment-scoped identity. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
+| `initialPosition` | Initial position | Used only without a checkpoint: earliest reads history; latest starts after the current mailbox. | `STRING` | false | earliest | earliest,latest | false | Not declared | Not declared | Not declared |
 | `folder` | Source folder | Optional confirmation of the exact operator-authorized source folder. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `pollIntervalMs` | Poll interval (ms) | May only increase the operator interval, up to 60000 ms. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `batchSize` | Batch size | Tightening-only messages per bounded scan. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |

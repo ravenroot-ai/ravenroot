@@ -1390,7 +1390,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             String packageId = behaviors.catalogSources().get(node.behavior()).bundleId();
             IngressRouteOwner owner = managedIngress == null ? null : new IngressRouteOwner(packageId,
                     security.tenantId(), id.value(), node.id(), generation);
-            SourceContext context = new SourceContext(node.id(), security, owner, generation);
+            SourceContext context = new SourceContext(node.id(), node.behavior(), security, owner, generation);
             BehaviorRegistry.SourceRegistration packageAuthority = behaviors.registerSourceAuthority(
                     context, packageId, id, node.id(), generation, security);
             BehaviorRegistry.SourceRegistration sourceAuthority = context.bind(packageAuthority);
@@ -1719,6 +1719,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
      */
     private final class SourceContext implements InboundSourceContext {
         private final String nodeId;
+        private final String behavior;
+        private final java.util.List<StableConsumerIngress> consumers = new java.util.ArrayList<>();
         private final SecurityContext identity;
         private final IngressRouteOwner ingressOwner;
         private final long generation;
@@ -1726,8 +1728,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         private final RequestReplyIngress requestReplies;
         private int lifecycle; // 0 provisional, 1 active, 2 retired
 
-        SourceContext(String nodeId, SecurityContext identity, IngressRouteOwner ingressOwner, long generation) {
+        SourceContext(String nodeId, String behavior, SecurityContext identity, IngressRouteOwner ingressOwner, long generation) {
             this.nodeId = nodeId;
+            this.behavior = behavior;
             this.identity = identity;
             this.ingressOwner = ingressOwner;
             this.generation = generation;
@@ -1748,7 +1751,11 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 }
                 @Override public void close() {
                     if (!closed.compareAndSet(false, true)) return;
-                    synchronized (SourceContext.this) { lifecycle = 2; }
+                    synchronized (SourceContext.this) {
+                        lifecycle = 2;
+                        java.util.List.copyOf(consumers).forEach(StableConsumerIngress::close);
+                        consumers.clear();
+                    }
                     packageAuthority.close();
                 }
             };
@@ -1820,9 +1827,25 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             this.context = context;
         }
 
+        @Override public ai.ravenroot.api.deployment.DurableConsumerIngress openDurableConsumer(String consumerId) {
+            synchronized (context) {
+                if (!context.active()) throw new IllegalStateException("source authority is retired");
+                if (consumerId == null || !consumerId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
+                    throw new IllegalArgumentException("invalid consumer identity");
+                if (executionStore == null) throw new UnsupportedOperationException("durable source store required");
+                if (!context.consumers.isEmpty()) throw new IllegalStateException("source consumer already opened");
+                String namespace = encodeSourcePart(context.behavior) + "/"
+                        + encodeSourcePart(context.nodeId) + "/" + consumerId;
+                var store = executionStore.openSourceCheckpointStore(context.identity.tenantId(), namespace);
+                var consumer = new StableConsumerIngress(context, store, namespace);
+                context.consumers.add(consumer);
+                return consumer;
+            }
+        }
+
         @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
             synchronized (context) {
-                return context.active() ? ingress.offer(security, target, payload)
+                return context.active() && context.identity.equals(security) ? ingress.offer(security, target, payload)
                         : IngressDisposition.REJECTED_ADMISSION_CLOSED;
             }
         }
@@ -1830,7 +1853,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         @Override public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
                 IngressTarget target, Object payload, String sourceId, String idempotentKey) {
             synchronized (context) {
-                return context.active() ? ingress.offerDurably(security, target, payload, sourceId, idempotentKey)
+                return context.active() && context.identity.equals(security) ? ingress.offerDurably(security, target, payload, sourceId, idempotentKey)
                         : new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
             }
         }
@@ -1838,7 +1861,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         @Override public CompletionStage<JournalCursor> sourceCheckpoint(SecurityContext security,
                                                                           String sourceId) {
             synchronized (context) {
-                return context.active() ? ingress.sourceCheckpoint(security, sourceId)
+                return context.active() && context.identity.equals(security) ? ingress.sourceCheckpoint(security, sourceId)
                         : CompletableFuture.failedFuture(new IllegalStateException("source authority is retired"));
             }
         }
@@ -1846,13 +1869,73 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         @Override public CompletionStage<JournalCursor> advanceSourceCheckpoint(JournalCursor expected,
                                                                                  long throughPosition) {
             synchronized (context) {
-                return context.active() ? ingress.advanceSourceCheckpoint(expected, throughPosition)
+                return context.active() && expected != null
+                        && context.identity.tenantId().equals(expected.tenantId())
+                        && expected.destination().startsWith(id.value() + "/")
+                        ? ingress.advanceSourceCheckpoint(expected, throughPosition)
                         : CompletableFuture.failedFuture(new IllegalStateException("source authority is retired"));
             }
         }
 
         @Override public int bufferCapacity() { return ingress.bufferCapacity(); }
         @Override public IngressOverflowPolicy overflowPolicy() { return ingress.overflowPolicy(); }
+    }
+
+    private static String encodeSourcePart(String value) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** Stable namespace, still fenced by the source context that opened it. */
+    private final class StableConsumerIngress implements ai.ravenroot.api.deployment.DurableConsumerIngress {
+        private final SourceContext context;
+        private final ai.ravenroot.api.persistence.SourceCheckpointStore store;
+        private final String namespace;
+        private boolean closed;
+        StableConsumerIngress(SourceContext context, ai.ravenroot.api.persistence.SourceCheckpointStore store,
+                              String namespace) {
+            this.context = context; this.store = store; this.namespace = namespace;
+        }
+        private boolean authorized(SecurityContext security) {
+            return !closed && context.active() && context.identity.equals(security);
+        }
+        @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
+            // A stable durable handle never offers volatile custody.
+            return IngressDisposition.REJECTED_ADMISSION_CLOSED;
+        }
+        @Override public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
+                IngressTarget target, Object payload, String sourceId, String idempotentKey) {
+            synchronized (context) {
+                if (!authorized(security)) return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+                return ((IngressView) ingress).offerDurablyScoped(security, target, payload, sourceId,
+                        idempotentKey, store, namespace);
+            }
+        }
+        @Override public CompletionStage<JournalCursor> sourceCheckpoint(SecurityContext security, String sourceId) {
+            synchronized (context) {
+                return authorized(security) ? store.checkpoint(sourceId)
+                        : CompletableFuture.failedFuture(new IllegalStateException("source authority is retired"));
+            }
+        }
+        @Override public CompletionStage<JournalCursor> advanceSourceCheckpoint(JournalCursor expected, long position) {
+            synchronized (context) {
+                return !closed && context.active() ? store.advance(expected, position)
+                        : CompletableFuture.failedFuture(new IllegalStateException("source authority is retired"));
+            }
+        }
+        @Override public int bufferCapacity() { return ingress.bufferCapacity(); }
+        @Override public IngressOverflowPolicy overflowPolicy() { return ingress.overflowPolicy(); }
+        @Override public void close() {
+            synchronized (context) {
+                if (closed) return;
+                closed = true;
+                context.consumers.remove(this);
+                try { store.close(); } catch (RuntimeException ignored) {
+                    // Revocation is already final; an adapter cleanup failure cannot keep the
+                    // source's package authority alive or skip retirement of its siblings.
+                }
+            }
+        }
     }
 
     /** Dynamic composition-root view: every call resolves the currently ready generation. */
@@ -2322,6 +2405,12 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         @Override
         public ai.ravenroot.api.deployment.IngressReceipt offerDurably(SecurityContext security,
                 IngressTarget target, Object payload, String sourceId, String idempotentKey) {
+            return offerDurablyScoped(security, target, payload, sourceId, idempotentKey, null, null);
+        }
+
+        private ai.ravenroot.api.deployment.IngressReceipt offerDurablyScoped(SecurityContext security,
+                IngressTarget target, Object payload, String sourceId, String idempotentKey,
+                ai.ravenroot.api.persistence.SourceCheckpointStore sourceStore, String sourceNamespace) {
             Objects.requireNonNull(sourceId, "sourceId");
             Objects.requireNonNull(idempotentKey, "idempotentKey");
             if (executionStore == null) {
@@ -2363,14 +2452,17 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             }
 
             String tenantId = security.tenantId();
-            String destination = id.value() + "/" + sourceId;
+            String destination = sourceStore == null ? id.value() + "/" + sourceId
+                    : "source-v1:" + encodeSourcePart(sourceNamespace) + "." + encodeSourcePart(sourceId);
             UUID eventId = UUID.nameUUIDFromBytes(
                     (tenantId + '\0' + destination + '\0' + idempotentKey)
                             .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
             boolean firstDelivery;
             try {
-                firstDelivery = executionStore.recordInboxDelivery(tenantId, destination, eventId, inboxRetention)
+                firstDelivery = (sourceStore == null
+                        ? executionStore.recordInboxDelivery(tenantId, destination, eventId, inboxRetention)
+                        : sourceStore.recordInbox(sourceId, eventId, inboxRetention))
                         .toCompletableFuture().get(DEFAULT_STORE_CALL_BOUND.toMillis(), TimeUnit.MILLISECONDS);
             } catch (RuntimeException | ExecutionException | TimeoutException storeFailure) {
                 // The commit is genuinely unknown, not refused (IngressReceipt.Ambiguous's own

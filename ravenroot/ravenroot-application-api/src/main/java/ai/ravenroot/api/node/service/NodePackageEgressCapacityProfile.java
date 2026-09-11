@@ -3,6 +3,7 @@ package ai.ravenroot.api.node.service;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * Closed quantitative description of one package's managed external-I/O service view.
@@ -31,11 +32,43 @@ public final class NodePackageEgressCapacityProfile {
             int maximumConcurrentPerTenant, int maximumQueuedWebSocketSends,
             Duration maximumDeadline, Duration maximumWebSocketLifetime,
             Duration maximumWebSocketIdle) {
+        // Before format v4, the managed bridge accepted whatever ratio the caller selected under
+        // ExternalIoLimits' absolute 1,000x ceiling. Retaining 1,000 here preserves that exact SDK
+        // contract; new compositions use the overload below to choose an explicit tighter profile.
+        return bounded(maximumRequestBytes, maximumResponseBytes, maximumWebSocketMessageBytes,
+                maximumWebSocketFragments, maximumConcurrentOperations, maximumConcurrentPerTenant,
+                maximumQueuedWebSocketSends, 1_000, maximumDeadline, maximumWebSocketLifetime,
+                maximumWebSocketIdle);
+    }
+
+    /** A service view with every quantitative limit, including decompression, explicitly resolved. */
+    public static NodePackageEgressCapacityProfile bounded(
+            long maximumRequestBytes, long maximumResponseBytes, long maximumWebSocketMessageBytes,
+            int maximumWebSocketFragments, int maximumConcurrentOperations,
+            int maximumConcurrentPerTenant, int maximumQueuedWebSocketSends,
+            int maximumDecompressionRatio,
+            Duration maximumDeadline, Duration maximumWebSocketLifetime,
+            Duration maximumWebSocketIdle) {
         return new NodePackageEgressCapacityProfile(new Limits(maximumRequestBytes,
                 maximumResponseBytes, maximumWebSocketMessageBytes, maximumWebSocketFragments,
                 maximumConcurrentOperations, maximumConcurrentPerTenant,
-                maximumQueuedWebSocketSends, maximumDeadline, maximumWebSocketLifetime,
+                maximumQueuedWebSocketSends, OptionalInt.of(maximumDecompressionRatio),
+                maximumDeadline, maximumWebSocketLifetime,
                 maximumWebSocketIdle));
+    }
+
+    /** Historical v2/v3 capacity whose decompression authority was not represented. */
+    public static NodePackageEgressCapacityProfile boundedWithoutDecompressionRatio(
+            long maximumRequestBytes, long maximumResponseBytes, long maximumWebSocketMessageBytes,
+            int maximumWebSocketFragments, int maximumConcurrentOperations,
+            int maximumConcurrentPerTenant, int maximumQueuedWebSocketSends,
+            Duration maximumDeadline, Duration maximumWebSocketLifetime,
+            Duration maximumWebSocketIdle) {
+        return new NodePackageEgressCapacityProfile(new Limits(maximumRequestBytes,
+                maximumResponseBytes, maximumWebSocketMessageBytes, maximumWebSocketFragments,
+                maximumConcurrentOperations, maximumConcurrentPerTenant,
+                maximumQueuedWebSocketSends, OptionalInt.empty(), maximumDeadline,
+                maximumWebSocketLifetime, maximumWebSocketIdle));
     }
 
     /** Empty means an explicitly deny-only service view. */
@@ -56,8 +89,21 @@ public final class NodePackageEgressCapacityProfile {
     public record Limits(long maximumRequestBytes, long maximumResponseBytes,
                          long maximumWebSocketMessageBytes, int maximumWebSocketFragments,
                          int maximumConcurrentOperations, int maximumConcurrentPerTenant,
-                         int maximumQueuedWebSocketSends, Duration maximumDeadline,
+                         int maximumQueuedWebSocketSends, OptionalInt maximumDecompressionRatio,
+                         Duration maximumDeadline,
                          Duration maximumWebSocketLifetime, Duration maximumWebSocketIdle) {
+        /** Source-compatible v2/v3 constructor with the historical 1,000x absolute ratio ceiling. */
+        public Limits(long maximumRequestBytes, long maximumResponseBytes,
+                      long maximumWebSocketMessageBytes, int maximumWebSocketFragments,
+                      int maximumConcurrentOperations, int maximumConcurrentPerTenant,
+                      int maximumQueuedWebSocketSends, Duration maximumDeadline,
+                      Duration maximumWebSocketLifetime, Duration maximumWebSocketIdle) {
+            this(maximumRequestBytes, maximumResponseBytes, maximumWebSocketMessageBytes,
+                    maximumWebSocketFragments, maximumConcurrentOperations,
+                    maximumConcurrentPerTenant, maximumQueuedWebSocketSends, OptionalInt.of(1_000),
+                    maximumDeadline, maximumWebSocketLifetime, maximumWebSocketIdle);
+        }
+
         public Limits {
             bytes(maximumRequestBytes, "maximumRequestBytes");
             bytes(maximumResponseBytes, "maximumResponseBytes");
@@ -66,6 +112,12 @@ public final class NodePackageEgressCapacityProfile {
             positive(maximumConcurrentOperations, "maximumConcurrentOperations");
             positive(maximumConcurrentPerTenant, "maximumConcurrentPerTenant");
             positive(maximumQueuedWebSocketSends, "maximumQueuedWebSocketSends");
+            Objects.requireNonNull(maximumDecompressionRatio, "maximumDecompressionRatio");
+            if (maximumDecompressionRatio.isPresent()
+                    && (maximumDecompressionRatio.getAsInt() < 1
+                    || maximumDecompressionRatio.getAsInt() > 1_000)) {
+                throw new IllegalArgumentException("maximumDecompressionRatio is out of range");
+            }
             if (maximumConcurrentPerTenant > maximumConcurrentOperations) {
                 throw new IllegalArgumentException(
                         "maximumConcurrentPerTenant exceeds package capacity");

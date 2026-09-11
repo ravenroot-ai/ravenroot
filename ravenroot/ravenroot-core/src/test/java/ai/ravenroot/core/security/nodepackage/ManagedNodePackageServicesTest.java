@@ -497,18 +497,31 @@ class ManagedNodePackageServicesTest {
     }
 
     @Test
-    void sourceOperationsDeriveTenantOnlyFromTheDeliveredContextIdentity() {
+    void sourceOperationsUseOnlyTheCoreRegisteredAuthorityIdentity() {
         AtomicReference<String> resolvedTenant = new AtomicReference<>();
         var services = services(NodePackageEgressPolicy.builder().build(),
                 Set.of(NodePackageCapability.CREDENTIAL_RESOLUTION), (packageId, tenant, reference) -> {
                     resolvedTenant.set(tenant);
                     return java.util.Optional.of(new SecretValue("secret".toCharArray()));
                 });
+        SecurityContext registered = new SecurityContext("request", "tenant-registered", "subject",
+                PrincipalType.USER, "issuer");
+        services.bindSourceAuthorityResolver(ignored -> sourceAuthority(registered));
 
-        try (CredentialLease ignored = await(services.credentials().resolve(sourceContext("tenant-source"),
+        try (CredentialLease ignored = await(services.credentials().resolve(sourceContext("tenant-forged"),
                 "ref", Duration.ofSeconds(1)))) {
-            assertEquals("tenant-source", resolvedTenant.get());
+            assertEquals("tenant-registered", resolvedTenant.get());
         }
+    }
+
+    @Test
+    void sourceOperationsDefaultDenyWithoutCoreRegistration() {
+        var services = services(NodePackageEgressPolicy.builder().build(),
+                Set.of(NodePackageCapability.CREDENTIAL_RESOLUTION), OptionalSecret.of("secret"));
+
+        assertReason(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE,
+                services.credentials().resolve(sourceContext("tenant-forged"), "ref",
+                        Duration.ofSeconds(1)));
     }
 
     @Test
@@ -576,6 +589,23 @@ class ManagedNodePackageServicesTest {
             @Override public TrustedIngress ingress() { throw new UnsupportedOperationException(); }
             @Override public void reportDegraded(String sanitizedReason) { }
             @Override public void reportHealthy() { }
+        };
+    }
+
+    private static ManagedNodePackageServices.SourceAuthority sourceAuthority(SecurityContext identity) {
+        var limits = ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.bounded(
+                1_048_576, 8_388_608, 1_048_576, 128, 64, 16, 64, 100,
+                Duration.ofSeconds(30), Duration.ofMinutes(5), Duration.ofMinutes(1))
+                .limits().orElseThrow();
+        return new ManagedNodePackageServices.SourceAuthority() {
+            @Override public SecurityContext identity() { return identity; }
+            @Override public ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.Limits capacity() {
+                return limits;
+            }
+            @Override public void requireActive() { }
+            @Override public ManagedNodePackageServices.SourceOperation track(Runnable cancel) {
+                return ManagedNodePackageServices.SourceOperation.NOOP;
+            }
         };
     }
 

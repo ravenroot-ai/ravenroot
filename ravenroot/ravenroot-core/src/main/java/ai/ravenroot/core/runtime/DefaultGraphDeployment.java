@@ -1390,23 +1390,29 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             IngressRouteOwner owner = managedIngress == null ? null : new IngressRouteOwner(packageId,
                     security.tenantId(), id.value(), node.id(), generation);
             InboundSourceContext context = new SourceContext(node.id(), security, owner);
+            BehaviorRegistry.SourceRegistration sourceAuthority = behaviors.registerSourceAuthority(
+                    context, packageId, id, node.id(), generation, security);
+            InboundSource source = null;
             try {
-                InboundSource source = capableFactory.get().createSource(node, context);
+                source = capableFactory.get().createSource(node, context);
                 if (source == null) {
                     throw new IllegalStateException("Behavior '" + node.behavior()
                             + "' returned no inbound source for node '" + node.id() + "'");
                 }
+                sourceAuthority.activate();
                 joinSourceStart(source.start(context));
                 // From this point the source owns live resources. Record it before managed route
                 // activation so an acquisition failure rolls back this source and retires any lease
                 // it obtained before completing exceptionally, not only earlier siblings.
-                started.add(new SourceHandle(node.id(), source, owner));
+                started.add(new SourceHandle(node.id(), source, owner, sourceAuthority));
                 if (source instanceof ManagedIngressSource ingressSource) {
                     IngressRouteAuthority authority = context.ingressRoutes().orElseThrow(() ->
                             new IllegalStateException("managed ingress is unavailable for source"));
                     joinSourceStart(ingressSource.activateManagedIngress(authority));
                 }
             } catch (RuntimeException | Error failure) {
+                sourceAuthority.close();
+                if (source != null) stopSourceBounded(source::rollback);
                 rollbackSources(started);
                 throw failure;
             }
@@ -1418,7 +1424,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private void rollbackSources(List<SourceHandle> handles) {
         for (SourceHandle handle : handles) {
             retireIngress(handle);
-            joinSourceStopBounded(handle.source().rollback());
+            handle.sourceAuthority().close();
+            stopSourceBounded(handle.source()::rollback);
         }
     }
 
@@ -1512,9 +1519,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         // the divergence is documented explicitly rather than left to be discovered.
         for (SourceHandle handle : sourcesToStop) {
             retireIngress(handle);
-            joinSourceStopBounded(release == SourceRelease.SHUTDOWN
-                    ? handle.source().shutdown()
-                    : handle.source().stop());
+            handle.sourceAuthority().close();
+            stopSourceBounded(release == SourceRelease.SHUTDOWN
+                    ? handle.source()::shutdown
+                    : handle.source()::stop);
         }
         try {
             if (runnerToClose != null) {
@@ -1649,12 +1657,22 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
+    private static void stopSourceBounded(java.util.function.Supplier<CompletionStage<Void>> stop) {
+        try {
+            joinSourceStopBounded(stop.get());
+        } catch (RuntimeException ignored) {
+            // A source is already being retired; one synchronous cleanup failure must not strand
+            // sibling sources or replace the startup failure that selected this cleanup path.
+        }
+    }
+
     /** One node's inbound source, paired with the node id for diagnostics and individual stop/rollback. */
     private void retireIngress(SourceHandle handle) {
         if (managedIngress != null && handle.owner() != null) managedIngress.retire(handle.owner());
     }
 
-    private record SourceHandle(String nodeId, InboundSource source, IngressRouteOwner owner) {
+    private record SourceHandle(String nodeId, InboundSource source, IngressRouteOwner owner,
+                                BehaviorRegistry.SourceRegistration sourceAuthority) {
     }
 
     /**
@@ -1989,11 +2007,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         ai.ravenroot.api.persistence.ExecutionKey key = new ai.ravenroot.api.persistence.ExecutionKey(
                 security.tenantId(), processInstanceId);
         var executionOperationalPolicy = executionManifests == null ? null
-                : executionManifests.resolvePolicy(key,
+                : executionManifests.resolvePolicyForNodes(key,
                         ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
-                        manager.definition().nodes().stream()
-                                .map(ai.ravenroot.core.graph.GraphNode::behavior)
-                                .filter(java.util.Objects::nonNull).toList());
+                        manager.definition().nodes());
         AutoCloseable budgetBinding = null;
         AutoCloseable humanTaskBinding = null;
         try {

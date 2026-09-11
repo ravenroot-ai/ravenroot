@@ -136,7 +136,7 @@ public final class EnvironmentNodePackageServiceGrants {
     private static final Set<String> ENCRYPTED_SCHEMES = Set.of("https", "wss");
     private static final Set<String> LIMIT_KEYS = Set.of("maxRequestBytes", "maxResponseBytes",
             "maxWebSocketMessageBytes", "maxWebSocketFragments", "maxQueuedWebSocketSends",
-            "maxConcurrentOperations", "maxConcurrentPerTenant", "maxDeadlineMs",
+            "maxConcurrentOperations", "maxConcurrentPerTenant", "maxDecompressionRatio", "maxDeadlineMs",
             "maxWebSocketLifetimeMs", "maxWebSocketIdleMs");
     private static final Set<String> ORIGIN_KEYS = Set.of("scheme", "host", "port");
     private static final Set<String> CREDENTIAL_BINDING_KEYS =
@@ -543,6 +543,8 @@ public final class EnvironmentNodePackageServiceGrants {
                 count(variable, limits, "maxQueuedWebSocketSends", DEFAULTS.maximumQueuedWebSocketSends()),
                 millis(variable, limits, "maxWebSocketLifetimeMs", DEFAULTS.maximumWebSocketLifetime()),
                 millis(variable, limits, "maxWebSocketIdleMs", DEFAULTS.maximumWebSocketIdle()));
+        policy.maximumDecompressionRatio(count(variable, limits, "maxDecompressionRatio",
+                DEFAULTS.maximumDecompressionRatio()));
         policy.maximumDeadline(millis(variable, limits, "maxDeadlineMs", DEFAULTS.maximumDeadline()));
     }
 

@@ -17,6 +17,7 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.programming.ProgramRuntime;
 import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
+import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.GraphExecutionLimits;
 import ai.ravenroot.core.runtime.UnknownBehaviorPolicy;
@@ -149,7 +150,17 @@ public final class ExecutionManifestResolver {
                         maximumExecutionResultPayloadBytes),
                 behaviors.builtInHttpCapacityFor(behaviorNames), capacities,
                 java.util.Optional.ofNullable(maximumPersistencePayloadBytes)
-                        .map(ResolvedOperationalPolicy.PersistenceLimits::new));
+                        .map(ResolvedOperationalPolicy.PersistenceLimits::new), List.of());
+    }
+
+    /** Resolves package and per-node external-I/O capacities from one immutable accepted graph. */
+    public ResolvedOperationalPolicy operationalPolicyForNodes(Collection<GraphNode> nodes) {
+        Objects.requireNonNull(nodes, "nodes");
+        var behaviorNames = nodes.stream().filter(node -> node.behavior() != null)
+                .map(GraphNode::behavior).collect(java.util.stream.Collectors.toSet());
+        ResolvedOperationalPolicy base = operationalPolicyFor(behaviorNames);
+        return new ResolvedOperationalPolicy(base.graph(), base.results(), base.builtInHttp(),
+                base.nodePackages(), base.persistence(), behaviors.nodeExternalIoCapacitiesFor(nodes));
     }
 
     /** Compatibility overload: includes every installed package. */
@@ -160,12 +171,27 @@ public final class ExecutionManifestResolver {
                 behaviors.catalogSources().keySet());
     }
 
+    /** Builds a v4 manifest from the exact policy snapshot already used to construct runtime. */
+    public ExecutionManifest manifestForResolved(ExecutionKey key, GraphContentId graphContentId,
+                                                 GraphDefinitionIdentity graphIdentity,
+                                                 ExecutionPolicy policy, Instant pinnedAt,
+                                                 ResolvedOperationalPolicy operational) {
+        Objects.requireNonNull(policy, "policy");
+        Objects.requireNonNull(operational, "operational");
+        var runtime = runtime(policy, executionLimitsDigestOf(operational.graph()));
+        List<PinnedNodePackage> packages = operational.nodePackages().stream()
+                .map(entry -> behaviors.nodePackageBinding(entry.packageId()).orElseThrow().identity())
+                .toList();
+        return new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key, graphContentId,
+                graphIdentity, runtime, packages, pinnedAt, operational);
+    }
+
     /** Builds a v2 manifest for one accepted graph and its actually referenced packages. */
     public ExecutionManifest manifestFor(ExecutionKey key, GraphContentId graphContentId,
                                          GraphDefinitionIdentity graphIdentity, ExecutionPolicy policy,
                                          Instant pinnedAt, Collection<String> behaviorNames) {
         Objects.requireNonNull(policy, "policy");
-        ResolvedOperationalPolicy operational = operationalPolicyFor(behaviorNames);
+        ResolvedOperationalPolicy operational = legacyOperationalPolicyFor(behaviorNames);
         var runtime = runtime(policy, executionLimitsDigestOf(operational.graph()));
         List<PinnedNodePackage> packages = operational.nodePackages().stream()
                 .map(entry -> behaviors.nodePackageBinding(entry.packageId()).orElseThrow().identity())
@@ -174,6 +200,24 @@ public final class ExecutionManifestResolver {
                 ? ExecutionManifest.FORMAT_VERSION_2 : ExecutionManifest.FORMAT_VERSION_3;
         return new ExecutionManifest(formatVersion, key, graphContentId,
                 graphIdentity, runtime, packages, pinnedAt, operational);
+    }
+
+    private ResolvedOperationalPolicy legacyOperationalPolicyFor(Collection<String> behaviorNames) {
+        ResolvedOperationalPolicy current = operationalPolicyFor(behaviorNames);
+        var packages = current.nodePackages().stream().map(entry -> {
+            var limits = entry.capacity().limits();
+            if (limits.isEmpty()) return entry;
+            var value = limits.orElseThrow();
+            return new ResolvedOperationalPolicy.PackageCapacity(entry.packageId(),
+                    ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.bounded(
+                            value.maximumRequestBytes(), value.maximumResponseBytes(),
+                            value.maximumWebSocketMessageBytes(), value.maximumWebSocketFragments(),
+                            value.maximumConcurrentOperations(), value.maximumConcurrentPerTenant(),
+                            value.maximumQueuedWebSocketSends(), 1_000, value.maximumDeadline(),
+                            value.maximumWebSocketLifetime(), value.maximumWebSocketIdle()));
+        }).toList();
+        return new ResolvedOperationalPolicy(current.graph(), current.results(), current.builtInHttp(),
+                packages, current.persistence());
     }
 
     /** Builds the frozen v1 description used only to compare existing v1 rows. */
@@ -251,7 +295,8 @@ public final class ExecutionManifestResolver {
             throw new ExecutionManifestIncompatibleException(pinned.key(), compatibility);
         }
         if (pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_2
-                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_3) {
+                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_3
+                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_4) {
             return pinned.operationalPolicy();
         }
         if (storeCapabilities.contains(StoreCapability.EXECUTION_RESULTS)
@@ -262,6 +307,19 @@ public final class ExecutionManifestResolver {
         return new ResolvedOperationalPolicy(graphPolicyOf(graphExecutionLimits),
                 new ResolvedOperationalPolicy.ResultLimits(false,
                         maximumExecutionResultPayloadBytes), List.of());
+    }
+
+    /** Restores policy with proof that older layouts are unaffected by node-bound I/O capacity. */
+    public ResolvedOperationalPolicy resolvePolicyForNodes(ExecutionManifest pinned, ExecutionPolicy policy,
+                                                           Collection<GraphNode> nodes) {
+        Objects.requireNonNull(nodes, "nodes");
+        if (pinned.formatVersion() < ExecutionManifest.FORMAT_VERSION_4
+                && nodes.stream().anyMatch(behaviors::requiresExternalIoCapacity)) {
+            throw new ExecutionManifestResolutionException(
+                    ExecutionManifestResolutionException.Reason.LEGACY_OPERATIONAL_POLICY_UNAVAILABLE);
+        }
+        return resolvePolicy(pinned, policy, nodes.stream().filter(node -> node.behavior() != null)
+                .map(GraphNode::behavior).collect(java.util.stream.Collectors.toSet()));
     }
 
     /**
@@ -276,7 +334,8 @@ public final class ExecutionManifestResolver {
             throw new ExecutionManifestIncompatibleException(pinned.key(), compatibility);
         }
         if (pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_2
-                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_3) {
+                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_3
+                || pinned.formatVersion() == ExecutionManifest.FORMAT_VERSION_4) {
             return pinned.operationalPolicy();
         }
         return new ResolvedOperationalPolicy(graphPolicyOf(graphExecutionLimits),

@@ -135,6 +135,7 @@ public final class GraphRunner implements AutoCloseable {
     private final ExecutionIdentitySource identitySource;
     private final Duration shutdownBound;
     private final GraphExecutionLimits executionLimits;
+    private final Map<String, ai.ravenroot.api.node.service.NodeExternalIoCapacity> nodeExternalIo;
 
     /**
      * The immutable runtime definition of every graph node (ADR 0024 §1/§3).
@@ -848,8 +849,26 @@ public final class GraphRunner implements AutoCloseable {
                 : requireDescribes(snapshot, submitted);
         this.graph = pinned.definition();
         this.behaviors = java.util.Objects.requireNonNull(behaviors, "behaviors");
-        this.operationalPolicy = operationalPolicy == null
-                ? this.behaviors.unpinnedOperationalPolicy(this.executionLimits) : operationalPolicy;
+        if (operationalPolicy == null) {
+            var live = this.behaviors.unpinnedOperationalPolicy(this.executionLimits);
+            this.operationalPolicy = new ai.ravenroot.api.persistence.ResolvedOperationalPolicy(
+                    live.graph(), live.results(), live.builtInHttp(), live.nodePackages(), live.persistence(),
+                    this.behaviors.nodeExternalIoCapacitiesFor(this.graph.nodes()));
+        } else {
+            this.operationalPolicy = operationalPolicy;
+        }
+        var externalIo = new java.util.LinkedHashMap<String,
+                ai.ravenroot.api.node.service.NodeExternalIoCapacity>();
+        for (var entry : this.operationalPolicy.nodeExternalIo()) {
+            externalIo.put(entry.bindingDigest(), entry.capacity());
+        }
+        var expectedExternalIo = this.graph.nodes().stream()
+                .filter(this.behaviors::requiresExternalIoCapacity)
+                .map(this.behaviors::externalIoBindingDigest).collect(java.util.stream.Collectors.toSet());
+        if (!externalIo.keySet().equals(expectedExternalIo)) {
+            throw new IllegalArgumentException("external-I/O capacities do not match pin-capable graph nodes");
+        }
+        this.nodeExternalIo = java.util.Map.copyOf(externalIo);
         this.completedHumanTaskNode = validateCompletedHumanTaskNode(this.graph, completedHumanTaskNode);
         validateAdmittedCommands(this.graph, this.behaviors, executionPolicy);
         this.operationallyReachableNodes = operationallyReachableNodes(this.graph, executionPolicy);
@@ -4067,7 +4086,7 @@ public final class GraphRunner implements AutoCloseable {
         NodeHandler composed = node.kind() == NodeKind.BEHAVIOR && !authoredBypass
                 && !node.id().equals(completedHumanTaskNode)
                 && operationallyReachableNodes.contains(node.id())
-                ? behaviors.create(node).orElseGet(() -> fallback(node))
+                ? behaviors.create(node, externalIoFor(node)).orElseGet(() -> fallback(node))
                 : null;
         return new RavenNode() {
             private volatile NodeHandler operational = composed;
@@ -4119,12 +4138,18 @@ public final class GraphRunner implements AutoCloseable {
                 if (ready != null) return ready;
                 synchronized (this) {
                     if (operational == null) {
-                        operational = behaviors.create(node).orElseGet(() -> fallback(node));
+                        operational = behaviors.create(node, externalIoFor(node)).orElseGet(() -> fallback(node));
                     }
                     return operational;
                 }
             }
         };
+    }
+
+    private java.util.Optional<ai.ravenroot.api.node.service.NodeExternalIoCapacity>
+            externalIoFor(GraphNode node) {
+        if (!behaviors.requiresExternalIoCapacity(node)) return java.util.Optional.empty();
+        return java.util.Optional.ofNullable(nodeExternalIo.get(behaviors.externalIoBindingDigest(node)));
     }
 
     private static String requireCompletedHumanTaskNode(String nodeId) {

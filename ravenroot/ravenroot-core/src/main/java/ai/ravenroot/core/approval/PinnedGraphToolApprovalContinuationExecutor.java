@@ -532,10 +532,9 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             var action = behaviors.createToolCallContinuation(manager.definition().node(nodeId))
                     .orElseThrow(() -> new IllegalStateException(
                             "trusted continuation action is unavailable"));
-            var policy = manifests == null ? null : manifests.resolvePolicy(key,
+            var policy = manifests == null ? null : manifests.resolvePolicyForNodes(key,
                     ai.ravenroot.api.application.ExecutionPolicy.STANDARD,
-                    manager.definition().nodes().stream().map(ai.ravenroot.core.graph.GraphNode::behavior)
-                            .filter(java.util.Objects::nonNull).toList());
+                    manager.definition().nodes());
             return new Prepared(manager, snapshot, action, pinnedLimits, policy);
         } catch (RuntimeException failure) {
             manager.close();

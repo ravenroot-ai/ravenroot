@@ -15,6 +15,7 @@ import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.persistence.ResolvedRuntimeProfile;
 import ai.ravenroot.api.persistence.ResolvedOperationalPolicy;
 import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
 import ai.ravenroot.api.persistence.Retryability;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredExecutionManifest;
@@ -219,6 +220,36 @@ public abstract class ExecutionManifestStoreContract {
         var profile = new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through",
                 "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
         ExecutionManifest manifest = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_3, key,
+                new GraphContentId("a".repeat(64)),
+                new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
+                profile, List.of(nodePackage), EPOCH, policy);
+
+        await(store().pin(manifest));
+        assertEquals(policy, await(store().load(key)).manifest().operationalPolicy());
+        assumeCapability(StoreCapability.DURABLE);
+        assertEquals(manifest, await(reopen().load(key)).manifest());
+    }
+
+    @Test
+    final void aVersionFourExternalIoSnapshotAndPersistenceDispositionSurvivePinLoadAndReopen() {
+        ExecutionKey key = key(DEFAULT_TENANT);
+        PinnedNodePackage nodePackage = PinnedNodePackage.of("alpha.nodes", "1", "node-sdk-1");
+        ResolvedOperationalPolicy previous = operationalPolicy("alpha.nodes");
+        var limits = previous.nodePackages().getFirst().capacity().limits().orElseThrow();
+        var currentCapacity = NodePackageEgressCapacityProfile.bounded(
+                limits.maximumRequestBytes(), limits.maximumResponseBytes(),
+                limits.maximumWebSocketMessageBytes(), limits.maximumWebSocketFragments(),
+                limits.maximumConcurrentOperations(), limits.maximumConcurrentPerTenant(),
+                limits.maximumQueuedWebSocketSends(), 100, limits.maximumDeadline(),
+                limits.maximumWebSocketLifetime(), limits.maximumWebSocketIdle());
+        ResolvedOperationalPolicy policy = new ResolvedOperationalPolicy(previous.graph(), previous.results(),
+                previous.builtInHttp(), List.of(new ResolvedOperationalPolicy.PackageCapacity(
+                        "alpha.nodes", currentCapacity)), java.util.Optional.empty(),
+                List.of(new ResolvedOperationalPolicy.NodeIoCapacity("9".repeat(64),
+                        new NodeExternalIoCapacity(4096, 16, java.time.Duration.ofSeconds(5), 3))));
+        var profile = new ResolvedRuntimeProfile(1, 1, "STANDARD", "pass-through",
+                "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64));
+        ExecutionManifest manifest = new ExecutionManifest(ExecutionManifest.FORMAT_VERSION_4, key,
                 new GraphContentId("a".repeat(64)),
                 new GraphDefinitionIdentity(GraphDefinitionIdentity.SUBMISSION_GRAPH_ID, "a".repeat(64)),
                 profile, List.of(nodePackage), EPOCH, policy);
@@ -545,7 +576,7 @@ public abstract class ExecutionManifestStoreContract {
     private static ResolvedOperationalPolicy operationalPolicy(String packageId) {
         var graph = new ResolvedOperationalPolicy.GraphLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-        var capacity = NodePackageEgressCapacityProfile.bounded(1, 2, 3, 4, 5, 5, 6,
+        var capacity = NodePackageEgressCapacityProfile.bounded(1, 2, 3, 4, 5, 5, 6, 1_000,
                 java.time.Duration.ofSeconds(7), java.time.Duration.ofSeconds(8),
                 java.time.Duration.ofSeconds(7));
         return new ResolvedOperationalPolicy(graph,

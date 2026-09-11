@@ -164,8 +164,8 @@ public final class RavenrootServerMain {
                 OutboundHttpPolicy.fromCommaSeparated(
                         System.getenv("RAVENROOT_HTTP_ALLOWED_HOSTS"),
                         System.getenv("RAVENROOT_HTTP_ALLOWED_PORTS"),
-                        byteCeiling("RAVENROOT_HTTP_MAX_RESPONSE_BYTES"),
-                        byteCeiling("RAVENROOT_HTTP_MAX_REQUEST_BYTES")));
+                        byteCeiling(System.getenv(), "RAVENROOT_HTTP_MAX_RESPONSE_BYTES"),
+                        byteCeiling(System.getenv(), "RAVENROOT_HTTP_MAX_REQUEST_BYTES")));
         // Security audit (access, decisions, artifact/version lifecycle) is durable and
         // tamper-evident, separate from the operational stdout logs the server also writes. See ADR
         // 0013 and ai.ravenroot.api.audit.AuditTrail for what this does and does not defend against.
@@ -812,13 +812,15 @@ public final class RavenrootServerMain {
      * pass a map that simply omits the key. Treating blank as unset is what the surrounding
      * configuration readers already do.</p>
      */
-    private static long byteCeiling(String variable) {
-        String raw = System.getenv(variable);
+    static long byteCeiling(Map<String, String> environment, String variable) {
+        String raw = java.util.Objects.requireNonNull(environment, "environment").get(variable);
         if (raw == null || raw.isBlank()) {
             return 0;
         }
         try {
-            return Long.parseLong(raw.trim());
+            long value = Long.parseLong(raw.trim());
+            if (value < 1) throw new NumberFormatException("nonpositive");
+            return value;
         } catch (NumberFormatException notANumber) {
             // Do not echo the value: it is operator configuration and the useful answer is which
             // setting is wrong, not what was typed.
@@ -903,7 +905,7 @@ public final class RavenrootServerMain {
      *
      * <p>Empty means absent here. Compose declares optional settings as {@code NAME: ${NAME:-}}, so
      * an unset variable arrives as an empty string rather than as an absent key -- the same reason
-     * {@link #byteCeiling(String)} spells that case out.
+     * {@link #byteCeiling(Map, String)} spells that case out.
      *
      * <p><b>This method also writes the startup line, rather than leaving that to its caller.</b>
      * {@code GraalVmProgramRuntime.fromEnvironment} does the same with its own probe. Returning the

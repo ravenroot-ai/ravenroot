@@ -8,10 +8,22 @@ import ai.ravenroot.api.persistence.ExecutionManifest;
 import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.node.ExecutionIoCapacityCapable;
+import ai.ravenroot.api.node.NodeAction;
+import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodeConfiguration;
+import ai.ravenroot.api.node.NodePackage;
+import ai.ravenroot.api.node.NodeSdk;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
+import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
+import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.GraphExecutionLimits;
+import ai.ravenroot.core.runtime.NodePackages;
 import ai.ravenroot.core.runtime.UnknownBehaviorPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +38,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -67,6 +80,38 @@ class ExecutionManifestResolverEnginePolicyTest {
         ExecutionManifest current = manifest(managed);
         assertEquals(ExecutionManifest.FORMAT_VERSION_3, current.formatVersion());
         assertEquals(8192, current.operationalPolicy().persistence().orElseThrow().maximumPayloadBytes());
+    }
+
+    @Test
+    void formatFourPinsExactNodeIoWhileOlderRowsRefuseOnlyAffectedGraphs() {
+        var current = new AtomicReference<>(new NodeExternalIoCapacity(
+                4096, 8, java.time.Duration.ofSeconds(3), 4));
+        BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
+                capacityPackage(current));
+        var resolver = ExecutionManifestResolver.completeManaged(
+                engine("adapter", "a".repeat(64), new AtomicInteger()), Set.of(), 4096, 8192,
+                behaviors, UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null);
+        GraphNode node = new GraphNode("socket", NodeKind.BEHAVIOR, "test.io", java.util.Map.of());
+        var key = new ExecutionKey("tenant-a", UUID.randomUUID());
+        var accepted = resolver.operationalPolicyForNodes(List.of(node));
+        ExecutionManifest manifest = resolver.manifestForResolved(key, CONTENT,
+                GraphDefinitionIdentity.forSubmission(CONTENT), ExecutionPolicy.STANDARD,
+                CLOCK.instant(), accepted);
+        current.set(new NodeExternalIoCapacity(1024, 2, java.time.Duration.ofSeconds(1), 1));
+
+        assertEquals(ExecutionManifest.FORMAT_VERSION_4, manifest.formatVersion());
+        assertEquals(accepted, resolver.resolvePolicyForNodes(manifest, ExecutionPolicy.STANDARD,
+                List.of(node)));
+
+        ExecutionManifest old = resolver.manifestFor(new ExecutionKey("tenant-a", UUID.randomUUID()),
+                CONTENT, GraphDefinitionIdentity.forSubmission(CONTENT), ExecutionPolicy.STANDARD,
+                CLOCK.instant(), List.of("test.io"));
+        assertEquals(ExecutionManifestResolutionException.Reason.LEGACY_OPERATIONAL_POLICY_UNAVAILABLE,
+                assertThrows(ExecutionManifestResolutionException.class,
+                        () -> resolver.resolvePolicyForNodes(old, ExecutionPolicy.STANDARD,
+                                List.of(node))).reason());
+        assertEquals(old.operationalPolicy(), resolver.resolvePolicyForNodes(old,
+                ExecutionPolicy.STANDARD, List.of(GraphNode.behavior("plain", "unknown"))));
     }
 
     @Test
@@ -204,5 +249,31 @@ class ExecutionManifestResolverEnginePolicyTest {
                     case "close" -> null;
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
+    }
+
+    private static NodePackage capacityPackage(AtomicReference<NodeExternalIoCapacity> current) {
+        final class CapacityBehavior implements NodeBehavior, ExecutionIoCapacityCapable {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("test.io", "I/O", "Test", "", "actor", false,
+                        List.of(), Set.of());
+            }
+            @Override public NodeAction create(NodeConfiguration configuration) {
+                return message -> java.util.concurrent.CompletableFuture.completedFuture(
+                        ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()));
+            }
+            @Override public NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration) {
+                return current.get();
+            }
+            @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services,
+                                               NodeExternalIoCapacity capacity) {
+                return create(configuration);
+            }
+        }
+        return new NodePackage() {
+            @Override public String id() { return "test.io.package"; }
+            @Override public String version() { return "1"; }
+            @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+            @Override public List<NodeBehavior> behaviors() { return List.of(new CapacityBehavior()); }
+        };
     }
 }

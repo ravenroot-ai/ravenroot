@@ -20,7 +20,8 @@ public record ExecutionPersistenceAuthority(ExecutionManifestDigest manifestDige
     public static ExecutionPersistenceAuthority from(StoredExecutionManifest stored) {
         Objects.requireNonNull(stored, "stored");
         ExecutionManifest manifest = stored.manifest();
-        if (manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3
+        if ((manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_3
+                && manifest.formatVersion() != ExecutionManifest.FORMAT_VERSION_4)
                 || manifest.operationalPolicy() == null
                 || manifest.operationalPolicy().persistence().isEmpty()) {
             throw new IllegalArgumentException("execution manifest has no generic persistence capacity");

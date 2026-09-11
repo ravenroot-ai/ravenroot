@@ -55,8 +55,9 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
     public static final int FORMAT_VERSION_1 = 1;
     public static final int FORMAT_VERSION_2 = 2;
     public static final int FORMAT_VERSION_3 = 3;
+    public static final int FORMAT_VERSION_4 = 4;
     /** The layout this build writes. */
-    public static final int CURRENT_FORMAT_VERSION = FORMAT_VERSION_3;
+    public static final int CURRENT_FORMAT_VERSION = FORMAT_VERSION_4;
 
     /**
      * The largest number of node packages one manifest may pin.
@@ -66,11 +67,12 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
      * deployment happened to install. The value is far above any plausible installation.
      */
     public static final int MAX_NODE_PACKAGES = 1_024;
+    public static final int MAX_NODE_EXTERNAL_IO_CAPACITIES = 16_384;
 
     /** Rejects a manifest that could not stably identify what an execution was admitted against. */
     public ExecutionManifest {
         if (formatVersion != FORMAT_VERSION_1 && formatVersion != FORMAT_VERSION_2
-                && formatVersion != FORMAT_VERSION_3) {
+                && formatVersion != FORMAT_VERSION_3 && formatVersion != FORMAT_VERSION_4) {
             throw new IllegalArgumentException("unsupported execution manifest format version");
         }
         Objects.requireNonNull(key, "key");
@@ -97,7 +99,8 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
         if (formatVersion == FORMAT_VERSION_1 && operationalPolicy != null) {
             throw new IllegalArgumentException("format version 1 cannot carry operational policy");
         }
-        if (formatVersion == FORMAT_VERSION_2 || formatVersion == FORMAT_VERSION_3) {
+        if (formatVersion == FORMAT_VERSION_2 || formatVersion == FORMAT_VERSION_3
+                || formatVersion == FORMAT_VERSION_4) {
             Objects.requireNonNull(operationalPolicy, "operationalPolicy");
             if (!operationalPolicy.nodePackages().stream().map(
                     ResolvedOperationalPolicy.PackageCapacity::packageId).toList()
@@ -111,6 +114,14 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
         }
         if (formatVersion == FORMAT_VERSION_3 && operationalPolicy.persistence().isEmpty()) {
             throw new IllegalArgumentException("format version 3 requires generic persistence capacity");
+        }
+        if (formatVersion != FORMAT_VERSION_4 && operationalPolicy != null
+                && !operationalPolicy.nodeExternalIo().isEmpty()) {
+            throw new IllegalArgumentException("node external-I/O capacity requires manifest format 4");
+        }
+        if (formatVersion == FORMAT_VERSION_4
+                && operationalPolicy.nodeExternalIo().size() > MAX_NODE_EXTERNAL_IO_CAPACITIES) {
+            throw new IllegalArgumentException("too many node external-I/O capacities");
         }
     }
 

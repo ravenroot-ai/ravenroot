@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 18771 |
+| Atomic operational candidates discovered | 18905 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 8734 |
+| Reviewed | 8868 |
 | Pending review | 10037 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 144 |
 | Unique parameters converted to centralized configuration | 14 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 131 |
-| Retained protocol or format invariants | 1571 |
-| Retained published contract descriptions | 356 |
-| Retained presentation text | 37 |
+| Retained protocol or format invariants | 1574 |
+| Retained published contract descriptions | 378 |
+| Retained presentation text | 70 |
 | Retained derived values | 235 |
-| Test fixtures | 5415 |
+| Test fixtures | 5491 |
 | Intentionally deferred | 2 |
 
 Retired source candidates preserved in inventory history: 1360.
@@ -62,15 +62,15 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 8.
+Checked source reconciliations: 9.
 
 Surface counts are derived from the same inventory:
 
 - `deployment`: 1971
 - `deployment-example`: 20
 - `java`: 6140
-- `script`: 2319
-- `test-fixture`: 5415
+- `script`: 2377
+- `test-fixture`: 5491
 - `ui`: 2906
 
 ## Latest reconciliation
@@ -81,11 +81,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 18771 |
-| Unchanged identities | 18745 |
-| Approved identity migrations | 9 |
-| Approved retirements | 17 |
-| Semantically classified additions | 17 |
-| Current candidates | 18771 |
+| Unchanged identities | 18771 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 134 |
+| Current candidates | 18905 |
 
 ## Follow-up domain ownership
 
@@ -4226,16 +4226,74 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-bb265bf03e3a7c46e771` | `ravenroot/ravenroot-ui/src/ui-text.js:96` `module` | ui | retained | presentation-text | This value is user-facing copy in the keyed English message catalog; it does not control runtime operation. |
 | `oc-3fa268fbeaed24484255` | `ravenroot/ravenroot-ui/src/ui-text.js:154` `module` | ui | retained | presentation-text | This value is user-facing copy in the keyed English message catalog; it does not control runtime operation. |
 | `oc-2eb397e0663cc633a849` | `ravenroot/ravenroot-ui/src/workspace.js:348` `documentForRuntimeEvent` | ui | retained | protocol-or-format-invariant | This value is a transport framing or runtime-event type token consumed at a defined parser boundary. |
-| `oc-d07b88469755e3723091` | `scripts/publish_environment_reference.py:73` `module` | script | retained | protocol-or-format-invariant | This generator lookup key is the canonical server environment-binding token for manifest pin attempts. |
-| `oc-e50985f55067c90770ae` | `scripts/publish_environment_reference.py:73` `module` | script | retained | protocol-or-format-invariant | This scanner view is the canonical generator lookup token for the manifest pin-attempt environment binding. |
-| `oc-ab21438892a9166d37ad` | `scripts/publish_environment_reference.py:146` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-e71e65229d9fb90ae11a` | `scripts/publish_environment_reference.py:146` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-5868c95f5ad61ac3d140` | `scripts/publish_environment_reference.py:147` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-ed154ab1bed51027910d` | `scripts/publish_environment_reference.py:147` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-10085eb605070a36fd29` | `scripts/publish_environment_reference.py:149` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-1efbd9e58b4b21a431bd` | `scripts/publish_environment_reference.py:149` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-2187e8e042a7dafe9a4f` | `scripts/publish_environment_reference.py:149` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
-| `oc-4709172cda0539e755e0` | `scripts/publish_environment_reference.py:149` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-5f834eb78d6da593e43c` | `scripts/publish_environment_reference.py:23` `module` | script | retained | protocol-or-format-invariant | Closed publisher namespace-guard identity: this literal identifies the reviewed source file or its non-key PostgreSQL namespace, and does not introduce an operator setting or permit arbitrary suffixes. |
+| `oc-ee2d5a348a91933988c4` | `scripts/publish_environment_reference.py:23` `module` | script | retained | protocol-or-format-invariant | Closed publisher namespace-guard identity: this literal identifies the reviewed source file or its non-key PostgreSQL namespace, and does not introduce an operator setting or permit arbitrary suffixes. |
+| `oc-3dafb0146c728953ddd8` | `scripts/publish_environment_reference.py:24` `module` | script | retained | protocol-or-format-invariant | Closed publisher namespace-guard identity: this literal identifies the reviewed source file or its non-key PostgreSQL namespace, and does not introduce an operator setting or permit arbitrary suffixes. |
+| `oc-d07b88469755e3723091` | `scripts/publish_environment_reference.py:84` `module` | script | retained | protocol-or-format-invariant | This generator lookup key is the canonical server environment-binding token for manifest pin attempts. |
+| `oc-e50985f55067c90770ae` | `scripts/publish_environment_reference.py:84` `module` | script | retained | protocol-or-format-invariant | This scanner view is the canonical generator lookup token for the manifest pin-attempt environment binding. |
+| `oc-4fda15b2688f9325b9f8` | `scripts/publish_environment_reference.py:87` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-a7d7453dedccdb578a0e` | `scripts/publish_environment_reference.py:87` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-b9326ea48e6ca7564e8e` | `scripts/publish_environment_reference.py:87` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-d0b8d2b73bf143690c0e` | `scripts/publish_environment_reference.py:88` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-ea37160f41b0c44beca1` | `scripts/publish_environment_reference.py:88` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-fbcb39298f11ddce2ec6` | `scripts/publish_environment_reference.py:88` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-9ceae30e57da67de52e9` | `scripts/publish_environment_reference.py:89` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-a4c9d5f46a4330fb4a5a` | `scripts/publish_environment_reference.py:89` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-fa17c79d20d160017b3f` | `scripts/publish_environment_reference.py:89` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-280215dabf8a3af100cd` | `scripts/publish_environment_reference.py:90` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-9359780f5c9549d0806a` | `scripts/publish_environment_reference.py:90` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-f96587647cc1473e39b5` | `scripts/publish_environment_reference.py:90` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-03f0d9c41c4785517099` | `scripts/publish_environment_reference.py:91` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-482a89f61e936888b532` | `scripts/publish_environment_reference.py:91` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-f2e5e6b4b9dc99c37fc4` | `scripts/publish_environment_reference.py:91` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-91ee7b44ffd170cb13db` | `scripts/publish_environment_reference.py:92` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-92bf0e335501ebebb1c4` | `scripts/publish_environment_reference.py:92` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-a47a21b0a838aa0706aa` | `scripts/publish_environment_reference.py:92` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-ac12ed1baa9d5808365d` | `scripts/publish_environment_reference.py:93` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-c3226fc56612b4ec6e2a` | `scripts/publish_environment_reference.py:93` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-f896aaa175d020514365` | `scripts/publish_environment_reference.py:93` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-1816b6e534cf602e9a94` | `scripts/publish_environment_reference.py:94` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-3e0c1d8e5b935401be6f` | `scripts/publish_environment_reference.py:94` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-445b6b8130aba53ca737` | `scripts/publish_environment_reference.py:94` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-03d854e6f8d8a69d6ac8` | `scripts/publish_environment_reference.py:95` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-4010a0e7758e54123b43` | `scripts/publish_environment_reference.py:95` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-8e3445daae1817e094ff` | `scripts/publish_environment_reference.py:95` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-0378390cb787c4d88545` | `scripts/publish_environment_reference.py:96` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-7b8fa3cc60ea494336d9` | `scripts/publish_environment_reference.py:96` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-98d83c5932f12730f532` | `scripts/publish_environment_reference.py:96` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-55f8e6188f33a45215b3` | `scripts/publish_environment_reference.py:97` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-ab721e550e1904825b20` | `scripts/publish_environment_reference.py:97` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-b0272dcf0c57167ac74d` | `scripts/publish_environment_reference.py:97` `module` | script | retained | presentation-text | Generated environment-reference table key or descriptive boundary text reproducing the already documented PostgreSQL setting contract; it supplies no runtime default, limit or policy authority. |
+| `oc-ab21438892a9166d37ad` | `scripts/publish_environment_reference.py:172` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-e71e65229d9fb90ae11a` | `scripts/publish_environment_reference.py:172` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-5868c95f5ad61ac3d140` | `scripts/publish_environment_reference.py:173` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-ed154ab1bed51027910d` | `scripts/publish_environment_reference.py:173` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-10085eb605070a36fd29` | `scripts/publish_environment_reference.py:175` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-1efbd9e58b4b21a431bd` | `scripts/publish_environment_reference.py:175` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-2187e8e042a7dafe9a4f` | `scripts/publish_environment_reference.py:175` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-4709172cda0539e755e0` | `scripts/publish_environment_reference.py:175` `group` | script | retained | published-contract-description | This value is emitted by the environment-reference generator as a description of the operator contract defined by server configuration source. |
+| `oc-0f6f48668da4be0bfddd` | `scripts/publish_environment_reference.py:178` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-981e8de5d4f177294d1c` | `scripts/publish_environment_reference.py:178` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-2b00169e7f4c487d0899` | `scripts/publish_environment_reference.py:179` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-5fd55f21b0e69f41f0c0` | `scripts/publish_environment_reference.py:179` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-2c8f83c9daa86e85e446` | `scripts/publish_environment_reference.py:180` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-7289f876c007dc40ba6d` | `scripts/publish_environment_reference.py:180` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-2d92219d563b419abe17` | `scripts/publish_environment_reference.py:181` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-abe3cc28e9f99ddb0d1d` | `scripts/publish_environment_reference.py:181` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-7bbd930a843cf334a1ca` | `scripts/publish_environment_reference.py:182` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-80daa19a8ab169bda2a2` | `scripts/publish_environment_reference.py:182` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-a15ce60e876a5df81b87` | `scripts/publish_environment_reference.py:183` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-c2c5dc33c887324fce7d` | `scripts/publish_environment_reference.py:183` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-56aab9ad90e71237ecc1` | `scripts/publish_environment_reference.py:184` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-8fe1163dbae2a7eceb24` | `scripts/publish_environment_reference.py:184` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-89ab50e70138efedf6b5` | `scripts/publish_environment_reference.py:185` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-cea5efc5147108595fd0` | `scripts/publish_environment_reference.py:185` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-24815d0c45b89fef8ede` | `scripts/publish_environment_reference.py:186` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-eb3a9e4cc8b01ede72e3` | `scripts/publish_environment_reference.py:186` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-5ec5d52343850f4c6887` | `scripts/publish_environment_reference.py:187` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-9d5490ba6679814c9e38` | `scripts/publish_environment_reference.py:187` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-55e8e1ead4b8e5552dec` | `scripts/publish_environment_reference.py:188` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
+| `oc-57440892df1ad6f40f14` | `scripts/publish_environment_reference.py:188` `group` | script | retained | published-contract-description | This exact production PostgreSQL environment name routes its documented reference row to Persistence and recovery; membership is derived from the unchanged production binding source. |
 
 ## Validation
 

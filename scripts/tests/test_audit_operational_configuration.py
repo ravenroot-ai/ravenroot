@@ -1253,9 +1253,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(errors, "the synthetic document deliberately omits unrelated family authorities")
         unrelated = [error for error in errors if error not in target_errors]
         self.assertTrue(unrelated, "the synthetic document deliberately omits unrelated authorities")
+        self.assertIn(
+            "external-I/O settings require the exact mandatory source-derived authority",
+            unrelated,
+        )
         self.assertEqual([], [error for error in unrelated if not (
             error == "AssistantConfiguration operational limits require one closed family authority"
             or error == "Helm settings require the exact source-derived closed values authority"
+            or error == "external-I/O settings require the exact mandatory source-derived authority"
             or (error.startswith("deployment.")
                 and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
         )], unrelated)
@@ -3802,10 +3807,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def graph_limit_inventory_errors(self, document, candidates):
         # This fixture intentionally contains only graph rows. The separately mandatory assistant,
-        # Helm and persistence authorities have their own unmocked general-entrypoint tests.
+        # Helm, persistence and external-I/O authorities have unmocked general-entrypoint tests.
         with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]):
+                mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -5776,10 +5782,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             },
         }
         def errors(value):
-            # These two unresolved rows contain no assistant, Helm or persistence family.
+            # These two unresolved rows contain no assistant, Helm, persistence or external-I/O family.
             with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

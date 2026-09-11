@@ -827,7 +827,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         expected = audit.persistence_policy_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(expected)
         self.assertEqual(43, len(expected["contracts"]))
-        self.assertEqual(96, len(expected["candidateIds"]))
+        self.assertEqual(97, len(expected["candidateIds"]))
         self.assertEqual(
             "471891f10e915939b5d29ae276a5ece19c8ada9abc8513f2ccf24beef9872e83",
             hashlib.sha256(json.dumps(expected["contracts"][:40], sort_keys=True,
@@ -887,11 +887,17 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         relabelled = copy.deepcopy(entries)
         for entry in relabelled.values():
             if entry["id"] in contracts:
-                entry.pop("persistenceAuthority")
                 entry.update(status="retained", classification="protocol-or-format-invariant")
-        self.assertTrue(any("partition" in error for error in
+        self.assertTrue(any("requires one reviewed operator setting" in error for error in
                             audit.persistence_policy_authority_errors(
                                 ROOT, authorities, relabelled, discovered)))
+        unmarked = copy.deepcopy(relabelled)
+        for entry in unmarked.values():
+            if entry["id"] in contracts:
+                entry.pop("persistenceAuthority")
+        self.assertTrue(any("partition" in error for error in
+                            audit.persistence_policy_authority_errors(
+                                ROOT, authorities, unmarked, discovered)))
         malformed = copy.deepcopy(entries)
         first = next(iter(malformed.values()))
         first["defaultEvidence"] = "not-an-array"
@@ -930,9 +936,25 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIsNotNone(authority)
         entries = []
         protected = set(authority["candidateIds"])
+        contracts = {identifier: contract for contract in authority["contracts"]
+                     for identifier in contract["candidateIds"]}
         for candidate in candidates:
             entry = candidate.inventory_entry()
-            if candidate.surface == "test-fixture":
+            contract = contracts.get(candidate.id)
+            if contract is not None:
+                entry.update(
+                    status="already-centralized", classification="operator-configurable",
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], default=contract["defaultExpression"],
+                    defaultEvidence=contract["defaultCandidateIds"],
+                    validation="The typed policy validates this value before work.",
+                    scope="One explicitly composed adapter or caller.",
+                    pinning="Resolved before managed work where replay can observe it.",
+                    coverage="Source-derived owner, default, binding, consumer and test evidence.",
+                    rationale="The closed persistence policy is the source authority.",
+                    persistenceAuthority=audit.PERSISTENCE_POLICY_AUTHORITY_ID,
+                )
+            elif candidate.surface == "test-fixture":
                 entry.update(status="retained", classification="test-fixture",
                              rationale="Executable audit fixture.")
             entries.append(entry)
@@ -948,8 +970,32 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
         document["remediationDomains"] = audit.build_remediation_domains(entries)
         errors = audit.inventory_errors(ROOT, document, candidates)
-        self.assertFalse(any("persistence policy" in error or "persistence authority" in error
-                             for error in errors), errors)
+        target_tokens = protected | {contract["setting"] for contract in authority["contracts"]}
+        target_errors = [error for error in errors
+                         if "persistence policy" in error or "persistence authority" in error
+                         or any(token in error for token in target_tokens)]
+        self.assertEqual([], target_errors)
+        self.assertTrue(errors, "the synthetic document deliberately omits unrelated family authorities")
+        unrelated = [error for error in errors if error not in target_errors]
+        self.assertTrue(unrelated, "the synthetic document deliberately omits unrelated authorities")
+        self.assertEqual([], [error for error in unrelated if not (
+            error == "AssistantConfiguration operational limits require one closed family authority"
+            or error == "Helm settings require the exact source-derived closed values authority"
+            or (error.startswith("deployment.")
+                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
+        )], unrelated)
+
+        enabled = next(contract for contract in authority["contracts"]
+                       if contract["setting"] == "execution.store.enabled")
+        self.assertEqual(1, len(enabled["defaultCandidateIds"]))
+        self.assertIn(enabled["defaultCandidateIds"][0], enabled["candidateIds"])
+        missing_default = copy.deepcopy(document)
+        for entry in missing_default["entries"]:
+            if entry.get("setting") == "execution.store.enabled":
+                entry["defaultEvidence"] = []
+        errors = audit.inventory_errors(ROOT, missing_default, candidates)
+        self.assertTrue(any("execution.store.enabled" in error or identifier in error
+                            for identifier in enabled["candidateIds"] for error in errors), errors)
 
         removed = copy.deepcopy(document)
         removed.pop("persistencePolicyAuthorities")
@@ -962,6 +1008,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 entry.update(status="retained", classification="protocol-or-format-invariant",
                              rationale="Incorrectly hidden as a fixed protocol value.")
         errors = audit.inventory_errors(ROOT, relabelled, candidates)
+        self.assertTrue(any("requires one reviewed operator setting" in error for error in errors),
+                        errors)
+        unmarked = copy.deepcopy(relabelled)
+        for entry in unmarked["entries"]:
+            if entry["id"] in protected:
+                entry.pop("persistenceAuthority")
+        errors = audit.inventory_errors(ROOT, unmarked, candidates)
         self.assertTrue(any("candidate partition" in error for error in errors), errors)
 
     def test_persistence_policy_authority_rejects_partial_or_drifted_source(self) -> None:
@@ -1037,6 +1090,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
                     "|| isConfigured(properties, POOL_TIMEOUT_PROPERTY);",
                     "|| false;")
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    'static final String DEFAULT_ENABLED_VALUE = "true";',
+                    'static final String DEFAULT_ENABLED_VALUE = "false";')
+            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
+                    "? DEFAULT_ENABLED_VALUE\n                : raw.trim()",
+                    '? "true"\n                : raw.trim()')
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
                     "return SQLITE_SELECTOR;", "return POSTGRESQL_SELECTOR;")
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
@@ -1212,9 +1271,6 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
                     "case \"false\", \"off\", \"0\", \"no\" -> false;",
                     "case \"false\", \"off\", \"0\" -> false;")
-            rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
-                    "if (raw == null || raw.isBlank()) {\n            return true;",
-                    "if (raw == null || raw.isBlank()) {\n            return false;")
             rejects(audit.PERSISTENCE_STORE_CONFIGURATION_PATH,
                     "default -> throw new IllegalArgumentException(ENABLED_VARIABLE",
                     "default -> throw new UnsupportedOperationException(ENABLED_VARIABLE")

@@ -4876,7 +4876,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "singleHostLocation",
          "10b29a815f02ec4ce915c796bbb7091b06f6b7687e240a13659fb8f2feccace3"),
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "enabledIn",
-         "74463214e4492883e9ee06d84def326ddc9e575788ab317b6cb841d8e7690abe"),
+         "c37f4a358c11a630fb93873a1ebf02d1815cfb4c0aa8b7647d59c5e895ebb52f"),
     )
     if any(java_method_digest(sources[path], type_symbol, method) != digest
            for path, type_symbol, method, digest in approved_method_digests):
@@ -4888,12 +4888,15 @@ def persistence_policy_authority_from_source(
         rf'\bString\s+{field}\s*=\s*"{re.escape(value)}"\s*;', configuration_type)) == 1
         for field, value in (("SQLITE_SELECTOR", "sqlite"),
                              ("POSTGRESQL_SELECTOR", "postgresql")))
+    enabled_default_exact = len(re.findall(
+        r'\bstatic\s+final\s+String\s+DEFAULT_ENABLED_VALUE\s*=\s*"true"\s*;',
+        configuration_type)) == 1
     compact = java_compact_constructor_span(shared_connection, "SharedStoreConnection")
     if compact is None or java_span_digest(shared_connection, compact) != \
             "def1d81068a369cafbe90d4975eb1fc57067f20be43bdf211a45e059dd95c864" \
             or _source_digest(backup_configuration) != \
             "e7992790f1a312a57ea9d888b8ca8e0107877965e2eedf3b80589812f7ca3fe0" \
-            or not selector_constants_exact \
+            or not selector_constants_exact or not enabled_default_exact \
             or java_static_final_initializer(
                 shared_connection, "SharedStoreConnection", "REQUIRED_URL_PREFIX") is None \
             or normalized(java_static_final_initializer(
@@ -5117,6 +5120,8 @@ def persistence_policy_authority_from_source(
     enabled_ids = exact_ids((
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "environment-binding",
          "RAVENROOT_EXECUTION_STORE_ENABLED", "RAVENROOT_EXECUTION_STORE_ENABLED"),
+        (PERSISTENCE_STORE_CONFIGURATION_PATH, "fixed-declaration",
+         '"true"', "DEFAULT_ENABLED_VALUE"),
     ))
     if audit_ids is None or execution_directory_ids is None or enabled_ids is None:
         return None
@@ -5153,8 +5158,8 @@ def persistence_policy_authority_from_source(
             "setting": "execution.store.enabled",
             "owner": f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#ExecutionStoreConfiguration",
             "field": "enabled", "bindings": ["RAVENROOT_EXECUTION_STORE_ENABLED"],
-            "defaultExpression": "enabled when absent or blank",
-            "defaultKind": "closed-variant-fallback", "defaultCandidateIds": [],
+            "defaultExpression": 'DEFAULT_ENABLED_VALUE ("true")',
+            "defaultKind": "closed-variant-fallback", "defaultCandidateIds": [enabled_ids[1]],
             "candidateIds": enabled_ids,
             "consumerEvidence": [f"{PERSISTENCE_STORE_CONFIGURATION_PATH.as_posix()}#fromSources"],
             "sourceSemantics": "Absent or blank and canonical true enable the selected store; false, off, 0 and no select Disabled with the same maintenance directory; every other value is refused before composition.",
@@ -5572,6 +5577,9 @@ def persistence_policy_authority_errors(root: Path, authorities: object,
             continue
         if entry.get("status") == "pending-review":
             continue
+        if entry.get("status") != "already-centralized" \
+                or entry.get("classification") != "operator-configurable":
+            errors.append(f"{identifier}: persistence authority requires one reviewed operator setting")
         if entry.get("persistenceAuthority") != PERSISTENCE_POLICY_AUTHORITY_ID \
                 or entry.get("setting") != contract["setting"]:
             errors.append(f"{identifier}: persistence authority setting assignment has drifted")

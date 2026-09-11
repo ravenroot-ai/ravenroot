@@ -92,6 +92,9 @@ public sealed interface ExecutionStoreConfiguration {
     /** The single-host directory used when {@link #DIRECTORY_VARIABLE} is unset. */
     String DEFAULT_DIRECTORY = SqliteStoreLocation.DEFAULT_DIRECTORY;
 
+    /** The enabled state selected when {@link #ENABLED_VARIABLE} is absent or blank. */
+    static final String DEFAULT_ENABLED_VALUE = "true";
+
     /**
      * No execution store at all, with a single-host location retained as maintenance-lock authority.
      *
@@ -242,10 +245,10 @@ public sealed interface ExecutionStoreConfiguration {
      */
     private static boolean enabledIn(Map<String, String> environment) {
         String raw = environment.get(ENABLED_VARIABLE);
-        if (raw == null || raw.isBlank()) {
-            return true;
-        }
-        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+        String selected = raw == null || raw.isBlank()
+                ? DEFAULT_ENABLED_VALUE
+                : raw.trim().toLowerCase(Locale.ROOT);
+        return switch (selected) {
             case "true" -> true;
             case "false", "off", "0", "no" -> false;
             default -> throw new IllegalArgumentException(ENABLED_VARIABLE

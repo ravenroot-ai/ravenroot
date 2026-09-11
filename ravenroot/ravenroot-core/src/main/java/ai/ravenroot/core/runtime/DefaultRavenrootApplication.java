@@ -111,9 +111,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private final ArtifactRegistry artifacts;
     private final ProgramRuntime programRuntime;
     private volatile boolean artifactDualControl;
+    private final ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits;
     private final ConcurrentHashMap<String, BuildLock> programBuildLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Thread> programBuildTasks = new ConcurrentHashMap<>();
     private final ExecutionIdentitySource identitySource;
+
+    @Override
+    public ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
+        return programAuthoringLimits;
+    }
 
     /**
      * Whether a graph naming a behavior the trusted catalog lacks may run (SEC-09).
@@ -309,6 +315,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
                                        ArtifactRegistry artifacts, ProgramRuntime programRuntime) {
         this(engine, monitor, behaviors, artifacts, programRuntime, ExecutionIdentitySource.randomUuids());
+    }
+
+    /** Embedded composition with one immutable authoring policy and otherwise compatible defaults. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, ExecutionIdentitySource.randomUuids(), null,
+                0, UnknownBehaviorPolicy.passThrough(), null, null, null, GraphExecutionLimits.DEFAULTS, null,
+                null, GraphRunner.DEFAULT_SHUTDOWN_BOUND, ExecutionOwnership.defaults(), programAuthoringLimits);
     }
 
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
@@ -602,6 +617,26 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
                                        Duration runnerShutdownStepBound,
                                        ExecutionOwnership executionOwnership) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionManifestStore, runnerShutdownStepBound,
+                executionOwnership, ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS);
+    }
+
+    /** Full production composition with one immutable program-authoring admission policy. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
+                                       Duration runnerShutdownStepBound,
+                                       ExecutionOwnership executionOwnership,
+                                       ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits) {
         java.util.Objects.requireNonNull(executionOwnership, "executionOwnership");
         if (executionOwnership.identity().role() != WorkerIdentity.Role.RUNTIME) {
             // The application advances traversals it accepted; that is the RUNTIME role by
@@ -633,6 +668,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         this.behaviors = behaviors;
         this.artifacts = artifacts;
         this.programRuntime = programRuntime;
+        this.programAuthoringLimits = java.util.Objects.requireNonNull(
+                programAuthoringLimits, "programAuthoringLimits");
         this.identitySource = java.util.Objects.requireNonNull(identitySource, "identitySource");
         if (executionStore != null && !executionStore.supports(StoreCapability.TRANSACTIONAL_BATCH)) {
             throw new IllegalArgumentException(
@@ -712,6 +749,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public GeneratedArtifact createProgramArtifact(String language, String source, Map<String, String> metadata) {
         if (language == null || language.isBlank()) throw new IllegalArgumentException("Language cannot be blank");
         if (source == null || source.isBlank()) throw new IllegalArgumentException("Program source cannot be blank");
+        programAuthoringLimits.requireSource(source);
         return artifacts.create(language, source, metadata);
     }
 
@@ -788,6 +826,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public CompletionStage<ai.ravenroot.api.programming.ProgramBuildResult> buildProgramArtifact(
             String nodeId, String tenantId, String language, String source, Object testPayload,
             boolean dualControl, Map<String, String> trustedMetadata) {
+        programAuthoringLimits.requireSource(source);
         var result = new java.util.concurrent.CompletableFuture<ai.ravenroot.api.programming.ProgramBuildResult>();
         Thread.startVirtualThread(() -> {
             try {
@@ -805,11 +844,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             String tenantId, List<ai.ravenroot.api.programming.ProgramBuildRequest> programs,
             boolean dualControl, Map<String, String> trustedMetadata) {
         if (tenantId == null || tenantId.isBlank()) throw new IllegalArgumentException("tenant is required");
-        if (programs == null || programs.isEmpty() || programs.size() > 256
+        if (programs == null) throw new IllegalArgumentException("programs are required");
+        programAuthoringLimits.requireProgramCount(programs.size());
+        if (programs.stream().anyMatch(java.util.Objects::isNull)
                 || programs.stream().map(ai.ravenroot.api.programming.ProgramBuildRequest::nodeId)
                 .distinct().count() != programs.size()) {
-            throw new IllegalArgumentException("one to 256 uniquely identified programs are required");
+            throw new IllegalArgumentException("programs must be non-null and uniquely identified");
         }
+        programs.forEach(program -> programAuthoringLimits.requireSource(program.source()));
         var plans = programs.stream().map(program -> {
             var payload = ai.ravenroot.api.payload.PayloadValue.fromJava(program.testPayload(),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);

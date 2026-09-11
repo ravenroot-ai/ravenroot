@@ -109,6 +109,11 @@ services:
       # values preserve the typed defaults and do not activate an otherwise inert assistant.
       RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS: ${RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS:-}
       RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS: ${RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS:-}
+      # Program authoring limits are resolved once at startup. Empty values select the Java-owned
+      # compatibility defaults; local overlays can narrow them without replacing the image.
+      RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES: ${RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES:-}
+      RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES: ${RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES:-}
+      RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD: ${RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD:-}
       # HTTP admission, representation, and retained-limiter limits are resolved once at startup.
       # Empty values select the Java-owned defaults; deployment files carry no numeric defaults.
       RAVENROOT_RATELIMIT_ADDRESS_RPS: ${RAVENROOT_RATELIMIT_ADDRESS_RPS:-}

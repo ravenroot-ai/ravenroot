@@ -229,6 +229,35 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_ARTIFACT_DUAL_CONTROL` | strict Boolean `false` | `true` requires a second approval authority |
 | `RAVENROOT_ARTIFACT_PROVENANCE` | `refusing` | `unverified` is an explicit unsafe-development opt-out; other values refuse |
 
+The runtime and Graal settings in the first six rows also have system-property spellings. Presence is
+resolved before parsing: the property wins even when blank, an absent property delegates to the
+environment, and an absent environment selects the typed default. The aliases are `ravenroot.program.runtime`,
+`ravenroot.graal.sandbox-supervisor`, `ravenroot.graal.java`, `ravenroot.graal.resource-cache-dir`,
+`ravenroot.program.timeout-ms`, and `ravenroot.program.max-heap-mb`. A blank runtime selector is
+invalid; blank supervisor means unavailable; blank Java, timeout, heap, and Ravenroot cache values
+select their documented defaults. A present non-string property refuses startup.
+
+The standard Graal property `polyglot.engine.userResourceCache` has precedence over the Ravenroot
+cache alias and environment and preserves its exact value, including blank or relative values. An
+explicit cache override is sent only after the supervisor attests the optional `resource-cache-v1`
+extension. A strict v1 supervisor keeps its prior invocation for legacy placement and refuses an
+explicit override before a worker or program source is started. Cache placement is live deployment
+configuration; it does not change execution compatibility fingerprints or persisted manifests.
+
+Program authoring uses one immutable policy in the server, core, authorization facade, transport,
+and connected editor. Its property/environment pairs are:
+
+| Property | Environment | Default and accepted range |
+|---|---|---|
+| `ravenroot.program.authoring.max-source-bytes` | `RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES` | `1048576`; `1..1048576` UTF-8 bytes |
+| `ravenroot.program.authoring.max-build-request-bytes` | `RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES` | `10485760`; at least the source cap and at most `10485760` bytes |
+| `ravenroot.program.authoring.max-programs-per-build` | `RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD` | `256`; `1..256` programs |
+
+These authoring properties use the same presence-first precedence; a selected blank value delegates
+to its typed default. The configuration endpoint emits schema version 2 with all three effective
+values. The editor accepts schema version 1 only through its frozen historical defaults, while every
+version 2 response must carry the current values.
+
 The Java baseline for `RAVENROOT_PROGRAM_TIMEOUT_MS` is `5000` ms. The Helm chart deliberately sets
 `programTimeoutMs: 15000` as its F30 cold-start bridge, while Compose uses a `30000` ms local-development
 profile. Helm validates configured integers from `100` through `300000`; an explicit blank Helm overlay

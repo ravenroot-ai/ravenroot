@@ -486,7 +486,7 @@ class GithubActionBehaviorTest {
         Path path = directory.resolve("project-takeover.db");
         MutableClock clock = new MutableClock();
         GithubConfiguration base = GithubTestSupport.configuration(path);
-        GithubConfiguration.StorePolicy policy = new GithubConfiguration.StorePolicy(path, 100, 24, 100);
+        GithubConfiguration.StorePolicy policy = new GithubConfiguration.StorePolicy(path, 100, 24, 1_000);
         var firstStore = new SqliteGithubOperationStore(policy, clock);
         GithubNodePackage nodePackage = new GithubNodePackage(
                 new GithubConfiguration(base.authority(), base.projection(), policy, base.profiles()), firstStore);
@@ -494,9 +494,9 @@ class GithubActionBehaviorTest {
         String digest = GithubValues.sha256(GithubValues.jsonBytes(input));
         var http = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7));
         http.onRequest = () -> {
-            clock.advance(101);
+            clock.advance(1_001);
             new SqliteGithubOperationStore(policy, clock).begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE,
-                    "project-transition", projectKey("ITEM_1"), digest, 123,
+                    "project-transition", projectKey("ITEM_1"), digest, profileDigest(GithubTestSupport.configuration(path)), 123,
                     GithubOperationStore.BeginPolicy.project(7));
         };
         CompletableFuture<NodeResult> result = action(nodePackage, "project-transition", http)
@@ -640,7 +640,7 @@ class GithubActionBehaviorTest {
         var store = new SqliteGithubOperationStore(configuration.store(), clock);
         var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-app-review",
                 reviewKey("review-restart"),
-                GithubValues.sha256(GithubValues.jsonBytes(canonical)), 123,
+                GithubValues.sha256(GithubValues.jsonBytes(canonical)), profileDigest(configuration), 123,
                 GithubOperationStore.BeginPolicy.ordinary());
         store.save(lease, "AMBIGUOUS", 0, 0, 123, "99", "a".repeat(64),
                 "{\"status\":\"ambiguous\"}", true);
@@ -1084,7 +1084,7 @@ class GithubActionBehaviorTest {
                 "bodyDigest", GithubValues.sha256("Looks good"), "correlationId", "review-takeover");
         store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-app-review",
                 reviewKey("review-takeover"),
-                GithubValues.sha256(GithubValues.jsonBytes(canonical)), clock.millis() + 5_000,
+                GithubValues.sha256(GithubValues.jsonBytes(canonical)), profileDigest(configuration), clock.millis() + 5_000,
                 GithubOperationStore.BeginPolicy.forAmbiguousReconciliation(5_000));
         clock.advance(1_100);
         var http = new GithubTestSupport.HttpHarness();
@@ -1163,7 +1163,7 @@ class GithubActionBehaviorTest {
                 "deadlineEpochMs", deadline, "correlationId", "watch-restart");
         var store = new SqliteGithubOperationStore(GithubTestSupport.configuration(path).store());
         var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
-                workflowKey("watch-restart"), GithubValues.sha256(GithubValues.jsonBytes(input)), deadline,
+                workflowKey("watch-restart"), GithubValues.sha256(GithubValues.jsonBytes(input)), profileDigest(GithubTestSupport.configuration(path)), deadline,
                 GithubOperationStore.BeginPolicy.ordinary());
         Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
                 "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
@@ -1193,7 +1193,7 @@ class GithubActionBehaviorTest {
         Map<String, Object> input = Map.of("version", "github.workflow-watch.v1", "commit", GithubTestSupport.SHA,
                 "deadlineEpochMs", deadline, "correlationId", "watch-rate-restart");
         var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
-                workflowKey("watch-rate-restart"), GithubValues.sha256(GithubValues.jsonBytes(input)),
+                workflowKey("watch-rate-restart"), GithubValues.sha256(GithubValues.jsonBytes(input)), profileDigest(configuration),
                 deadline, GithubOperationStore.BeginPolicy.ordinary());
         Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
                 "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
@@ -1242,7 +1242,7 @@ class GithubActionBehaviorTest {
             var store = new SqliteGithubOperationStore(GithubTestSupport.configuration(path).store());
             var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
                     workflowKey("advance-" + conclusion),
-                    GithubValues.sha256(GithubValues.jsonBytes(input)), deadline,
+                    GithubValues.sha256(GithubValues.jsonBytes(input)), profileDigest(GithubTestSupport.configuration(path)), deadline,
                     GithubOperationStore.BeginPolicy.ordinary());
             Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
                     "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
@@ -1268,7 +1268,7 @@ class GithubActionBehaviorTest {
                 "deadlineEpochMs", deadline, "correlationId", "terminal-contradiction");
         var store = new SqliteGithubOperationStore(GithubTestSupport.configuration(path).store());
         var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
-                workflowKey("terminal-contradiction"), GithubValues.sha256(GithubValues.jsonBytes(input)),
+                workflowKey("terminal-contradiction"), GithubValues.sha256(GithubValues.jsonBytes(input)), profileDigest(GithubTestSupport.configuration(path)),
                 deadline, GithubOperationStore.BeginPolicy.ordinary());
         Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
                 "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
@@ -1712,6 +1712,42 @@ class GithubActionBehaviorTest {
                 Map.of(GithubTestSupport.TENANT + "\u0000" + GithubTestSupport.PROFILE, profile));
     }
 
+    private static GithubConfiguration withProfile(GithubConfiguration base, GithubProfile profile) {
+        return new GithubConfiguration(base.authority(), base.projection(), base.store(),
+                Map.of(GithubTestSupport.TENANT + "\u0000" + GithubTestSupport.PROFILE, profile));
+    }
+
+    private static GithubProfile copyProfile(GithubProfile old, String owner, String binding, String reference) {
+        return new GithubProfile(old.name(), old.tenantId(), old.apiOrigin(), owner, old.repository(),
+                old.repositoryId(), old.installationId(), old.reviewerLogin(), binding, reference,
+                old.webhookSecretReference(), old.route(), old.webhookEvents(), old.project(), old.workflowIds(),
+                old.release(), old.timeoutMs(), old.maxRequestBytes(), old.maxResponseBytes(), old.maxConcurrency(),
+                old.maxPolls(), old.pollIntervalMs());
+    }
+
+    private static List<GithubProfile> semanticProfileVariants(GithubProfile old) {
+        var project = new GithubProfile.ProjectPolicy(old.project().projectId(), old.project().statusFieldId(),
+                old.project().attemptsFieldId(), old.project().generationFieldId(), old.project().statusOptions(),
+                Set.of("Todo->InProgress"), old.project().claimTransition());
+        var release = new GithubProfile.ReleasePolicy(old.release().branch(), "other-pom.xml",
+                old.release().fragmentsPath(), old.release().allowedKinds(), old.release().maxFiles());
+        return List.of(
+                copyProfile(old, "changed-owner", old.credentialBindingId(), old.credentialReference()),
+                profile(old, old.project(), Set.of(1001L, 1002L, 1003L), old.release(), old.maxPolls()),
+                profile(old, project, old.workflowIds(), old.release(), old.maxPolls()),
+                profile(old, old.project(), old.workflowIds(), release, old.maxPolls()),
+                profile(old, old.project(), old.workflowIds(), old.release(), old.maxPolls() + 1));
+    }
+
+    private static GithubProfile profile(GithubProfile old, GithubProfile.ProjectPolicy project,
+                                         Set<Long> workflows, GithubProfile.ReleasePolicy release, int maxPolls) {
+        return new GithubProfile(old.name(), old.tenantId(), old.apiOrigin(), old.owner(), old.repository(),
+                old.repositoryId(), old.installationId(), old.reviewerLogin(), old.credentialBindingId(),
+                old.credentialReference(), old.webhookSecretReference(), old.route(), old.webhookEvents(),
+                project, workflows, release, old.timeoutMs(), old.maxRequestBytes(), old.maxResponseBytes(),
+                old.maxConcurrency(), maxPolls, old.pollIntervalMs());
+    }
+
     private static void awaitState(GithubOperationStore store, String kind, String key, String state) {
         long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
         while (System.nanoTime() < limit) {
@@ -1792,4 +1828,50 @@ class GithubActionBehaviorTest {
         @Override public long millis() { return millis; }
     }
 
+
+    private static String profileDigest(GithubConfiguration configuration) {
+        return configuration.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE)
+                .orElseThrow().semanticContractDigest();
+    }
+
+    @Test void restartRefusesChangedProfileSemanticsButAllowsCredentialRotationReplay() {
+        Path path = directory.resolve("semantic-profile-restart.db");
+        GithubConfiguration original = GithubTestSupport.configuration(path);
+        GithubProfile originalProfile = original.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE)
+                .orElseThrow();
+        Map<String, Object> input = Map.of("version", "profile-binding-test.v1", "value", "same");
+        NodeResult first = new GithubRuntime(() -> original).submit(GithubTestSupport.message(Map.of()),
+                new GithubTestSupport.HttpHarness(), originalProfile, "profile-binding", "same-key", input,
+                System.currentTimeMillis() + 5_000,
+                (api, operation, control) -> NodeResult.continueWith(Map.of("status", "done")))
+                .toCompletableFuture().join();
+
+        for (GithubProfile changedProfile : semanticProfileVariants(originalProfile)) {
+            GithubConfiguration changed = withProfile(original, changedProfile);
+            var changedWork = new AtomicBoolean();
+            GithubException refused = assertThrows(GithubException.class, () -> new GithubRuntime(() -> changed)
+                    .submit(GithubTestSupport.message(Map.of()), new GithubTestSupport.HttpHarness(), changedProfile,
+                            "profile-binding", "same-key", input, System.currentTimeMillis() + 5_000,
+                            (api, operation, control) -> {
+                                changedWork.set(true);
+                                return NodeResult.continueWith(Map.of());
+                            }));
+            assertEquals(GithubException.Code.CONFIGURATION, refused.code());
+            assertFalse(changedWork.get());
+        }
+
+        GithubConfiguration rotated = withProfile(original, copyProfile(originalProfile,
+                originalProfile.owner(), "rotated-binding", "rotated-reference"));
+        var replayWork = new AtomicBoolean();
+        NodeResult replay = new GithubRuntime(() -> rotated).submit(GithubTestSupport.message(Map.of()),
+                new GithubTestSupport.HttpHarness(),
+                rotated.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow(),
+                "profile-binding", "same-key", input, System.currentTimeMillis() + 5_000,
+                (api, operation, control) -> {
+                    replayWork.set(true);
+                    return NodeResult.continueWith(Map.of());
+                }).toCompletableFuture().join();
+        assertEquals(first.payload(), replay.payload());
+        assertFalse(replayWork.get(), "credential rotation must reuse the bound semantic operation");
+    }
 }

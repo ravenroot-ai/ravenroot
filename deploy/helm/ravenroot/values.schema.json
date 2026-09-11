@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["replicaCount", "image", "service", "auth", "engine", "executionRuntime", "graph", "humanTask", "assistant", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
+  "required": ["replicaCount", "image", "service", "auth", "engine", "executionRuntime", "graph", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "programTimeoutMs": {
@@ -218,6 +218,25 @@
         "maxToolIterations": {
           "x-ravenroot-environment": "RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS",
           "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 8 }, { "$ref": "#/definitions/graphBlank" }]
+        }
+      }
+    },
+    "programAuthoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxSourceBytes", "maxBuildRequestBytes", "maxProgramsPerBuild"],
+      "properties": {
+        "maxSourceBytes": {
+          "x-ravenroot-environment": "RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1048576 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxBuildRequestBytes": {
+          "x-ravenroot-environment": "RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 10485760 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxProgramsPerBuild": {
+          "x-ravenroot-environment": "RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 256 }, { "$ref": "#/definitions/graphBlank" }]
         }
       }
     },

@@ -82,8 +82,6 @@ public final class RavenrootServer implements AutoCloseable {
     private static final String EVENT_SOURCE_HEADER = "X-Ravenroot-Event-Source";
     private static final String EVENT_CONTINUITY_HEADER = "X-Ravenroot-Event-Continuity";
     private static final String EVENT_SCHEMA_VERSION_HEADER = "X-Ravenroot-Event-Schema-Version";
-    private static final int MAX_PROGRAM_BUILD_BYTES = 10 * 1024 * 1024;
-    private static final int MAX_PROGRAM_BYTES = 1024 * 1024;
     /** The same ceiling {@code AssistantTurn.TURN_LIMITS} parses under, applied before parsing. */
     private static final int MAX_ASSISTANT_TURN_BYTES =
             ai.ravenroot.server.assistant.AssistantTurn.TURN_LIMITS.maxEncodedBytes();
@@ -338,6 +336,7 @@ public final class RavenrootServer implements AutoCloseable {
     private final int graphDocumentMaxBytes;
     /** Typed representation returned to the connected authoring client. */
     private final ServedConfiguration servedConfiguration;
+    private final ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits;
     /** Populated by every {@link #apiContext} call; see {@link #registeredRoutes()}. */
     private final List<ai.ravenroot.server.spec.RouteDescriptor> registeredRoutes = new java.util.ArrayList<>();
     /**
@@ -702,7 +701,9 @@ public final class RavenrootServer implements AutoCloseable {
                     ai.ravenroot.server.embed.EmbedBrowserConfiguration embedConfiguration,
                     ai.ravenroot.server.credential.UserCredentialStore credentials,
                     GraphMlLimits graphMlLimits) {
-        this.servedConfiguration = ServedConfiguration.from(graphMlLimits);
+        this.programAuthoringLimits = java.util.Objects.requireNonNull(application, "application")
+                .programAuthoringLimits();
+        this.servedConfiguration = ServedConfiguration.from(graphMlLimits, programAuthoringLimits);
         this.graphDocumentMaxBytes = servedConfiguration.graphDocumentMaxBytes();
         this.assistant = java.util.Objects.requireNonNull(assistant, "assistant");
         // Null is a real composition, not an oversight: a host that composes no credential
@@ -1882,9 +1883,9 @@ public final class RavenrootServer implements AutoCloseable {
     private void createProgramArtifact(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         byte[] source;
         try (var input = exchange.getRequestBody()) {
-            source = input.readNBytes(MAX_PROGRAM_BYTES + 1);
+            source = input.readNBytes(programAuthoringLimits.maxSourceBytes() + 1);
         }
-        if (source.length > MAX_PROGRAM_BYTES) {
+        if (source.length > programAuthoringLimits.maxSourceBytes()) {
             fail(exchange, httpContext, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
             return;
         }
@@ -1902,13 +1903,13 @@ public final class RavenrootServer implements AutoCloseable {
             throws IOException, java.util.concurrent.ExecutionException, InterruptedException {
         byte[] body;
         try (var input = exchange.getRequestBody()) {
-            body = input.readNBytes(MAX_PROGRAM_BUILD_BYTES + 1);
+            body = input.readNBytes(programAuthoringLimits.maxBuildRequestBytes() + 1);
         }
-        if (body.length > MAX_PROGRAM_BUILD_BYTES) {
+        if (body.length > programAuthoringLimits.maxBuildRequestBytes()) {
             fail(exchange, httpContext, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
             return;
         }
-        var submission = ProgramBuildSubmission.read(body, payloadLimits);
+        var submission = ProgramBuildSubmission.read(body, payloadLimits, programAuthoringLimits);
         var context = httpContext.applicationContext();
         var programs = submission.programs().stream()
                 .map(program -> new ai.ravenroot.api.programming.ProgramBuildRequest(
@@ -1942,7 +1943,7 @@ public final class RavenrootServer implements AutoCloseable {
             failPayload(exchange, httpContext, PayloadException.tooLarge(body.length, payloadLimits.maxEncodedBytes()));
             return;
         }
-        var approval = ProgramBuildSubmission.readApproval(body, payloadLimits);
+        var approval = ProgramBuildSubmission.readApproval(body, payloadLimits, programAuthoringLimits);
         var approved = authorizedApplication.approveProgramArtifacts(
                 httpContext.applicationContext(), approval.artifactIds(), approval.reason());
         String response = approved.stream().map(RavenrootServer::artifactJson)

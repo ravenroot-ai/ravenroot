@@ -6,6 +6,8 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /** Immutable tenant authority for one GitHub installation and repository. */
 public record GithubProfile(
@@ -45,6 +47,37 @@ public record GithubProfile(
 
     public OutboundCredentialBinding credential() {
         return new OutboundCredentialBinding(credentialBindingId, credentialReference);
+    }
+
+    /** Secret-free binding for every profile field that changes durable operation meaning. */
+    String semanticContractDigest() {
+        Map<String, Object> projectContract = Map.of(
+                "projectId", project.projectId,
+                "statusFieldId", project.statusFieldId,
+                "attemptsFieldId", project.attemptsFieldId,
+                "generationFieldId", project.generationFieldId,
+                "statusOptions", new TreeMap<>(project.statusOptions),
+                "allowedTransitions", new TreeSet<>(project.allowedTransitions).stream().toList(),
+                "claimTransition", project.claimTransition);
+        Map<String, Object> releaseContract = Map.of(
+                "branch", release.branch,
+                "versionPath", release.versionPath,
+                "fragmentsPath", release.fragmentsPath,
+                "allowedKinds", new TreeSet<>(release.allowedKinds).stream().toList(),
+                "maxFiles", release.maxFiles);
+        Map<String, Object> limits = Map.of(
+                "timeoutMs", timeoutMs, "maxRequestBytes", maxRequestBytes,
+                "maxResponseBytes", maxResponseBytes, "maxConcurrency", maxConcurrency,
+                "maxPolls", maxPolls, "pollIntervalMs", pollIntervalMs);
+        return GithubValues.sha256(GithubValues.jsonBytes(Map.ofEntries(
+                Map.entry("version", "ravenroot.github.profile-contract.v1"),
+                Map.entry("name", name), Map.entry("tenantId", tenantId),
+                Map.entry("apiOrigin", apiOrigin.toASCIIString()), Map.entry("owner", owner),
+                Map.entry("repository", repository), Map.entry("repositoryId", repositoryId),
+                Map.entry("installationId", installationId), Map.entry("reviewerLogin", reviewerLogin),
+                Map.entry("project", projectContract),
+                Map.entry("workflowIds", new TreeSet<>(workflowIds).stream().toList()),
+                Map.entry("release", releaseContract), Map.entry("limits", limits))));
     }
 
     URI rest(String path) {

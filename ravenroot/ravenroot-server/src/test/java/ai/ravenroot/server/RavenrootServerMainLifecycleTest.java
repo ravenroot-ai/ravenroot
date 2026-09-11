@@ -70,9 +70,11 @@ class RavenrootServerMainLifecycleTest {
                 "the actual server engine site must use the resolved policy");
         assertTrue(compact.contains("executionStoreOwner.executionManifestStore(), "
                         + "executionRuntime.applicationRunnerShutdownStepBound(), "
-                        + "executionOwnershipConfiguration.runtimeOwnership())"),
+                        + "executionOwnershipConfiguration.runtimeOwnership(), "
+                        + "programAuthoringLimits)"),
                 "the application site must use its named projection, and must be handed this "
-                        + "replica's own runtime identity rather than letting core mint one");
+                        + "replica's own runtime identity and the one resolved authoring policy "
+                        + "rather than letting core mint either one");
         assertTrue(source.indexOf("refuseUnsupportableReplicaTopology(System.getenv(), "
                         + "executionStoreConfiguration)")
                         < source.indexOf("ExecutionStoreBootstrap.openOwned("),

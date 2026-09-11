@@ -250,7 +250,10 @@ class GraalVmProgramRuntimeFromEnvironmentTest {
         assertTrue(log.get().contains(script.toString()), log.get());
     }
 
-    private static final String HEALTHY_BODY = "#!/bin/sh\nprintf 'ravenroot-sandbox-supervisor/1'\nexit 0\n";
+    private static final String HEALTHY_BODY = "#!/bin/sh\ncase \"$1\" in\n"
+            + "--ravenroot-sandbox-supervisor-capabilities=v1) printf 'ravenroot-sandbox-supervisor/1';;\n"
+            + "--ravenroot-sandbox-supervisor-capabilities=resource-cache-v1) printf 'ravenroot-sandbox-supervisor-resource-cache/1';;\n"
+            + "*) exit 78;;\nesac\n";
 
     private Path writeScript(String name, String body, boolean executable) throws Exception {
         Path script = directory.resolve(name);

@@ -238,7 +238,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
                          audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                          *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                         authority["timeoutRuntime"]["path"]}:
+                         *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}:
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / path, target)
@@ -268,7 +268,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
                     audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                     *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                    authority["timeoutRuntime"]["path"]}
+                    *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}
         for before, after in chart_mutations:
             with self.subTest(chart_mutation=before):
                 with tempfile.TemporaryDirectory() as location:
@@ -357,8 +357,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ("scripts/tests/test_helm_values_contract.sh",
              "securityContext.readOnlyRootFilesystem=false \\",
              "securityContext.readOnlyRootFilesystem=not-a-boolean \\",),
-            (authority["timeoutRuntime"]["path"],
-             'Duration timeout = Duration.ofMillis(', '// Duration timeout = Duration.ofMillis('),
+            (authority["timeoutRuntime"]["resolverPath"],
+             'int timeout = integer(', '// int timeout = integer('),
             (authority["timeoutRuntime"]["path"],
              'static GraalVmProgramRuntime fromEnvironment(java.util.Map<String, String> environment)',
              'static GraalVmProgramRuntime fromChangedEnvironment(java.util.Map<String, String> environment)'),
@@ -371,7 +371,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 audit.HELM_VALUES_PATH,
                                 audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                                authority["timeoutRuntime"]["path"]}
+                                *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}
                     for path in required:
                         target = root / path
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -394,7 +394,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 audit.HELM_VALUES_PATH,
                                 audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                                authority["timeoutRuntime"]["path"]}
+                                *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}
                     for path in required:
                         target = root / path
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -409,7 +409,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
                          audit.HELM_VALUES_PATH,
                          *audit.HELM_TEMPLATE_PATHS,
-                         *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
+                         *audit.HELM_TEST_ROLES, *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}:
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / path, target)
@@ -5916,6 +5916,303 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:
             audit.main(["--accept-retired-pending"])
         self.assertEqual(2, failure.exception.code)
+
+
+class ProgramGithubPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in audit.PROGRAM_GITHUB_REQUIRED_PATHS:
+            destination = cls.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.program_github_policy_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The actual supported source must derive before any negative test")
+        cls.entries = {candidate.id: {**candidate.source_fields(), "status": "pending-review",
+                                     "classification": None} for candidate in cls.candidates}
+        for contract in cls.authority["contracts"] + cls.authority["bindingCarriers"]:
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(
+                    status="already-centralized", classification="operator-configurable",
+                    programGithubPolicyAuthority=audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID,
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], defaultEvidence=contract["defaultCandidateIds"],
+                    default=contract["defaultExpression"], scope=contract["scope"], pinning=contract["pinning"],
+                    validation=contract["validation"], coverage=contract["coverage"])
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(status=partition["status"], classification=partition["classification"],
+                    programGithubPolicyAuthority=audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def test_program_github_all_59_fields_are_closed_and_scanner_blind_fields_are_not_invented(self) -> None:
+        authority = self.authority
+        self.assertEqual(59, len(authority["contracts"]))
+        self.assertEqual(50, sum(item["setting"].startswith("github.") for item in authority["contracts"]))
+        self.assertEqual(1, len(authority["bindingCarriers"]))
+        self.assertTrue(any(not item["candidateIds"] for item in authority["contracts"]),
+                        "A scanner-blind field must have structural proof, never fabricated literal IDs")
+        all_ids = [identifier for item in authority["contracts"] + authority["bindingCarriers"]
+                   + authority["semanticPartitions"] for identifier in item["candidateIds"]]
+        self.assertEqual(len(all_ids), len(set(all_ids)))
+        self.assertEqual(set(all_ids), audit.program_github_policy_cohort_candidate_ids(self.root, self.discovered))
+        self.assertEqual([], audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority}, self.entries, self.discovered))
+
+    def test_program_github_missing_markers_whole_family_or_scanner_blind_contract_cannot_opt_out(self) -> None:
+        for authorities in (None, {}, {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: {}}):
+            with self.subTest(authorities=authorities):
+                self.assertTrue(audit.program_github_policy_authority_errors(
+                    self.root, authorities, self.entries, self.discovered))
+        changed = copy.deepcopy(self.authority)
+        changed["contracts"] = [item for item in changed["contracts"] if item["candidateIds"]]
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: changed}, self.entries, self.discovered))
+        entries = copy.deepcopy(self.entries)
+        for row in entries.values(): row.pop("programGithubPolicyAuthority", None)
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+
+    def test_program_github_entry_relabel_foreign_setting_pending_and_omission_refuse(self) -> None:
+        identifier = next(item["candidateIds"][0] for item in self.authority["contracts"] if item["candidateIds"])
+        for change in ({"classification": "derived", "status": "retained"}, {"setting": "foreign.setting"},
+                       {"status": "pending-review", "classification": None}, {"authorityStatus": "unresolved"},
+                       {"owner": "foreign/File.java#Owner"}, {"bindings": ["RAVENROOT_FOREIGN"]},
+                       {"defaultEvidence": ["oc-not-an-actual-source-id"]}):
+            with self.subTest(change=change):
+                entries = copy.deepcopy(self.entries); entries[identifier].update(change)
+                self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+                    {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+        entries = copy.deepcopy(self.entries); del entries[identifier]
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+        retained_id = self.authority["semanticPartitions"][0]["candidateIds"][0]
+        entries = copy.deepcopy(self.entries)
+        entries[retained_id]["classification"] = "security-ceiling-or-default" if entries[retained_id]["classification"] != "security-ceiling-or-default" else "derived"
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+
+    def test_program_github_current_cohort_omission_or_extra_candidate_refuses(self) -> None:
+        from dataclasses import replace
+        identifier = self.authority["candidateIds"][0]
+        changed = dict(self.discovered); del changed[identifier]
+        self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, changed))
+        source = next(item for item in self.candidates if item.path == audit.PROGRAM_GITHUB_PATHS["graal"])
+        extra = replace(source, id="oc-injected-unreviewed", role="NEW_UNREVIEWED_SETTING", expression="123")
+        changed = {**self.discovered, extra.id: extra}
+        self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, changed))
+        excluded = set(audit.PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS)
+        self.assertFalse(excluded & set(self.authority["candidateIds"]))
+        self.assertNotIn(extra.id, excluded)
+
+    def test_program_github_actual_source_mutations_cannot_be_blessed_by_metadata_refresh(self) -> None:
+        mutations = (
+            ("graal", "return value != null ? value : environment.get(variable);", "return environment.get(variable);"),
+            ("graal", "if (standard != null)", "if (standard != null && !standard.isBlank())"),
+            ("graal", "!(properties.get(name) instanceof String)", "false"),
+            ("authoring", "source.getBytes(StandardCharsets.UTF_8).length > maxSourceBytes", "source.length() > maxSourceBytes"),
+            ("authoring", "count > maxProgramsPerBuild", "count > HARD_MAX_PROGRAMS_PER_BUILD"),
+            ("selector", "if (properties.containsKey(PROPERTY))", "if (false)"),
+            ("runtime", "policyFor(configuration.javaExecutable(), configuration.timeout(), configuration.maxHeapMegabytes())",
+                         "policyFor(configuration.javaExecutable(), Duration.ofMillis(5000), 64)"),
+            ("runtime", "policy.deadline().toMillis()", "5000"),
+            ("launcher", 'if (placement.hasOverride()) throw new IOException("SANDBOX_RESOURCE_CACHE_UNSUPPORTED");', "if (false) throw new IOException(\"SANDBOX_RESOURCE_CACHE_UNSUPPORTED\");"),
+            ("process", "builder.environment().clear();", ""),
+            ("process", "verifyPlacement(placement);", ""),
+            ("github", 'profiles.get(tenantId + "\\u0000" + name)', 'profiles.get(name)'),
+            ("profile", 'Map.entry("name", name)', 'Map.entry("credentialReference", credentialReference)'),
+            ("store", "beforePrune != null && !profileContractDigest.equals(beforePrune.profileContractDigest())", "false"),
+            ("store", 'statement.execute("BEGIN IMMEDIATE")', 'statement.execute("BEGIN")'),
+            ("core", "programAuthoringLimits.requireSource(source);", ""),
+            ("authorized", "delegate.programAuthoringLimits().requireProgramCount(artifactIds.size());", ""),
+            ("server", "input.readNBytes(programAuthoringLimits.maxBuildRequestBytes() + 1)", "input.readNBytes(10485760 + 1)"),
+            ("manifest", "was.programRuntimeDigest(), programRuntimeDigest", "was.programRuntimeDigest(), was.programRuntimeDigest()"),
+            ("client", "value?.schemaVersion === 1 && value?.programAuthoring === undefined", "value.schemaVersion === 1"),
+            ("ui", "const batchLimit = authoringLimits.maxProgramsPerBuild;", "const batchLimit = 256;"),
+        )
+        for key, before, after in mutations:
+            path = self.root / audit.PROGRAM_GITHUB_PATHS[key]
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=path, before=before):
+                self.assertIn(before, original, "Mutation must alter the actual accepted executable source")
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, refreshed))
+                    errors = audit.program_github_policy_authority_errors(self.root, {}, {}, refreshed)
+                    self.assertTrue(any("source family" in error for error in errors), errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_program_github_source_or_decisive_assertion_deletion_refuses(self) -> None:
+        path = self.root / audit.PROGRAM_GITHUB_PATHS["authoring"]
+        original = path.read_text(encoding="utf-8")
+        try:
+            path.unlink()
+            self.assertTrue(audit.program_github_policy_source_present(self.root))
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            path.write_text(original, encoding="utf-8")
+        relative, _, _, _ = audit.PROGRAM_GITHUB_TEST_PROOFS[0]
+        path = self.root / relative; original = path.read_text(encoding="utf-8")
+        try:
+            self.assertIn("assert", original)
+            path.write_text(original.replace("assert", "removedAssert", 1), encoding="utf-8")
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_program_github_live_references_remap_without_rewriting_history_or_prose(self) -> None:
+        old, new = 'oc-reviewed-old', 'oc-reviewed-new'
+        authority = {"candidateIds": [old], "contracts": [{"candidateIds": [old], "defaultCandidateIds": [old], "rationale": old}],
+                     "bindingCarriers": [{"candidateIds": [old], "defaultCandidateIds": [old]}],
+                     "semanticPartitions": [{"candidateIds": [old], "rationale": old}]}
+        history = [{"candidateIds": [old], "source": old}]
+        document = {"programGithubPolicyAuthorities": {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority},
+                    "reconciliationHistory": copy.deepcopy(history), "retiredEntries": copy.deepcopy(history)}
+        audit.remap_declared_candidate_references(document, {old: new})
+        self.assertEqual([new], authority["candidateIds"])
+        for field in ("contracts", "bindingCarriers", "semanticPartitions"):
+            self.assertEqual([new], authority[field][0]["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["defaultCandidateIds"])
+        self.assertEqual([new], authority["bindingCarriers"][0]["defaultCandidateIds"])
+        self.assertEqual(old, authority["contracts"][0]["rationale"])
+        self.assertEqual(old, authority["semanticPartitions"][0]["rationale"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        self.assertEqual(history, document["retiredEntries"])
+
+    def test_program_github_closed_deployment_mirrors_and_client_consumer_refuse_bypass(self) -> None:
+        mutations = (
+            ("compose", "RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES:-}", "RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES:-1024}"),
+            ("helmSchema", '"maximum": 1048576', '"maximum": 1048577'),
+            ("helmDeployment", '.Values.programAuthoring.maxSourceBytes', '.Values.programAuthoring.maxBuildRequestBytes'),
+            ("helmValues", 'programAuthoring:\n  maxSourceBytes: ""', 'programAuthoring:\n  maxSourceBytes: 1048576'),
+            ("client", "programs.length > authoring.maxProgramsPerBuild", "programs.length > 256"),
+            ("client", "new TextEncoder().encode(source).byteLength > authoring.maxSourceBytes", "source.length > authoring.maxSourceBytes"),
+        )
+        for key, before, after in mutations:
+            path = self.root / audit.PROGRAM_GITHUB_PATHS[key]
+            original = path.read_text()
+            with self.subTest(key=key):
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after, 1))
+                    self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+                finally:
+                    path.write_text(original)
+
+    def program_github_inventory_document(self, entries: dict[str, dict[str, object]]) -> dict[str, object]:
+        return {"schemaVersion": audit.SCHEMA_VERSION, "entries": list(entries.values()),
+                "evidenceRecords": {candidate.evidence_digest: candidate.evidence for candidate in self.candidates},
+                "programGithubPolicyAuthorities": {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}}
+
+    def test_program_github_exact_contract_prose_refuses_each_fictional_field_in_both_routes(self) -> None:
+        contract = next(item for item in self.authority["contracts"] if len(item["candidateIds"]) > 1)
+        identifiers = contract["candidateIds"]
+        self.assertGreater(len(identifiers), 1)
+        authorities = {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}
+        self.assertEqual([], audit.program_github_policy_authority_errors(
+            self.root, authorities, self.entries, self.discovered))
+        baseline = audit.inventory_errors(self.root, self.program_github_inventory_document(self.entries), self.candidates)
+        self.assertFalse([error for error in baseline if "program/GitHub" in error], baseline)
+        for field in ("default", "scope", "pinning", "validation", "coverage"):
+            with self.subTest(field=field):
+                entries = copy.deepcopy(self.entries)
+                # Keep all rows mutually consistent: only the independent contract can reject this claim.
+                for identifier in identifiers:
+                    entries[identifier][field] = "fictional but nonempty " + field
+                self.assertEqual(1, len({entries[identifier][field] for identifier in identifiers}))
+                direct = audit.program_github_policy_authority_errors(
+                    self.root, authorities, entries, self.discovered)
+                global_errors = audit.inventory_errors(
+                    self.root, self.program_github_inventory_document(entries), self.candidates)
+                for identifier in identifiers:
+                    expected = f"{identifier}: program/GitHub {field} authority has drifted"
+                    self.assertIn(expected, direct)
+                    self.assertIn(expected, global_errors)
+
+    def test_program_github_release_asset_verification_cannot_be_blessed_by_digest_refresh(self) -> None:
+        path = self.root / audit.PROGRAM_GITHUB_PATHS["release"]
+        original = path.read_text(encoding="utf-8")
+        before = "if digest(downloaded) != digest(local):"
+        self.assertEqual(1, original.count(before))
+        try:
+            path.write_text(original.replace(before, "if digest(downloaded) == digest(local):"), encoding="utf-8")
+            refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+            document = self.program_github_inventory_document(copy.deepcopy(self.entries))
+            claimed = copy.deepcopy(self.authority)
+            for item in claimed["sourceDigests"]:
+                if item["path"] == audit.PROGRAM_GITHUB_PATHS["release"]:
+                    item["digest"] = audit._source_digest(path.read_text(encoding="utf-8"))
+            self.assertNotEqual(self.authority["sourceDigests"], claimed["sourceDigests"])
+            document["programGithubPolicyAuthorities"] = {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: claimed}
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, refreshed))
+            self.assertTrue(any("source family" in error for error in audit.program_github_policy_authority_errors(
+                self.root, document["programGithubPolicyAuthorities"], self.entries, refreshed)))
+            self.assertTrue(any("program/GitHub policy source family" in error for error in audit.inventory_errors(
+                self.root, document, tuple(refreshed.values()))))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_program_github_build_envelope_and_non_source_guard_bypasses_refuse(self) -> None:
+        path = self.root / audit.PROGRAM_GITHUB_PATHS["submission"]
+        original = path.read_text(encoding="utf-8")
+        mutations = (
+            ("PayloadJson.read(body, buildEnvelopeLimits(limits, authoring))", "PayloadJson.read(body, limits)"),
+            ("enforceGenericTextLimitsOutsideProgramSource(root, limits);", ""),
+            ('if (!"source".equals(field.getKey()))', 'if (false)'),
+        )
+        for before, after in mutations:
+            with self.subTest(before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+        helper_path = self.root / "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java"
+        helper_source = helper_path.read_text(encoding="utf-8")
+        helper_span = audit.java_method_span(helper_source, "ProgramBuildSubmissionTest", "assertPayloadReason")
+        self.assertIsNotNone(helper_span)
+        start, end = helper_span
+        try:
+            helper_path.write_text(helper_source[:start] + helper_source[start:end].replace("assertThrows", "removedAssertThrows", 1)
+                                   + helper_source[end:], encoding="utf-8")
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            helper_path.write_text(helper_source, encoding="utf-8")
+        relative = "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ContentAddressedProgramBuildHttpIntegrationTest.java"
+        path = self.root / relative
+        original = path.read_text(encoding="utf-8")
+        span = audit.java_method_span(original, "ContentAddressedProgramBuildHttpIntegrationTest",
+                                      "buildRouteMakesTheSelectedRequestAndUtf8SourceCeilingsReachable")
+        self.assertIsNotNone(span)
+        start, end = span
+        body = original[start:end]
+        self.assertIn("assert", body)
+        try:
+            path.write_text(original[:start] + body.replace("assert", "removedAssert", 1) + original[end:], encoding="utf-8")
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_program_github_inventory_dispatch_is_mandatory_without_markers(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(audit, "program_github_policy_authority_errors", return_value=["program-github-routing-probe"]) as routed:
+                self.assertIn("program-github-routing-probe", audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
 
 
 if __name__ == "__main__":

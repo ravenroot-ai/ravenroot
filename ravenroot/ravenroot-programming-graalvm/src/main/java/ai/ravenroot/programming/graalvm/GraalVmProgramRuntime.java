@@ -41,6 +41,7 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
 
     private final SandboxSupervisorLauncher launcher;
     private final SandboxPolicy policy;
+    private final SandboxLaunchPlacement placement;
 
     /**
      * Retained only for source compatibility. It deliberately has no unsandboxed fallback and always fails closed.
@@ -51,64 +52,54 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
     }
 
     public GraalVmProgramRuntime(SandboxSupervisorLauncher launcher, SandboxPolicy policy) {
-        if (launcher == null || policy == null) throw new IllegalArgumentException("Sandbox launcher and policy are required");
+        this(launcher, policy, SandboxLaunchPlacement.LEGACY);
+    }
+
+    public GraalVmProgramRuntime(SandboxSupervisorLauncher launcher, SandboxPolicy policy, SandboxLaunchPlacement placement) {
+        if (launcher == null || policy == null || placement == null)
+            throw new IllegalArgumentException("Sandbox launcher, policy and placement are required");
         this.launcher = launcher;
         this.policy = policy;
+        this.placement = placement;
     }
 
     public static GraalVmProgramRuntime fromEnvironment() {
-        return fromEnvironment(System.getenv());
+        return fromEnvironment(System.getProperties(), System.getenv());
     }
 
-    /**
-     * The real body of {@link #fromEnvironment()}, split out over a {@code Map} rather than
-     * reading {@code System.getenv()} directly -- the same seam {@code BackupRestoreConfiguration},
-     * {@code UnknownBehaviorPolicy} and {@code NodePackageLoader} already use elsewhere in this
-     * codebase for the identical reason: a real process environment cannot be set from inside a test
-     * JVM, and the startup probe below requires direct test coverage. Package-private: this is a
-     * test seam for this module, not a second public entry point.
-     */
+    public static GraalVmProgramRuntime fromEnvironment(java.util.Properties properties, java.util.Map<String, String> environment) {
+        return fromConfiguration(GraalVmRuntimeConfiguration.resolve(properties, environment));
+    }
+
+    /** Environment-only compatibility test seam; does not inherit unrelated JVM configuration. */
     static GraalVmProgramRuntime fromEnvironment(java.util.Map<String, String> environment) {
-        String launcher = environment.get("RAVENROOT_GRAAL_SANDBOX_SUPERVISOR");
-        SandboxSupervisorLauncher configured = launcher == null || launcher.isBlank() ? new MissingLauncher()
-                : new SandboxSupervisorProcessLauncher(Path.of(launcher));
-        // Only a launcher an operator actually pointed somewhere is probed here. MissingLauncher
-        // is the documented, intentional "nothing configured" state -- its own verifyCapability() always
-        // fails the same fixed way, so logging that at every boot would be noise repeating a fact the
-        // operator already chose. A CONFIGURED path that is not a usable supervisor is different: that
-        // is a deployment error, and before this the earliest anything said so was the first user's
-        // Validate request, not the boot log the operator is actually watching while standing the
-        // deployment up. The check is the same verifyCapability() a request already pays for -- a
-        // process spawn bounded at 2s -- run once more here, at startup, before any request exists.
-        //
-        // The catch below is the whole point and must never become a throw: a startup probe that can
-        // abort the server would turn a diagnostic into an outage, for a component (program artifacts)
-        // that is optional. GraalVmProgramRuntimeFromEnvironmentTest asserts the return, not just the
-        // log line, for exactly this reason.
+        return fromEnvironment(new java.util.Properties(), environment);
+    }
+
+    public static GraalVmProgramRuntime fromConfiguration(GraalVmRuntimeConfiguration configuration) {
+        java.util.Objects.requireNonNull(configuration, "Runtime configuration is required");
+        SandboxSupervisorLauncher configured = configuration.supervisor() == null ? new MissingLauncher()
+                : new SandboxSupervisorProcessLauncher(configuration.supervisor());
+        // A configured but unavailable optional supervisor is a nonfatal startup diagnostic.
+        // Actual requests repeat capability checks and refuse before launching or redeeming source.
         if (configured instanceof SandboxSupervisorProcessLauncher) {
             try {
                 configured.verifyCapability();
+                configured.verifyPlacement(configuration.placement());
             } catch (IOException unusable) {
                 logSandboxUnavailable("startup", configured, unusable);
             }
-            // Same reasoning as the capability probe just above: a launcher an operator
-            // pointed somewhere is a deployment they intend to run Python programs on, so the
-            // directory GraalVmWorkerMain's own default will try to extract the standard library
-            // into is worth checking here, at the boot log the operator is watching, instead of
-            // letting it surface for the first time as a ModuleNotFoundError on someone's first
-            // Validate. MissingLauncher is skipped for the same "not configured is not broken"
-            // reason the capability probe above skips it.
-            //
-            checkResourceCacheStartup(java.nio.file.Path.of("/opt/ravenroot"),
-                    GraalVmWorkerMain.DEFAULT_RESOURCE_CACHE_DIR,
-                    environment.get(GraalVmWorkerMain.RESOURCE_CACHE_ENV));
+            if (configuration.placement().hasOverride()) {
+                String value = configuration.placement().resourceCachePropertyValue();
+                // Empty standard properties retain Graal semantics, never Path.of("").
+                if (!value.isBlank()) checkResourceCacheDirectory(value);
+            } else {
+                checkResourceCacheStartup(Path.of("/opt/ravenroot"), GraalVmWorkerMain.DEFAULT_RESOURCE_CACHE_DIR, null);
+            }
         }
-        Path java = Path.of(environment.getOrDefault("RAVENROOT_GRAAL_JAVA",
-                Path.of(System.getProperty("java.home"), "bin", "java").toString()));
-        Duration timeout = Duration.ofMillis(
-                integerEnvironment(environment, "RAVENROOT_PROGRAM_TIMEOUT_MS", 5_000, 100, 300_000));
-        int memory = integerEnvironment(environment, "RAVENROOT_PROGRAM_MAX_HEAP_MB", 64, 32, 1024);
-        return new GraalVmProgramRuntime(configured, policyFor(java, timeout, memory));
+        return new GraalVmProgramRuntime(configured,
+                policyFor(configuration.javaExecutable(), configuration.timeout(), configuration.maxHeapMegabytes()),
+                configuration.placement());
     }
 
     /**
@@ -219,22 +210,19 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
                     unusable.getMessage(), unusable);
         }
         checkDeadline(start, deadline, cancelled, "before_launch");
-        var session = launcher.launch(policy);
+        final SandboxSupervisorLauncher.SandboxSupervisorSession session;
+        try {
+            session = launcher.launch(policy, placement);
+        } catch (IOException unusable) {
+            logSandboxUnavailable("request", launcher, unusable);
+            throw new ProgramRuntimeUnavailableException(
+                    ProgramRuntimeUnavailableException.Reason.SANDBOX_UNAVAILABLE, unusable.getMessage(), unusable);
+        }
         sessionRef.set(session);
         try {
-            // The window this check closes contains only launcher.launch(policy) on the line above --
-            // that is ProcessBuilder.start()
-            // and nothing else -- so it is among the NARROWEST of the seven deadline sites, not the
-            // widest. GraalPy's measured 2929 ms cold start happens inside the child process, and the
-            // first point at which this adapter can observe it is session.await() below, which reports
-            // it as "sandbox_outcome".
-            //
-            // An earlier version of this comment claimed the opposite -- that a cold start on a loaded
-            // machine is what this check dies at -- and that claim was then copied into ErrorCode, into
-            // RavenrootServer and into the error contract by a reader who trusted it instead of opening
-            // SandboxSupervisorProcessLauncher. It is left recorded because the wrong version was the
-            // more plausible-sounding one. Measured over two full reactor runs: sandbox_outcome five
-            // times each, after_launch never once.
+            // Launch includes optional placement attestation and ProcessBuilder.start(). Both
+            // consume this request's deadline. GraalPy initialization happens in the child and
+            // is observed later by session.await(); source is never redeemed after this deadline.
             checkDeadline(start, deadline, cancelled, "after_launch");
             // The redemption point. Authoritative state is re-read HERE, on the far side
             // of process launch and virtual-thread scheduling, and the source that goes to the worker
@@ -309,27 +297,9 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
     }
 
     /**
-     * The startup resource-cache check, split over its two external inputs (the same
-     * seam {@link #fromEnvironment(java.util.Map)} and {@code
-     * GraalVmWorkerMain#applyResourceCacheDefault(Path, String)} already use, for the identical
-     * reason: {@code imageRoot}'s existence cannot be set from inside a test JVM). Package-private:
-     * a test seam for this module, not a second public entry point.
-     *
-     * <p><b>Both checks run, unconditionally of each other.</b> An earlier version was an if/else
-     * that checked only {@code override} when one was set. That fails silently because
-     * {@code RAVENROOT_GRAAL_RESOURCE_CACHE_DIR} set on this server
-     * container does NOT reach the worker in the shipped stack ({@code
-     * SandboxSupervisorProcessLauncher} clears the environment before spawning the supervisor --
-     * see its Javadoc and {@code GraalVmWorkerMain}'s), so an operator who sets it here is checking
-     * a path the worker will never actually use. The if/else let that operator see a clean startup
-     * log -- override writable, so silent -- while the worker fell back to {@code defaultDirectory},
-     * which could be unwritable for a reason the override check never looked at; the first Validate
-     * would still fail with the exact {@code ModuleNotFoundError} this check exists to prevent, and
-     * nothing at startup would have said so. {@code defaultDirectory} is therefore always checked
-     * when {@code imageRoot} exists (mirroring {@code applyResourceCacheDefault}'s own guard, since
-     * that is the directory the worker resorts to whenever the override does not reach it);
-     * {@code override}, when set, is checked ADDITIONALLY, as a best-effort diagnostic for an
-     * integrator's own supervisor that does choose to forward it.
+     * Advisory legacy-placement checks. Explicit negotiated placement is checked separately by
+     * fromConfiguration; this helper retains the independent default/override diagnostic seam.
+     * A host-directory check does not establish a production supervisor's worker filesystem view.
      */
     static void checkResourceCacheStartup(Path imageRoot, String defaultDirectory, String override) {
         if (java.nio.file.Files.isDirectory(imageRoot)) {
@@ -517,7 +487,6 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
         }
     }
     private static byte[] sha256(byte[] value) { try { return MessageDigest.getInstance("SHA-256").digest(value); } catch (NoSuchAlgorithmException e) { throw new IllegalStateException("SHA-256 is unavailable", e); } }
-    private static int integerEnvironment(java.util.Map<String, String> environment, String name, int defaultValue, int minimum, int maximum) { String value = environment.get(name); if (value == null || value.isBlank()) return defaultValue; try { int parsed = Integer.parseInt(value); if (parsed < minimum || parsed > maximum) throw new NumberFormatException(); return parsed; } catch (NumberFormatException error) { throw new IllegalArgumentException(name + " must be between " + minimum + " and " + maximum); } }
     private static final class MissingLauncher implements SandboxSupervisorLauncher {
         @Override public void verifyCapability() throws IOException { throw new IOException("SANDBOX_LAUNCHER_MISSING"); }
         @Override public SandboxSupervisorSession launch(SandboxPolicy policy) throws IOException { throw new IOException("SANDBOX_LAUNCHER_MISSING"); }

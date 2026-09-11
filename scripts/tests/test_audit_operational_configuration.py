@@ -61,6 +61,54 @@ def classify_non_pending(root: Path) -> None:
         audit.render_report(document), encoding="utf-8")
 
 
+REAPPEARANCE_PRIOR_REVISION = "0596c618ac2cb7c55851c6891f7321b407e9686c"
+REAPPEARANCE_TARGET_REVISION = "2ab60f03cb1563a69d245e2b81b5f7cb3b056f95"
+REAPPEARANCE_CHECKPOINT_REVISION = "c2317c6643378e3f82a4f46d638ac03a157b0461"
+
+
+def committed_inventory(revision: str) -> tuple[dict[str, object], bytes]:
+    relative = audit.INVENTORY.relative_to(audit.ROOT).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{relative}"], cwd=ROOT, check=True,
+        capture_output=True,
+    )
+    return json.loads(result.stdout), result.stdout
+
+
+def production_reappearance_fixture() -> tuple[
+        dict[str, object], tuple[audit.Candidate, ...], list[dict[str, object]],
+        dict[str, object], bytes, dict[str, object], bytes]:
+    document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+    candidates = audit.discover(ROOT)
+    prior, prior_raw = committed_inventory(REAPPEARANCE_PRIOR_REVISION)
+    checkpoint, checkpoint_raw = committed_inventory(REAPPEARANCE_CHECKPOINT_REVISION)
+    active_ids = {entry["id"] for entry in document["entries"]}
+    retired = {entry["id"]: entry for entry in document["retiredEntries"]}
+    collisions = sorted(active_ids & set(retired))
+    candidate_by_id = {candidate.id: candidate for candidate in candidates}
+    records = [{
+        "kind": audit.REAPPEARANCE_KIND,
+        "issue": "#317",
+        "candidateId": identifier,
+        "approved": True,
+        "rationale": (
+            f"The pending schema atom {retired[identifier]['expression']} reappeared with the same "
+            "normalized identity after the closed Helm schema moved its source line; this approval "
+            "does not inherit semantic review from the retired row."
+        ),
+        "priorInventoryRevision": REAPPEARANCE_PRIOR_REVISION,
+        "priorInventoryPath": audit.INVENTORY.relative_to(audit.ROOT).as_posix(),
+        "priorInventoryDigest": audit.hashlib.sha256(prior_raw).hexdigest(),
+        "targetSourceRevision": REAPPEARANCE_TARGET_REVISION,
+        "identityCheckpointRevision": REAPPEARANCE_CHECKPOINT_REVISION,
+        "identityCheckpointInventoryDigest": audit.hashlib.sha256(checkpoint_raw).hexdigest(),
+        "reconciliationId": "issue-317-closed-helm-contract-v1",
+        "retiredPayloadDigest": audit.canonical_json_digest(retired[identifier]),
+        "currentEvidenceDigest": candidate_by_id[identifier].evidence_digest,
+    } for identifier in collisions]
+    return document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw
+
+
 class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
@@ -394,6 +442,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "evidence": "oc-old remains historical prose",
             }},
             "semanticReviewHistory": [{"candidateIds": ["oc-old"]}],
+            "normalizedIdentityReappearanceHistory": [{
+                "candidateId": "oc-old", "rationale": "Immutable historical identity evidence.",
+            }],
         }
         locations = audit.candidate_reference_locations(document, {"oc-old"})
         self.assertTrue(all(audit.allowed_migrated_reference(path)
@@ -404,7 +455,264 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(["oc-new"], authority["candidateIds"])
         self.assertEqual(["oc-new"], authority["contracts"][0]["candidateIds"])
         self.assertEqual(["oc-old"], document["semanticReviewHistory"][0]["candidateIds"])
+        self.assertEqual(
+            "oc-old", document["normalizedIdentityReappearanceHistory"][0]["candidateId"])
         self.assertEqual("oc-old remains historical prose", authority["evidence"])
+
+    def test_normalized_identity_reappearance_is_exact_source_anchored_and_nonsemantic(self) -> None:
+        document, candidates, records, prior, prior_raw, checkpoint, checkpoint_raw = \
+            production_reappearance_fixture()
+        self.assertEqual(21, len(records))
+        document["normalizedIdentityReappearanceHistory"] = copy.deepcopy(records)
+
+        errors, allowed = audit.normalized_identity_reappearance_errors(
+            ROOT, document, candidates)
+        self.assertEqual([], errors)
+        self.assertEqual({record["candidateId"] for record in records}, allowed)
+
+        malformed_collection = copy.deepcopy(document)
+        malformed_collection["normalizedIdentityReappearanceHistory"] = {}
+        self.assertEqual(
+            ["normalizedIdentityReappearanceHistory must be an array"],
+            audit.normalized_identity_reappearance_errors(
+                ROOT, malformed_collection, candidates)[0])
+
+        # Exercise the production routing without paying the unrelated append-only semantic-review
+        # validation cost. The source-anchored reappearance validator itself remains unmocked.
+        with mock.patch.object(audit, "reconciliation_history_errors", return_value=[]), \
+                mock.patch.object(audit, "remediation_domain_errors", return_value=[]):
+            routed = audit.inventory_errors(ROOT, document, candidates)
+        self.assertFalse(any("duplicate active/retired inventory id" in error for error in routed), routed)
+
+        inventory_path = audit.INVENTORY.relative_to(audit.ROOT).as_posix()
+
+        def anchored_errors(value, discovered=candidates, prior_document=prior,
+                            prior_bytes=prior_raw, checkpoint_document=checkpoint,
+                            checkpoint_bytes=checkpoint_raw):
+            def committed(_root, revision, path):
+                if path != inventory_path:
+                    return None, None
+                if revision == REAPPEARANCE_PRIOR_REVISION:
+                    return prior_document, prior_bytes
+                if revision == REAPPEARANCE_CHECKPOINT_REVISION:
+                    return checkpoint_document, checkpoint_bytes
+                return None, None
+            with mock.patch.object(audit, "committed_json", side_effect=committed):
+                return audit.normalized_identity_reappearance_errors(
+                    ROOT, value, discovered)[0]
+
+        absent = copy.deepcopy(document)
+        absent["normalizedIdentityReappearanceHistory"].pop()
+        self.assertTrue(any("missing active/retired collisions" in error
+                            for error in anchored_errors(absent)))
+        self.assertEqual(set(), audit.normalized_identity_reappearance_errors(
+            ROOT, absent, candidates)[1], "a partial record set must grant no duplicate exception")
+        collision_id = records[0]["candidateId"]
+        collision_candidate = next(item for item in candidates if item.id == collision_id)
+        collision_document = {
+            "schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+            "entries": [copy.deepcopy(next(
+                entry for entry in document["entries"] if entry["id"] == collision_id))],
+            "retiredEntries": [copy.deepcopy(next(
+                entry for entry in document["retiredEntries"] if entry["id"] == collision_id))],
+            "migrationHistory": [],
+            "evidenceRecords": {collision_candidate.evidence_digest: collision_candidate.evidence},
+        }
+        with mock.patch.object(audit, "route_table_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "graph_limit_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "environment_resolver_group_errors", return_value=[]), \
+                mock.patch.object(audit, "reconciliation_history_errors", return_value=[]), \
+                mock.patch.object(audit, "remediation_domain_errors", return_value=[]):
+            collision_errors = audit.inventory_errors(
+                ROOT, collision_document, (collision_candidate,))
+        self.assertIn(f"duplicate active/retired inventory id: {collision_id}", collision_errors)
+
+        duplicate = copy.deepcopy(document)
+        duplicate["normalizedIdentityReappearanceHistory"].append(
+            copy.deepcopy(duplicate["normalizedIdentityReappearanceHistory"][0]))
+        self.assertTrue(any("duplicate normalized identity" in error
+                            for error in anchored_errors(duplicate)))
+
+        foreign = copy.deepcopy(document)
+        foreign["normalizedIdentityReappearanceHistory"][0]["candidateId"] = "oc-foreign"
+        self.assertTrue(any("non-colliding candidates" in error
+                            for error in anchored_errors(foreign)))
+
+        for field, value in (
+                ("approved", False), ("rationale", " "), ("issue", "317"),
+                ("priorInventoryPath", "../inventory.json"),
+                ("priorInventoryRevision", "deadbeef"),
+                ("priorInventoryDigest", "0" * 64),
+                ("identityCheckpointInventoryDigest", "0" * 64),
+                ("reconciliationId", "missing-reconciliation"),
+                ("retiredPayloadDigest", "0" * 64),
+                ("currentEvidenceDigest", "0" * 64)):
+            with self.subTest(record_field=field):
+                changed = copy.deepcopy(document)
+                changed["normalizedIdentityReappearanceHistory"][0][field] = value
+                self.assertTrue(anchored_errors(changed))
+
+        extra_field = copy.deepcopy(document)
+        extra_field["normalizedIdentityReappearanceHistory"][0]["owner"] = "forbidden"
+        self.assertTrue(any("unsupported or incomplete shape" in error
+                            for error in anchored_errors(extra_field)))
+
+        with mock.patch.object(audit, "revision_is_ancestor", return_value=False):
+            self.assertTrue(any("ordered ancestry" in error for error in anchored_errors(document)))
+
+        identifier = records[0]["candidateId"]
+        checkpoint_entry = next(entry for entry in checkpoint["entries"]
+                                if entry["id"] == identifier)
+
+        prior_active = copy.deepcopy(prior)
+        prior_active["entries"].append(copy.deepcopy(checkpoint_entry))
+        prior_active_raw = json.dumps(prior_active).encode("utf-8")
+        changed = copy.deepcopy(document)
+        for record in changed["normalizedIdentityReappearanceHistory"]:
+            record["priorInventoryDigest"] = audit.hashlib.sha256(prior_active_raw).hexdigest()
+        self.assertTrue(any("absent from active prior inventory" in error for error in
+                            anchored_errors(changed, prior_document=prior_active,
+                                            prior_bytes=prior_active_raw)))
+
+        prior_without_retirement = copy.deepcopy(prior)
+        prior_without_retirement["retiredEntries"] = [
+            entry for entry in prior_without_retirement["retiredEntries"]
+            if entry.get("id") != identifier]
+        prior_without_raw = json.dumps(prior_without_retirement).encode("utf-8")
+        changed = copy.deepcopy(document)
+        for record in changed["normalizedIdentityReappearanceHistory"]:
+            record["priorInventoryDigest"] = audit.hashlib.sha256(prior_without_raw).hexdigest()
+        self.assertTrue(any("one retirement" in error for error in
+                            anchored_errors(changed, prior_document=prior_without_retirement,
+                                            prior_bytes=prior_without_raw)))
+
+        current_retired_tamper = copy.deepcopy(document)
+        next(entry for entry in current_retired_tamper["retiredEntries"]
+             if entry["id"] == identifier)["retirementRationale"] = "Rewritten history."
+        self.assertTrue(any("immutable retired payload has drifted" in error for error in
+                            anchored_errors(current_retired_tamper)))
+
+        def eligibility_errors(mutator):
+            changed = copy.deepcopy(document)
+            prior_changed = copy.deepcopy(prior)
+            checkpoint_changed = copy.deepcopy(checkpoint)
+            retired_rows = [
+                next(entry for entry in changed["retiredEntries"] if entry["id"] == identifier),
+                next(entry for entry in prior_changed["retiredEntries"] if entry["id"] == identifier),
+                next(entry for entry in checkpoint_changed["retiredEntries"]
+                     if entry["id"] == identifier),
+            ]
+            for row in retired_rows:
+                mutator(row)
+            prior_changed_raw = json.dumps(prior_changed).encode("utf-8")
+            checkpoint_changed_raw = json.dumps(checkpoint_changed).encode("utf-8")
+            for record in changed["normalizedIdentityReappearanceHistory"]:
+                record["priorInventoryDigest"] = audit.hashlib.sha256(prior_changed_raw).hexdigest()
+                record["identityCheckpointInventoryDigest"] = audit.hashlib.sha256(
+                    checkpoint_changed_raw).hexdigest()
+                if record["candidateId"] == identifier:
+                    record["retiredPayloadDigest"] = audit.canonical_json_digest(retired_rows[0])
+            return anchored_errors(
+                changed, prior_document=prior_changed, prior_bytes=prior_changed_raw,
+                checkpoint_document=checkpoint_changed, checkpoint_bytes=checkpoint_changed_raw)
+
+        eligibility_mutations = (
+            lambda row: row.update(status="retained"),
+            lambda row: row.update(classification="protocol-or-format-invariant"),
+            lambda row: row.update(removal={"kind": "duplicate-removed"}),
+            lambda row: row["sourceRefresh"].update(semanticRetirement=True),
+            lambda row: row["sourceRefresh"].update(duplicateAuthorityCredit=1),
+            lambda row: row["sourceRefresh"].update(
+                kind="semantic-candidate-retirement-v1"),
+        )
+        for index, mutation in enumerate(eligibility_mutations):
+            with self.subTest(eligibility=index):
+                self.assertTrue(any("not an eligible mechanical pending refresh" in error
+                                    for error in eligibility_errors(mutation)))
+
+        def mutate_checkpoint_plan(mutator):
+            changed = copy.deepcopy(document)
+            checkpoint_changed = copy.deepcopy(checkpoint)
+            checkpoint_plan = next(plan for plan in checkpoint_changed["reconciliationHistory"]
+                                   if plan["id"] == "issue-317-closed-helm-contract-v1")
+            current_plan = next(plan for plan in changed["reconciliationHistory"]
+                                if plan["id"] == "issue-317-closed-helm-contract-v1")
+            mutator(checkpoint_plan)
+            mutator(current_plan)
+            checkpoint_changed_raw = json.dumps(checkpoint_changed).encode("utf-8")
+            for record in changed["normalizedIdentityReappearanceHistory"]:
+                record["identityCheckpointInventoryDigest"] = audit.hashlib.sha256(
+                    checkpoint_changed_raw).hexdigest()
+            return anchored_errors(
+                changed, checkpoint_document=checkpoint_changed,
+                checkpoint_bytes=checkpoint_changed_raw)
+
+        for plan_field, value in (
+                ("sourceRevision", REAPPEARANCE_TARGET_REVISION),
+                ("sourceInventoryPath", "inventory.json"),
+                ("sourceInventoryDigest", "0" * 64),
+                ("targetRevision", REAPPEARANCE_PRIOR_REVISION)):
+            with self.subTest(checkpoint_plan_field=plan_field):
+                def mutate_anchor(plan, field=plan_field, replacement=value):
+                    plan[field] = replacement
+                self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                                    mutate_checkpoint_plan(mutate_anchor)))
+
+        self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                            mutate_checkpoint_plan(lambda plan: plan.__setitem__(
+                                "additions", [item for item in plan["additions"]
+                                              if item["id"] != identifier]))))
+
+        def replace_addition_with_mapping(plan):
+            plan["additions"] = [item for item in plan["additions"] if item["id"] != identifier]
+            plan["mappings"].append({
+                "fromId": identifier, "toId": identifier, "approved": True,
+                "rationale": "Invalid same-id mapping.", "equivalence": {},
+            })
+        self.assertTrue(any("exact approved checkpoint addition" in error for error in
+                            mutate_checkpoint_plan(replace_addition_with_mapping)))
+
+        unapproved = copy.deepcopy(document)
+        unapproved["reconciliationHistory"] = [
+            plan for plan in unapproved["reconciliationHistory"]
+            if plan.get("id") != "issue-317-closed-helm-contract-v1"]
+        self.assertTrue(any("identity reconciliation is absent" in error
+                            for error in anchored_errors(unapproved)))
+
+        candidate = next(candidate for candidate in candidates if candidate.id == identifier)
+        active = next(entry for entry in document["entries"] if entry["id"] == identifier)
+        source_mutations = {
+            "path": ("path", "deploy/helm/ravenroot/other.json"),
+            "symbol": ("symbol", "other"),
+            "kind": ("kind", "fixed-declaration"),
+            "role": ("role", "other"),
+            "expression": ("expression", '"other"'),
+            "expressionDigest": ("expression_digest", "0" * 64),
+            "evidenceDigest": ("evidence_digest", "0" * 64),
+            "surface": ("surface", "java"),
+        }
+        for entry_field, (candidate_field, value) in source_mutations.items():
+            with self.subTest(source_field=entry_field):
+                changed = copy.deepcopy(document)
+                next(entry for entry in changed["entries"]
+                     if entry["id"] == identifier)[entry_field] = value
+                changed_candidates = tuple(
+                    audit.replace(item, **{candidate_field: value}) if item.id == identifier else item
+                    for item in candidates)
+                self.assertTrue(anchored_errors(changed, discovered=changed_candidates))
+
+        missing_candidate = tuple(item for item in candidates if item.id != identifier)
+        self.assertTrue(any("current candidate is absent" in error
+                            for error in anchored_errors(document, discovered=missing_candidate)))
+
+        moved = copy.deepcopy(document)
+        next(entry for entry in moved["entries"] if entry["id"] == identifier)["line"] = active["line"] + 1
+        moved_candidates = tuple(
+            audit.replace(item, line=item.line + 1) if item.id == identifier else item
+            for item in candidates)
+        self.assertEqual([], anchored_errors(moved, discovered=moved_candidates))
 
     def test_manifest_pin_attempt_authority_is_closed_over_binding_default_and_wiring(self) -> None:
         discovered = {candidate.id: candidate for candidate in audit.discover(ROOT)}
@@ -2853,6 +3161,22 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             audit.render_report({"entries": [], "retiredEntries": [], "migrationHistory": []}),
         )
 
+    def test_report_counts_active_retired_and_reappearance_history_separately(self) -> None:
+        document = {
+            "entries": [{
+                "id": "oc-active", "path": "runtime/Policy.java", "line": 1,
+                "symbol": "Policy", "surface": "java", "status": "retained",
+                "classification": "protocol-or-format-invariant", "rationale": "Protocol token.",
+            }],
+            "retiredEntries": [{"id": "oc-retired"}, {"id": "oc-active"}],
+            "migrationHistory": [], "reconciliationHistory": [],
+            "normalizedIdentityReappearanceHistory": [{"candidateId": "oc-active"}],
+        }
+        report = audit.render_report(document)
+        self.assertIn("| Atomic operational candidates discovered | 1 |", report)
+        self.assertIn("Retired source candidates preserved in inventory history: 2.", report)
+        self.assertIn("Approved normalized-identity reappearances: 1.", report)
+
     def test_new_named_operational_constant_is_rejected(self) -> None:
         with synthetic_repository() as location:
             root = Path(location)
@@ -4343,6 +4667,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "id": "earlier-reconciliation",
                     "additions": [{"id": "oc-old"}],
                 }],
+                "normalizedIdentityReappearanceHistory": [{
+                    "candidateId": "oc-old", "rationale": "Anchored historical reference fixture.",
+                }],
                 "evidenceRecords": {old_entry["evidenceDigest"]: "old evidence"},
             }
             inventory.write_text(json.dumps(source_document, indent=2) + "\n", encoding="utf-8")
@@ -4388,6 +4715,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertEqual(["oc-new"], remapped["entries"][0]["defaultEvidence"])
             self.assertEqual("oc-old", remapped["reconciliationHistory"][0]["additions"][0]["id"],
                              "anchored history must never be rewritten")
+            self.assertEqual(
+                "oc-old", remapped["normalizedIdentityReappearanceHistory"][0]["candidateId"],
+                "reappearance history must never be rewritten")
 
             malformed_issue = copy.deepcopy(plan)
             malformed_issue["issue"] = "316"
@@ -4445,6 +4775,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             tampered["reconciliationHistory"].insert(0, {"id": "forged-prior-record"})
             self.assertTrue(any("append-only chain" in error for error in
                                 audit.reconciliation_history_errors(root, tampered, (candidate,))))
+
+            tampered_reappearance = copy.deepcopy(refreshed)
+            tampered_reappearance["normalizedIdentityReappearanceHistory"][0]["rationale"] = \
+                "Changed later."
+            self.assertTrue(any("normalizedIdentityReappearanceHistory is not an append-only chain"
+                                in error for error in audit.reconciliation_history_errors(
+                                    root, tampered_reappearance, (candidate,))))
 
             missing_retirement = copy.deepcopy(refreshed)
             missing_retirement["retiredEntries"] = []

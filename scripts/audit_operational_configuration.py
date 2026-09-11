@@ -1043,6 +1043,8 @@ def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = Fals
         raise ValueError("schema v5 inventory requires reconciliationRequired=true")
     if not isinstance(document.get("migrationHistory", []), list):
         raise ValueError("inventory migrationHistory must be an array")
+    if not isinstance(document.get("normalizedIdentityReappearanceHistory", []), list):
+        raise ValueError("inventory normalizedIdentityReappearanceHistory must be an array")
     return document
 
 
@@ -2565,6 +2567,7 @@ def immutable_historical_reference(path: tuple[str, ...]) -> bool:
     """Recognize anchored historical candidate references that must never be rewritten."""
     return bool(path) and path[0] in {
         "reconciliationHistory", "semanticReviewHistory", "retiredEntries",
+        "normalizedIdentityReappearanceHistory",
     }
 
 
@@ -2965,6 +2968,13 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
     if source_history != history[:-1]:
         errors.append("reconciliation history is not an append-only chain from the committed source inventory")
     if isinstance(source_document, dict):
+        source_reappearances = source_document.get("normalizedIdentityReappearanceHistory", [])
+        current_reappearances = document.get("normalizedIdentityReappearanceHistory", [])
+        if not isinstance(source_reappearances, list) \
+                or not isinstance(current_reappearances, list) \
+                or current_reappearances[:len(source_reappearances)] != source_reappearances:
+            errors.append(
+                "normalizedIdentityReappearanceHistory is not an append-only chain from the committed source inventory")
         expected_retired = expected_reconciled_retired_entries(
             source_document, source_entries, plan)
         if document.get("retiredEntries") != expected_retired:
@@ -3043,6 +3053,246 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         if target is None or candidate_semantic_payload(target) != expected:
             errors.append(f"candidate {identifier} has an unapproved semantic metadata change")
     return errors
+
+
+REAPPEARANCE_KIND = "pending-candidate-normalized-identity-reappearance-v1"
+REAPPEARANCE_FIELDS = {
+    "kind", "issue", "candidateId", "approved", "rationale",
+    "priorInventoryRevision", "priorInventoryPath", "priorInventoryDigest",
+    "targetSourceRevision", "identityCheckpointRevision",
+    "identityCheckpointInventoryDigest", "reconciliationId",
+    "retiredPayloadDigest", "currentEvidenceDigest",
+}
+NORMALIZED_IDENTITY_FIELDS = (
+    "path", "symbol", "kind", "role", "expression", "expressionDigest",
+    "evidenceDigest", "surface",
+)
+
+
+def canonical_json_digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+
+
+def normalized_identity_reappearance_errors(
+        root: Path, document: dict[str, object],
+        candidates: tuple[Candidate, ...]) -> tuple[list[str], set[str]]:
+    """Validate the closed, source-anchored exception for a normalized ID reappearing.
+
+    A valid record explains identity reuse only. It neither rewrites the immutable retirement
+    ledger nor transfers the retired row's unreviewed semantic state to the active candidate.
+    """
+    errors: list[str] = []
+    raw_entries = document.get("entries", [])
+    raw_retired = document.get("retiredEntries", [])
+    active = {str(entry["id"]): entry for entry in raw_entries
+              if isinstance(entry, dict) and isinstance(entry.get("id"), str)} \
+        if isinstance(raw_entries, list) else {}
+    retired_by_id: dict[str, list[dict[str, object]]] = defaultdict(list)
+    if isinstance(raw_retired, list):
+        for entry in raw_retired:
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+                retired_by_id[str(entry["id"])].append(entry)
+    collisions = set(active) & set(retired_by_id)
+    raw_history = document.get("normalizedIdentityReappearanceHistory", [])
+    if not isinstance(raw_history, list):
+        return ["normalizedIdentityReappearanceHistory must be an array"], set()
+
+    records: dict[str, dict[str, object]] = {}
+    for raw_record in raw_history:
+        candidate_id = raw_record.get("candidateId") if isinstance(raw_record, dict) else None
+        if not isinstance(raw_record, dict) or set(raw_record) != REAPPEARANCE_FIELDS \
+                or not isinstance(candidate_id, str) or not candidate_id:
+            errors.append("normalized identity reappearance has an unsupported or incomplete shape")
+            continue
+        if candidate_id in records:
+            errors.append(f"duplicate normalized identity reappearance record: {candidate_id}")
+            continue
+        records[candidate_id] = raw_record
+    missing = collisions - set(records)
+    foreign = set(records) - collisions
+    if missing:
+        errors.append(
+            "normalized identity reappearance history is missing active/retired collisions: "
+            + ", ".join(sorted(missing)))
+    if foreign:
+        errors.append(
+            "normalized identity reappearance history contains non-colliding candidates: "
+            + ", ".join(sorted(foreign)))
+    if errors:
+        return errors, set()
+    if not collisions:
+        return [], set()
+
+    inventory_path = INVENTORY.relative_to(ROOT).as_posix()
+    discovered = {candidate.id: candidate for candidate in candidates}
+    head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                                 capture_output=True, text=True)
+    checked_head = head_result.stdout.strip() if head_result.returncode == 0 else ""
+    committed_cache: dict[tuple[str, str], tuple[dict[str, object] | None, bytes | None]] = {}
+
+    def cached_json(revision: str, path: str) -> tuple[dict[str, object] | None, bytes | None]:
+        key = (revision, path)
+        if key not in committed_cache:
+            committed_cache[key] = committed_json(root, revision, path)
+        return committed_cache[key]
+
+    def rows(value: dict[str, object] | None, field: str, identifier: str) \
+            -> list[dict[str, object]]:
+        raw = value.get(field, []) if isinstance(value, dict) else []
+        return [entry for entry in raw
+                if isinstance(entry, dict) and entry.get("id") == identifier] \
+            if isinstance(raw, list) else []
+
+    for identifier, record in records.items():
+        prefix = f"normalized identity reappearance {identifier}"
+        if record.get("kind") != REAPPEARANCE_KIND or record.get("approved") is not True \
+                or not isinstance(record.get("issue"), str) \
+                or re.fullmatch(r"#[1-9][0-9]*", str(record.get("issue"))) is None \
+                or not isinstance(record.get("rationale"), str) \
+                or not str(record.get("rationale")).strip():
+            errors.append(f"{prefix} lacks its closed row-level approval")
+            continue
+        prior_revision = record.get("priorInventoryRevision")
+        prior_path = record.get("priorInventoryPath")
+        target_revision = record.get("targetSourceRevision")
+        checkpoint_revision = record.get("identityCheckpointRevision")
+        digests = (
+            record.get("priorInventoryDigest"),
+            record.get("identityCheckpointInventoryDigest"),
+            record.get("retiredPayloadDigest"),
+            record.get("currentEvidenceDigest"),
+        )
+        if prior_path != inventory_path \
+                or not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+                           for value in (prior_revision, target_revision, checkpoint_revision)) \
+                or not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+                           for value in digests):
+            errors.append(f"{prefix} has an unsafe or malformed source anchor")
+            continue
+        assert isinstance(prior_revision, str) and isinstance(target_revision, str)
+        assert isinstance(checkpoint_revision, str) and isinstance(prior_path, str)
+        if not commit_exists(root, prior_revision) \
+                or not commit_exists(root, target_revision) \
+                or not commit_exists(root, checkpoint_revision) \
+                or not revision_is_ancestor(root, prior_revision, target_revision) \
+                or not revision_is_ancestor(root, target_revision, checkpoint_revision) \
+                or not checked_head \
+                or not revision_is_ancestor(root, checkpoint_revision, checked_head):
+            errors.append(f"{prefix} revisions are not a resolvable ordered ancestry")
+            continue
+        prior_document, prior_bytes = cached_json(prior_revision, prior_path)
+        checkpoint_document, checkpoint_bytes = cached_json(checkpoint_revision, prior_path)
+        if prior_document is None or prior_bytes is None \
+                or hashlib.sha256(prior_bytes).hexdigest() != record["priorInventoryDigest"]:
+            errors.append(f"{prefix} prior inventory is absent or its digest has drifted")
+            continue
+        if checkpoint_document is None or checkpoint_bytes is None \
+                or hashlib.sha256(checkpoint_bytes).hexdigest() \
+                != record["identityCheckpointInventoryDigest"]:
+            errors.append(f"{prefix} identity checkpoint is absent or its digest has drifted")
+            continue
+
+        prior_active = rows(prior_document, "entries", identifier)
+        prior_retired = rows(prior_document, "retiredEntries", identifier)
+        checkpoint_active = rows(checkpoint_document, "entries", identifier)
+        checkpoint_retired = rows(checkpoint_document, "retiredEntries", identifier)
+        current_retired = retired_by_id.get(identifier, [])
+        if prior_active or len(prior_retired) != 1:
+            errors.append(f"{prefix} was not absent from active prior inventory with one retirement")
+            continue
+        if len(checkpoint_active) != 1 or len(checkpoint_retired) != 1:
+            errors.append(f"{prefix} is not an exact active/retired checkpoint collision")
+            continue
+        if len(current_retired) != 1 or current_retired[0] != prior_retired[0] \
+                or checkpoint_retired[0] != prior_retired[0] \
+                or canonical_json_digest(prior_retired[0]) != record["retiredPayloadDigest"]:
+            errors.append(f"{prefix} immutable retired payload has drifted")
+            continue
+
+        retired = prior_retired[0]
+        refresh = retired.get("sourceRefresh")
+        expected_refresh_fields = {
+            "kind", "beforeRevision", "afterRevision", "group",
+            "semanticRetirement", "duplicateAuthorityCredit",
+        }
+        before = refresh.get("beforeRevision") if isinstance(refresh, dict) else None
+        after = refresh.get("afterRevision") if isinstance(refresh, dict) else None
+        eligible = retired.get("status") == "pending-review" \
+            and retired.get("classification") is None \
+            and "removal" not in retired and "retirement" not in retired \
+            and isinstance(refresh, dict) and set(refresh) == expected_refresh_fields \
+            and refresh.get("kind") == "pending-candidate-source-refresh-v1" \
+            and refresh.get("semanticRetirement") is False \
+            and isinstance(refresh.get("duplicateAuthorityCredit"), int) \
+            and not isinstance(refresh.get("duplicateAuthorityCredit"), bool) \
+            and refresh.get("duplicateAuthorityCredit") == 0 \
+            and isinstance(refresh.get("group"), str) and bool(str(refresh.get("group")).strip()) \
+            and isinstance(before, str) and isinstance(after, str) \
+            and commit_exists(root, before) and commit_exists(root, after) \
+            and revision_is_ancestor(root, before, after) \
+            and revision_is_ancestor(root, after, prior_revision)
+        if not eligible:
+            errors.append(f"{prefix} retired row is not an eligible mechanical pending refresh")
+            continue
+
+        reconciliation_id = record.get("reconciliationId")
+        checkpoint_history = checkpoint_document.get("reconciliationHistory", [])
+        current_history = document.get("reconciliationHistory", [])
+        checkpoint_plans = [plan for plan in checkpoint_history
+                            if isinstance(plan, dict) and plan.get("id") == reconciliation_id] \
+            if isinstance(checkpoint_history, list) else []
+        current_plans = [plan for plan in current_history
+                         if isinstance(plan, dict) and plan.get("id") == reconciliation_id] \
+            if isinstance(current_history, list) else []
+        if len(checkpoint_plans) != 1 or len(current_plans) != 1 \
+                or current_plans[0] != checkpoint_plans[0]:
+            errors.append(f"{prefix} identity reconciliation is absent or changed")
+            continue
+        plan = checkpoint_plans[0]
+        additions = [item for item in plan.get("additions", [])
+                     if isinstance(item, dict) and item.get("id") == identifier] \
+            if isinstance(plan.get("additions"), list) else []
+        mapping_ids = {str(item.get(field)) for item in plan.get("mappings", [])
+                       if isinstance(item, dict) for field in ("fromId", "toId")} \
+            if isinstance(plan.get("mappings"), list) else set()
+        retirement_ids = {str(item.get("id")) for item in plan.get("retirements", [])
+                          if isinstance(item, dict)} \
+            if isinstance(plan.get("retirements"), list) else set()
+        if plan.get("issue") != record["issue"] \
+                or plan.get("sourceRevision") != prior_revision \
+                or plan.get("sourceInventoryPath") != prior_path \
+                or plan.get("sourceInventoryDigest") != record["priorInventoryDigest"] \
+                or plan.get("targetRevision") != target_revision \
+                or len(additions) != 1 or identifier in mapping_ids or identifier in retirement_ids:
+            errors.append(f"{prefix} is not the exact approved checkpoint addition")
+            continue
+        checkpoint_metadata = candidate_semantic_payload(checkpoint_active[0])
+        if checkpoint_metadata != additions[0].get("metadata") \
+                or checkpoint_metadata.get("status") == "pending-review" \
+                or checkpoint_metadata.get("classification") not in CLASSIFICATIONS \
+                or not isinstance(checkpoint_metadata.get("rationale"), str) \
+                or not str(checkpoint_metadata.get("rationale")).strip():
+            errors.append(f"{prefix} checkpoint addition metadata does not match its active row")
+            continue
+
+        candidate = discovered.get(identifier)
+        current_entry = active.get(identifier)
+        if candidate is None or current_entry is None:
+            errors.append(f"{prefix} current candidate is absent")
+            continue
+        if any(current_entry.get(key) != value for key, value in candidate.source_fields().items()):
+            errors.append(f"{prefix} current source fields do not match discovery")
+            continue
+        normalized_rows = (retired, checkpoint_active[0], current_entry)
+        if any(tuple(row.get(field) for field in NORMALIZED_IDENTITY_FIELDS)
+               != tuple(normalized_rows[0].get(field) for field in NORMALIZED_IDENTITY_FIELDS)
+               for row in normalized_rows[1:]) \
+                or candidate.evidence_digest != record["currentEvidenceDigest"]:
+            errors.append(f"{prefix} normalized source identity or evidence has drifted")
+
+    return (errors, set(records)) if not errors else (errors, set())
 
 
 REMEDIATION_DOMAIN_TITLES = {
@@ -6614,6 +6864,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if identifier not in discovered:
             errors.append(f"stale inventory entry: {identifier} ({entry.get('path', 'unknown path')})")
 
+    reappearance_errors, allowed_reappearances = normalized_identity_reappearance_errors(
+        root, document, candidates)
+    errors.extend(reappearance_errors)
+
     retired_entries = document.get("retiredEntries", [])
     assert isinstance(retired_entries, list)
     retired_ids: set[str] = set()
@@ -6622,7 +6876,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append("retired inventory entry has no string id")
             continue
         identifier = str(entry["id"])
-        if identifier in retired_ids or identifier in entries:
+        if identifier in retired_ids \
+                or (identifier in entries and identifier not in allowed_reappearances):
             errors.append(f"duplicate active/retired inventory id: {identifier}")
         retired_ids.add(identifier)
         if not isinstance(entry.get("retirementRationale"), str) \
@@ -6843,6 +7098,8 @@ def render_report(document: dict[str, object]) -> str:
     assert isinstance(migrations, list)
     reconciliations = document.get("reconciliationHistory", [])
     assert isinstance(reconciliations, list)
+    reappearances = document.get("normalizedIdentityReappearanceHistory", [])
+    assert isinstance(reappearances, list)
     duplicate_settings = {str(entry["setting"]) for entry in retired if isinstance(entry, dict)
                           and entry.get("status") == "duplicate-removed" and entry.get("setting")}
     duplicates = len(duplicate_settings)
@@ -6907,6 +7164,8 @@ def render_report(document: dict[str, object]) -> str:
         f"| Test fixtures | {classifications['test-fixture']} |",
         f"| Intentionally deferred | {deferred} |", "",
         f"Retired source candidates preserved in inventory history: {len(retired)}.", "",
+        f"Approved normalized-identity reappearances: {len(reappearances)}. Active candidates and",
+        "retired historical payloads remain counted separately; an approval records identity reuse only.", "",
         f"Checked inventory-schema migrations: {len(migrations)}. Validation requires the recorded source",
         "revision to be present locally; CI must fetch that history before enabling this gate.", "",
         f"Checked source reconciliations: {len(reconciliations)}.", "",

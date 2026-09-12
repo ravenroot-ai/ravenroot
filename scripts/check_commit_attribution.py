@@ -86,6 +86,10 @@ def event_range(event_name: str, event: dict) -> tuple[str, str] | None:
     return None
 
 
+def reachable(revision: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{revision}^{{commit}}"], capture_output=True).returncode == 0
+
+
 def default_range() -> tuple[str, str]:
     """Outside an event with a range: the commits this checkout adds to dev."""
     try:
@@ -109,6 +113,11 @@ def main(argv: list[str] | None = None) -> int:
             event = json.loads(Path(path).read_text(encoding="utf-8"))
         span = event_range(os.environ.get("GITHUB_EVENT_NAME", ""), event) or default_range()
     base, head = span
+    if base and not reachable(base):
+        # A force-pushed branch leaves the event's `before` unreachable in a fresh clone. The range
+        # that matters is then the commits this checkout adds to dev, which is what a work branch
+        # introduces anyway.
+        base, head = default_range()
     if not base or not head:
         print("check_commit_attribution: the event names no commit range to examine", file=sys.stderr)
         return 1

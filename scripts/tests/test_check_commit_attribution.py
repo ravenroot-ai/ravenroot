@@ -69,6 +69,14 @@ class CommitAttributionTest(unittest.TestCase):
         self.assertIsNone(check.event_range("push", {"before": "0" * 40, "after": "h"}),
                           "a new branch has no before; the checkout's own range is used instead")
 
+    def test_a_force_pushed_before_falls_back_to_the_branch_range(self) -> None:
+        """The event's `before` is gone after a force-push; the check must not crash on it."""
+        with mock.patch.object(check, "reachable", return_value=False), \
+             mock.patch.object(check, "default_range", return_value=("base", "HEAD")) as fallback, \
+             mock.patch.object(check, "commits", return_value=[]):
+            self.assertEqual(check.main(["--base", "0" * 39 + "1", "--head", "HEAD"]), 0)
+        fallback.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

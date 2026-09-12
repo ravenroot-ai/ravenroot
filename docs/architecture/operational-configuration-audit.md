@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 19735 |
+| Atomic operational candidates discovered | 19767 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 19735 |
+| Reviewed | 19767 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 245 |
@@ -51,10 +51,10 @@ semantic review and focused source inventories remain required for those boundar
 | Retained published contract descriptions | 424 |
 | Retained presentation text | 477 |
 | Retained derived values | 1002 |
-| Test fixtures | 6524 |
+| Test fixtures | 6559 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1592.
+Retired source candidates preserved in inventory history: 1597.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,34 +62,34 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 19.
+Checked source reconciliations: 20.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 19735 candidates.
+zero-count or unclassified rows as needed and sums to 19767 candidates.
 
 ### Status counts
 
 | Status | Candidates |
 |---|---:|
-| already-centralized | 1279 |
+| already-centralized | 1276 |
 | confirmed-hardcoded | 0 |
 | converted | 59 |
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 18397 |
+| retained | 18432 |
 
 ### Classification counts
 
 | Classification | Candidates |
 |---|---:|
 | derived | 1002 |
-| operator-configurable | 1338 |
+| operator-configurable | 1335 |
 | presentation-text | 477 |
 | protocol-or-format-invariant | 8132 |
 | published-contract-description | 424 |
 | security-ceiling-or-default | 1838 |
-| test-fixture | 6524 |
+| test-fixture | 6559 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -98,9 +98,9 @@ zero-count or unclassified rows as needed and sums to 19735 candidates.
 |---|---:|
 | deployment | 2042 |
 | deployment-example | 20 |
-| java | 6333 |
+| java | 6330 |
 | script | 1906 |
-| test-fixture | 6524 |
+| test-fixture | 6559 |
 | ui | 2910 |
 
 ### Owning remediation counts
@@ -117,8 +117,8 @@ assigned to an issue retroactively.
 | #318 | 107 |
 | #319 | 287 |
 | #320 | 1541 |
-| #321 | 8665 |
-| Retained; no remediation required | 8478 |
+| #321 | 8662 |
+| Retained; no remediation required | 8513 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 19675 |
-| Unchanged identities | 19669 |
-| Approved identity migrations | 6 |
-| Approved retirements | 0 |
-| Semantically classified additions | 60 |
-| Current candidates | 19735 |
+| Source inventory candidates | 19735 |
+| Unchanged identities | 19730 |
+| Approved identity migrations | 0 |
+| Approved retirements | 5 |
+| Semantically classified additions | 37 |
+| Current candidates | 19767 |
 
 ## Final semantic review
 
@@ -173,7 +173,7 @@ tamper-evident; new candidates receive no classification by similarity.
 | Deployment Image Build And Carrier Invariants | protocol-or-format-invariant | 43 | Runtime resource and health values, ports, and non-root identities are separated into dedicated groups. |
 | Deployment Port Contracts | protocol-or-format-invariant | 2 | The two production Dockerfiles publish the same application port contract. |
 | Deployment Runtime Resources And Health Defaults | security-ceiling-or-default | 20 | Empty environment carriers and environment-name identities are separated, so every member here is an actual non-empty deployment choice. |
-| Embed Enabled Operator Setting | operator-configurable | 5 | The exact five production reads form one startup pipeline: validation happens before registration storage and route composition, while later exact-true checks consume that validated process value. |
+| Centralized Embed Enablement Setting | operator-configurable | 5 | The typed Boolean setting already existed; #321 removed three raw consumers and the duplicate startup parser, so one exact false-default parser now owns validation for every startup decision. |
 | Executable Verification Fixtures | test-fixture | 513 | The exact eleven-script roster is executable and interpreter-backed. Every script source is digest-pinned; the checker derives the complete candidate roster from those paths. |
 | Java Cli And Dev Tooling Component Defaults | security-ceiling-or-default | 4 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Cli And Dev Tooling Derived Arithmetic | derived | 1 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
@@ -224,7 +224,7 @@ tamper-evident; new candidates receive no classification by similarity.
 | Ui Timing And Retry Defaults | security-ceiling-or-default | 14 | Only numeric atoms whose owning symbol names the timing role enter this group. |
 | JWKS Cache Lifetime Setting | operator-configurable | 4 | The 300-second cache lifetime is an existing operator default; 30 seconds and one hour are validation endpoints, not additional fixed lifetimes. |
 | JWKS Connect Timeout Setting | operator-configurable | 1 | The former fixed three-second external connection timeout is converted to a typed environment setting with the same shipped fallback. |
-| JWKS Request Timeout Setting | operator-configurable | 1 | The former fixed five-second complete HTTP request timeout is converted to a typed environment setting with the same shipped fallback. |
+| JWKS Request Timeout Setting | operator-configurable | 1 | The former fixed five-second HttpRequest response timeout is converted to a typed environment setting with the same shipped fallback; streamed-body admission remains bounded separately by the payload ceiling. |
 | JWKS Response Payload Ceiling | security-ceiling-or-default | 2 | The 64 KiB limit is enforced before parsing untrusted JWKS bytes and is retained as an intrinsic admission ceiling. |
 | JWKS HTTP Media Contract | protocol-or-format-invariant | 2 | The Accept header and JSON/JWK-set media values are wire compatibility tokens consumed by request and response validation. |
 | JWKS Payload Overflow Sentinel | derived | 1 | The extra byte is derived from the 64 KiB cap and exists only to detect overflow without admitting it. |
@@ -306,7 +306,7 @@ in this table.
 | deployment.service.type | already-centralized | `deploy/helm/ravenroot/values.yaml#service` | `service.type` | none | ClusterIP | `oc-4d8f591f6c442258f4ae`: "NodePort"<br>`oc-79610b2162187c1e96f3`: "LoadBalancer"<br>`oc-b93c1be90bba950081e2`: "string"<br>`oc-c352eb115ddbc06980db`: "type"<br>`oc-c7f93086b2d46e72334d`: "type"<br>`oc-d1109b258a05b9c4d1d6`: "enum"<br>`oc-d5347dea3d4c8558f42a`: "ClusterIP" | service-type | one rendered Helm release | resolved by Helm schema validation and rendered into the pod specification | closed values/schema/template and executable default, nondefault, and refusal contracts |
 | deployment.tmpfs.size-limit | already-centralized | `deploy/helm/ravenroot/values.yaml#tmpfs` | `tmpfs.sizeLimit` | none | 64Mi | `oc-0a2a343d1b7f8b5e3d93`: "sizeLimit"<br>`oc-3d81a0ba0320f8eb7a49`: "#/definitions/kubernetesPositiveQuantity"<br>`oc-789ef1b832a901f9f62a`: "$ref"<br>`oc-8cc6be48545301cf8ad1`: #/definitions/kubernetesPositiveQuantity | positive-quantity | one rendered Helm release | resolved by Helm schema validation and rendered into the pod specification | closed values/schema/template and executable default, nondefault, and refusal contracts |
 | egress.reserved-network-exceptions | already-centralized | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/egress/ReservedNetworkPolicy.java#ReservedNetworkPolicy` | `DEFAULT_EXCEPTIONS` | `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | "localhost:LOOPBACK" | `oc-0021613c430be66e8fb3`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-07b17751bcf76c35ff5f`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-30f290ad5b28bf82e43f`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-32868e003e570b96e929`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-538a54dbcee6bd847aa6`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-a6448b02327bd1822bff`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-a96eace9250c556bf865`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-acb234fe9df90b14e068`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-bc77e9cd0563ed2e72f7`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-d238be815f6fd3c0e239`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-e5d375ef0a55321bd5ca`: "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS"<br>`oc-f613a4df7b900ce63ae9`: RAVENROOT_EGRESS_RESERVED_EXCEPTIONS<br>`oc-fe8ad35a5a95da6a3e53`: "localhost:LOOPBACK" | The typed policy validates the value before external I/O is admitted. | Live deployment authorization; graphs and manifests cannot widen it. | Current authorization is checked at each connection and is not manifest-pinned. | Source-derived owner, default, binding, consumer and test evidence. |
-| embed.enabled | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration` | `enabled` | `RAVENROOT_EMBED_ENABLED` | false | `oc-962b7f0237877684628e`: RAVENROOT_EMBED_ENABLED<br>`oc-9afebfed0a8eeafb99ce`: RAVENROOT_EMBED_ENABLED<br>`oc-b3b8db24d0c0c201aa50`: RAVENROOT_EMBED_ENABLED<br>`oc-d2a8cec06bc7d5911c92`: RAVENROOT_EMBED_ENABLED<br>`oc-e8ffbe9d45ac6a184c88`: RAVENROOT_EMBED_ENABLED | Absent defaults false; only exact lowercase true or false is accepted before composition. | Packaged server process at startup. | Read once before opening embed registration storage and composing browser routes. | Typed configuration, packaged startup refusal, replica guard, server composition, operator reference, and focused tests. |
+| embed.enabled | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration` | `enabled` | `RAVENROOT_EMBED_ENABLED` | false | `oc-c92f93b348c318a14a6d`: RAVENROOT_EMBED_ENABLED<br>`oc-e67c99abfd1d50dd0a6f`: RAVENROOT_EMBED_ENABLED | Absent defaults false; only exact lowercase true or false is accepted before composition. | Packaged server process during startup. | Validated at the start of packaged-server run and read again only by later startup composition and topology checks in the same process environment. | Typed strict parser, pre-composition startup refusal, registration-store and route composition, replica topology naming, operator reference, and runnable tests. |
 | execution.inventory.default-page-size | already-centralized | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/ProcessInventoryQuery.java#Builder` | `limit` | `ProcessInventoryQuery.Builder.limit(int)` | 50 | `oc-d7f5a7861188edd94e2f`: 50 | The public query builder owns the requested page-size default; callers may override it and the selected store independently enforces its maximum inventory page size. | The deployment, adapter, registry, query, or store instance named by the typed owner and mandatory source-derived contract. | Execution persistence capacity is pinned in manifest format 3 and checked against the immutable managed store; connection credentials and deployment coordination remain live operational policy. | Mandatory owner, default, binding, validation, consumer, and executable-test evidence are derived from the accepted source. |
 | execution.lease-ttl | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionOwnershipConfiguration.java#ExecutionOwnershipConfiguration` | `leaseTtl` | `ravenroot.execution.lease-ttl-seconds`, `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | ExecutionOwnership.DEFAULT_LEASE_TTL (Duration.ofSeconds(30)) | `oc-3d39f9f61305def03fb3`: "RAVENROOT_EXECUTION_LEASE_TTL_SECONDS"<br>`oc-668b215972eaaef9bf95`: RAVENROOT_EXECUTION_LEASE_TTL_SECONDS<br>`oc-79a29a0861a521d8dacd`: "ravenroot.execution.lease-ttl-seconds"<br>`oc-b217432810180984986c`: 30<br>`oc-f3d20757d27f9a9a9561`: ravenroot.execution.lease-ttl-seconds | Property overrides environment; blank delegates to 30 seconds; positive whole seconds, above store skew and no greater than store max lease; used by runtime and recovery claims. | The deployment, adapter, registry, query, or store instance named by the typed owner and mandatory source-derived contract. | Execution persistence capacity is pinned in manifest format 3 and checked against the immutable managed store; connection credentials and deployment coordination remain live operational policy. | Mandatory owner, default, binding, validation, consumer, and executable-test evidence are derived from the accepted source. |
 | execution.manifest.pin-retries | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java#Shared` | `manifestPinAttempts` | `RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS` | 3 attempts | `oc-3ccd3f70160ca02c1363`: Binding-name declaration: RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS.<br>`oc-880c750d7e363c0ee44a`: Adapter default declaration: 3 manifest pin lost-race repair attempts.<br>`oc-e3b27dd436766078df1d`: Environment read: RAVENROOT_EXECUTION_MANIFEST_PIN_ATTEMPTS. | A positive whole number; zero, negative, malformed, and overflowing values are refused without echoing the supplied value. | Each PostgreSQL execution-manifest store instance composed by one server replica. | Read from the process environment when the shared execution store is composed. | Typed parsing, PostgreSQL-only selector conflict, environment reference publication, bootstrap propagation, and adapter construction are source-backed. |
@@ -515,6 +515,15 @@ Retained JWKS atoms are reported by their exact source role:
 | jwks-response-payload-ceiling | security-ceiling-or-default | 2 |
 | jwks-http-media-contract | protocol-or-format-invariant | 3 |
 | jwks-payload-overflow-sentinel | derived | 1 |
+
+## Source-proven embed enablement
+
+One strict typed parser owns the default-off setting. Packaged startup validates it
+before registration-store, route, and replica-topology consumers use the same parser.
+
+| Setting | State | Typed owner | Field | Binding | Default | Candidates |
+|---|---|---|---|---|---|---:|
+| embed.enabled | already-centralized; duplicate consumers centralized in #321 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration` | `enabled` | `RAVENROOT_EMBED_ENABLED` | `false` | 2 |
 
 ## Source-proven persistence policy
 
@@ -8280,17 +8289,15 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-d738e23c551e8a4976e5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:170` `switch` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-d717c8bf6cf643f8709d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:171` `switch` | java | already-centralized | operator-configurable | The closed platform external-I/O policy is the source authority. |
 | `oc-bee73cb21d5309341327` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:177` `switch` | java | retained | security-ceiling-or-default | The exact inline-operational-call `24` at ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java#switch is a fixed fail-closed safety ceiling, allowlist member, or bounded-work guard rather than an operator setting; evidence route: existing fixed audit retention preserved. |
-| `oc-9afebfed0a8eeafb99ce` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:415` `if` | java | already-centralized | operator-configurable | The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment. |
-| `oc-78d69934138449db9524` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:705` `PackagedEmbedStartupRefused` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-1ad2e0a507373350dd55` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:712` `ReplicaTopologyRefused` | java | retained | presentation-text | This payload-free replica-topology refusal is diagnostic wording and does not select topology or runtime limits. |
-| `oc-80de18a4a116c2a304fe` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:935` `artifactProvenance` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-ad7d124b048882cce394` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:935` `artifactProvenance` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-e55f29fc2bf0e9de3cb6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:935` `artifactProvenance` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-436a02d622f96b7bfe51` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:939` `switch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-78d69934138449db9524` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:706` `PackagedEmbedStartupRefused` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-1ad2e0a507373350dd55` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:713` `ReplicaTopologyRefused` | java | retained | presentation-text | This payload-free replica-topology refusal is diagnostic wording and does not select topology or runtime limits. |
+| `oc-80de18a4a116c2a304fe` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:936` `artifactProvenance` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-ad7d124b048882cce394` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:936` `artifactProvenance` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-e55f29fc2bf0e9de3cb6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:936` `artifactProvenance` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-436a02d622f96b7bfe51` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java:940` `switch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-27f8ca932843e59d3dd5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaCount.java:27` `ReplicaCount` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-750f88203118eca65791` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaCount.java:27` `ReplicaCount` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-d45036249f28c721d35a` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaCount.java:34` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-e8ffbe9d45ac6a184c88` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java:163` `if` | java | already-centralized | operator-configurable | The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment. |
 | `oc-58ebba64a0b7f7a5a071` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ServedConfiguration.java:12` `ServedConfiguration` | java | retained | protocol-or-format-invariant | Fixed peer protocol/header/schema identity, not a deployment default. |
 | `oc-fa4fe5175f93a7b9b98b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/StaticUiHandler.java:63` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-78cfc9cca6f4f9eda673` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/StaticUiHandler.java:74` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -8555,7 +8562,6 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-17cb2e4a7d6fccc7be94` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/deployment/DeploymentCapConfiguration.java:145` `DeploymentCapConfiguration` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-84667d50e4ebe5627deb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/deployment/DeploymentCapConfiguration.java:145` `DeploymentCapConfiguration` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-dc0fdec2c20ddead6353` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:58` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-b3b8db24d0c0c201aa50` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:73` `disabled` | java | already-centralized | operator-configurable | The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment. |
 | `oc-7d9569e5fd347cb534ab` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:75` `disabled` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-2b7dd0ed2ac44389072e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:77` `disabled` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-df872039f372cfbfc2f8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:78` `disabled` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
@@ -8565,6 +8571,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-a4acb7b723169db8ac20` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:82` `disabled` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-bf98985d3f501e5fee75` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:83` `disabled` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-3b6cb2df5507c3fecdb9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:85` `disabled` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-c92f93b348c318a14a6d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java:93` `enabledFromEnvironment` | java | already-centralized | operator-configurable | The typed enabled field and its one shared parser own the false default and strict Boolean contract; every startup consumer calls that authority. |
 | `oc-89e207d1faf66762eaae` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserHttpHandler.java:31` `EmbedBrowserHttpHandler` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-844aca0012e84d12b680` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserHttpHandler.java:32` `EmbedBrowserHttpHandler` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-b2381ece016fdff8c716` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserHttpHandler.java:33` `EmbedBrowserHttpHandler` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -8595,13 +8602,12 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-8d182b5bb5efb72fda86` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedLaunchTicketAuthority.java:149` `CapacityExceededException` | java | retained | presentation-text | These strings are human-readable diagnostics or refusal detail and do not select runtime behavior. |
 | `oc-7aad794367b99a41353e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:34` `EmbedStartupCheck` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-a86f24bdc9cf85fe61c1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:34` `EmbedStartupCheck` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-962b7f0237877684628e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:57` `evaluate` | java | already-centralized | operator-configurable | The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment. |
-| `oc-d2a8cec06bc7d5911c92` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:61` `if` | java | already-centralized | operator-configurable | The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment. |
-| `oc-4103a09ae97fee9c2424` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:86` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-dd23882f9ddd4014661c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:88` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-41e1286c1b8e7cca68fb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:91` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-a716ba60ca049c0cad11` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:94` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-7b26969ecefc7c7dff47` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:102` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-e67c99abfd1d50dd0a6f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:62` `catch` | java | already-centralized | operator-configurable | The typed enabled field and its one shared parser own the false default and strict Boolean contract; every startup consumer calls that authority. |
+| `oc-4103a09ae97fee9c2424` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:88` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-dd23882f9ddd4014661c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:90` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-41e1286c1b8e7cca68fb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:93` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-a716ba60ca049c0cad11` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:96` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-7b26969ecefc7c7dff47` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java:104` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-7eb9f683787733d557f3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/P256EmbedProofVerifier.java:22` `P256EmbedProofVerifier` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-8dc335f2d4aa1dad30ba` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/P256EmbedProofVerifier.java:23` `P256EmbedProofVerifier` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-6864f108deb8476e1c04` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/P256EmbedProofVerifier.java:37` `P256EmbedProofVerifier` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -9097,10 +9103,10 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-cf4e6c5cbdc26a20c1e0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:95` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
 | `oc-381e5a180527cc1fcd7d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:96` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
 | `oc-78e46e964af43d845252` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:96` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
-| `oc-0d756f56f0730903ebfc` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:98` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
-| `oc-6f8939a818a5be4420bb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:98` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
-| `oc-55cca610c684dbaf2ec1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
-| `oc-7d56e461d90bd9bc6c44` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-0d756f56f0730903ebfc` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:98` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
+| `oc-6f8939a818a5be4420bb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:98` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
+| `oc-55cca610c684dbaf2ec1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
+| `oc-7d56e461d90bd9bc6c44` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
 | `oc-a06b412d7a5006f0e633` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:108` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-293ca98fa5592b54fd8d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:112` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-16176eaa6708c80eb7b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:128` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
@@ -9135,12 +9141,12 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-27c5ddd81d236551c769` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:66` `try` | java | retained | derived | The one extra byte is derived from the response ceiling so the consumer can detect an oversized body without admitting it. |
 | `oc-0a79907d0c0d60fe319b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:120` `TransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
 | `oc-764d4f52cd42f218091c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:121` `TransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
-| `oc-c2cd64f3692a38ad3d34` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:122` `TransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
-| `oc-bf9f875c30ad65973a91` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:123` `TransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-c2cd64f3692a38ad3d34` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:122` `TransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
+| `oc-bf9f875c30ad65973a91` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:123` `TransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
 | `oc-d6e6e3714fd483bc0e45` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:127` `TransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
-| `oc-0797ac4abdb190f878d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:129` `TransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-0797ac4abdb190f878d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:129` `TransportPolicy` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
 | `oc-4ebf73a069117c0f9ea5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:133` `defaults` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
-| `oc-c46f0158107cc34e12fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:133` `defaults` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-c46f0158107cc34e12fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:133` `defaults` | java | converted | operator-configurable | The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback. |
 | `oc-9440df5b11bc92d505ac` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:25` `JwtRequestAuthenticator` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-351943d622744f1a9b37` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:43` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-d77fdac1407a5380555b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:43` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |

@@ -160,7 +160,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
                     self.assertIn("needs.release-classification.outputs.tier == 'full'", block)
 
     def test_operational_configuration_gate_runs_with_complete_history_on_both_tiers(self) -> None:
-        for job in ("fast-tooling-contracts", "full-python-contracts"):
+        for job in ("fast-python-tooling-contracts", "full-python-contracts"):
             with self.subTest(job=job):
                 block = self.jobs[job]
                 self.assertIn("fetch-depth: 0", block)

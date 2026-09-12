@@ -5,7 +5,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
-/** Operator-owned admission limits for program authoring requests. */
+/**
+ * Operator-owned admission limits for program authoring requests.
+ *
+ * @param maxSourceBytes maximum UTF-8 bytes accepted for one program source
+ * @param maxBuildRequestBytes maximum aggregate bytes accepted for one build request
+ * @param maxProgramsPerBuild maximum programs accepted in one build request
+ */
 public record ProgramAuthoringLimits(int maxSourceBytes, int maxBuildRequestBytes, int maxProgramsPerBuild) {
     public static final int HARD_MAX_BUILD_REQUEST_BYTES = 10 * 1024 * 1024;
     public static final int HARD_MAX_PROGRAMS_PER_BUILD = 256;
@@ -25,6 +31,7 @@ public record ProgramAuthoringLimits(int maxSourceBytes, int maxBuildRequestByte
     public static final String MAX_PROGRAMS_PER_BUILD_ENV =
             "RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD";
 
+    /** Validates one complete program-authoring limit set. */
     public ProgramAuthoringLimits {
         if (maxSourceBytes < 1 || maxSourceBytes > ProgramArtifactIdentity.MAX_SOURCE_BYTES) {
             throw new IllegalArgumentException("maxSourceBytes must be between 1 and "
@@ -41,7 +48,13 @@ public record ProgramAuthoringLimits(int maxSourceBytes, int maxBuildRequestByte
         }
     }
 
-    /** Resolves each setting by lexical presence: property, then environment, then default. */
+    /**
+     * Resolves each setting by lexical presence: property, then environment, then default.
+     *
+     * @param properties Java system properties or an equivalent operator-owned property set
+     * @param environment process environment variables
+     * @return validated effective program-authoring limits
+     */
     public static ProgramAuthoringLimits resolve(Properties properties, Map<String, String> environment) {
         Objects.requireNonNull(properties, "properties");
         Objects.requireNonNull(environment, "environment");
@@ -54,6 +67,11 @@ public record ProgramAuthoringLimits(int maxSourceBytes, int maxBuildRequestByte
                         MAX_PROGRAMS_PER_BUILD_ENV, DEFAULTS.maxProgramsPerBuild));
     }
 
+    /**
+     * Rejects source whose UTF-8 representation exceeds {@link #maxSourceBytes()}.
+     *
+     * @param source program source to validate
+     */
     public void requireSource(String source) {
         Objects.requireNonNull(source, "source");
         if (source.getBytes(StandardCharsets.UTF_8).length > maxSourceBytes) {
@@ -61,6 +79,11 @@ public record ProgramAuthoringLimits(int maxSourceBytes, int maxBuildRequestByte
         }
     }
 
+    /**
+     * Rejects a build whose program count exceeds the configured request bounds.
+     *
+     * @param count number of programs in the build request
+     */
     public void requireProgramCount(int count) {
         if (count < 1 || count > maxProgramsPerBuild) {
             throw new IllegalArgumentException("one to " + maxProgramsPerBuild + " programs are required");

@@ -17,7 +17,11 @@ import java.util.function.Consumer;
 
 /** Use cases shared by HTTP, CLI and future UI adapters. */
 public interface RavenrootApplication extends AutoCloseable {
-    /** Effective operator-owned limits used by every program-authoring boundary. */
+    /**
+     * Effective operator-owned limits used by every program-authoring boundary.
+     *
+     * @return the limits shared by program source and build admission
+     */
     default ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
         return ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
     }

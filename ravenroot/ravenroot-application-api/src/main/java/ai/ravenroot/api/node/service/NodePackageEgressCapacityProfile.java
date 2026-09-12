@@ -20,12 +20,30 @@ public final class NodePackageEgressCapacityProfile {
         this.limits = limits;
     }
 
-    /** A service view with no managed external I/O. */
+    /**
+     * A service view with no managed external I/O.
+     *
+     * @return shared deny-only capacity profile
+     */
     public static NodePackageEgressCapacityProfile noManagedEgress() {
         return NONE;
     }
 
-    /** A service view with every quantitative limit explicitly resolved. */
+    /**
+     * A service view with every quantitative limit explicitly resolved.
+     *
+     * @param maximumRequestBytes maximum bytes in one outbound request
+     * @param maximumResponseBytes maximum bytes in one outbound response
+     * @param maximumWebSocketMessageBytes maximum bytes in one WebSocket message
+     * @param maximumWebSocketFragments maximum fragments in one WebSocket message
+     * @param maximumConcurrentOperations maximum active operations for the package
+     * @param maximumConcurrentPerTenant maximum active operations for one tenant
+     * @param maximumQueuedWebSocketSends maximum queued sends for one WebSocket session
+     * @param maximumDeadline maximum duration of one outbound operation
+     * @param maximumWebSocketLifetime maximum lifetime of one WebSocket session
+     * @param maximumWebSocketIdle maximum idle duration of one WebSocket session
+     * @return validated finite capacity profile using the historical decompression ceiling
+     */
     public static NodePackageEgressCapacityProfile bounded(
             long maximumRequestBytes, long maximumResponseBytes, long maximumWebSocketMessageBytes,
             int maximumWebSocketFragments, int maximumConcurrentOperations,
@@ -41,7 +59,22 @@ public final class NodePackageEgressCapacityProfile {
                 maximumWebSocketIdle);
     }
 
-    /** A service view with every quantitative limit, including decompression, explicitly resolved. */
+    /**
+     * A service view with every quantitative limit, including decompression, explicitly resolved.
+     *
+     * @param maximumRequestBytes maximum bytes in one outbound request
+     * @param maximumResponseBytes maximum bytes in one outbound response
+     * @param maximumWebSocketMessageBytes maximum bytes in one WebSocket message
+     * @param maximumWebSocketFragments maximum fragments in one WebSocket message
+     * @param maximumConcurrentOperations maximum active operations for the package
+     * @param maximumConcurrentPerTenant maximum active operations for one tenant
+     * @param maximumQueuedWebSocketSends maximum queued sends for one WebSocket session
+     * @param maximumDecompressionRatio maximum decoded-to-encoded response ratio
+     * @param maximumDeadline maximum duration of one outbound operation
+     * @param maximumWebSocketLifetime maximum lifetime of one WebSocket session
+     * @param maximumWebSocketIdle maximum idle duration of one WebSocket session
+     * @return validated finite capacity profile
+     */
     public static NodePackageEgressCapacityProfile bounded(
             long maximumRequestBytes, long maximumResponseBytes, long maximumWebSocketMessageBytes,
             int maximumWebSocketFragments, int maximumConcurrentOperations,
@@ -57,7 +90,21 @@ public final class NodePackageEgressCapacityProfile {
                 maximumWebSocketIdle));
     }
 
-    /** Historical v2/v3 capacity whose decompression authority was not represented. */
+    /**
+     * Historical v2/v3 capacity whose decompression authority was not represented.
+     *
+     * @param maximumRequestBytes maximum bytes in one outbound request
+     * @param maximumResponseBytes maximum bytes in one outbound response
+     * @param maximumWebSocketMessageBytes maximum bytes in one WebSocket message
+     * @param maximumWebSocketFragments maximum fragments in one WebSocket message
+     * @param maximumConcurrentOperations maximum active operations for the package
+     * @param maximumConcurrentPerTenant maximum active operations for one tenant
+     * @param maximumQueuedWebSocketSends maximum queued sends for one WebSocket session
+     * @param maximumDeadline maximum duration of one outbound operation
+     * @param maximumWebSocketLifetime maximum lifetime of one WebSocket session
+     * @param maximumWebSocketIdle maximum idle duration of one WebSocket session
+     * @return validated historical capacity profile without decompression authority
+     */
     public static NodePackageEgressCapacityProfile boundedWithoutDecompressionRatio(
             long maximumRequestBytes, long maximumResponseBytes, long maximumWebSocketMessageBytes,
             int maximumWebSocketFragments, int maximumConcurrentOperations,
@@ -71,7 +118,11 @@ public final class NodePackageEgressCapacityProfile {
                 maximumWebSocketLifetime, maximumWebSocketIdle));
     }
 
-    /** Empty means an explicitly deny-only service view. */
+    /**
+     * Empty means an explicitly deny-only service view.
+     *
+     * @return finite capacity limits, or empty for a deny-only service view
+     */
     public Optional<Limits> limits() {
         return Optional.ofNullable(limits);
     }
@@ -85,14 +136,41 @@ public final class NodePackageEgressCapacityProfile {
         return Objects.hashCode(limits);
     }
 
-    /** Finite managed external-I/O capacities. */
+    /**
+     * Finite managed external-I/O capacities.
+     *
+     * @param maximumRequestBytes maximum bytes in one outbound request
+     * @param maximumResponseBytes maximum bytes in one outbound response
+     * @param maximumWebSocketMessageBytes maximum bytes in one WebSocket message
+     * @param maximumWebSocketFragments maximum fragments in one WebSocket message
+     * @param maximumConcurrentOperations maximum active operations for the package
+     * @param maximumConcurrentPerTenant maximum active operations for one tenant
+     * @param maximumQueuedWebSocketSends maximum queued sends for one WebSocket session
+     * @param maximumDecompressionRatio maximum decoded-to-encoded response ratio, when represented
+     * @param maximumDeadline maximum duration of one outbound operation
+     * @param maximumWebSocketLifetime maximum lifetime of one WebSocket session
+     * @param maximumWebSocketIdle maximum idle duration of one WebSocket session
+     */
     public record Limits(long maximumRequestBytes, long maximumResponseBytes,
                          long maximumWebSocketMessageBytes, int maximumWebSocketFragments,
                          int maximumConcurrentOperations, int maximumConcurrentPerTenant,
                          int maximumQueuedWebSocketSends, OptionalInt maximumDecompressionRatio,
                          Duration maximumDeadline,
                          Duration maximumWebSocketLifetime, Duration maximumWebSocketIdle) {
-        /** Source-compatible v2/v3 constructor with the historical 1,000x absolute ratio ceiling. */
+        /**
+         * Source-compatible v2/v3 constructor with the historical 1,000x absolute ratio ceiling.
+         *
+         * @param maximumRequestBytes maximum bytes in one outbound request
+         * @param maximumResponseBytes maximum bytes in one outbound response
+         * @param maximumWebSocketMessageBytes maximum bytes in one WebSocket message
+         * @param maximumWebSocketFragments maximum fragments in one WebSocket message
+         * @param maximumConcurrentOperations maximum active operations for the package
+         * @param maximumConcurrentPerTenant maximum active operations for one tenant
+         * @param maximumQueuedWebSocketSends maximum queued sends for one WebSocket session
+         * @param maximumDeadline maximum duration of one outbound operation
+         * @param maximumWebSocketLifetime maximum lifetime of one WebSocket session
+         * @param maximumWebSocketIdle maximum idle duration of one WebSocket session
+         */
         public Limits(long maximumRequestBytes, long maximumResponseBytes,
                       long maximumWebSocketMessageBytes, int maximumWebSocketFragments,
                       int maximumConcurrentOperations, int maximumConcurrentPerTenant,
@@ -104,6 +182,7 @@ public final class NodePackageEgressCapacityProfile {
                     maximumDeadline, maximumWebSocketLifetime, maximumWebSocketIdle);
         }
 
+        /** Validates one finite managed external-I/O capacity. */
         public Limits {
             bytes(maximumRequestBytes, "maximumRequestBytes");
             bytes(maximumResponseBytes, "maximumResponseBytes");

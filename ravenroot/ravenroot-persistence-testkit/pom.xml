@@ -6,7 +6,7 @@
     <parent>
         <groupId>ai.ravenroot</groupId>
         <artifactId>ravenroot-parent</artifactId>
-        <version>0.1.0-alpha.1</version>
+        <version>0.2.0-alpha.1</version>
     </parent>
     <artifactId>ravenroot-persistence-testkit</artifactId>
     <name>Ravenroot Execution Store TCK</name>

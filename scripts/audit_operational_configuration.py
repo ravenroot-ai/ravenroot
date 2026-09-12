@@ -68,11 +68,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"
+    "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5"
+    "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -5950,7 +5950,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"),
+         "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7580,7 +7580,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029',
+  '1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -12155,7 +12155,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
   'RavenrootServerMain',
   'run',
-  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029'),
+  '1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',

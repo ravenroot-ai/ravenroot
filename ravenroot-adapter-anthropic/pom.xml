@@ -42,7 +42,7 @@
 
     <groupId>ai.ravenroot.adapters</groupId>
     <artifactId>ravenroot-adapter-anthropic</artifactId>
-    <version>0.2.0-alpha.1</version>
+    <version>0.1.0-alpha.1</version>
     <name>Ravenroot Anthropic Model Adapter</name>
     <description>
         Optional ModelProvider adapter for the Anthropic Messages API, on the operator-key credential
@@ -53,7 +53,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <ravenroot.version>0.2.0-alpha.1</ravenroot.version>
+        <ravenroot.version>0.1.0-alpha.1</ravenroot.version>
         <junit.version>6.1.2</junit.version>
     </properties>
 

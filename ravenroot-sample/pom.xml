@@ -6,7 +6,7 @@
 
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-sample</artifactId>
-    <version>0.2.0-alpha.1</version>
+    <version>0.1.0-alpha.1</version>
     <name>Ravenroot Embedded Sample</name>
 
     <properties>

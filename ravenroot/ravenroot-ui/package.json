@@ -1,6 +1,6 @@
 {
   "name": "@ravenroot/ui",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.1",
   "private": true,
   "type": "module",
   "description": "Framework-independent GraphML and Graphify graph viewer for Ravenroot.",

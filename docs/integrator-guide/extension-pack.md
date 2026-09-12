@@ -8,7 +8,7 @@ one ordinary dependency resolves the complete reviewed set at one Ravenroot vers
 
 ```xml
 <properties>
-  <ravenroot.version>0.1.0-alpha.1</ravenroot.version>
+  <ravenroot.version>0.2.0-alpha.1</ravenroot.version>
 </properties>
 
 <dependencies>
@@ -26,7 +26,7 @@ declared version:
 ```sh
 mvn -B --no-transfer-progress dependency:tree \
   -Dincludes=ai.ravenroot:* \
-  -Dravenroot.version=0.1.0-alpha.1
+  -Dravenroot.version=0.2.0-alpha.1
 ```
 
 The pack contains no replacement versions, ranges, snapshots, classifiers, or optional edges. Every

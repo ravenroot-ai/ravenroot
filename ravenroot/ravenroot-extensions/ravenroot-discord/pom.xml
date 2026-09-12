@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
-  <parent><groupId>ai.ravenroot</groupId><artifactId>ravenroot-parent</artifactId><version>0.1.0-alpha.1</version><relativePath>../../pom.xml</relativePath></parent>
+  <parent><groupId>ai.ravenroot</groupId><artifactId>ravenroot-parent</artifactId><version>0.2.0-alpha.1</version><relativePath>../../pom.xml</relativePath></parent>
   <artifactId>ravenroot-discord</artifactId>
   <name>Ravenroot Discord messaging extension</name>
   <dependencies>

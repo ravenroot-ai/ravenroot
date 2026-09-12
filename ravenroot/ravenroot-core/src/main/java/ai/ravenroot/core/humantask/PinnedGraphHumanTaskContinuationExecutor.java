@@ -299,7 +299,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             }
             AutoCloseable binding;
             try {
-                binding = bindLive(task.key(), recorder, runner::continuationBudget);
+                binding = bindLive(task.key(), recorder, runner);
             } catch (RuntimeException failure) {
                 failure = cleanup(failure, runner::close);
                 failure = cleanup(failure, recorder::detachForAcknowledgement);
@@ -311,7 +311,8 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                 result = runner.executeAfterHumanTask(task.request().requester(),
                         task.key().processInstanceId(), claim.traversalId(), task.request().nodeId(),
                         task.request().graphVersionPin().reference(), recorder, result(task, handler),
-                        checkpoint.budget(), task.request().executionLimits().responsePayload());
+                        checkpoint.budget(), task.request().executionLimits().responsePayload(),
+                        checkpoint.joins(), task.request().invocationId());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, () -> close(binding));
                 setupFailure = cleanup(setupFailure, runner::close);
@@ -435,9 +436,10 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     }
 
     private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder,
-                                   java.util.function.Function<ai.ravenroot.api.execution.NodeMessage,
-                                           ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot> budget) {
-        AutoCloseable taskBinding = tasks.bindLive(key, recorder, budget);
+                                   GraphRunner runner) {
+        var budget = (java.util.function.Function<ai.ravenroot.api.execution.NodeMessage,
+                ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot>) runner::continuationBudget;
+        AutoCloseable taskBinding = tasks.bindLive(key, recorder, runner);
         AutoCloseable approvalBinding = null;
         AutoCloseable budgetBinding = null;
         try {

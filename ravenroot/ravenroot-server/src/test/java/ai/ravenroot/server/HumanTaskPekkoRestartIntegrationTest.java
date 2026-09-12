@@ -5,6 +5,7 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.CanonicalGraphMl;
@@ -81,6 +82,7 @@ class HumanTaskPekkoRestartIntegrationTest {
               <graph id="pekko-human-restart" edgedefault="directed">
                 <node id="error"><data key="kind">ERROR</data></node>
                 <node id="start"><data key="kind">START</data></node>
+                <node id="log"><data key="kind">BEHAVIOR</data><data key="behavior">pekko-log</data></node>
                 <node id="review">
                   <data key="kind">BEHAVIOR</data><data key="behavior">human-task</data>
                   <data key="title">Approve release</data>
@@ -90,6 +92,7 @@ class HumanTaskPekkoRestartIntegrationTest {
                 </node>
                 <node id="end"><data key="kind">END</data></node>
                 <edge id="start-review" source="start" target="review"/>
+                <edge id="start-log" source="start" target="log"/>
                 <edge id="review-end" source="review" target="end">
                   <data key="edge-outcome">resolved</data>
                 </edge>
@@ -119,7 +122,7 @@ class HumanTaskPekkoRestartIntegrationTest {
                          standard(tasks), new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                          GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "pekko-before", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
+                 var binding = tasks.bindLive(key, recorder, runner)) {
                 ExecutionException suspension = assertThrows(ExecutionException.class,
                         () -> runner.execute(requesterIdentity(), key.processInstanceId(), traversalId,
                                 null, pin, null, null, recorder).toCompletableFuture()
@@ -177,7 +180,9 @@ class HumanTaskPekkoRestartIntegrationTest {
     private static BehaviorRegistry standard(HumanTaskService tasks) {
         return BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults(),
                 ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
-                ai.ravenroot.api.publication.PublicationAuditSink.noop(), tasks);
+                ai.ravenroot.api.publication.PublicationAuditSink.noop(), tasks)
+                .register("pekko-log", message -> java.util.concurrent.CompletableFuture.completedFuture(
+                        NodeResult.continueWith(message.payload())));
     }
 
     private static GraphVersionSnapshot snapshot(GraphDefinitionIdentity identity, GraphManager manager) {

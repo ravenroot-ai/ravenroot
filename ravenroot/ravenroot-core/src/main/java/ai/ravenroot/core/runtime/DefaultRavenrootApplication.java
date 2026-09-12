@@ -1473,7 +1473,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
+                            security.tenantId(), processInstanceId), recorder, runner);
             execution = java.util.Objects.requireNonNull(
                     runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
                             null, null, recorder),

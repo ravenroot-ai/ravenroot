@@ -6840,13 +6840,17 @@ class EmbedEnabledAuditTest(unittest.TestCase):
             "evidenceRecords": {
                 candidate.evidence_digest: candidate.evidence for candidate in self.candidates
             },
+            "embedEnabledAuthorities": {
+                audit.EMBED_ENABLED_AUTHORITY_ID: copy.deepcopy(self.authority),
+            },
         }
 
     def assert_direct_and_global_embed_error(self, document, candidates=None) -> None:
         current_candidates = self.candidates if candidates is None else candidates
         current = {candidate.id: candidate for candidate in current_candidates}
         entries = {entry["id"]: entry for entry in document["entries"]}
-        direct = audit.embed_enabled_authority_errors(self.root, entries, current)
+        direct = audit.embed_enabled_authority_errors(
+            self.root, document.get("embedEnabledAuthorities"), entries, current)
         self.assertTrue(direct)
         global_errors = audit.inventory_errors(self.root, document, tuple(current_candidates))
         self.assertTrue(any("embed enabled" in error for error in global_errors), global_errors)
@@ -6859,11 +6863,16 @@ class EmbedEnabledAuditTest(unittest.TestCase):
         self.assertEqual(["oc-c92f93b348c318a14a6d"],
                          self.authority["contract"]["defaultEvidence"])
         self.assertEqual([], audit.embed_enabled_authority_errors(
-            self.root, self.entries, self.discovered))
+            self.root, {audit.EMBED_ENABLED_AUTHORITY_ID: self.authority},
+            self.entries, self.discovered))
         global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
         self.assertFalse([error for error in global_errors if "embed enabled" in error], global_errors)
 
     def test_embed_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
+        without_authority = self.document()
+        del without_authority["embedEnabledAuthorities"]
+        self.assert_direct_and_global_embed_error(without_authority)
+
         without_markers = self.document()
         for row in without_markers["entries"]:
             row.pop("embedEnabledAuthority", None)
@@ -6927,7 +6936,8 @@ class EmbedEnabledAuditTest(unittest.TestCase):
                             self.root, refreshed))
                         document = self.document()
                         direct = audit.embed_enabled_authority_errors(
-                            self.root, self.entries, refreshed)
+                            self.root, document.get("embedEnabledAuthorities"),
+                            self.entries, refreshed)
                         self.assertIn(
                             "embed enabled source pipeline is incomplete, misordered, or unsupported",
                             direct)

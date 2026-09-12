@@ -3303,6 +3303,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "embedEnabledAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 5 and path[0] == "embedEnabledAuthorities" \
+            and path[2] == "contract" \
+            and path[3] in {"candidateIds", "defaultEvidence"}:
+        return path[4].isdigit()
     if len(path) == 4 and path[0] == "interactionWebSocketAuthorities" and path[2] == "candidateIds":
         return path[3].isdigit()
     if len(path) == 6 and path[0] == "interactionWebSocketAuthorities" \
@@ -3498,6 +3505,17 @@ def remap_declared_candidate_references(document: dict[str, object],
                         if isinstance(row, dict):
                             remap_list(row, "candidateIds")
                             remap_list(row, "defaultCandidateIds")
+
+    embed_authorities = document.get("embedEnabledAuthorities")
+    if isinstance(embed_authorities, dict):
+        for authority in embed_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contract = authority.get("contract")
+            if isinstance(contract, dict):
+                remap_list(contract, "candidateIds")
+                remap_list(contract, "defaultEvidence")
 
     interaction_authorities = document.get("interactionWebSocketAuthorities")
     if isinstance(interaction_authorities, dict):
@@ -3757,6 +3775,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             return None, ["cannot derive the closed JWKS retrieval policy authority from current source"]
         refreshed["jwkPolicyAuthorities"] = {
             JWK_POLICY_AUTHORITY_ID: jwk_authority,
+        }
+    if embed_enabled_source_present(root):
+        embed_authority = embed_enabled_authority_from_source(root, current)
+        if embed_authority is None:
+            return None, ["cannot derive the centralized embed enablement authority from current source"]
+        refreshed["embedEnabledAuthorities"] = {
+            EMBED_ENABLED_AUTHORITY_ID: embed_authority,
         }
     if interaction_websocket_source_present(root):
         interaction_authority = interaction_websocket_authority_from_source(root, current)
@@ -11588,11 +11613,12 @@ def embed_enabled_authority_from_source(
 
 
 def embed_enabled_authority_errors(
-        root: Path, entries: dict[str, dict[str, object]],
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
         discovered: dict[str, Candidate]) -> list[str]:
     if not embed_enabled_source_present(root):
-        return ([] if not any(entry.get("embedEnabledAuthority") is not None
-                              for entry in entries.values())
+        return ([] if authorities in (None, {})
+                and not any(entry.get("embedEnabledAuthority") is not None
+                            for entry in entries.values())
                 else ["embed enabled authority exists without its source pipeline"])
     expected = embed_enabled_authority_from_source(root, discovered)
     if expected is None:
@@ -11602,6 +11628,8 @@ def embed_enabled_authority_errors(
     marked = {identifier for identifier, entry in entries.items()
               if entry.get("embedEnabledAuthority") is not None}
     errors: list[str] = []
+    if authorities != {EMBED_ENABLED_AUTHORITY_ID: expected}:
+        errors.append("embed enabled setting requires the exact mandatory source-derived authority")
     if marked != expected_ids:
         errors.append("embed enabled authority candidate partition is missing, duplicated, or foreign")
     expected_fields = {key: value for key, value in contract.items() if key != "candidateIds"}
@@ -15381,7 +15409,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         root, document.get("jwkPolicyAuthorities"), entries, discovered,
     ))
     errors.extend(embed_enabled_authority_errors(
-        root, entries, discovered,
+        root, document.get("embedEnabledAuthorities"), entries, discovered,
     ))
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
@@ -15702,6 +15730,24 @@ def render_report(document: dict[str, object], root: Path = ROOT) -> str:
         lines.append(f"| {partition.get('semanticPartition', '')} | "
                      f"{partition.get('classification', '')} | "
                      f"{len(partition.get('candidateIds', []))} |")
+    embed_authorities = document.get("embedEnabledAuthorities", {})
+    embed_authority = (embed_authorities.get(EMBED_ENABLED_AUTHORITY_ID)
+                       if isinstance(embed_authorities, dict) else None)
+    embed_contract = (embed_authority.get("contract")
+                      if isinstance(embed_authority, dict) else None)
+    lines.extend(("", "## Source-proven embed enablement", "",
+                  "One strict typed parser owns the default-off setting. Packaged startup validates it",
+                  "before registration-store, route, and replica-topology consumers use the same parser.", "",
+                  "| Setting | State | Typed owner | Field | Binding | Default | Candidates |",
+                  "|---|---|---|---|---|---|---:|"))
+    if isinstance(embed_contract, dict):
+        bindings = ", ".join(f"`{item}`" for item in embed_contract.get("bindings", []))
+        lines.append(f"| {embed_contract.get('setting', '')} | {embed_contract.get('status', '')} | "
+                     f"`{embed_contract.get('owner', '')}` | `{embed_contract.get('field', '')}` | "
+                     f"{bindings} | `{embed_contract.get('default', '')}` | "
+                     f"{len(embed_contract.get('candidateIds', []))} |")
+    else:
+        lines.append("| _No source-proven embed enablement policy_ |  |  |  |  |  |  |")
     persistence_authorities = document.get("persistencePolicyAuthorities", {})
     persistence_authority = (persistence_authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID)
                              if isinstance(persistence_authorities, dict) else None)

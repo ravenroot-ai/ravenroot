@@ -9,55 +9,898 @@
   "candidateSetDigest": "b3d7d89dbd2476d5278d26139d9afc20459cf855d5ea6beec6299f4016d00690",
   "groups": [
     {
-      "id": "agent-maximum-input-tokens-per-turn-setting",
-      "title": "Agent Maximum Input Tokens Per Turn Setting",
+      "id": "agent-identity-and-scope-token-grammars",
+      "title": "Agent Identity And Scope Token Grammars",
       "owner": "#321",
       "metadata": {
+        "status": "retained",
+        "classification": "protocol-or-format-invariant",
+        "rationale": "These regular expressions define the accepted identity and scope token grammar.",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1"
+      },
+      "semanticDecision": "These regular expressions define the accepted identity and scope token grammar.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The closed source-derived family assigns every configuration-class candidate to one exact setting or retained semantic partition."
+        }
+      ],
+      "candidateCount": 2,
+      "candidateSetDigest": "c722513372ab2e231666c87b656b01e56c59465084bab7a376435c07f2429d2c",
+      "candidateIds": [
+        "oc-d71318608e2888544703",
+        "oc-e1d66b0de1616b9f6244"
+      ]
+    },
+    {
+      "id": "agent-parser-cardinality-ceilings",
+      "title": "Agent Parser Cardinality Ceilings",
+      "owner": "#321",
+      "metadata": {
+        "status": "retained",
+        "classification": "security-ceiling-or-default",
+        "rationale": "These fixed parser bounds limit environment token length and distinct scope cardinality.",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1"
+      },
+      "semanticDecision": "These fixed parser bounds limit environment token length and distinct scope cardinality.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The closed source-derived family assigns every configuration-class candidate to one exact setting or retained semantic partition."
+        }
+      ],
+      "candidateCount": 2,
+      "candidateSetDigest": "df8f9dda4fa2af424d2fe588367c26140fc867b330bb12d099fee27ca36d4d29",
+      "candidateIds": [
+        "oc-b99e8c5a730d48fa6bdb",
+        "oc-cd6afcb87c61066decf5"
+      ]
+    },
+    {
+      "id": "agent-scope-limit-diagnostic",
+      "title": "Agent Scope Limit Diagnostic",
+      "owner": "#321",
+      "metadata": {
+        "status": "retained",
+        "classification": "presentation-text",
+        "rationale": "This fixed cause-free diagnostic is operator-facing failure text, not an operating value.",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1"
+      },
+      "semanticDecision": "This fixed cause-free diagnostic is operator-facing failure text, not an operating value.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The closed source-derived family assigns every configuration-class candidate to one exact setting or retained semantic partition."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "1b4c4866a65e127d3ca3f2aea81f854f4d58352d626906ee2b4392ae0159729d",
+      "candidateIds": [
+        "oc-b60333a2740b5f904a72"
+      ]
+    },
+    {
+      "id": "agent-setting-authority-scopes",
+      "title": "Agent setting: agent.authority-scopes",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.authority-scopes",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "authorityScopes",
+        "bindings": [
+          "RAVENROOT_AGENT_AUTHORITY_SCOPES"
+        ],
+        "validation": "Absence uses the shipped set; explicit blank selects an empty set; comma-separated stripped tokens are syntax-checked, deduplicated, and bounded.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_AUTHORITY_SCOPES is an operator-controlled deployment binding; its shipped fallback occupies the exact typed authorityScopes slot.",
         "status": "already-centralized",
         "classification": "operator-configurable",
         "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "runtime:delegate",
+        "defaultEvidence": []
+      },
+      "semanticDecision": "The exact tokens(environment, AUTHORITY_SCOPES, Set.of(\"runtime:delegate\")) expression binds RAVENROOT_AGENT_AUTHORITY_SCOPES and fallback Set.of(\"runtime:delegate\") to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#authorityScopes; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates authorityScopes."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 2,
+      "candidateSetDigest": "3669086796e619f2de0860ab06ee3a01c8e1bda5891efb1cca49e7ec8bb010a2",
+      "candidateIds": [
+        "oc-39ca1fa0333e82747d7a",
+        "oc-c9bbee667ba2ff98f893"
+      ]
+    },
+    {
+      "id": "agent-setting-cost-currency",
+      "title": "Agent setting: agent.cost-currency",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.cost-currency",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "currency",
+        "bindings": [
+          "RAVENROOT_AGENT_COST_CURRENCY"
+        ],
+        "validation": "Absent or blank uses USD; otherwise the stripped value is uppercased with Locale.ROOT and must be three letters.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_COST_CURRENCY is an operator-controlled deployment binding; its shipped fallback occupies the exact typed currency slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "USD",
+        "defaultEvidence": []
+      },
+      "semanticDecision": "The exact currency(environment, \"RAVENROOT_AGENT_COST_CURRENCY\", \"USD\") expression binds RAVENROOT_AGENT_COST_CURRENCY and fallback \"USD\" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#currency; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates currency."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "5c147a0911f3df30f7ee21ac1f87ae8cf3f68be53112b8934e61485c0b524ed1",
+      "candidateIds": [
+        "oc-2d8910ad5748d00ea7a7"
+      ]
+    },
+    {
+      "id": "agent-setting-data-scopes",
+      "title": "Agent setting: agent.data-scopes",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.data-scopes",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "dataScopes",
+        "bindings": [
+          "RAVENROOT_AGENT_DATA_SCOPES"
+        ],
+        "validation": "Absence uses the shipped set; explicit blank selects an empty set; comma-separated stripped tokens are syntax-checked, deduplicated, and bounded.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_DATA_SCOPES is an operator-controlled deployment binding; its shipped fallback occupies the exact typed dataScopes slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "empty set",
+        "defaultEvidence": []
+      },
+      "semanticDecision": "The exact tokens(environment, \"RAVENROOT_AGENT_DATA_SCOPES\", Set.of()) expression binds RAVENROOT_AGENT_DATA_SCOPES and fallback Set.of() to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#dataScopes; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates dataScopes."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "a522f265cf319d90d7aa50d778f82f0f466f9b9501441a6c9ae8e4d63374c63f",
+      "candidateIds": [
+        "oc-e865215bbc38d0f2fb47"
+      ]
+    },
+    {
+      "id": "agent-setting-input-token-rate-micros",
+      "title": "Agent setting: agent.input-token-rate-micros",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.input-token-rate-micros",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "inputTokenRateMicros",
+        "bindings": [
+          "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long at least zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed inputTokenRateMicros slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "10",
+        "defaultEvidence": [
+          "oc-eb2419bc075e44ae7342"
+        ]
+      },
+      "semanticDecision": "The exact nonNegative(environment, \"RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS\", 10) expression binds RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS and fallback 10 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#inputTokenRateMicros; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates inputTokenRateMicros."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "f91fa53b2a1d1b0be720490f76b40572ddda354b7d93f744d6d97f3bcab10b1d",
+      "candidateIds": [
+        "oc-1f3c6cc0472e4cb420ba",
+        "oc-ae7957f7cd2952eeb52d",
+        "oc-eb2419bc075e44ae7342"
+      ]
+    },
+    {
+      "id": "agent-setting-max-cost-micros",
+      "title": "Agent setting: agent.max-cost-micros",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-cost-micros",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "costMicros",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_COST_MICROS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_COST_MICROS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed costMicros slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "100000000",
+        "defaultEvidence": [
+          "oc-53863f58cf4171010342"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_COST_MICROS\", 100_000_000) expression binds RAVENROOT_AGENT_MAX_COST_MICROS and fallback 100_000_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#costMicros; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates costMicros."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "95bc6ff8ece9492662e846c228bd094e292be86d5b460f94c18cb5f627362375",
+      "candidateIds": [
+        "oc-5193bbd6be4fb596bd15",
+        "oc-53863f58cf4171010342",
+        "oc-e14c1510ab0443e1036a"
+      ]
+    },
+    {
+      "id": "agent-setting-max-delegation-depth",
+      "title": "Agent setting: agent.max-delegation-depth",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-delegation-depth",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "delegationDepth",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH is an operator-controlled deployment binding; its shipped fallback occupies the exact typed delegationDepth slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "8",
+        "defaultEvidence": [
+          "oc-8ccc9dda38e4332bc20e"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_DELEGATION_DEPTH\", 8) expression binds RAVENROOT_AGENT_MAX_DELEGATION_DEPTH and fallback 8 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#delegationDepth; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates delegationDepth."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "954fbc678a26ce7a35700bb3c57c201e93bae49a153e60b1efa956a1869ada3f",
+      "candidateIds": [
+        "oc-4a4ff1ef7dc47fe3b010",
+        "oc-8ccc9dda38e4332bc20e",
+        "oc-e667f3ee3e62db6d6008"
+      ]
+    },
+    {
+      "id": "agent-setting-max-elapsed-millis",
+      "title": "Agent setting: agent.max-elapsed-millis",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-elapsed-millis",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "elapsedMillis",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed elapsedMillis slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "3600000",
+        "defaultEvidence": [
+          "oc-78ea7d1dc9782b7b3b83"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_ELAPSED_MILLIS\", 3_600_000) expression binds RAVENROOT_AGENT_MAX_ELAPSED_MILLIS and fallback 3_600_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#elapsedMillis; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates elapsedMillis."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "94fd4f93b6111c9078dc6d7333585748a36f72bc7b43a32c2634bc6daee735e9",
+      "candidateIds": [
+        "oc-727ea7eb9afd800c022b",
+        "oc-78ea7d1dc9782b7b3b83",
+        "oc-e1a001a35b01e7f002e0"
+      ]
+    },
+    {
+      "id": "agent-setting-max-input-tokens",
+      "title": "Agent setting: agent.max-input-tokens",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-input-tokens",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "inputTokens",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_INPUT_TOKENS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_INPUT_TOKENS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed inputTokens slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "20000000",
+        "defaultEvidence": [
+          "oc-60e38e225112f658c078"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_INPUT_TOKENS\", 20_000_000) expression binds RAVENROOT_AGENT_MAX_INPUT_TOKENS and fallback 20_000_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#inputTokens; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates inputTokens."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "16ccf74c364f3efb67c24aef88c48bde641be9698b3d9c4d4b71696a1e0dc040",
+      "candidateIds": [
+        "oc-60e38e225112f658c078",
+        "oc-d5b8c6e33ff76e800da2",
+        "oc-e609f62b0bcd4c181434"
+      ]
+    },
+    {
+      "id": "agent-setting-max-output-tokens",
+      "title": "Agent setting: agent.max-output-tokens",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-output-tokens",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "outputTokens",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed outputTokens slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "2000000",
+        "defaultEvidence": [
+          "oc-e0ee45a1bb0f311c83fe"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_OUTPUT_TOKENS\", 2_000_000) expression binds RAVENROOT_AGENT_MAX_OUTPUT_TOKENS and fallback 2_000_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#outputTokens; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates outputTokens."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "dc558f18bcc6eace8c49348290fb6c6731dc081eda8c0efba0d248966b7c6956",
+      "candidateIds": [
+        "oc-bb5eadcd0632cc164d8a",
+        "oc-e0ee45a1bb0f311c83fe",
+        "oc-fd3b89e140cc0c6a5b0d"
+      ]
+    },
+    {
+      "id": "agent-setting-max-team-active",
+      "title": "Agent setting: agent.max-team-active",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-team-active",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "teamActive",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_TEAM_ACTIVE"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_TEAM_ACTIVE is an operator-controlled deployment binding; its shipped fallback occupies the exact typed teamActive slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "16",
+        "defaultEvidence": [
+          "oc-8d6c003df6bea95567fd"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_TEAM_ACTIVE\", 16) expression binds RAVENROOT_AGENT_MAX_TEAM_ACTIVE and fallback 16 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#teamActive; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates teamActive."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "8e6b27844fa16683b119e8c623bbcaa2e2af2cecac20a531bba666cb87417f82",
+      "candidateIds": [
+        "oc-5c23c9d5c46e11dd89b3",
+        "oc-8d6c003df6bea95567fd",
+        "oc-b6151a5e37f092a298da"
+      ]
+    },
+    {
+      "id": "agent-setting-max-team-cumulative",
+      "title": "Agent setting: agent.max-team-cumulative",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-team-cumulative",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "teamCumulative",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE is an operator-controlled deployment binding; its shipped fallback occupies the exact typed teamCumulative slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "64",
+        "defaultEvidence": [
+          "oc-0d35f8b9dba82cb730b8"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE\", 64) expression binds RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE and fallback 64 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#teamCumulative; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates teamCumulative."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "c226651ff90294e2b48598d49b5142270c57b0d4f459da37e45705b52d4f61d1",
+      "candidateIds": [
+        "oc-0d35f8b9dba82cb730b8",
+        "oc-3cc7469cdc39493aca8b",
+        "oc-8975a8267df23b8f7e6d"
+      ]
+    },
+    {
+      "id": "agent-setting-max-tool-calls",
+      "title": "Agent setting: agent.max-tool-calls",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-tool-calls",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "toolCalls",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_TOOL_CALLS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_TOOL_CALLS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed toolCalls slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "4096",
+        "defaultEvidence": [
+          "oc-e0e18ae7cd557023d822"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_TOOL_CALLS\", 4_096) expression binds RAVENROOT_AGENT_MAX_TOOL_CALLS and fallback 4_096 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#toolCalls; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates toolCalls."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "ad9207781c05f84c274d0e4a4bb8fc924ddba20d8870c36fa18945370105f4f9",
+      "candidateIds": [
+        "oc-2e864bf37677e2dc35c3",
+        "oc-750bfe950df4dda1da14",
+        "oc-e0e18ae7cd557023d822"
+      ]
+    },
+    {
+      "id": "agent-setting-max-turns",
+      "title": "Agent setting: agent.max-turns",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.max-turns",
+        "owner": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector",
+        "field": "turns",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_TURNS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_TURNS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed turns slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "1024",
+        "defaultEvidence": [
+          "oc-f97e0748795084b193ca"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_TURNS\", 1_024) expression binds RAVENROOT_AGENT_MAX_TURNS and fallback 1_024 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#turns; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java",
+          "digest": "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697",
+          "assertion": "The typed owner declares and validates turns."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "3c38e06b99badf84bcd9b6fa0f0de623adc1b48017bb836212dcbfa123bb22fb",
+      "candidateIds": [
+        "oc-13f6dc216f92cd29c16d",
+        "oc-b1a332041564ef37ae6b",
+        "oc-f97e0748795084b193ca"
+      ]
+    },
+    {
+      "id": "agent-setting-maximum-input-tokens-per-turn",
+      "title": "Agent setting: agent.maximum-input-tokens-per-turn",
+      "owner": "#321",
+      "metadata": {
         "setting": "agent.maximum-input-tokens-per-turn",
         "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
         "field": "maximumInputTokensPerTurn",
         "bindings": [
           "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"
         ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN is an operator-controlled deployment binding; its shipped fallback occupies the exact typed maximumInputTokensPerTurn slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
         "default": "128000",
         "defaultEvidence": [
           "oc-473ffef3055ed509d856"
-        ],
-        "validation": "Absent or blank uses 128000; otherwise a stripped base-10 long is required, and zero, negative, malformed, and overflowing values are rejected with setting-only diagnostics.",
-        "scope": "Packaged server agent authority budget.",
-        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
-        "coverage": "Exact startup composition, environment lookup and fallback atom, positive parser helper chain, typed record constructor slot and validation, model-reservation consumer, and focused default/blank/invalid-value tests.",
-        "rationale": "The per-turn input-token budget is an operator-controlled deployment setting. Its 128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal."
+        ]
       },
-      "semanticDecision": "These three atoms are the exact binding name, environment-binding candidate, and integer fallback in one typed constructor argument. The source-derived family validates their startup composition, slot, parser helpers, policy constraint, evaluated default, model-reservation use, and decisive runnable tests.",
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN\", 128_000) expression binds RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN and fallback 128_000 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#maximumInputTokensPerTurn; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
       "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
           "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
-          "assertion": "The typed AgentAuthorityBudgetPolicy component and compact constructor reject nonpositive per-turn input-token budgets."
-        },
-        {
-          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
-          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
-          "assertion": "The model reservation path reads maximumInputTokensPerTurn, applies it to remaining input/total capacity, and records it in the reserved budget vector."
+          "assertion": "The typed owner declares and validates maximumInputTokensPerTurn."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
           "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
-          "assertion": "Packaged startup calls fromEnvironment(System.getenv()) exactly once in the durable agent-budget service construction path."
+          "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
-          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
-          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
-          "assertion": "The fromEnvironment factory places the exact binding and fallback in the maximumInputTokensPerTurn constructor slot and routes it through positive and number."
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
-          "digest": "ee109378bc41b4234c0032dd76ff78e79440eb8ede993dd6cb521e4312050917",
-          "assertion": "Focused tests prove the exact shipped default, absent/blank equivalence, malformed and overflow rejection, positive bounds, and the complete positive-setting roster."
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
         }
       ],
       "candidateCount": 3,
@@ -66,6 +909,358 @@
         "oc-2d29419d18f18da74d3c",
         "oc-473ffef3055ed509d856",
         "oc-defbd8454b4343da9a9f"
+      ]
+    },
+    {
+      "id": "agent-setting-maximum-output-tokens-per-turn",
+      "title": "Agent setting: agent.maximum-output-tokens-per-turn",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.maximum-output-tokens-per-turn",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "maximumOutputTokensPerTurn",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN is an operator-controlled deployment binding; its shipped fallback occupies the exact typed maximumOutputTokensPerTurn slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "32000",
+        "defaultEvidence": [
+          "oc-4b06a68e342789f2bfcf"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN\", 32_000) expression binds RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN and fallback 32_000 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#maximumOutputTokensPerTurn; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates maximumOutputTokensPerTurn."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "15fcb4d3ccf0968e9460a1d04ff136d51e9d6df164da6db8a19dd33e935436aa",
+      "candidateIds": [
+        "oc-4b06a68e342789f2bfcf",
+        "oc-af46f52e960ab1a91ca6",
+        "oc-b589877f7f08f75f5a26"
+      ]
+    },
+    {
+      "id": "agent-setting-output-token-rate-micros",
+      "title": "Agent setting: agent.output-token-rate-micros",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.output-token-rate-micros",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "outputTokenRateMicros",
+        "bindings": [
+          "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long at least zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed outputTokenRateMicros slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "30",
+        "defaultEvidence": [
+          "oc-f2aa34e7e5cdb3f9ab04"
+        ]
+      },
+      "semanticDecision": "The exact nonNegative(environment, \"RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS\", 30) expression binds RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS and fallback 30 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#outputTokenRateMicros; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates outputTokenRateMicros."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "b35c6642f3b8cc190eab057001e0685fa76568d7080641d06bcfbf3c1b1ef82e",
+      "candidateIds": [
+        "oc-935b17e36c728427b8c2",
+        "oc-9bc14c3b33ad4771d2c2",
+        "oc-f2aa34e7e5cdb3f9ab04"
+      ]
+    },
+    {
+      "id": "agent-setting-policy-version",
+      "title": "Agent setting: agent.policy-version",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.policy-version",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "policyVersion",
+        "bindings": [
+          "RAVENROOT_AGENT_POLICY_VERSION"
+        ],
+        "validation": "Absent or blank uses the shipped identity; otherwise a stripped 1..128 character identity token is required.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_POLICY_VERSION is an operator-controlled deployment binding; its shipped fallback occupies the exact typed policyVersion slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "server-finite-v1",
+        "defaultEvidence": []
+      },
+      "semanticDecision": "The exact identity(environment, \"RAVENROOT_AGENT_POLICY_VERSION\", \"server-finite-v1\") expression binds RAVENROOT_AGENT_POLICY_VERSION and fallback \"server-finite-v1\" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#policyVersion; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates policyVersion."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "10d542885a173f729dffd05d932a9dd1c823276b3dcc968b82bbd442e068dfb3",
+      "candidateIds": [
+        "oc-a26899d3913aa4f08a0d"
+      ]
+    },
+    {
+      "id": "agent-setting-rate-card-version",
+      "title": "Agent setting: agent.rate-card-version",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.rate-card-version",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "rateCardVersion",
+        "bindings": [
+          "RAVENROOT_AGENT_RATE_CARD_VERSION"
+        ],
+        "validation": "Absent or blank uses the shipped identity; otherwise a stripped 1..128 character identity token is required.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_RATE_CARD_VERSION is an operator-controlled deployment binding; its shipped fallback occupies the exact typed rateCardVersion slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "builtin-conservative-v1",
+        "defaultEvidence": [
+          "oc-25622dbeae86fdc6b9fe"
+        ]
+      },
+      "semanticDecision": "The exact identity(environment, \"RAVENROOT_AGENT_RATE_CARD_VERSION\", \"builtin-conservative-v1\") expression binds RAVENROOT_AGENT_RATE_CARD_VERSION and fallback \"builtin-conservative-v1\" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#rateCardVersion; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates rateCardVersion."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "39fe4ec57b6fff3a75e80ac0f839f3ce0cc4e8dbfa04dc1adb244adc97bb9c63",
+      "candidateIds": [
+        "oc-25622dbeae86fdc6b9fe",
+        "oc-406ec1e5f68991665f79",
+        "oc-a0224ca5abb9a115dca2"
+      ]
+    },
+    {
+      "id": "agent-setting-root-lifetime-seconds",
+      "title": "Agent setting: agent.root-lifetime-seconds",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.root-lifetime-seconds",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "rootLifetime",
+        "bindings": [
+          "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS"
+        ],
+        "validation": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS is an operator-controlled deployment binding; its shipped fallback occupies the exact typed rootLifetime slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "3600",
+        "defaultEvidence": [
+          "oc-1b47386ef65cf77cd585"
+        ]
+      },
+      "semanticDecision": "The exact positive(environment, \"RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS\", 3_600) expression binds RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS and fallback 3_600 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#rootLifetime; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates rootLifetime."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "3dae946221b3715e3f922f79ba16f4df99f728d45cdae76e1850e6da5c50446b",
+      "candidateIds": [
+        "oc-1b47386ef65cf77cd585",
+        "oc-d522126eeb67d3da2ee6",
+        "oc-d79589e3b588784a1ff8"
+      ]
+    },
+    {
+      "id": "agent-setting-runtime-instance",
+      "title": "Agent setting: agent.runtime-instance",
+      "owner": "#321",
+      "metadata": {
+        "setting": "agent.runtime-instance",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "runtimeInstanceId",
+        "bindings": [
+          "RAVENROOT_AGENT_RUNTIME_INSTANCE"
+        ],
+        "validation": "Absent or blank uses the shipped identity; otherwise a stripped 1..128 character identity token is required.",
+        "scope": "Packaged server agent authority and economic budget policy.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact startup composition, factory expression and typed constructor slot, shared parser and policy/vector validation, production budget-service consumption, and focused executable tests.",
+        "rationale": "RAVENROOT_AGENT_RUNTIME_INSTANCE is an operator-controlled deployment binding; its shipped fallback occupies the exact typed runtimeInstanceId slot.",
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "default": "ravenroot-server",
+        "defaultEvidence": []
+      },
+      "semanticDecision": "The exact identity(environment, \"RAVENROOT_AGENT_RUNTIME_INSTANCE\", \"ravenroot-server\") expression binds RAVENROOT_AGENT_RUNTIME_INSTANCE and fallback \"ravenroot-server\" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#runtimeInstanceId; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The exact helper call, environment name, fallback expression, and constructor position are derived from executable source."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed owner declares and validates runtimeInstanceId."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup composes the policy from the process environment."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The budget service consumes the typed policy field or its exact root budget vector component."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "c6d8d331bf01535c1606e1c1ddff5cae7abd902e9416bf4d81096ff5a77445d0",
+          "assertion": "Runnable focused tests prove shipped defaults, blank behavior, accepted values, and rejection semantics."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "0c460ef019b7ace47d7e1d0371577e92f54a21813332a5c9f0da5f3bce3fe8d9",
+      "candidateIds": [
+        "oc-c8dbaff142f7ff98ace1"
       ]
     },
     {
@@ -4556,8 +5751,8 @@
           "assertion": "Operator reference publishes supported server bindings."
         }
       ],
-      "candidateCount": 115,
-      "candidateSetDigest": "0c049aa99a8d989614c42f29522f0ec8bdd4225f796ed5e00f5fe516769006f7",
+      "candidateCount": 96,
+      "candidateSetDigest": "fc5a0022c5bd54675e31095124948a045b87a5e8a87212b639b02a0ae97ef188",
       "candidateIds": [
         "oc-02c9cb904b5be6dd406c",
         "oc-0930812e4cd42bfba63c",
@@ -4567,7 +5762,6 @@
         "oc-1bbf61f21edc3bfb74c9",
         "oc-1bd52fa12e9105bd59ef",
         "oc-1d879c046e733c12b3ba",
-        "oc-1f3c6cc0472e4cb420ba",
         "oc-204a2157911cfc852f49",
         "oc-20f796f0e15a1c389586",
         "oc-28811ab2079c465a25b6",
@@ -4575,18 +5769,13 @@
         "oc-2a05da0c7bbf885a1309",
         "oc-2b7dd0ed2ac44389072e",
         "oc-2c652158d3f690f55c3d",
-        "oc-2d8910ad5748d00ea7a7",
-        "oc-2e864bf37677e2dc35c3",
         "oc-32eb0f0556dbc07dd2c9",
         "oc-37dd89102d2d4b38afc4",
         "oc-3889ae2ca8c039266d01",
-        "oc-39ca1fa0333e82747d7a",
         "oc-3add4efd8bcaa192c3c7",
         "oc-3b1023ae68aebf210d43",
         "oc-3b6cb2df5507c3fecdb9",
-        "oc-3cc7469cdc39493aca8b",
         "oc-404cd36c73f5026200e5",
-        "oc-406ec1e5f68991665f79",
         "oc-4103a09ae97fee9c2424",
         "oc-41e1286c1b8e7cca68fb",
         "oc-420dbd015ab378bbe64c",
@@ -4596,14 +5785,11 @@
         "oc-4676e985e58356eee620",
         "oc-4f7fa3e8b4c411d91f9a",
         "oc-513e4efa232d3de42d50",
-        "oc-5193bbd6be4fb596bd15",
         "oc-525aef35d81da0cbdd02",
         "oc-55a8116a587949a1d33a",
         "oc-5a0e47ddb55cad04983f",
-        "oc-5c23c9d5c46e11dd89b3",
         "oc-682c8f5e328baa3db297",
         "oc-6bcfc92b92b67e77a246",
-        "oc-727ea7eb9afd800c022b",
         "oc-750f88203118eca65791",
         "oc-756aae38cd66c71c7993",
         "oc-76415ff990f0d012f552",
@@ -4621,12 +5807,10 @@
         "oc-92ed2863bbade41a1d71",
         "oc-99d41a7d84c430e8a634",
         "oc-9a0e8e6f691375215ec7",
-        "oc-9bc14c3b33ad4771d2c2",
         "oc-9bf223d751a36594c7d9",
         "oc-9d60733cd2e2743a4347",
         "oc-a0076c4163291be0a447",
         "oc-a06b412d7a5006f0e633",
-        "oc-a26899d3913aa4f08a0d",
         "oc-a4acb7b723169db8ac20",
         "oc-a5809bdfded1808cb826",
         "oc-a6666e1133a84c069cc9",
@@ -4638,9 +5822,7 @@
         "oc-abe464e12461cf17c5a5",
         "oc-ad7d124b048882cce394",
         "oc-ae6872031243f9c2b4cb",
-        "oc-b1a332041564ef37ae6b",
         "oc-b204ecbb38d0ebf0fd80",
-        "oc-b589877f7f08f75f5a26",
         "oc-ba2b60b13c1d4ac3d987",
         "oc-bccd53697a4904d92fcd",
         "oc-bd644971c2ad27071596",
@@ -4649,13 +5831,10 @@
         "oc-c0a1830e5798feab0461",
         "oc-c1848fbba0d57c8fdf2d",
         "oc-c6532ac0c15df28ea47f",
-        "oc-c8dbaff142f7ff98ace1",
         "oc-ca65d7f9cc72baa0b92a",
         "oc-ce3287ebd2c785156786",
         "oc-ce624d2db21158fe2aec",
         "oc-d3e2ea74e17987fc74ec",
-        "oc-d522126eeb67d3da2ee6",
-        "oc-d5b8c6e33ff76e800da2",
         "oc-da1bb23ab088c0e0183d",
         "oc-dc0fdec2c20ddead6353",
         "oc-dd23882f9ddd4014661c",
@@ -4663,8 +5842,6 @@
         "oc-dfda42f89b3231338c65",
         "oc-e29357e3867ba5dd0961",
         "oc-e35ca54df8a1bf1b2341",
-        "oc-e667f3ee3e62db6d6008",
-        "oc-e865215bbc38d0f2fb47",
         "oc-f0d5db89396a3e2d2180",
         "oc-f10a1a17c174c11cb40f",
         "oc-f341a04861d0b99e6ab6",
@@ -4672,7 +5849,6 @@
         "oc-f5890c559bb5d38c8fd6",
         "oc-f95dbe867b5e62717df8",
         "oc-fab22d30239709aa931e",
-        "oc-fd3b89e140cc0c6a5b0d",
         "oc-ffecfed85871e3829860"
       ]
     },
@@ -4698,8 +5874,8 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 345,
-      "candidateSetDigest": "06f13a3128de458c3218866c78b25055a4d43167d0c766c07666109b186d2b82",
+      "candidateCount": 317,
+      "candidateSetDigest": "fb2cc02befdc193410b773eab623322b52f3af98750be652f9831d72525d0d1a",
       "candidateIds": [
         "oc-00733076b1001148a226",
         "oc-0093d6bdc1b62d30edc9",
@@ -4718,7 +5894,6 @@
         "oc-08ad077658fdbec44be4",
         "oc-0c28fd442e016d58fa3a",
         "oc-0d2df39f551c99766298",
-        "oc-0d35f8b9dba82cb730b8",
         "oc-0edb533a7d3226ad4f96",
         "oc-0f2e9930f582d7c379ce",
         "oc-1161844a061283d557fc",
@@ -4726,7 +5901,6 @@
         "oc-127ab3eedb3477b10bae",
         "oc-129ca7aa97bac03f246f",
         "oc-13299f9a86102571e37f",
-        "oc-13f6dc216f92cd29c16d",
         "oc-13fa0e5b81acaa9bc5a0",
         "oc-151e58c147c7b21c9fc5",
         "oc-16798bdbf1d8540aee1c",
@@ -4752,7 +5926,6 @@
         "oc-237857268b349c127161",
         "oc-23cd05b2080a3d7ff634",
         "oc-23f50ddca7ea65fc2aec",
-        "oc-25622dbeae86fdc6b9fe",
         "oc-25d2e6acf8f57fef492d",
         "oc-27b418ea5d2e648640f4",
         "oc-27c5ddd81d236551c769",
@@ -4808,7 +5981,6 @@
         "oc-46aa5f8354974b41a815",
         "oc-47c6a12ec3c28b8d0460",
         "oc-49dcfc2afbe5a19dfd34",
-        "oc-4a4ff1ef7dc47fe3b010",
         "oc-4ae010a2fb7f9bfd94ea",
         "oc-4b02939689171074ceb1",
         "oc-4c005613d2809866a72c",
@@ -4824,7 +5996,6 @@
         "oc-52e1cc8f44d5808d7946",
         "oc-530eeb5044382ed32011",
         "oc-531c72ea5f405b878c12",
-        "oc-53863f58cf4171010342",
         "oc-53c5e8ef03f6259aacc2",
         "oc-55d879133c1fe4d60ca1",
         "oc-56390c88967234a1da7f",
@@ -4844,7 +6015,6 @@
         "oc-5ef81d81fc5bf5815cf3",
         "oc-5f4310e7be163ee262b8",
         "oc-5f58421ed658250d2a49",
-        "oc-60e38e225112f658c078",
         "oc-615e6fd87600392e280d",
         "oc-61605a5fe154ff72e8f7",
         "oc-62b3899ff7d54f4fd221",
@@ -4871,12 +6041,10 @@
         "oc-7363516cbd825416c733",
         "oc-74d6cc00db35017e44da",
         "oc-74e0305287d1d8c5f738",
-        "oc-750bfe950df4dda1da14",
         "oc-75871ec5b862ae2d8200",
         "oc-777e0c2a2802a2ea0e48",
         "oc-78cfc9cca6f4f9eda673",
         "oc-78d69934138449db9524",
-        "oc-78ea7d1dc9782b7b3b83",
         "oc-7906b81559c8fe6af9a6",
         "oc-7aad794367b99a41353e",
         "oc-7ea7878257aec2277e5b",
@@ -4896,21 +6064,17 @@
         "oc-87ed419e0b9ba44a9133",
         "oc-886d1581ff889079e85d",
         "oc-890813c7fb2d8861e36f",
-        "oc-8975a8267df23b8f7e6d",
         "oc-89a974f62280dfee1968",
         "oc-89c548c7ea93cee24c04",
         "oc-89e207d1faf66762eaae",
         "oc-8a51d2e52ca35d566269",
         "oc-8bd5183f73b590fe24f4",
-        "oc-8ccc9dda38e4332bc20e",
-        "oc-8d6c003df6bea95567fd",
         "oc-8d8bab368aecb81c8dde",
         "oc-8e2a93ed4c6ee37a653d",
         "oc-909dc491cafdb65dbb1c",
         "oc-90a8fb41bf01480cdc0a",
         "oc-92757ad2d947ad243799",
         "oc-92e7a625ae5d828264bc",
-        "oc-935b17e36c728427b8c2",
         "oc-959ca4237152750f98ae",
         "oc-95a3bd07e99ba50517f0",
         "oc-962649afd3d7d7587106",
@@ -4927,7 +6091,6 @@
         "oc-9d8a522602459a0f6356",
         "oc-9e29efa2f10deb161cbe",
         "oc-9f263e6e7dd8ca77b3a7",
-        "oc-a0224ca5abb9a115dca2",
         "oc-a102dcf7164eb3f71ebe",
         "oc-a131e8a4837df6a7e876",
         "oc-a1f952b46615c0186f36",
@@ -4938,9 +6101,7 @@
         "oc-aa4253ed28b42b6f194b",
         "oc-ac001b4008af1f9240bc",
         "oc-ad9751c0b77835e42cf5",
-        "oc-ae7957f7cd2952eeb52d",
         "oc-ae962a83a3844e9d903d",
-        "oc-af46f52e960ab1a91ca6",
         "oc-b094cfd4dfb9177a89e3",
         "oc-b1ef322d310829b4b6af",
         "oc-b20367b4f02b8991ae31",
@@ -4948,14 +6109,11 @@
         "oc-b3aeb7a252de7dc9b02c",
         "oc-b4d441f8fa5ecf869e83",
         "oc-b5679b1c894831977b55",
-        "oc-b60333a2740b5f904a72",
-        "oc-b6151a5e37f092a298da",
         "oc-b798a16a9604e7e3969e",
         "oc-b7a68d656a047ea00aab",
         "oc-b88cc0518df89816d4f5",
         "oc-bab31a7057d3e30568b6",
         "oc-bb2220535fac70787a51",
-        "oc-bb5eadcd0632cc164d8a",
         "oc-bbea2924213eab09d7a3",
         "oc-bcfca62bd73fd92da58b",
         "oc-bd5b24540ecdde4a811e",
@@ -4978,7 +6136,6 @@
         "oc-c95a08f1702f62f35a29",
         "oc-c95fe1f5714bb543d0d6",
         "oc-c9bb3dbd324d3fb5f541",
-        "oc-c9bbee667ba2ff98f893",
         "oc-c9cb568327b36e999061",
         "oc-cb51dc40aed49681cadd",
         "oc-cb8ad5405d5a1a49440d",
@@ -4992,8 +6149,6 @@
         "oc-d59faf3e434560eb05ed",
         "oc-d5e63d4f9e4cc090a927",
         "oc-d64880c45570a1a9c35a",
-        "oc-d71318608e2888544703",
-        "oc-d79589e3b588784a1ff8",
         "oc-d7c41a0533178f7723f7",
         "oc-d8699b45f2c0047c4b0c",
         "oc-d8acbeb88798717bc146",
@@ -5003,17 +6158,11 @@
         "oc-dfa004a7732d5296622f",
         "oc-dffa0c7630aa57257781",
         "oc-e071b3b8968d47b122a5",
-        "oc-e0e18ae7cd557023d822",
-        "oc-e0ee45a1bb0f311c83fe",
-        "oc-e14c1510ab0443e1036a",
-        "oc-e1a001a35b01e7f002e0",
-        "oc-e1d66b0de1616b9f6244",
         "oc-e24b52b35398cd9683f7",
         "oc-e3003c5ec2070a532fc2",
         "oc-e34e65095edf019c3299",
         "oc-e390270d2426d4a21ba6",
         "oc-e55f29fc2bf0e9de3cb6",
-        "oc-e609f62b0bcd4c181434",
         "oc-e66891f6d307f5991d50",
         "oc-e7eb1837f75a402418d4",
         "oc-e86480374508bd3b87f3",
@@ -5033,7 +6182,6 @@
         "oc-f61ac5b7072ac86925e3",
         "oc-f81f8847760433153d36",
         "oc-f88713d5e34f85e785c4",
-        "oc-f97e0748795084b193ca",
         "oc-fa4fe5175f93a7b9b98b",
         "oc-fad6072ca4b6d4d0f70f",
         "oc-fb3f09e66a4e318f7c74",
@@ -5070,8 +6218,8 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 113,
-      "candidateSetDigest": "8927570d6f037cfda31c6e9a0261cc3e82911df08d44daa2deac4868c8e22272",
+      "candidateCount": 111,
+      "candidateSetDigest": "de52becbcb40de0d703a629a02437233bf0b72de1d54fef34a7042cb98929483",
       "candidateIds": [
         "oc-02784eba076c21026c31",
         "oc-065b5f04b0945d4ab34d",
@@ -5152,7 +6300,6 @@
         "oc-b745c0cde8fd401cee72",
         "oc-b7b648223af6aaf58145",
         "oc-b9080bb0d81e32cb391c",
-        "oc-b99e8c5a730d48fa6bdb",
         "oc-bcf96869472e3ca408f3",
         "oc-c3b8e97c596cf5b562cc",
         "oc-c4f4ec6d523ea93321bf",
@@ -5160,7 +6307,6 @@
         "oc-c97bd3515ab346c4cd8b",
         "oc-cbd509699c1e1eeba26f",
         "oc-cd40738a77e3cec65c29",
-        "oc-cd6afcb87c61066decf5",
         "oc-d019485b022fdada91dc",
         "oc-d35709cd0ae83c78548f",
         "oc-d7299a5e83ad67b313b8",
@@ -5210,22 +6356,20 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 37,
-      "candidateSetDigest": "65349ac9d354f3a5ef49768741053db62235acfa0eee4a2a7ba87aa6052d33ae",
+      "candidateCount": 33,
+      "candidateSetDigest": "a4d899cbc071dc7b3b6f50878cfb89216a0dbb60c3ca0756e4603a3de71f6be3",
       "candidateIds": [
         "oc-0067c29a9b072e2c7201",
         "oc-09f18a2c3fdb11586b07",
         "oc-0d1b8f9765cde16cb247",
         "oc-11aa2538e37479955ec0",
         "oc-170bdbd0e9edd2e8c8da",
-        "oc-1b47386ef65cf77cd585",
         "oc-26b2b81d0e92e45613e2",
         "oc-33cec57484edded99509",
         "oc-351943d622744f1a9b37",
         "oc-38fae1f8e9c909fd83b9",
         "oc-3c0130c650d3cce583fb",
         "oc-4aeeae3f84fb5cda7587",
-        "oc-4b06a68e342789f2bfcf",
         "oc-52d6c43c77559992cecb",
         "oc-53375f9df2dc580cf4af",
         "oc-5b70093154b9bdeb572b",
@@ -5244,10 +6388,8 @@
         "oc-d77fdac1407a5380555b",
         "oc-e078aa2e71dbda380e27",
         "oc-e9e6b367b31bf6739387",
-        "oc-eb2419bc075e44ae7342",
         "oc-ee4a38fb19b2811511db",
         "oc-eead090c5276bf93cc0e",
-        "oc-f2aa34e7e5cdb3f9ab04",
         "oc-f34580ab0f43d20dfd87",
         "oc-f7796137612eae42fae7"
       ]

@@ -38,6 +38,7 @@ function localizeCommand(command, t) {
 export function createAppCommands(actions, { t = uiText } = {}) {
   const active = context => context.hasDocument;
   const editable = context => context.editable;
+  const documentEditable = context => context.documentEditable;
   const modifiable = context => context.canModify;
   const modifying = context => context.modifyEnabled;
   const authoring = context => context.modifyEnabled && context.canModify;
@@ -49,8 +50,8 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     isChecked: context => context.hasDocument && context.renderMode === id,
     kind: 'radio',
   });
-  const arrangement = (id, order) => ({
-    id: `layout.arrange.${id}`, group: 'design-arrange', order: order + 200,
+  const arrangement = (id, order, group = 'design-arrange') => ({
+    id: `layout.arrange.${id}`, group, order: order + 200,
     placements: ['menu.layout', 'help'], execute: () => actions.arrange(id),
     isEnabled: context => active(context) && context.renderMode === 'design',
   });
@@ -68,7 +69,11 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'file.open', group: 'document', order: 20,
       placements: ['menu.file', 'toolbar.file'], execute: actions.openFile },
     { id: 'file.replaceActive', group: 'document', order: 30,
-      placements: ['menu.file'], execute: actions.replaceActive, isEnabled: active },
+      placements: ['menu.file'], execute: actions.replaceActive,
+      isEnabled: context => active(context) && context.documentMode === 'draft' },
+    { id: 'file.fork', group: 'document', order: 35,
+      placements: ['menu.file'], execute: actions.forkDocument,
+      isEnabled: context => active(context) && context.documentMode !== 'draft' },
     { id: 'file.save', group: 'save', order: 40,
       placements: ['menu.file', 'toolbar.editor', 'help'], execute: actions.save,
       isEnabled: context => editable(context) && !context.layoutBusy,
@@ -79,11 +84,14 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     { id: 'edit.undo', group: 'history', order: 10,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.undo,
-      isEnabled: context => context.canUndo, shortcuts: [global({ key: 'z', primary: true })],
+      isEnabled: context => context.documentEditable && context.canUndo,
+      describe: context => (context.undoLabel ? `Undo ${context.undoLabel}` : 'Nothing to undo'),
+      shortcuts: [global({ key: 'z', primary: true })],
     },
     { id: 'edit.redo', group: 'history', order: 20,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.redo,
-      isEnabled: context => context.canRedo,
+      isEnabled: context => context.documentEditable && context.canRedo,
+      describe: context => (context.redoLabel ? `Redo ${context.redoLabel}` : 'Nothing to redo'),
       shortcuts: [global({ key: 'z', primary: true, shift: true }), global({ key: 'y', ctrl: true })],
     },
     { id: 'edit.modify', group: 'mode', order: 30, kind: 'checkbox',
@@ -109,8 +117,24 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'edit.deleteSelection', group: 'author', order: 80,
       placements: ['menu.edit', 'help'], execute: actions.deleteSelection,
       isEnabled: context => authoring(context) && context.hasSelection,
-      shortcuts: [global({ key: 'Delete' }), global({ key: 'Backspace' })],
+      shortcuts: [global({ key: 'Delete', keyAliases: ['Del', 'Canc'] }), global({ key: 'Backspace' })],
     },
+    { id: 'edit.groupSelection', group: 'visual-groups', order: 100,
+      placements: ['menu.edit', 'help'], execute: actions.groupSelection,
+      isEnabled: context => authoring(context) && context.canGroupSelection,
+      shortcuts: [global({ key: 'g', primary: true })] },
+    { id: 'view.toggleGroup', group: 'visual-groups', order: 101,
+      placements: ['menu.edit', 'help'], execute: actions.toggleGroup,
+      isEnabled: context => context.hasVisualGroup },
+    ...['renameGroup', 'replaceGroupMembers', 'ungroup'].map((id, index) => ({
+      id: `edit.${id}`, group: 'visual-groups', order: 102 + index,
+      placements: ['menu.edit', 'help'], execute: actions[id],
+      isEnabled: context => authoring(context) && (id === 'replaceGroupMembers' ? context.hasManagedVisualGroup : context.hasVisualGroup)
+        && (id !== 'replaceGroupMembers' || context.selectedRealNodeCount >= 2),
+    })),
+    { id: 'edit.removeGroupMetadata', group: 'visual-groups', order: 105,
+      placements: ['menu.edit'], execute: actions.removeGroupMetadata,
+      isEnabled: context => authoring(context) && context.invalidGroupMetadata },
     // Only offered while the document has not already declared join semantics -- migrating a
     // document that already has the marker is a defined no-op (JoinSemantics.migrate is idempotent),
     // but a command an author can invoke for no visible effect is worse than one that is simply
@@ -135,6 +159,10 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     // documents that could drift from the first.
     { id: 'view.graphs', group: 'panels', order: 35,
       placements: ['menu.view'], execute: actions.openDocumentSwitcher, isEnabled: active,
+    },
+    { id: 'view.closeAllDocuments', group: 'panels', order: 36,
+      placements: ['menu.view'], execute: actions.closeAllDocuments,
+      isEnabled: context => context.hasOpenDocuments,
     },
     { id: 'view.panels', group: 'panels', order: 40,
       placements: ['menu.view'], execute: actions.openPanels },
@@ -173,28 +201,53 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     arrangement('flow', 20),
     arrangement('organic', 30),
     arrangement('keep', 40),
+    // The layered drawings are additive: a sibling group after the established arrangements, so
+    // the existing four keep their ids, order and contiguity, and the menu separates the two sets.
+    arrangement('hierarchical-new', 50, 'design-arrange-layered'),
+    arrangement('layered-down', 60, 'design-arrange-layered'),
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,
-      isEnabled: context => context.editable && (!context.running || context.executionUnknown === true),
+      isEnabled: context => context.editable && context.tenantAuthority
+        && (!context.running || context.executionUnknown === true),
       shortcuts: [global({ key: 'Enter', primary: true })],
     },
     { id: 'run.start', group: 'execution', order: 20,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.run,
-      isEnabled: context => context.editable && (!context.running || context.executionUnknown === true),
+      isEnabled: context => context.editable && context.tenantAuthority
+        && (!context.running || context.executionUnknown === true),
     },
     { id: 'run.pause', group: 'execution', order: 30,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.pause,
-      isEnabled: context => Boolean(context.transientRunning && !context.sourceSessionActive) },
-    { id: 'run.stop', group: 'execution', order: 40,
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.executionPaused && !context.executionUnknown
+        && !context.executionCommandInFlight),
+      isVisible: context => Boolean(context.transientRunning && !context.executionPaused) },
+    { id: 'run.resume', group: 'execution', order: 40,
+      placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.resume,
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && context.executionPaused && !context.executionUnknown
+        && !context.executionCommandInFlight),
+      isVisible: context => Boolean(context.transientRunning && context.executionPaused) },
+    { id: 'run.cancel', group: 'execution', order: 50,
+      placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.cancel,
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.executionUnknown && !context.executionCommandInFlight),
+      isVisible: context => Boolean(context.transientRunning) },
+    { id: 'run.stop', group: 'execution', order: 60,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.stop,
-      isEnabled: context => Boolean(context.transientRunning || context.sourceSessionActive) },
-    { id: 'run.forceStop', group: 'execution', order: 50,
-      placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.forceStop,
-      isEnabled: context => Boolean(context.transientRunning && !context.sourceSessionActive) },
-    { id: 'run.authenticate', group: 'connection', order: 60,
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.sourceSessionActive && !context.sourceSessionStopInFlight),
+      isVisible: context => Boolean(context.sourceSessionActive) },
+    { id: 'run.stopDeployment', group: 'unavailable-lifecycle', order: 70,
+      placements: ['menu.run', 'help'], execute: actions.stopDeployment,
+      isEnabled: () => false },
+    { id: 'run.shutdown', group: 'unavailable-lifecycle', order: 80,
+      placements: ['menu.run', 'help'], execute: actions.shutdown,
+      isEnabled: () => false },
+    { id: 'run.authenticate', group: 'connection', order: 90,
       placements: ['menu.run', 'toolbar.runtime'], execute: actions.authenticate },
-    { id: 'run.forgetToken', group: 'connection', order: 70,
+    { id: 'run.forgetToken', group: 'connection', order: 100,
       placements: ['menu.run', 'toolbar.runtime'], execute: actions.forgetToken,
       isEnabled: context => context.hasToken },
     // Its own group, so the menu separator puts a line between "sign this editor in to my
@@ -205,7 +258,7 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     // ALWAYS ENABLED, including with no connection. The window is where an author is TOLD that a
     // credential needs a service to be stored in, and a menu entry that is greyed out until they
     // guess why teaches them nothing. Its own status line says it in a sentence instead.
-    { id: 'run.credentials', group: 'credentials', order: 80,
+    { id: 'run.credentials', group: 'credentials', order: 110,
       placements: ['menu.run'], execute: actions.openCredentials },
 
     // Its own group, same reasoning as `run.credentials` just above: a line separates

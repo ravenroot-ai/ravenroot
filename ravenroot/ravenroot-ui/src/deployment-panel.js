@@ -88,6 +88,7 @@ function validateDeploymentId(value) {
  */
 export function createDeploymentsWindow({
   dialog, client = null, currentDocument = () => null, pollMs = 2000,
+  onDeployments = () => {}, onRegistered = () => {}, onDeploymentSelected = () => {},
 } = {}) {
   if (!dialog) {
     return {
@@ -212,14 +213,20 @@ export function createDeploymentsWindow({
         }
       }
       item.append(actionsRow);
+      const use = doc.createElement('button');
+      use.type = 'button';
+      use.className = 'btn deployment-context-action';
+      use.dataset.deploymentContext = entry.deploymentId;
+      use.textContent = 'Use for active graph tasks';
+      use.disabled = !entry.graphVersion;
+      if (!entry.graphVersion) use.title = 'This service did not provide the deployment graph version';
+      item.append(use);
       return item;
     }));
   }
 
   function publish() {
-    // No `onDeployments` callback exists yet -- unlike credentials, nothing else in this editor reads
-    // this listing today. Kept as a named function anyway so a future caller (e.g. the node inspector
-    // offering a deployment id) has one place to hook in, matching credential-panel.js's own shape.
+    onDeployments({ loaded: listing.loaded, deployments: [...listing.deployments] });
   }
 
   // ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────
@@ -267,7 +274,8 @@ export function createDeploymentsWindow({
     setRegistering(true);
     say(`Registering “${check.id}” from “${source.displayName}”…`);
     try {
-      await client.registerDeployment(check.id, source.graphMl);
+      const registered = await client.registerDeployment(check.id, source.graphMl);
+      onRegistered(registered, source);
       if (disposed) return;
       await client.startDeployment(check.id);
       if (disposed) return;
@@ -347,6 +355,17 @@ export function createDeploymentsWindow({
     const actionButton = event.target.closest?.('[data-deployment-action]');
     if (actionButton) {
       void runRowAction(actionButton.dataset.deploymentId, actionButton.dataset.deploymentAction);
+      return;
+    }
+    const contextButton = event.target.closest?.('[data-deployment-context]');
+    if (contextButton) {
+      const selected = listing.deployments.find(entry =>
+        entry.deploymentId === contextButton.dataset.deploymentContext);
+      if (selected?.graphVersion) {
+        onDeploymentSelected(selected);
+        say(`“${selected.deploymentId}” is the active graph’s Human Task context.`, 'ok');
+        close();
+      }
       return;
     }
     if (event.target.closest?.('#deployment-close')) close();

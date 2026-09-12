@@ -1,11 +1,19 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.ToolCallAuthorization;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.api.security.ToolInvocation;
+import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
+import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +23,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -61,6 +71,39 @@ class AgentMcpToolsTest {
     }
 
     @Test
+    @DisplayName("a narrower managed output ceiling rejects tools expanded by safe schema synthesis")
+    void managedOutputCeilingSurvivesMcpToolsProjection() {
+        var emptySchema = Map.of("type", "object", "properties", Map.of());
+        var remoteProjection = List.of("one", "two", "three", "four").stream()
+                .map(name -> Map.of("name", name, "description", "tool " + name,
+                        "inputSchema", emptySchema))
+                .toList();
+        long operatorCeiling = PayloadLimits.DEFAULTS.enforceAndMeasure(remoteProjection);
+        var exposedProjection = List.of("one", "two", "three", "four").stream()
+                .map(name -> Map.of("name", "alpha__" + name, "description", "tool " + name,
+                        "parameters", emptySchema))
+                .toList();
+        assertTrue(PayloadLimits.DEFAULTS.enforceAndMeasure(exposedProjection) > operatorCeiling,
+                "server-name prefixing must be the expansion that crosses the operator ceiling");
+        var alpha = new McpDouble("alpha", "one", "two", "three", "four").omittingSchemas();
+        var probe = new McpDouble("alpha", "one", "two", "three", "four").omittingSchemas();
+        assertTrue(probe.respond(McpProtocol.listTools(3)).body().length <= operatorCeiling,
+                "the wire envelope itself must fit so this exercises post-parse projection");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .mcpOutputLimit(operatorCeiling)
+                .chatting(AiTestSupport.answers("must not be called"))
+                .serving(ALPHA, alpha);
+
+        AgentException refusal = failureOf(agent(http, "alpha",
+                AiTestSupport.mcpProfile("alpha", ALPHA, "one", "two", "three", "four")));
+
+        assertEquals(AgentException.Code.MCP_RESPONSE_TOO_LARGE, refusal.code());
+        assertEquals(List.of("initialize", "notifications/initialized", "tools/list"),
+                alpha.receivedMethods());
+        assertEquals(0, http.chatCalls(), "an over-authority catalogue never reaches model state");
+    }
+
+    @Test
     @DisplayName("a tool call reaches the server that owns it, and its result re-enters the loop")
     void aToolCallReachesTheRightServerAndItsResultReEntersTheLoop() throws Exception {
         // BOTH servers expose a tool called "search". This is the case the exposed-name scheme exists
@@ -90,9 +133,106 @@ class AgentMcpToolsTest {
 
         // And the result came back into the conversation as a tool message the model could read.
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        assertEquals(4, messages.size());
-        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)));
-        assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(3)));
+        assertEquals(5, messages.size());
+        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)));
+        assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(4)));
+    }
+
+    @Test
+    @DisplayName("tool audit distinguishes MCP success from every sanitized failure result")
+    void toolAuditUsesTerminalMcpOutcomeInsteadOfNonEmptyModelText() throws Exception {
+        var cases = List.of(
+                new AuditCase(new McpDouble("alpha", "search").returning("found"),
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.UNREACHABLE),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.SLOW),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.ERRORING),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search").returningError("not found"),
+                        ToolCallAuditEvent.Disposition.FAILED));
+
+        for (AuditCase testCase : cases) {
+            var events = new ArrayList<ToolCallAuditEvent>();
+            var http = new AiTestSupport.RoutedHttp(CHAT)
+                    .authorizing(authorizer(events, new AtomicReference<>()))
+                    .chatting(AiTestSupport.asksFor("call-1", "alpha__search"),
+                            AiTestSupport.answers("done"))
+                    .serving(ALPHA, testCase.server());
+
+            assertEquals("done", resultOf(agent(http, "alpha",
+                    AiTestSupport.mcpProfile("alpha", ALPHA, "search"))).payload());
+            assertAuditPair(events, testCase.terminal());
+        }
+    }
+
+    @Test
+    @DisplayName("blank model arguments are authorized and executed exactly once as canonical empty JSON")
+    void blankArgumentsRemainCompatibleAcrossPolicyAuditAndEffect() throws Exception {
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var alpha = new McpDouble("alpha", "search").returning("found");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .authorizing(authorizer(events, evaluated))
+                .chatting(AiTestSupport.asksFor("call-1", "alpha__search", "  "),
+                        AiTestSupport.answers("done"))
+                .serving(ALPHA, alpha);
+
+        assertEquals("done", resultOf(agent(http, "alpha",
+                AiTestSupport.mcpProfile("alpha", ALPHA, "search"))).payload());
+
+        assertEquals(Map.of(), evaluated.get().arguments());
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertEquals(List.of("search"), alpha.calledTools());
+        var call = (PayloadValue.MapValue) PayloadJson.read(
+                alpha.calledDocuments().get(0).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                PayloadLimits.DEFAULTS);
+        var params = assertInstanceOf(PayloadValue.MapValue.class, call.entries().get("params"));
+        var arguments = assertInstanceOf(PayloadValue.MapValue.class,
+                params.entries().get("arguments"));
+        assertEquals(Map.of(), arguments.entries());
+        assertAuditPair(events, ToolCallAuditEvent.Disposition.SUCCEEDED);
+    }
+
+    @Test
+    @DisplayName("post-effect accounting failure terminates without repeating the provider or tool")
+    void postEffectAccountingFailureCannotLookRetryableToTheAgentLoop() {
+        var completions = new AtomicInteger();
+        var alpha = new McpDouble("alpha", "search").returning("effect-complete");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .authorizing((message, tool, arguments) -> new ToolCallAuthorization() {
+                    private final java.util.UUID callId = java.util.UUID.randomUUID();
+                    @Override public java.util.UUID callId() { return callId; }
+                    @Override public Disposition disposition() { return Disposition.ALLOW; }
+                    @Override public String argumentsDigest() { return "sha256:test"; }
+                    @Override public byte[] canonicalArguments() { return "{}".getBytes(
+                            java.nio.charset.StandardCharsets.UTF_8); }
+                    @Override public void complete(Outcome outcome) {
+                        completions.incrementAndGet();
+                        throw new NodePackageServiceException(
+                                NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE);
+                    }
+                })
+                .chatting(AiTestSupport.asksFor("call-1", "alpha__search"),
+                        AiTestSupport.answers("must-not-run"))
+                .serving(ALPHA, alpha);
+
+        ExecutionException raised = assertThrows(ExecutionException.class,
+                () -> agent(http, "alpha", AiTestSupport.mcpProfile("alpha", ALPHA, "search"))
+                        .handle(AiTestSupport.message("a payload")).toCompletableFuture().get());
+        Throwable cause = raised.getCause();
+        while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+        NodePackageServiceException indeterminate = assertInstanceOf(NodePackageServiceException.class, cause);
+        assertEquals(NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE,
+                indeterminate.reason());
+        assertEquals(List.of("search"), alpha.calledTools());
+        assertEquals(1, http.chatCalls());
+        assertEquals(1, completions.get());
     }
 
     @Test
@@ -134,7 +274,7 @@ class AgentMcpToolsTest {
         // Nothing was sent to the server. The refusal happened here, before any byte left.
         assertEquals(List.of(), alpha.calledTools());
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        String refusal = ((PayloadValue.TextValue) contentOf(messages.get(3))).value();
+        String refusal = ((PayloadValue.TextValue) contentOf(messages.get(4))).value();
         assertFalse(refusal.isEmpty());
         assertTrue(refusal.contains("available to you"), refusal);
     }
@@ -213,7 +353,7 @@ class AgentMcpToolsTest {
 
         assertEquals("I answered without it", result.payload());
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        String told = ((PayloadValue.TextValue) contentOf(messages.get(3))).value();
+        String told = ((PayloadValue.TextValue) contentOf(messages.get(4))).value();
         assertFalse(told.isEmpty());
         assertTrue(told.contains("did not answer"));
     }
@@ -319,7 +459,9 @@ class AgentMcpToolsTest {
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(new McpProfile("alpha", java.net.URI.create(ALPHA),
                         java.util.Optional.empty(), 5_000, 1024 * 1024, 1, Set.of("search"))));
+        var resources = new AiTestSupport.TrackingAgentResources();
         var http = new AiTestSupport.RoutedHttp(CHAT)
+                .resources(resources)
                 .chattingForever()
                 .serving(ALPHA, new McpDouble("alpha", "search"));
 
@@ -331,10 +473,14 @@ class AgentMcpToolsTest {
 
         AgentException failure = failureOf(behavior.create(configuration("alpha"), http));
         assertEquals(AgentException.Code.CAPACITY_UNAVAILABLE, failure.code());
+        assertEquals(2, resources.admissions.get());
+        assertEquals(1, resources.cancels.get(),
+                "the run refused after admission must cancel its durable grant");
 
         // And the refusal released the model-profile lease it had already taken before reaching the
         // full server -- the unwind path that only this ordering exercises.
         holding.cancel(true);
+        assertEquals(2, resources.cancels.get());
         assertEquals(0, behavior.mcpAdmissionEntries());
         assertEquals(0, behavior.admissionEntries());
     }
@@ -345,7 +491,9 @@ class AgentMcpToolsTest {
         // The binding is a name the runtime resolves; the bundle never holds a secret and therefore
         // has no path that could return one. Adding CREDENTIAL_RESOLUTION here would replace that
         // property with a promise.
-        assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP),
+        assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                        NodePackageCapability.TOOL_AUTHORIZATION,
+                        NodePackageCapability.AGENT_RESOURCES),
                 new AgentNodeBehavior().requiredServices());
         assertTrue(new AgentNodeBehavior().descriptor().properties().stream()
                 .anyMatch(property -> "mcpServers".equals(property.name())));
@@ -388,7 +536,7 @@ class AgentMcpToolsTest {
         // And the server never had to answer 404, which is the observation that does not depend on
         // reading headers at all.
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        assertEquals(PayloadValue.of("found it"), contentOf(messages.get(3)));
+        assertEquals(PayloadValue.of("found it"), contentOf(messages.get(4)));
     }
 
     @Test
@@ -423,6 +571,44 @@ class AgentMcpToolsTest {
         assertEquals(List.of(), alpha.calledTools());
         assertEquals(0, behavior.admissionEntries());
         assertEquals(0, behavior.mcpAdmissionEntries());
+    }
+
+    @Test
+    void engineCancellationSignalCancelsTheActiveModelCallBeforeAnyLaterToolEffect() {
+        var alpha = new McpDouble("alpha", "search");
+        var http = new AiTestSupport.RoutedHttp(CHAT).chattingForever().serving(ALPHA, alpha);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
+                AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
+        var cancellation = new TestCancellation();
+        var stage = behavior.create(configuration("alpha"), http)
+                .handle(AiTestSupport.message("a payload"), cancellation).toCompletableFuture();
+
+        cancellation.cancel();
+        http.releaseChat(AiTestSupport.asksFor("call-1", "alpha__search"));
+
+        assertTrue(stage.isCompletedExceptionally());
+        assertEquals(List.of(Boolean.TRUE), http.cancelled());
+        assertEquals(1, http.chatCalls());
+        assertEquals(List.of(), alpha.calledTools());
+        assertEquals(0, behavior.admissionEntries());
+        assertEquals(0, behavior.mcpAdmissionEntries());
+    }
+
+    @Test
+    void alreadyCancelledEngineSignalStartsNoDiscoveryOrModelTransport() {
+        var alpha = new McpDouble("alpha", "search");
+        var http = new AiTestSupport.RoutedHttp(CHAT).chattingForever().serving(ALPHA, alpha);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
+                AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
+        var cancellation = new TestCancellation();
+        cancellation.cancel();
+
+        var stage = behavior.create(configuration("alpha"), http)
+                .handle(AiTestSupport.message("a payload"), cancellation).toCompletableFuture();
+
+        assertTrue(stage.isCompletedExceptionally());
+        assertEquals(0, http.chatCalls());
+        assertEquals(List.of(), alpha.receivedMethods());
     }
 
     @Test
@@ -461,6 +647,9 @@ class AgentMcpToolsTest {
         var http = new AiTestSupport.RoutedHttp(CHAT)
                 .chattingForeverAndFailingCancellation()
                 .serving(ALPHA, new McpDouble("alpha", "search"));
+        var resources = new AiTestSupport.TrackingAgentResources().failingCancellation(
+                new IllegalStateException("resource cleanup failed"));
+        http.resources(resources);
         var behavior = new AgentNodeBehavior(
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
@@ -475,6 +664,8 @@ class AgentMcpToolsTest {
         // the other holding.
         assertEquals(0, behavior.admissionEntries());
         assertEquals(0, behavior.mcpAdmissionEntries());
+        assertEquals(1, resources.cancels.get(),
+                "a throwing transport cancellation must not skip durable attempt cleanup");
 
         // And a second run is admitted, which is the property an operator actually has: the first
         // assertion says the counter reads zero, this one says the capacity is really back.
@@ -522,20 +713,20 @@ class AgentMcpToolsTest {
         // Both worlds are offered, and the built-in still comes first.
         assertEquals(List.of(LoadSkillTool.NAME, "alpha__search"),
                 toolNamesOf(http.chatBodies().get(0)));
-        // The skill's name and description reached the system turn; its body did not.
-        String system = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(0))
-                .get(0))).value();
-        assertTrue(system.contains("runbook"), system);
-        assertFalse(system.contains("step one, step two"), system);
+        // The skill's name and description reached the untrusted author turn; its body did not.
+        String author = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(0))
+                .get(1))).value();
+        assertTrue(author.contains("runbook"), author);
+        assertFalse(author.contains("step one, step two"), author);
 
         // The first load hands the body over.
         String first = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(1))
-                .get(3))).value();
+                .get(4))).value();
         assertEquals("step one, step two", first);
         // The second says "already loaded" instead of repeating it -- the duplicate-load rule holds on a node
         // that also declares an MCP server, which is the interaction worth pinning here.
         String second = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(2))
-                .get(5))).value();
+                .get(6))).value();
         assertTrue(second.contains("already loaded"), second);
         assertFalse(second.contains("step one, step two"), second);
     }
@@ -578,8 +769,8 @@ class AgentMcpToolsTest {
 
             assertEquals("answered anyway", result.payload(), mode.name());
             List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-            assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)), mode.name());
-            assertFalse(((PayloadValue.TextValue) contentOf(messages.get(3))).value().isEmpty(),
+            assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)), mode.name());
+            assertFalse(((PayloadValue.TextValue) contentOf(messages.get(4))).value().isEmpty(),
                     mode.name());
         }
     }
@@ -588,6 +779,29 @@ class AgentMcpToolsTest {
         return new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(servers))
                 .create(configuration(declared), http);
+    }
+
+    private static ai.ravenroot.api.node.service.ToolCallAuthorizationService authorizer(
+            List<ToolCallAuditEvent> events, AtomicReference<ToolInvocation> evaluated) {
+        return ManagedNodePackageServices.builder("ai.ravenroot.extension.ai",
+                        NodePackageEgressPolicy.builder().build(),
+                        (packageId, tenant, reference) -> java.util.Optional.empty())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build().toolAuthorization();
+    }
+
+    private static void assertAuditPair(List<ToolCallAuditEvent> events,
+                                        ToolCallAuditEvent.Disposition terminal) {
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT, terminal),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+    }
+
+    private record AuditCase(McpDouble server, ToolCallAuditEvent.Disposition terminal) {
     }
 
     private static ai.ravenroot.api.node.NodeConfiguration configuration(String mcpServers) {
@@ -608,6 +822,16 @@ class AgentMcpToolsTest {
             cause = cause.getCause();
         }
         return assertInstanceOf(AgentException.class, cause);
+    }
+
+    private static final class TestCancellation implements CancellationSignal {
+        private final List<Runnable> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private volatile boolean cancelled;
+        @Override public boolean cancelled() { return cancelled; }
+        @Override public void onCancel(Runnable listener) {
+            if (cancelled) listener.run(); else listeners.add(listener);
+        }
+        void cancel() { cancelled = true; listeners.forEach(Runnable::run); }
     }
 
     private static List<String> toolNamesOf(byte[] body) {

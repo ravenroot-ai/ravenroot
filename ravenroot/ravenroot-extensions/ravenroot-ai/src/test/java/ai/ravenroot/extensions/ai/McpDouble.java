@@ -59,6 +59,7 @@ final class McpDouble {
     private final String name;
     private final List<String> announced = new CopyOnWriteArrayList<>();
     private final List<String> calledTools = new CopyOnWriteArrayList<>();
+    private final List<String> calledDocuments = new CopyOnWriteArrayList<>();
     private final List<String> receivedMethods = new CopyOnWriteArrayList<>();
     private final AtomicInteger calls = new AtomicInteger();
     private volatile Mode mode = Mode.HEALTHY;
@@ -68,7 +69,9 @@ final class McpDouble {
     /** Turns on only after {@code tools/list}, so discovery succeeds and the call does not. */
     private volatile Mode modeFromCallOnwards;
     private volatile String result = "ok";
+    private volatile boolean resultIsError;
     private volatile long slowMillis = 5_000;
+    private volatile boolean omitSchemas;
 
     McpDouble(String name, String... tools) {
         this.name = name;
@@ -115,6 +118,17 @@ final class McpDouble {
         return this;
     }
 
+    McpDouble returningError(String text) {
+        result = text;
+        resultIsError = true;
+        return this;
+    }
+
+    McpDouble omittingSchemas() {
+        omitSchemas = true;
+        return this;
+    }
+
     McpDouble slowBy(long millis) {
         slowMillis = millis;
         return this;
@@ -123,6 +137,11 @@ final class McpDouble {
     /** The tools this server was asked to run, in order. Empty means it was never called. */
     List<String> calledTools() {
         return List.copyOf(calledTools);
+    }
+
+    /** Exact request documents for executed tool calls, excluding discovery exchanges. */
+    List<String> calledDocuments() {
+        return List.copyOf(calledDocuments);
     }
 
     /** The JSON-RPC methods it received, in order. */
@@ -190,9 +209,10 @@ final class McpDouble {
             case "tools/list" -> toolsList(effective == Mode.TOO_LARGE);
             case "tools/call" -> {
                 calledTools.add(between(document, "\"name\":\"", "\""));
+                calledDocuments.add(document);
                 yield effective == Mode.TOO_LARGE
-                        ? toolResult("x".repeat(3 * 1024 * 1024))
-                        : toolResult(result);
+                        ? toolResult("x".repeat(3 * 1024 * 1024), false)
+                        : toolResult(result, resultIsError);
             }
             default -> "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"no\"}}";
         };
@@ -234,14 +254,18 @@ final class McpDouble {
             }
             tools.append("{\"name\":\"").append(tool).append("\",\"description\":\"")
                     .append(oversized ? "d".repeat(3 * 1024 * 1024) : "What " + tool + " does.")
-                    .append("\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}");
+                    .append('"');
+            if (!omitSchemas) {
+                tools.append(",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}");
+            }
+            tools.append('}');
         }
         return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[" + tools + "]}}";
     }
 
-    private static String toolResult(String text) {
+    private static String toolResult(String text, boolean isError) {
         return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                + text + "\"}],\"isError\":false}}";
+                + text + "\"}],\"isError\":" + isError + "}}";
     }
 
     private static Answer json(String body) {

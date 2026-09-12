@@ -35,4 +35,20 @@ class EnvironmentStorageProfileResolverTest {
                 Base64.getEncoder().encodeToString(unknown.getBytes(StandardCharsets.UTF_8)))).resolve("assets").isEmpty());
         assertTrue(new EnvironmentStorageProfileResolver(Map.of(key, JSON)).resolve("assets").isEmpty());
     }
+
+    @Test void listAndVersionDeleteRequireExplicitExistingOperationAllowlistValues() {
+        String key = EnvironmentStorageProfileResolver.environmentVariableName("assets");
+        String expanded = JSON.replace("[\"get\",\"put\"]",
+                "[\"get\",\"put\",\"list\",\"delete\",\"delete_version\"]");
+        StorageProfile profile = new EnvironmentStorageProfileResolver(Map.of(key,
+                Base64.getEncoder().encodeToString(expanded.getBytes(StandardCharsets.UTF_8))))
+                .resolve("assets").orElseThrow();
+        assertEquals(java.util.Set.of(StorageProfile.Operation.GET, StorageProfile.Operation.PUT,
+                StorageProfile.Operation.LIST, StorageProfile.Operation.DELETE,
+                StorageProfile.Operation.DELETE_VERSION), profile.allowedOperations());
+
+        String orphanVersionDelete = JSON.replace("[\"get\",\"put\"]", "[\"delete_version\"]");
+        assertTrue(new EnvironmentStorageProfileResolver(Map.of(key, Base64.getEncoder().encodeToString(
+                orphanVersionDelete.getBytes(StandardCharsets.UTF_8)))).resolve("assets").isEmpty());
+    }
 }

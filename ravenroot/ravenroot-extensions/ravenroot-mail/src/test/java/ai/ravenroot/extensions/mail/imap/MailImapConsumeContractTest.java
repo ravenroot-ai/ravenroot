@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -71,17 +72,15 @@ class MailImapConsumeContractTest {
 
     @Test void deploymentScopedOpaqueCheckpointDestinationIsAcceptedAndPreserved() {
         var ingress = new ImapConsumerTestSupport.Ingress();
-        String sourceId = ImapMessageEvent.sourceId("consume", ImapConsumerTestSupport.PROFILE, "INBOX", 42);
-        ingress.checkpointOverride = java.util.concurrent.CompletableFuture.completedFuture(
-                new ai.ravenroot.api.persistence.JournalCursor(ImapConsumerTestSupport.TENANT,
-                        "stable-deployment/" + sourceId, 0));
+        ingress.destinationPrefix = "stable-deployment/";
         source = source(new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner()),
                 configuration(Map.of()), ignored -> secret());
 
         source.start(new ImapConsumerTestSupport.Context(ingress)).toCompletableFuture().join();
 
         assertEquals(ImapConsumerSource.State.READY, source.state());
-        assertEquals(0, ingress.checkpointOverride.join().deliveredThrough());
+        assertTrue(ingress.cursors.keySet().stream().allMatch(key -> key.startsWith("stable-deployment/")));
+        assertTrue(ingress.cursors.values().stream().anyMatch(cursor -> cursor.deliveredThrough() == 1));
     }
 
     @Test void graphMlRereadPreservesHiddenPreviewValueButMetadataModeNeverReadsIt() throws Exception {
@@ -151,6 +150,91 @@ class MailImapConsumeContractTest {
         ingress.releaseOffer();
         awaitAdvances(ingress, 1);
         assertEquals(java.util.List.of(7L), ingress.advances);
+    }
+
+    @Test void latestSnapshotIsDurableBeforeReadyAndSkipsOnlyInitialHistory() {
+        var owner = new ImapConsumerTestSupport.FakeOwner();
+        owner.highWaterUid = 5;
+        owner.deliver(5, ImapConsumerTestSupport.message("<old>", "history", "body"));
+        var ingress = new ImapConsumerTestSupport.Ingress();
+        ingress.bootstrapGate = new CompletableFuture<>();
+        source = source(new ImapConsumerTestSupport.FakeProtocol(owner),
+                configuration(Map.of("initialPosition", "latest")), ignored -> secret());
+        var context = new ImapConsumerTestSupport.Context(ingress);
+        var ready = source.start(context).toCompletableFuture();
+        assertEquals(6L, ImapConsumerTestSupport.await(ingress.baselineRequested));
+        assertFalse(ready.isDone());
+        assertEquals(0, context.healthy.get());
+        assertTrue(owner.requestedPositions.isEmpty());
+        ingress.bootstrapGate.complete(null);
+        ready.join();
+        owner.deliver(6, ImapConsumerTestSupport.message("<new>", "new", "body"));
+        awaitAdvances(ingress, 1);
+        assertEquals(java.util.List.of(6L), ingress.advances);
+        assertEquals("new", ingress.payloads.getFirst().get("subject"));
+        assertEquals(5L, owner.requestedPositions.getFirst());
+    }
+
+    @Test void emptyLatestBaselineAndStoppedArrivalSurviveRestartWithoutReapplyingLatest() {
+        var first = new ImapConsumerTestSupport.FakeOwner();
+        var second = new ImapConsumerTestSupport.FakeOwner();
+        second.highWaterUid = 1;
+        second.deliver(1, ImapConsumerTestSupport.message("<offline>", "offline", "body"));
+        var ingress = new ImapConsumerTestSupport.Ingress();
+        source = source(new ImapConsumerTestSupport.FakeProtocol(first, second),
+                configuration(Map.of("initialPosition", "latest")), ignored -> secret());
+        var context = new ImapConsumerTestSupport.Context(ingress);
+        source.start(context).toCompletableFuture().join();
+        source.stop().toCompletableFuture().join();
+        assertTrue(ingress.advances.isEmpty());
+        assertEquals(1L, ingress.baselineRequested.join());
+        source.start(context).toCompletableFuture().join();
+        awaitAdvances(ingress, 1);
+        assertEquals(java.util.List.of(1L), ingress.advances);
+        assertEquals(0L, second.requestedPositions.getFirst());
+    }
+
+    @Test void defaultEarliestReadsHistoryAndExactLegacyCursorWinsOverLatest() {
+        var owner = new ImapConsumerTestSupport.FakeOwner();
+        owner.highWaterUid = 7;
+        owner.deliver(7, ImapConsumerTestSupport.message("<history>", "history", "body"));
+        var ingress = new ImapConsumerTestSupport.Ingress();
+        source = source(new ImapConsumerTestSupport.FakeProtocol(owner), configuration(Map.of()), ignored -> secret());
+        source.start(new ImapConsumerTestSupport.Context(ingress)).toCompletableFuture().join();
+        awaitAdvances(ingress, 1);
+        assertEquals(0L, owner.requestedPositions.getFirst());
+        source.stop().toCompletableFuture().join();
+
+        var legacyIngress = new ImapConsumerTestSupport.Ingress();
+        String legacyId = ImapMessageEvent.sourceId("consume", ImapConsumerTestSupport.PROFILE, "INBOX", 42);
+        legacyIngress.cursors.put(legacyId, new ai.ravenroot.api.persistence.JournalCursor(
+                ImapConsumerTestSupport.TENANT, legacyId, 7));
+        var restarted = new ImapConsumerTestSupport.FakeOwner();
+        restarted.highWaterUid = 8;
+        restarted.deliver(8, ImapConsumerTestSupport.message("<offline>", "offline", "body"));
+        source = source(new ImapConsumerTestSupport.FakeProtocol(restarted),
+                configuration(Map.of("initialPosition", "latest")), ignored -> secret());
+        source.start(new ImapConsumerTestSupport.Context(legacyIngress)).toCompletableFuture().join();
+        awaitAdvances(legacyIngress, 1);
+        assertEquals(7L, restarted.requestedPositions.getFirst());
+        assertEquals(java.util.List.of(8L), legacyIngress.advances);
+    }
+
+    @Test void newPropertiesAreStrictAndUnsupportedStableOwnershipFailsBeforeSecrets() {
+        for (var properties : java.util.List.<Map<String, Object>>of(
+                Map.of("consumerId", " "), Map.of("consumerId", "a/b"),
+                Map.of("consumerId", "a".repeat(129)), Map.of("consumerId", "é"),
+                Map.of("initialPosition", "LATEST"), Map.of("initialPosition", ""),
+                Map.of("consumerId", "valid-id"))) {
+            var credentials = new AtomicInteger();
+            var protocol = new ImapConsumerTestSupport.FakeProtocol(new ImapConsumerTestSupport.FakeOwner());
+            source = source(protocol, configuration(properties), ignored -> { credentials.incrementAndGet(); return secret(); });
+            assertThrows(CompletionException.class, () -> source.start(new ImapConsumerTestSupport.Context(
+                    new ImapConsumerTestSupport.Ingress())).toCompletableFuture().join());
+            assertEquals(0, credentials.get());
+            assertEquals(0, protocol.openCalls.get());
+            source.stop().toCompletableFuture().join();
+        }
     }
 
     @Test void graphHeaderSelectionCanOnlyTightenOperatorAuthority() throws Exception {
@@ -244,7 +328,30 @@ class MailImapConsumeContractTest {
         assertEquals("poison", ingress.payloads.getFirst().get("kind"));
         assertEquals(Map.of("type", "projection", "reason", "message-size-invalid"),
                 ingress.payloads.getFirst().get("failure"));
+        assertEquals(11L, ImapConsumerTestSupport.await(ingress.checkpointCompleted));
         assertEquals(java.util.List.of(11L), ingress.advances);
+    }
+
+    @Test void durableReceiptAvailabilityIsDistinctFromCheckpointCompletion() {
+        var owner = new ImapConsumerTestSupport.FakeOwner();
+        var ingress = new ImapConsumerTestSupport.Ingress().gateCheckpoint();
+        source = source(new ImapConsumerTestSupport.FakeProtocol(owner), configuration(Map.of()), ignored -> secret());
+        source.start(new ImapConsumerTestSupport.Context(ingress)).toCompletableFuture().join();
+        owner.deliver(12, ImapConsumerTestSupport.message("<checkpoint-gate>", "hello", "body"));
+
+        try {
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class,
+                    ImapConsumerTestSupport.await(ingress.receiptAvailable));
+            assertEquals(12L, ImapConsumerTestSupport.await(ingress.checkpointAdvanceRequested));
+            assertFalse(ingress.checkpointCompleted.isDone(),
+                    "a durable receipt must not imply checkpoint completion");
+            assertTrue(ingress.advances.isEmpty(),
+                    "the fixture must expose premature checkpoint advancement");
+        } finally {
+            ingress.releaseCheckpoint();
+        }
+        assertEquals(12L, ImapConsumerTestSupport.await(ingress.checkpointCompleted));
+        assertEquals(java.util.List.of(12L), ingress.advances);
     }
 
     @Test void transientLazyProjectionFailureReconnectsAndNeverPoisonsOrAdvances() throws Exception {
@@ -437,25 +544,18 @@ class MailImapConsumeContractTest {
         assertTrue(context.degraded.contains("message-size-unavailable"));
     }
 
-    @Test void rolloverReconnectUsesCappedObservedBackoffAndStopInterruptsIt() {
-        var first = new ImapConsumerTestSupport.FakeOwner();
-        var second = new ImapConsumerTestSupport.FakeOwner("INBOX", 43);
-        var protocol = new ImapConsumerTestSupport.FakeProtocol(first, second);
-        var delays = new java.util.concurrent.CopyOnWriteArrayList<Integer>();
-        var scheduled = new java.util.concurrent.CountDownLatch(1);
-        source = new ImapConsumerSource(configuration(Map.of()), ignored -> secret(),
-                (tenant, id) -> Optional.of(ImapConsumerTestSupport.profile()),
-                (tenant, id) -> Optional.of(ImapConsumerTestSupport.policy()), protocol,
-                virtualExecutor(), Clock.systemUTC(), delay -> { delays.add(delay); scheduled.countDown(); },
-                () -> 0.5d);
-        source.start(new ImapConsumerTestSupport.Context(new ImapConsumerTestSupport.Ingress()))
-                .toCompletableFuture().join();
-        first.rollover(43);
-        ImapConsumerTestSupport.await(scheduled);
-        assertEquals(java.util.List.of(150), delays);
-        long started = System.nanoTime();
-        source.stop().toCompletableFuture().join();
-        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 500);
+    @Test void uidValidityChangeHaltsWithoutReconnectOrCheckpointReset() {
+        var owner = new ImapConsumerTestSupport.FakeOwner();
+        var ingress = new ImapConsumerTestSupport.Ingress();
+        var protocol = new ImapConsumerTestSupport.FakeProtocol(owner);
+        source = source(protocol, configuration(Map.of()), ignored -> secret());
+        var context = new ImapConsumerTestSupport.Context(ingress);
+        source.start(context).toCompletableFuture().join();
+        owner.rollover(43);
+        awaitState(ImapConsumerSource.State.FAILED);
+        assertTrue(context.degraded.contains("imap-uidvalidity-changed"));
+        assertEquals(1, protocol.openCalls.get());
+        assertTrue(ingress.advances.isEmpty());
     }
 
     @Test void rejectedExecutorStillStopsInATerminalState() {
@@ -524,36 +624,22 @@ class MailImapConsumeContractTest {
         source = second;
     }
 
-    @Test void uidValidityRolloverUsesFreshInjectiveNamespaceAndFencesOldGeneration() {
-        var first = new ImapConsumerTestSupport.FakeOwner("INBOX", 42);
+    @Test void uidValidityChangeAcrossRestartRefusesBeforeReady() {
+        var first = new ImapConsumerTestSupport.FakeOwner();
         var second = new ImapConsumerTestSupport.FakeOwner("INBOX", 43);
-        var ingress = new ImapConsumerTestSupport.Ingress(2);
-        var context = new ImapConsumerTestSupport.Context(ingress, 2);
-        var protocol = new ImapConsumerTestSupport.FakeProtocol(first, second);
-        source = source(protocol, configuration(Map.of()), ignored -> secret());
+        var ingress = new ImapConsumerTestSupport.Ingress();
+        source = source(new ImapConsumerTestSupport.FakeProtocol(first, second), configuration(Map.of()), ignored -> secret());
+        var context = new ImapConsumerTestSupport.Context(ingress);
         source.start(context).toCompletableFuture().join();
-        first.deliver(0xffff_ffffL, ImapConsumerTestSupport.message("<max>", "max", "body"));
-        awaitPayloads(ingress, 1);
-        first.rollover(43);
-        long reconnectDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-        while (second.pollEntered.getCount() != 0 && System.nanoTime() < reconnectDeadline) Thread.onSpinWait();
-        assertEquals(0, second.pollEntered.getCount(), "state=" + source.state() + " degraded="
-                + context.degraded + " opens=" + protocol.openCalls.get());
-        second.deliver(1, ImapConsumerTestSupport.message("<new>", "new", "body"));
-        awaitPayloads(ingress, 2);
-        assertNotEquals(ingress.sourceIds.get(0), ingress.sourceIds.get(1));
-        assertTrue(ingress.sourceIds.get(0).endsWith("/42"));
-        assertTrue(ingress.sourceIds.get(1).endsWith("/43"));
-        @SuppressWarnings("unchecked")
-        var before = (Map<String, Object>) ingress.payloads.get(0).get("checkpoint");
-        @SuppressWarnings("unchecked")
-        var after = (Map<String, Object>) ingress.payloads.get(1).get("checkpoint");
-        assertEquals(42L, before.get("uidValidity"));
-        assertEquals(0xffff_ffffL, before.get("candidateDeliveredThroughUid"));
-        assertEquals(43L, after.get("uidValidity"));
-        assertEquals(1L, after.get("candidateDeliveredThroughUid"));
-        awaitAdvances(ingress, 2);
-        assertArrayEquals(new Long[]{0xffff_ffffL, 1L}, ingress.advances.toArray(Long[]::new));
+        first.deliver(0xffff_ffffL, ImapConsumerTestSupport.message("<last>", "last", "body"));
+        awaitAdvances(ingress, 1);
+        assertEquals(java.util.List.of(0xffff_ffffL), ingress.advances);
+        assertTrue(ingress.cursors.values().stream().anyMatch(c -> c.deliveredThrough() == 0x1_0000_0000L));
+        source.stop().toCompletableFuture().join();
+        assertThrows(CompletionException.class, () -> source.start(context).toCompletableFuture().join());
+        assertTrue(context.degraded.contains("imap-uidvalidity-changed"));
+        assertEquals(1, context.healthy.get());
+        assertEquals(1, ingress.payloads.size());
     }
 
     @Test void hiddenInactivePreviewValueIsNeverReadAndUnknownPropertyFailsBeforeCredentialOrOpen() {

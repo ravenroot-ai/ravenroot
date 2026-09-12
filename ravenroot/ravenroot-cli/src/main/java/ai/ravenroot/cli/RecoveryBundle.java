@@ -73,6 +73,12 @@ final class RecoveryBundle {
     }
 
     static Path create(BackupRestoreConfiguration configuration, Path destination) throws Exception {
+        return create(configuration, destination, AuditCopyObserver.NONE);
+    }
+
+    static Path create(BackupRestoreConfiguration configuration, Path destination,
+                       AuditCopyObserver observer) throws Exception {
+        Objects.requireNonNull(observer, "observer");
         Path absolute = destination.toAbsolutePath().normalize();
         Path parent = requireParent(absolute);
         Files.createDirectories(parent);
@@ -84,7 +90,7 @@ final class RecoveryBundle {
             createPrivateDirectory(staging);
             Path audit = staging.resolve(AUDIT_DIRECTORY);
             createPrivateDirectory(audit);
-            copyAudit(configuration.auditDirectory(), audit);
+            copyAudit(configuration.auditDirectory(), audit, observer);
             Path store = staging.resolve(STORE_FILE);
             requireUsableSpace(staging, currentStoreSize(configuration.executionStoreLocation()));
             try (var executionStore = new SqliteExecutionStore(
@@ -440,6 +446,11 @@ final class RecoveryBundle {
     }
 
     static void copyAudit(Path source, Path destination) throws IOException {
+        copyAudit(source, destination, AuditCopyObserver.NONE);
+    }
+
+    static void copyAudit(Path source, Path destination, AuditCopyObserver observer) throws IOException {
+        Objects.requireNonNull(observer, "observer");
         if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) {
             forceDirectory(destination);
             return;
@@ -447,6 +458,8 @@ final class RecoveryBundle {
         requireDirectory(source);
         long total = 0;
         int count = 0;
+        var logs = new java.util.ArrayList<Path>();
+        var heads = new java.util.ArrayList<Path>();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(source)) {
             for (Path entry : entries) {
                 String name = entry.getFileName().toString();
@@ -457,10 +470,23 @@ final class RecoveryBundle {
                     throw new BundleException(Reason.RESOURCE_LIMIT);
                 }
                 requireRegularFile(entry);
-                FileEvidence evidence = copyBoundedLiveSource(entry, destination.resolve(name),
-                        MAX_AUDIT_FILE_BYTES, new MutableBytes(total));
-                total = boundedAdd(total, evidence.size, MAX_AUDIT_TOTAL_BYTES);
+                (name.endsWith(".audit.jsonl") ? logs : heads).add(entry);
             }
+        }
+        // FileAuditTrail publishes each record to its log before advancing its head watermark. A
+        // snapshot must therefore capture every watermark before its corresponding advancing log:
+        // a concurrent append may leave the copied head behind the copied log (a valid crash-safe
+        // prefix), but never ahead of it (which would falsely resemble a deleted tail).
+        for (Path entry : heads.stream().sorted().toList()) {
+            FileEvidence evidence = copyBoundedLiveSource(entry,
+                    destination.resolve(entry.getFileName()), MAX_AUDIT_FILE_BYTES, new MutableBytes(total));
+            total = boundedAdd(total, evidence.size, MAX_AUDIT_TOTAL_BYTES);
+        }
+        for (Path entry : logs.stream().sorted().toList()) {
+            FileEvidence evidence = copyBoundedLiveSource(entry,
+                    destination.resolve(entry.getFileName()), MAX_AUDIT_FILE_BYTES, new MutableBytes(total));
+            total = boundedAdd(total, evidence.size, MAX_AUDIT_TOTAL_BYTES);
+            observer.afterLogCopied(entry.getFileName().toString());
         }
         forceDirectory(destination);
     }
@@ -882,6 +908,13 @@ final class RecoveryBundle {
         SnapshotObserver NONE = () -> { };
 
         void afterManifestCopied() throws IOException;
+    }
+
+    @FunctionalInterface
+    interface AuditCopyObserver {
+        AuditCopyObserver NONE = ignored -> { };
+
+        void afterLogCopied(String fileName) throws IOException;
     }
 
     private record FileEvidence(long size, String sha256) {

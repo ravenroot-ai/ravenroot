@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.mail;
 
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.util.Locale;
 import java.util.Map;
@@ -111,13 +112,17 @@ public final class EnvironmentMailProfileResolver implements MailProfileResolver
     enum Rejection {
         FIELD_COUNT, PORT_FORMAT, CONCURRENCY_FORMAT, HOST_BLANK, UNKNOWN_SECURITY_MODE, PORT_RANGE,
         CONCURRENCY_RANGE, CREDENTIAL_PAIRING, DUPLICATE_LIST_ENTRY, ALLOWED_FROM_EMPTY,
-        ALLOWED_RECIPIENTS_EMPTY, DEFAULT_FROM_NOT_ALLOWED, RECORD_POLICY
+        ALLOWED_RECIPIENTS_EMPTY, DEFAULT_FROM_NOT_ALLOWED, RESERVED_DESTINATION, RECORD_POLICY
     }
     private static final Set<String> SECURITY_MODES = Set.of("SMTPS", "STARTTLS", "SMTP");
     private static final System.Logger LOGGER = System.getLogger("ai.ravenroot.mail.profile.rejected");
     private final Map<String, String> environment;
+    private final ReservedNetworkPolicy destinationPolicy;
     public EnvironmentMailProfileResolver() { this(System.getenv()); }
-    EnvironmentMailProfileResolver(Map<String, String> environment) { this.environment = Map.copyOf(environment); }
+    EnvironmentMailProfileResolver(Map<String, String> environment) {
+        this.environment = Map.copyOf(environment);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
+    }
     @Override public Optional<MailProfile> resolve(String tenant, String profile) {
         if (!safeId(tenant) || !safeId(profile)) return Optional.empty();
         final String key;
@@ -128,6 +133,8 @@ public final class EnvironmentMailProfileResolver implements MailProfileResolver
         String[] p = raw.split(";", -1);
         if (p.length != 10 && p.length != 11) return rejected(tenant, profile, Rejection.FIELD_COUNT);
         if (p[0].isBlank()) return rejected(tenant, profile, Rejection.HOST_BLANK);
+        try { destinationPolicy.requireAllowedLiteral(p[0]); }
+        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         if (!SECURITY_MODES.contains(p[2].toUpperCase(Locale.ROOT))) return rejected(tenant, profile, Rejection.UNKNOWN_SECURITY_MODE);
         int port;
         try { port = Integer.parseInt(p[1]); }

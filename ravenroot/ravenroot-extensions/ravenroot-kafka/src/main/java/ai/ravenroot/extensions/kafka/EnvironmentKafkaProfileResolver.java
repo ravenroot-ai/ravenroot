@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.kafka;
 
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.util.List;
 import java.util.Map;
@@ -9,8 +10,12 @@ import java.util.Set;
 
 public final class EnvironmentKafkaProfileResolver implements KafkaProfileResolver {
     private final Map<String, String> environment;
+    private final ReservedNetworkPolicy destinationPolicy;
     public EnvironmentKafkaProfileResolver() { this(System.getenv()); }
-    EnvironmentKafkaProfileResolver(Map<String, String> environment) { this.environment = Map.copyOf(environment); }
+    EnvironmentKafkaProfileResolver(Map<String, String> environment) {
+        this.environment = Map.copyOf(environment);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
+    }
     @Override public Optional<KafkaProfile> resolve(String tenant, String profile) {
         if (!safe(tenant) || !safe(profile)) return Optional.empty();
         final String key;
@@ -21,6 +26,7 @@ public final class EnvironmentKafkaProfileResolver implements KafkaProfileResolv
         String[] p = raw.split(";", -1);
         if (p.length != 24) return Optional.empty();
         try {
+            requireDestinations(p[0], destinationPolicy);
             return Optional.of(new KafkaProfile(tenant, profile, List.of(p[0].split(",", -1)), p[1], bool(p[2]),
                     p[3], p[4], p[5], p[6], p[7], csv(p[8]), csv(p[9]), bool(p[10]), integer(p[11]), bool(p[12]),
                     p[13], p[14], bool(p[15]), integer(p[16]), integer(p[17]), bool(p[18]), integer(p[19]),
@@ -47,4 +53,17 @@ public final class EnvironmentKafkaProfileResolver implements KafkaProfileResolv
         throw new IllegalArgumentException("invalid boolean");
     }
     private static Set<String> csv(String value) { return value.isEmpty() ? Set.of() : Set.of(value.split(",", -1)); }
+    static void requireDestinations(String bootstrapServers, ReservedNetworkPolicy policy) {
+        for (String authority : bootstrapServers.split(",", -1))
+            policy.requireAllowedLiteral(host(authority));
+    }
+    private static String host(String authority) {
+        String value = authority.trim();
+        if (value.startsWith("[")) {
+            int close = value.indexOf(']');
+            return close < 0 ? value : value.substring(0, close + 1);
+        }
+        int first = value.indexOf(':');
+        return first < 0 || first != value.lastIndexOf(':') ? value : value.substring(0, first);
+    }
 }

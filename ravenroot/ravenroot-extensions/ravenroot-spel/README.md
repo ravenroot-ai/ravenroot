@@ -37,3 +37,30 @@ Build and validate the private bundle:
 
 Spring Expression and its runtime dependencies remain inside that bundle. See
 [`DEPENDENCIES.md`](DEPENDENCIES.md) for the pinned inventory, licenses, and source-artifact hashes.
+
+## Exact node fields and examples
+
+`spel.transform` requires only `expression`; its bounded result replaces the payload, attributes pass
+through, and it emits `continue`. `spel.decision` requires `expression`, optionally accepts
+`trueOutcome` (default `true`) and `falseOutcome` (default `false`), preserves the payload and
+attributes, and selects one of those outcomes. No profile, credential, service grant, egress,
+network, filesystem, retry, or side-effect field applies to either node. Both are deterministic for
+the same canonical input and expression.
+
+```xml
+<node id="choose">
+  <data key="kind">BEHAVIOR</data>
+  <data key="behavior">spel.decision</data>
+  <data key="expression">customer.name == 'Ada'</data>
+  <data key="trueOutcome">continue</data>
+  <data key="falseOutcome">other</data>
+</node>
+```
+
+Run with `{"customer":{"name":"Ada"}}`; the unchanged payload follows `continue`. A transform
+using `<data key="expression">customer.name</data>` returns `Ada` on `continue`. Test mode bypasses
+evaluation. Failures are `SPEL_EXPRESSION_MISSING`, `SPEL_EXPRESSION_TOO_LONG`,
+`SPEL_EXPRESSION_INVALID`, `SPEL_AST_UNSUPPORTED`, `SPEL_AST_LIMIT_EXCEEDED`,
+`SPEL_FORBIDDEN_PROPERTY`, `SPEL_INPUT_REJECTED`, `SPEL_RESULT_REJECTED`,
+`SPEL_DECISION_NOT_BOOLEAN`, `SPEL_CAPACITY_UNAVAILABLE`, `SPEL_DEADLINE_EXCEEDED`, and
+`SPEL_EVALUATION_FAILED`; no partial result or alternative outcome is emitted.

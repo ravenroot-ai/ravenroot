@@ -21,6 +21,7 @@ import { retireExecutionOutcomeClaim } from './execution-reconciliation.js';
 
 // A submission that has been sent but whose execution id has not come back yet.
 export const PENDING_EXECUTION = 'pending';
+export const DOCUMENT_MODES = Object.freeze({ DRAFT: 'draft', TEST: 'test', DEPLOYED: 'deployed' });
 
 // ── The definition of "the active document" ──────────────────────────────────────────────────────
 //
@@ -39,14 +40,21 @@ export const PENDING_EXECUTION = 'pending';
 
 export function createDocumentRecord({
   id,
+  documentId = id,
   incarnation = createDocumentIncarnation(),
   name = 'untitled.graphml',
   displayName = name,
   graph = null,
   history = null,
+  tenantId = null,
+  mode = DOCUMENT_MODES.DRAFT,
+  provenance = null,
 }) {
+  const durableId = String(documentId || createDocumentIncarnation());
+  if (!Object.values(DOCUMENT_MODES).includes(mode)) throw new TypeError(`Unknown document mode: ${mode}`);
   return {
-    id: String(id),
+    id: durableId,
+    documentId: durableId,
     // Opaque identity of this exact open document incarnation. Filename, tab id and graph version
     // are all reusable; this value rotates whenever content replaces the record.
     incarnation: String(incarnation),
@@ -56,8 +64,20 @@ export function createDocumentRecord({
     displayName,
     graph,
     history,
+    tenantId,
+    mode,
+    provenance: {
+      originMode: provenance?.originMode || mode,
+      sourceDocumentId: provenance?.sourceDocumentId || null,
+      sourceGraphVersion: provenance?.sourceGraphVersion || null,
+      deploymentId: provenance?.deploymentId || null,
+    },
     // Owned by app.js, one per document. Held here so the record is the single home of the state.
     cy: null,
+    visualGroupState: {},
+    visualGroupPresentationDirty: false,
+    canvasState: null,
+    visualGroupsRenderer: null,
     // The pane is built BEFORE the canvas and the canvas is created inside it, because moving a
     // `.doc-canvas` after the fact stops its Cytoscape instance painting for good (UI-03). Both are
     // held here so a document carries its own DOM rather than the layout
@@ -112,6 +132,9 @@ export function createDocumentRecord({
       // this value is present in both the submission response and every live/durable event.
       processInstanceId: null,
       graphVersion: null,
+      // Authoritative GET /v1/executions/{id} projection. This is deliberately separate from
+      // reconciliationState: transport uncertainty is not evidence that a traversal changed state.
+      paused: false,
       finished: new Set(),
       events: [],
       // Transport could not prove whether the bound execution is still active. This remains
@@ -137,6 +160,14 @@ export function createDocumentRecord({
     // from `execution`: starting it creates no traversal, and later inbound events have their own ids.
     sourceSession: {
       sessionId: null,
+      // The long-lived deployment this session's traversals run under, as the server reports it.
+      // This is what runtime events are attributed by while the session listens: the session emits
+      // executions without limit and their ids are never known here, so `execution.executionId`
+      // -- the only binding the editor had -- can never match one of them.
+      deploymentId: null,
+      // Set when the runtime answers a source session without a deployment identity. The view then
+      // has nothing to attribute events by, and says so once rather than staying quietly blank.
+      deploymentUnreported: false,
       state: '',
       sourceCount: 0,
       diagnostic: '',
@@ -148,7 +179,44 @@ export function createDocumentRecord({
       stopRequested: false,
       observationUnavailable: false,
     },
+    humanTasks: {
+      deploymentId: null,
+      graphVersion: null,
+      projection: null,
+      attentionSignature: '',
+      pageSignature: '',
+    },
   };
+}
+
+export function documentIsEditable(document_) {
+  return document_?.mode === DOCUMENT_MODES.DRAFT && document_?.graph?.format !== 'graphify';
+}
+
+export function forkDocumentRecord(source, { documentId = createDocumentIncarnation(), tenantId = source?.tenantId,
+  graph = null, history = null, name = source?.name } = {}) {
+  if (!source) throw new TypeError('A source document is required');
+  const forkGraph = graph || structuredClone(source.graph);
+  if (forkGraph?.nodes) forkGraph.nodeMap = Object.fromEntries(forkGraph.nodes.map(node => [node.id, node]));
+  const fork = createDocumentRecord({
+    id: documentId, documentId, tenantId, graph: forkGraph, history, name,
+    displayName: `${source.displayName || source.name || 'workflow'} — fork`,
+    mode: DOCUMENT_MODES.DRAFT,
+    provenance: {
+      originMode: source.mode,
+      sourceDocumentId: source.documentId,
+      sourceGraphVersion: source.provenance?.sourceGraphVersion || null,
+      deploymentId: null,
+    },
+  });
+  fork.visualGroupState = structuredClone(source.visualGroupState || {});
+  fork.visualGroupPresentationDirty = Boolean(source.visualGroupPresentationDirty);
+  fork.canvasState = source.canvasState ? structuredClone(source.canvasState) : null;
+  fork.renderMode = source.renderMode;
+  fork.layoutMode = source.layoutMode;
+  fork.visualStyle = source.visualStyle;
+  fork.fontSize = source.fontSize;
+  return fork;
 }
 
 export function createDocumentIncarnation() {
@@ -208,6 +276,17 @@ export function createWorkspace() {
       activeId = neighbour ? neighbour.id : null;
       return removed;
     },
+
+    // Removes one captured set without exposing intermediate activation changes to a renderer.
+    // Callers perform their owner-specific teardown first, then project `workspace.active` once.
+    closeMany(ids) {
+      const removed = [];
+      for (const id of ids) {
+        const document_ = workspace.close(id);
+        if (document_) removed.push(document_);
+      }
+      return removed;
+    },
   };
 
   return workspace;
@@ -220,7 +299,14 @@ export function createWorkspace() {
 // belongs to no open document is dropped rather than painted on whichever graph happens to be in
 // front of the user.
 //
-// Binding is keyed on `executionId` (== traversalId) alone. A traversal that resumes an existing
+// Binding is keyed on `executionId` (== traversalId) FOR A SUBMITTED RUN, and on `deploymentId` for
+// a document watching a long-lived source session. The second rule is not a convenience: a source
+// admits an unbounded series of traversals whose ids the document is never told, so the execution
+// rule alone could only ever drop them, and did -- a listening graph painted nothing, ever, however
+// much traffic it handled. The deployment is the identity that outlives the traversals and the one
+// the session's own status now names, so it is the only thing a document can hold in advance.
+//
+// A traversal that resumes an existing
 // process after a wait gets a NEW traversalId while keeping the same processInstanceId, introducing
 // a second value for the identifier used here. Such an
 // event will not match any `binding.executionId` here and will be silently dropped, even though the
@@ -255,6 +341,22 @@ export function documentForRuntimeEvent(workspace, event) {
   });
   if (bound) return bound;
 
+  // Rule two: the document watching the deployment this event belongs to. Checked AFTER the
+  // execution rule so Test and Run keep the binding they were given, and before the pending
+  // fallback so a document that has merely submitted cannot adopt a source's traffic. The
+  // deployment id is per session and per tenant, so it identifies exactly one open document.
+  const deploymentId = typeof event?.deploymentId === 'string' && event.deploymentId
+    ? event.deploymentId : null;
+  if (deploymentId) {
+    // Deliberately not fenced on graphVersion. For a run, the version proves the event belongs to
+    // the snapshot the document submitted; for a session, the deployment id already does, and it
+    // keeps proving it after the author edits the document the session is not running.
+    const listening = workspace.documents.find(
+      doc => doc.sourceSession?.deploymentId === deploymentId,
+    );
+    if (listening) return listening;
+  }
+
   // The pending fallback is a guess, and a guess must not outrank a fact. When an open document
   // holds this execution id, the event belongs to that run — it reached here only because its
   // version is stale — and a document that has merely submitted must not adopt another document's
@@ -275,7 +377,8 @@ export function documentForRuntimeEvent(workspace, event) {
 // the one the user is most likely to have forgotten. The caller writes the working view back into
 // the active record first, so that "dirty" here means every document's own history.
 export function hasUnsavedWork(workspace) {
-  return workspace.documents.some(document_ => Boolean(document_.history?.isDirty()));
+  return workspace.documents.some(document_ => Boolean(document_.history?.isDirty())
+    || (documentIsEditable(document_) && document_.visualGroupPresentationDirty));
 }
 
 export function bindExecution(document, executionId, graphVersion = null, reconciliationClient = null,
@@ -289,6 +392,7 @@ export function bindExecution(document, executionId, graphVersion = null, reconc
   document.execution.executionId = executionId;
   document.execution.processInstanceId = processInstanceId;
   document.execution.graphVersion = graphVersion;
+  document.execution.paused = false;
   document.execution.reconciliationState = 'known';
   document.execution.reconciliationClient = reconciliationClient;
   if (executionId && executionId !== PENDING_EXECUTION) {
@@ -309,6 +413,7 @@ export function detachExecution(document) {
   document.execution.executionId = null;
   document.execution.processInstanceId = null;
   document.execution.graphVersion = null;
+  document.execution.paused = false;
   document.execution.finished.clear();
   document.execution.reconciliationState = 'known';
   document.execution.reconciliationClient = null;

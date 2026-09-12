@@ -81,6 +81,10 @@ test('fine-pointer hover exposes a stable semantic minibar and trace uses the ex
       { action: 'trace', hidden: false, label: 'Trace full path from Start', tooltip: 'Trace full path from Start' },
       { action: 'delete', hidden: false, label: 'Delete Start', tooltip: 'Delete Start' },
       { action: 'duplicate', hidden: true, label: 'Duplicate Start', tooltip: 'Duplicate Start' },
+      // Visual groups put their two direct actions in the minibar too (docs/user-guide/
+      // workspace-authoring.md). Neither applies to a lone ungrouped node, so both stay hidden.
+      { action: 'group', hidden: true, label: 'Group selection', tooltip: 'Group selection' },
+      { action: 'toggleGroup', hidden: true, label: 'Collapse group', tooltip: 'Collapse group' },
       { action: 'more', hidden: false, label: 'More node actions', tooltip: 'More node actions' },
     ],
   });
@@ -121,6 +125,7 @@ test('duplicate is one canonical history step and overlay/context menu share the
   const duplicate = page.getByRole('button', { name: 'Duplicate Do something' });
   await expect(duplicate).toBeVisible();
   const before = await graphState(page);
+  const livePosition = await page.evaluate(() => window.cy.getElementById('dosomething').position());
   const sourcePosition = await page.evaluate(() => {
     const source = window.ravenroot.activeDocument().graph.nodeMap.dosomething;
     return { x: source.ox, y: source.oy };
@@ -136,11 +141,15 @@ test('duplicate is one canonical history step and overlay/context menu share the
     .toEqual({ x: sourcePosition.x + 32, y: sourcePosition.y + 32 });
   await page.locator('#btn-undo').click();
   await expect.poll(() => graphState(page)).toEqual(before);
+  expect(await page.evaluate(() => window.cy.getElementById('dosomething').position()))
+    .toEqual(livePosition);
   await page.locator('#btn-redo').click();
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: ['dosomething', 'dosomething-copy-1', 'end', 'error', 'start'],
     edges: before.edges,
   });
+  expect(await page.evaluate(() => window.cy.getElementById('dosomething').position()))
+    .toEqual(livePosition);
 
   await page.evaluate(() => { window.cy.$(':selected').unselect(); });
   await page.mouse.click(worker.x, worker.y, { button: 'right' });
@@ -661,7 +670,13 @@ test.describe('coarse pointer node actions', () => {
     await page.keyboard.press('Enter');
     const menu = page.getByRole('menu');
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveCount(3);
+    // The More menu lists the node actions followed by the visual-group actions
+    // (docs/user-guide/workspace-authoring.md); for a lone ungrouped node only the three node
+    // actions are operable. Every entry, disabled or not, must still meet the coarse target size.
+    await expect(items).toHaveCount(8);
+    expect(await items.evaluateAll(elements => elements.map(element => element.dataset.nodeAction))).toEqual(
+      ['trace', 'duplicate', 'delete', 'group', 'toggleGroup', 'renameGroup', 'replaceGroup', 'ungroup']);
+    await expect(menu.getByRole('menuitem', { disabled: false })).toHaveCount(3);
     const boxes = await items.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()));
     for (const box of boxes) expect(box.height).toBeGreaterThanOrEqual(50.5);
     for (let index = 1; index < boxes.length; index += 1) {

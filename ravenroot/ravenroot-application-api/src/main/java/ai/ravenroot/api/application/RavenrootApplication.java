@@ -17,6 +17,14 @@ import java.util.function.Consumer;
 
 /** Use cases shared by HTTP, CLI and future UI adapters. */
 public interface RavenrootApplication extends AutoCloseable {
+    /**
+     * Effective operator-owned limits used by every program-authoring boundary.
+     *
+     * @return the limits shared by program source and build admission
+     */
+    default ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
+        return ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
+    }
 /**
  * Reports whether the application can accept work and its current lifecycle state.
  * @return an immutable application status snapshot
@@ -506,6 +514,132 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Whether this traversal is held, asked with a tenant so a hold that outlived the process that
+     * took it can be answered from durable state.
+     *
+     * <p>{@link #executionPaused(UUID)} can only answer for holds this process is keeping, because a
+     * traversal id alone does not identify a tenant and a durable read has to be tenant-scoped or it
+     * is a cross-tenant existence oracle. That is exactly the question a restart makes impossible to
+     * answer: the traversal was held by a process that no longer exists, so no process-local
+     * bookkeeping has it. This overload is how a deployment that persists holds reports one anyway,
+     * and every implementation that does not simply answers what the process knows.</p>
+     *
+     * <p>The default therefore delegates and loses nothing: an implementation with no durable holds
+     * has exactly one answer to give and gives it under either signature.</p>
+     *
+     * @param tenantId authenticated tenant boundary; a traversal of another tenant is not held here.
+     * @param traversalId the traversal to ask about.
+     * @return whether the traversal is currently held.
+     */
+    default boolean executionPaused(String tenantId, UUID traversalId) {
+        return executionPaused(traversalId);
+    }
+
+    /**
+     * Releases a hold, asked with a tenant so a hold that outlived its process can be released.
+     *
+     * <p>The counterpart of {@link #executionPaused(String, UUID)} and additive for the same reason.
+     * A deployment that persists holds continues the traversal from the boundary its hold committed;
+     * one that does not answers exactly as {@link #resumeTraversal(UUID)} does.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param traversalId the traversal to release.
+     * @return whether a hold was found and released.
+     */
+    default boolean resumeTraversal(String tenantId, UUID traversalId) {
+        return resumeTraversal(traversalId);
+    }
+
+    /**
+     * Cancels a traversal, asked with a tenant so a durably held one can be cancelled.
+     *
+     * <p>Additive for the reason the two above are. A held traversal that no process is running is
+     * still cancellable, and that is the difference between a hold an operator can decide about and
+     * one that has stranded work.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param traversalId the traversal to cancel.
+     * @return whether the traversal was found and cancelled.
+     */
+    default boolean cancelTraversal(String tenantId, UUID traversalId) {
+        return cancelTraversal(traversalId);
+    }
+
+    /**
+     * Ends this tenant's executions that can no longer reach any outcome, and releases what they
+     * were holding.
+     *
+     * <p>An execution becomes unreachable when the last thing capable of settling it disappears —
+     * most often a call that never answered — leaving a branch parked at a join with no node
+     * running, no deadline armed and no arrival that can ever come. Such an execution is not
+     * cancellable in the ordinary sense: a cooperative stop refuses the next hop, and there is no
+     * next hop. It stays live, stays listed, and holds its admission capacity for the life of the
+     * process, so a graph that strands one branch per run drains a tenant's capacity one execution
+     * at a time. This is the operation that ends them.</p>
+     *
+     * <p>A reconciled execution becomes readable through the ordinary result surface with
+     * {@link ExecutionTerminationReason#UNREACHABLE} beside its {@code FAILED} status, which
+     * {@link ExecutionOutcome#unreachable()} reports. That is a fault and is meant to be counted as
+     * one; what the reason adds is that no node broke, so an operator looks for what stopped
+     * delivering rather than for a failing behaviour.</p>
+     *
+     * <p><b>Caller-invoked, never a background sweep.</b> The condition is established by positive
+     * evidence rather than by a deadline, and a sweep would need a period — an elapsed-time guess
+     * over exactly the condition that must not be guessed at. An operator or a supervisor decides
+     * when to ask.</p>
+     *
+     * <p>Idempotent and safe to race against a cancellation, a shutdown or a late completion: an
+     * execution is ended once and reports one reason however many endings arrive together, and an
+     * execution that settled on its own is simply not found. Effects issued before the execution
+     * became unreachable are not undone and cannot be.</p>
+     *
+     * <p>Default empty for implementations that do not track active executions at all — an honest
+     * "nothing here was unreachable", never a false claim of effect, matching
+     * {@link #cancelTraversal(UUID)}'s own default. The engine-backed production implementation
+     * overrides this with the real mechanism.</p>
+     *
+     * @param tenantId authenticated tenant boundary; another tenant's execution is never reconciled
+     *                 here.
+     * @return the traversals this call reconciled, empty when none was unreachable. It names the
+     *         executions this call acted on rather than asserting that this call is what ended each
+     *         of them: a concurrent cancellation or shutdown may have ended one in the same instant,
+     *         and claiming otherwise would be a race dressed up as a return value. What the caller
+     *         may rely on is that every execution named here is ended.
+     */
+    default java.util.Set<UUID> reconcileUnreachableExecutions(String tenantId) {
+        return java.util.Set.of();
+    }
+
+    /**
+ * Whether a hold is currently in place on the traversal identified by {@code traversalId}.
+ *
+ * <p>The read counterpart of {@link #pauseTraversal}, and the authority behind the {@code paused}
+ * qualifier on both read surfaces — {@link LiveExecution#paused()} and
+ * {@link ExecutionOutcome#paused()}. It reads the same bookkeeping {@code pauseTraversal} mutates,
+ * so a listing that says a traversal is holding and a pause command that answers
+ * {@code ALREADY_PAUSED} are one fact rather than two projections that can disagree.</p>
+ *
+ * <h4>Why the outcome vocabulary needs this and could not be derived without it</h4>
+ * <p>{@link #pauseTraversal} answers a boolean, so "already holding" and "nothing here to hold"
+ * arrive identically. They used to be separated by asking whether the traversal was still listed
+ * live, which is a sound inference only while {@code false} can mean nothing except "a hold is
+ * already in place" — and it cannot. A traversal that has been asked to stop, and one that has
+ * begun to end, both answer {@code false} while still being listed, and both were therefore
+ * reported as already paused with nothing holding them. This method answers the question directly,
+ * so each outcome is read from the state it names.</p>
+ *
+ * <p>Default {@code false} for implementations that track no active executions, matching
+ * {@link #pauseTraversal}'s own default: never a claim that something is being held.</p>
+ *
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @return {@code true} while this implementation is holding that traversal, {@code false} when it
+ * is running normally, has ended, or was never active here
+ */
+    default boolean executionPaused(UUID traversalId) {
+        return false;
+    }
+
+    /**
  * ADR 0012's engine-wide drain, exposed as an operator command: refuses further
  * execution starts and stops every running node cooperatively, then waits up to {@code bound} for
  * every node to terminate. The underlying runtime is left up either way -- this is drain, not
@@ -541,12 +675,134 @@ public interface RavenrootApplication extends AutoCloseable {
  *
  * <p>The default returns an empty list, for implementations that track no active executions at
  * all — consistent with {@link #cancelTraversal}'s own default.
+ *
+ * <p><strong>Relationship to {@link #processInventory}:</strong> this method remains the
+ * process-local live view and is not superseded by the durable inventory. See
+ * {@link #processInventoryAvailable()} for the full distinction; in short, this answers "what is
+ * this process running right now" and forgets everything on restart, while the durable inventory
+ * answers "what does the durable record say exists" and survives one. Prefer the durable inventory
+ * as the authoritative source for API, CLI, UI, audit and recovery callers.
  * @param tenantId tenant whose visible active executions are requested
  * @return current live executions visible to the supplied tenant scope
  */
     default List<LiveExecution> liveExecutions(String tenantId) {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         return List.of();
+    }
+
+    /**
+     * Whether the durable, tenant-scoped process and traversal inventory is available:
+     * an {@code ExecutionStore} is composed and declares
+     * {@code StoreCapability.PROCESS_INVENTORY}.
+     *
+     * <h4>How this relates to {@link #liveExecutions}</h4>
+     * <p>{@link #liveExecutions} answers a different question than this inventory does, and neither
+     * supersedes the other. {@link #liveExecutions} is the <strong>process-local live view</strong>:
+     * traversals this one process currently has runners for, read from an in-memory map that forgets
+     * everything on restart and knows nothing this process itself did not accept. This inventory is
+     * the <strong>durable, authoritative view</strong>: what the store's own persisted record says
+     * exists for a tenant, read fresh on every call rather than cached, and it survives a restart —
+     * an instance this process never touched, recorded by another process before a crash, is visible
+     * here and invisible to {@link #liveExecutions}. An operator chasing a traversal that looks
+     * stuck <em>right now</em> wants {@link #liveExecutions}; an API, CLI, UI, audit or recovery
+     * caller establishing what durably exists — including after a restart — wants this inventory.
+     * {@link #liveExecutions} is not deleted, redefined, or demoted by this method's addition; the
+     * two are complementary answers to different questions, not competing answers to the same one.</p>
+     * @return whether {@link #processInventory}, {@link #processInstance} and
+     * {@link #processInstanceTraversals} are backed by a real durable store rather than refusing outright
+     */
+    default boolean processInventoryAvailable() {
+        return false;
+    }
+
+    /**
+     * The largest page {@link #processInventory} will return in one call, delegating to
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#maxInventoryPageSize()} — published rather
+     * than left for a caller to discover by bisection, which is exactly the failure
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#maxInventoryPageSize()}'s own Javadoc argues
+     * against for the store itself. This bound is adapter- and deployment-configurable (both shipped
+     * adapters default it to the same value, but an operator may change it), so it is stated here as
+     * a fact this implementation reads back from its composed store rather than a literal anyone could
+     * cite as universal.
+     * @return the maximum page size the composed store accepts, or zero when
+     * {@link #processInventoryAvailable()} is {@code false}
+     */
+    default int processInventoryMaxPageSize() {
+        return 0;
+    }
+
+    /**
+     * Lists one page of {@code tenantId}'s durable process instances, delegating
+     * directly to {@link ai.ravenroot.api.persistence.ExecutionStore#listProcessInstances}.
+     *
+     * <p><strong>{@code tenantId} is mechanism, not policy</strong>, exactly as it is on
+     * {@link #liveExecutions}, {@link #executionResult} and {@link #durableEventsAfter}: this is the
+     * delegate layer, tenant-oblivious by design, and the caller supplying the id is answerable for
+     * where it came from. {@link AuthorizedRavenrootApplication#processInventory} is the only
+     * signature reachable from an external adapter, and it resolves the tenant from an authenticated
+     * {@code RequestContext} and from nothing else.</p>
+     * @throws IllegalStateException if {@link #processInventoryAvailable()} is {@code false}
+     * @param tenantId tenant whose durable process inventory page is requested
+     * @param query the page to return: filters, cursor and limit
+     * @return one deterministic page of the tenant's durable process instances
+     */
+    default ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
+            String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(query, "query");
+        throw new IllegalStateException("durable process inventory unavailable");
+    }
+
+    /**
+     * Reads one instance's durable inventory row directly, delegating to
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#findProcessInstance}.
+     *
+     * <p>Empty for an instance that does not exist and for one belonging to another tenant alike —
+     * indistinguishable by design, the same rule {@link #executionResult} follows for the identical
+     * reason: a distinguishable denial would make this delegate a cross-tenant existence oracle.
+     * {@code tenantId} is mechanism, not policy, exactly as on {@link #processInventory}.</p>
+     * @throws IllegalStateException if {@link #processInventoryAvailable()} is {@code false}
+     * @param tenantId tenant whose instance is requested
+     * @param processInstanceId the durable process instance to read
+     * @return the instance's inventory row, or empty when absent or not visible to this tenant
+     */
+    default java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> processInstance(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable process inventory unavailable");
+    }
+
+    /**
+     * Lists one instance's traversals from the durable inventory, delegating to
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#listTraversals}.
+     *
+     * <p>Fails the way the store does when the instance is absent or belongs to another tenant —
+     * indistinguishable, exactly as {@link #processInstance} is. {@code tenantId} is mechanism, not
+     * policy, exactly as on {@link #processInventory}.</p>
+     * @throws IllegalStateException if {@link #processInventoryAvailable()} is {@code false}
+     * @param tenantId tenant whose instance's traversals are requested
+     * @param processInstanceId the durable process instance whose traversals are listed
+     * @return the instance's traversals, in insertion order
+     */
+    default List<ai.ravenroot.api.persistence.TraversalInventoryEntry> processInstanceTraversals(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        throw new IllegalStateException("durable process inventory unavailable");
+    }
+
+    /**
+     * The per-tenant inventory retention floor, delegating to
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#inventoryRetainedFrom}. {@link java.time.Instant#MIN}
+     * for an implementation with no durable inventory at all, which is the honest answer: nothing has
+     * ever been purged because nothing durable exists to purge.
+     * @param tenantId tenant whose inventory retention floor is requested
+     * @return the earliest instant from which this tenant's terminal inventory is complete
+     */
+    default java.time.Instant processInventoryRetainedFrom(String tenantId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        return java.time.Instant.MIN;
     }
 
 /**

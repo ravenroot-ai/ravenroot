@@ -1,0 +1,87 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: "/ravenroot/ravenroot-extensions/ravenroot-ocr/container"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+
+  - package-ecosystem: maven
+    directory: "/ravenroot"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+      - java
+
+  - package-ecosystem: maven
+    directory: "/ravenroot-adapter-anthropic"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+      - java
+
+  - package-ecosystem: maven
+    directory: "/ravenroot-adapter-openai-compatible"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+      - java
+
+  - package-ecosystem: maven
+    directory: "/ravenroot-dev-harness"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+      - java
+
+  - package-ecosystem: maven
+    directory: "/ravenroot-sample"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+      - java
+
+  - package-ecosystem: npm
+    directory: "/ravenroot/ravenroot-ui"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies
+
+  - package-ecosystem: npm
+    directory: "/scripts/mermaid-renderer"
+    schedule:
+      interval: weekly
+    target-branch: dev
+    labels:
+      - dependencies

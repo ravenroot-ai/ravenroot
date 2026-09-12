@@ -36,6 +36,17 @@ const graphState = page => page.evaluate(() => ({
   historyDepth: window.ravenroot.activeDocument().history.depth(),
 }));
 
+const documentGraphState = (page, documentId) => page.evaluate(id => {
+  const owner = window.ravenroot.workspace.find(id);
+  return {
+    nodes: owner.cy.nodes().map(node => node.id()).sort(),
+    edges: owner.cy.edges().map(edge => edge.id()).sort(),
+    selected: owner.cy.$(':selected').map(element => element.id()).sort(),
+    historyDepth: owner.history.depth(),
+    active: window.ravenroot.workspace.activeId === id,
+  };
+}, documentId);
+
 const selectElements = (page, ids) => page.evaluate(elementIds => {
   window.cy.$(':selected').unselect();
   elementIds.forEach(id => { window.cy.getElementById(id).select(); });
@@ -56,6 +67,151 @@ async function edgePoint(page, id) {
     return { x: canvas.left + point.x, y: canvas.top + point.y };
   }, id);
 }
+
+async function documentNodePoint(page, documentId, nodeId) {
+  return page.evaluate(({ documentId: id, nodeId: key }) => {
+    const owner = window.ravenroot.workspace.find(id);
+    const point = owner.cy.getElementById(key).renderedPosition();
+    const canvas = owner.cy.container().getBoundingClientRect();
+    return { x: canvas.left + point.x, y: canvas.top + point.y };
+  }, { documentId, nodeId });
+}
+
+async function clickElementNaturally(page, type, id, { additive = false, additiveKey = 'Control' } = {}) {
+  const point = await (type === 'node' ? nodePoint(page, id) : edgePoint(page, id));
+  if (additive) await page.keyboard.down(additiveKey);
+  await page.mouse.click(point.x, point.y);
+  if (additive) await page.keyboard.up(additiveKey);
+}
+
+for (const { type, id, key } of [
+  { type: 'node', id: 'dosomething', key: 'Delete' },
+  { type: 'edge', id: 'edge-start-dosomething', key: 'Backspace' },
+]) {
+  test(`a natural ${type} click routes immediate ${key} without focus transfer or selection polling`, async ({ page }) => {
+    await open(page);
+    const before = await graphState(page);
+
+    // Begin in a real editor field so the completed canvas gesture, rather than a test-only focus
+    // helper, must hand the immediately following key to the graph.
+    await clickElementNaturally(page, type, id);
+    await page.locator(type === 'node'
+      ? '#node-editor input[name="name"]'
+      : '#edge-editor input[name="edgeName"]').click();
+    await clickElementNaturally(page, type, id);
+    await page.keyboard.press(key);
+
+    await expect.poll(() => graphState(page)).toMatchObject(type === 'node' ? {
+      nodes: ['end', 'error', 'start'], edges: [], selected: [],
+      historyDepth: before.historyDepth + 1,
+    } : {
+      nodes: BASE_NODES, edges: ['edge-dosomething-end', 'edge-dosomething-error'], selected: [],
+      historyDepth: before.historyDepth + 1,
+    });
+    await page.locator('#btn-undo').click();
+    await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
+  });
+}
+
+test('natural additive node selection routes immediate Backspace as one command', async ({ page }) => {
+  await open(page);
+  const before = await graphState(page);
+
+  await clickElementNaturally(page, 'node', 'dosomething');
+  await clickElementNaturally(page, 'node', 'error', { additive: true });
+  await page.keyboard.press('Backspace');
+
+  await expect.poll(() => graphState(page)).toMatchObject({
+    nodes: ['end', 'start'], edges: [], selected: [], historyDepth: before.historyDepth + 1,
+  });
+  await page.locator('#btn-undo').click();
+  await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
+});
+
+test('natural additive mixed selection routes immediate Delete as one command', async ({ page }) => {
+  await open(page);
+  const before = await graphState(page);
+
+  await clickElementNaturally(page, 'node', 'start');
+  await clickElementNaturally(page, 'edge', 'edge-dosomething-end', { additive: true, additiveKey: 'Meta' });
+  await page.keyboard.press('Delete');
+
+  await expect.poll(() => graphState(page)).toMatchObject({
+    nodes: ['dosomething', 'end', 'error'], edges: ['edge-dosomething-error'], selected: [],
+    historyDepth: before.historyDepth + 1,
+  });
+  await page.locator('#btn-undo').click();
+  await expect.poll(() => graphState(page)).toMatchObject({ nodes: BASE_NODES, edges: BASE_EDGES });
+});
+
+test('natural Delete waits for the dirty Inspector decision and Cancel preserves selection', async ({ page }) => {
+  await open(page);
+  await page.locator('#btn-autosave').click();
+  await expect(page.locator('#btn-autosave')).toHaveAttribute('aria-pressed', 'false');
+  await clickElementNaturally(page, 'node', 'dosomething');
+  const name = page.locator('#node-editor input[name="name"]');
+  await name.fill('Uncommitted delete draft');
+  const before = await graphState(page);
+
+  await clickElementNaturally(page, 'node', 'dosomething');
+  await page.keyboard.press('Delete');
+
+  const dialog = page.locator('#inspector-unsaved-dialog');
+  await expect(dialog).toBeVisible();
+  expect(await graphState(page)).toEqual(before);
+  await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
+  await expect(name).toHaveValue('Uncommitted delete draft');
+  expect(await graphState(page)).toEqual(before);
+
+  await clickElementNaturally(page, 'node', 'dosomething');
+  await page.keyboard.press('Backspace');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('[data-inspector-unsaved-action="discard"]').click();
+  await expect.poll(() => graphState(page)).toMatchObject({
+    nodes: ['end', 'error', 'start'], edges: [], selected: [],
+    historyDepth: before.historyDepth + 1,
+  });
+});
+
+test('a background document pointer selection becomes the only Delete target', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await open(page);
+  const first = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  const second = await page.evaluate(() => window.ravenroot.openDocument({ name: 'second.graphml' }));
+  await page.evaluate(() => window.ravenroot.setWorkspaceLayout('horizontal'));
+  await expect(page.locator(`.doc-pane[data-document-id="${first}"]`))
+    .not.toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator(`.doc-pane[data-document-id="${second}"]`))
+    .not.toHaveAttribute('aria-busy', 'true');
+  await page.evaluate(ids => {
+    for (const id of ids) {
+      const owner = window.ravenroot.workspace.find(id);
+      owner.cy.stop(true);
+      owner.cy.getElementById('start').position({ x: 120, y: 120 });
+      owner.cy.getElementById('dosomething').position({ x: 400, y: 120 });
+      owner.cy.getElementById('end').position({ x: 680, y: 80 });
+      owner.cy.getElementById('error').position({ x: 680, y: 330 });
+      owner.cy.fit(undefined, 70);
+    }
+  }, [first, second]);
+  await page.evaluate(id => window.ravenroot.activateDocument(id), first);
+  if (await page.locator('#btn-modify').getAttribute('aria-pressed') !== 'true') {
+    await page.locator('#btn-modify').click();
+  }
+  await page.evaluate(id => window.ravenroot.activateDocument(id), second);
+  const beforeFirst = await documentGraphState(page, first);
+  const beforeSecond = await documentGraphState(page, second);
+
+  const point = await documentNodePoint(page, first, 'dosomething');
+  await page.mouse.click(point.x, point.y);
+  await page.keyboard.press('Delete');
+
+  await expect.poll(() => documentGraphState(page, first)).toMatchObject({
+    nodes: ['end', 'error', 'start'], edges: [], selected: [],
+    historyDepth: beforeFirst.historyDepth + 1, active: true,
+  });
+  expect(await documentGraphState(page, second)).toEqual({ ...beforeSecond, active: false });
+});
 
 async function clickEdge(page, id) {
   const point = await edgePoint(page, id);

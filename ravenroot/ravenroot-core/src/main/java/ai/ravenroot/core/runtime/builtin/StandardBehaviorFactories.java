@@ -2,6 +2,10 @@ package ai.ravenroot.core.runtime.builtin;
 
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.NodeBehaviorFactory;
+import ai.ravenroot.api.publication.PublicationAuditSink;
+import ai.ravenroot.api.publication.PublicationPolicyResolver;
+import ai.ravenroot.core.publication.PublicationBoundaryGuard;
+import ai.ravenroot.core.publication.StandardPublicationPolicyEvaluator;
 
 import java.util.List;
 
@@ -26,17 +30,58 @@ public final class StandardBehaviorFactories {
     }
 
     public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment) {
+        return all(environment, PublicationPolicyResolver.none(), PublicationAuditSink.noop());
+    }
+
+    /** Core catalog with an operator-owned publication policy boundary. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit) {
+        return all(environment, publicationPolicies, publicationAudit, null);
+    }
+
+    /** Core catalog optionally armed with the durable human-task reference monitor. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit,
+                                                ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
+        return all(environment, publicationPolicies, publicationAudit, humanTasks,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    /** Core catalog with one operator-owned Human Task policy. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit,
+                                                ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        return all(environment, publicationPolicies, publicationAudit, humanTasks, humanTaskPolicy, null);
+    }
+
+    /** Core catalog with a runtime-owned resolver for execution-scoped operational values. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit,
+                                                ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
+                                                java.util.function.Function<ai.ravenroot.api.execution.NodeMessage,
+                                                        ai.ravenroot.api.persistence.ResolvedOperationalPolicy>
+                                                        operationalPolicies) {
         return List.of(
                 new LogNodeBehaviorFactory(),
                 new DelayNodeBehaviorFactory(),
+                new HumanTaskNodeBehaviorFactory(humanTasks, humanTaskPolicy),
                 new TemplateNodeBehaviorFactory(),
                 new JsonParseNodeBehaviorFactory(),
                 new CelTransformNodeBehaviorFactory(),
                 new CelDecisionNodeBehaviorFactory(),
                 new JsonPathNodeBehaviorFactory(),
                 new HttpRequestNodeBehaviorFactory(environment.outboundHttpPolicy(), environment.credentials(),
-                        environment.toolPolicy()),
+                        environment.toolPolicy(), operationalPolicies),
                 new ProgramNodeBehaviorFactory(environment.artifacts(), environment.programRuntime(),
-                        environment.toolPolicy()));
+                        environment.toolPolicy()),
+                new BoundaryGuardNodeBehaviorFactory(
+                        new PublicationBoundaryGuard(publicationPolicies, new StandardPublicationPolicyEvaluator()),
+                        publicationAudit));
     }
 }

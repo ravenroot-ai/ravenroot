@@ -196,11 +196,13 @@
     <button class="btn" id="btn-run" data-command-id="run.start"
             title="Execute real node behavior in a transient operational run">▶ Run</button>
     <button class="btn" id="btn-pause" data-command-id="run.pause"
-            title="Pause the current graph at a safe node boundary">Ⅱ Pause</button>
+            title="Pause this execution after its current node reaches a safe boundary">Ⅱ Pause</button>
+    <button class="btn" id="btn-resume" data-command-id="run.resume" hidden
+            title="Resume this paused execution">▶ Resume</button>
+    <button class="btn danger" id="btn-cancel" data-command-id="run.cancel" hidden
+            title="Cooperatively cancel this execution">✕ Cancel</button>
     <button class="btn danger" id="btn-stop" data-command-id="run.stop"
-            title="Cooperatively stop the current graph only">■ Stop</button>
-    <button class="btn danger" id="btn-force-stop" data-command-id="run.forceStop"
-            title="Force-kill isolated work for the current graph only">✖ Force stop</button>
+            title="Stop this document’s process-local source session">■ Stop</button>
   </div>
   <span id="source-session-status" class="source-session-status" role="status" aria-live="polite" hidden></span>
 </div>
@@ -763,6 +765,15 @@
   </div>
 </dialog>
 
+<dialog id="close-all-documents-dialog" class="unsaved-document-dialog close-all-documents-dialog"
+        aria-labelledby="close-all-documents-title" aria-describedby="close-all-documents-description">
+  <h2 id="close-all-documents-title"></h2>
+  <p id="close-all-documents-description"></p>
+  <ul id="close-all-documents-list" class="close-all-documents-list"></ul>
+  <p id="close-all-documents-status" class="close-all-documents-status" aria-live="polite"></p>
+  <div id="close-all-documents-actions" class="unsaved-document-actions"></div>
+</dialog>
+
 <!-- Closing a document is NOT Stop: the process-local deployment (or source-session listener)
      this document started keeps running in this server process, owned by the server, until an
      explicit Stop. Without this dialog that distinction lived only in a code comment on
@@ -899,6 +910,30 @@
     <p id="deployment-empty" class="credential-note"></p>
     <ul id="deployment-list" class="credential-list deployment-list" aria-labelledby="deployments-list-title" hidden></ul>
   </section>
+</dialog>
+
+<!-- A Human Task decision is a central modal operation: the selected graph node remains selection
+     context, while this form identifies one exact durable task and generation. All prose enters as
+     textContent in human-task-ui.js; no presentation value becomes markup or a destination. -->
+<dialog id="human-task-dialog" class="human-task-dialog" aria-labelledby="human-task-dialog-title"
+        aria-describedby="human-task-dialog-prompt">
+  <form method="dialog" class="human-task-decision-form" novalidate>
+    <header class="credentials-hd">
+      <h2 id="human-task-dialog-title">Human task decision</h2>
+      <button class="btn" type="button" data-human-task-close>Close</button>
+    </header>
+    <p id="human-task-dialog-prompt" class="human-task-prompt" data-human-task-prompt></p>
+    <p class="human-task-dialog-identity" data-human-task-identity></p>
+    <div class="editor-field full" data-human-task-comment-field>
+      <label for="human-task-comment">Comment</label>
+      <textarea id="human-task-comment" data-human-task-comment
+                aria-describedby="human-task-comment-hint human-task-error"></textarea>
+      <small id="human-task-comment-hint" data-human-task-comment-hint></small>
+    </div>
+    <p id="human-task-error" class="credential-error" role="status" aria-live="polite"
+       data-human-task-error hidden></p>
+    <div class="human-task-dialog-actions" data-human-task-actions></div>
+  </form>
 </dialog>
 
 <!-- ══ DRAG CARRIER ══════════════════════════════════════════════════════════════════════════════

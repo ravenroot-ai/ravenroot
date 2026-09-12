@@ -252,39 +252,49 @@ final class GraphMlRejection {
         return new Detail(label, value == null ? null : value.toString());
     }
 
+    /**
+     * Retains the only parser diagnostic that is safe to expose through the internal detail channel.
+     * Exception messages, causes and stacks may quote the submitted document, so public rejections
+     * must never retain the throwable itself.
+     */
+    private static Detail exceptionClass(Throwable exception) {
+        return detail("exceptionClass",
+                Objects.requireNonNull(exception, "exception").getClass().getName());
+    }
+
+    static GraphMlParseException parseFailureFromException(
+            GraphMlParseException.Reason reason, Sentence sentence, Throwable exception) {
+        return parseFailure(reason, sentence, exceptionClass(exception));
+    }
+
+    static GraphMlCompatibilityException compatibilityFailureFromException(
+            Sentence sentence, Throwable exception) {
+        return compatibilityFailure(sentence, exceptionClass(exception));
+    }
+
     /** Builds a classified security-layer rejection. */
     static GraphMlParseException parseFailure(GraphMlParseException.Reason reason, Sentence sentence,
                                               Detail... details) {
-        return parseFailure(reason, sentence, null, null, details);
+        return parseFailure(reason, sentence, null, details);
     }
 
     /** Builds a classified security-layer rejection whose sentence names a declared term. */
     static GraphMlParseException parseFailure(GraphMlParseException.Reason reason, Sentence sentence,
                                               Term term, Detail... details) {
-        return parseFailure(reason, sentence, term, null, details);
-    }
-
-    static GraphMlParseException parseFailure(GraphMlParseException.Reason reason, Sentence sentence,
-                                              Term term, Throwable cause, Detail... details) {
         Objects.requireNonNull(reason, "reason");
         return new GraphMlParseException(reason, sentence.render(term), newIncidentId(),
-                render(details), cause);
+                render(details));
     }
 
     /** Builds a compatibility-layer rejection under exactly the same policy. */
     static GraphMlCompatibilityException compatibilityFailure(Sentence sentence, Detail... details) {
-        return compatibilityFailure(sentence, null, null, details);
+        return compatibilityFailure(sentence, null, details);
     }
 
     static GraphMlCompatibilityException compatibilityFailure(Sentence sentence, Term term,
                                                               Detail... details) {
-        return compatibilityFailure(sentence, term, null, details);
-    }
-
-    static GraphMlCompatibilityException compatibilityFailure(Sentence sentence, Term term,
-                                                              Throwable cause, Detail... details) {
         return new GraphMlCompatibilityException(sentence.render(term), newIncidentId(),
-                render(details), cause);
+                render(details));
     }
 
     /**

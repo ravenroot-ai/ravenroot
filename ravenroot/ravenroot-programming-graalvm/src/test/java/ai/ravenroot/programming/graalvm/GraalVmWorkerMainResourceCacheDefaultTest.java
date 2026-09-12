@@ -97,4 +97,13 @@ class GraalVmWorkerMainResourceCacheDefaultTest {
 
         assertEquals("/set/by/something/else", System.getProperty(PROPERTY));
     }
+    @Test
+    void aPresentBlankStandardPropertyStillShadowsEnvironmentAndImageDefault(@TempDir Path directory) {
+        for (String value : new String[]{"", "   "}) {
+            System.setProperty(PROPERTY, value);
+            GraalVmWorkerMain.applyResourceCacheDefault(directory, "/ignored/environment/cache");
+            assertEquals(value, System.getProperty(PROPERTY));
+        }
+    }
+
 }

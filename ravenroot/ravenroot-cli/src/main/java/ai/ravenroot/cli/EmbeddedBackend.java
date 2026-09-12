@@ -111,20 +111,56 @@ final class EmbeddedBackend implements CliBackend {
                 // for the same reason -- ExecutionOutcome already carries it, so dropping it here
                 // would be this projection's own gap, not the remote transport's.
                 yield new ResultView(outcome.executionId().toString(), outcome.status().toString(),
-                        outcome.degraded(), outcome.visitedNodes().stream().sorted().toList(),
+                        outcome.paused(), outcome.degraded(), outcome.visitedNodes().stream().sorted().toList(),
                         outcome.defaultedNodes().stream().sorted().toList(),
                         outcome.bypassedNodes().stream().sorted().toList(),
                         outcome.handledFailure(),
                         outcome.handledFailureNodes().stream().sorted().toList(),
-                        outcome.untakenEdges().stream().sorted().toList(), payload);
+                        outcome.untakenEdges().stream().sorted().toList(), payload,
+                        // The raw enum name, matching RavenrootServer#executionOutcomeJson's own wire
+                        // shape -- CliBackend carries no dependency on ExecutionTerminationReason itself.
+                        outcome.terminationReason() == null ? null : outcome.terminationReason().name());
             }
-            // These two IOException messages must match, verbatim, what RemoteBackend.renderError
-            // produces for the equivalent 410/404 server responses -- see ErrorCode.EXECUTION_RESULT_EXPIRED
-            // and ErrorCode.UNKNOWN_EXECUTION -- so both transports fail the same way for the same caller.
+            // These IOException messages must match, verbatim, what RemoteBackend.renderError produces
+            // for the equivalent 410/404 server responses -- see ErrorCode.EXECUTION_RESULT_EXPIRED,
+            // ErrorCode.EXECUTION_RESULT_REDACTED and ErrorCode.UNKNOWN_EXECUTION -- so both transports
+            // fail the same way, with the same diagnostic detail, for the same caller.
             case ExecutionLookup.Expired expired ->
-                    throw new IOException("410 EXECUTION_RESULT_EXPIRED: the execution result is no longer retained");
+                    throw new IOException("410 EXECUTION_RESULT_EXPIRED: the execution result is no "
+                            + "longer retained" + tombstoneDetail(expired.status(), expired.terminationReason(), null));
+            // Its own message and its own code, distinct from Expired above: this execution's payload
+            // was refused at write time rather than having aged out after being retained. See
+            // RavenrootServer#readExecution and ErrorCode.EXECUTION_RESULT_REDACTED for why the two
+            // are told apart rather than collapsed, and payloadState for which refusal applies.
+            case ExecutionLookup.Redacted redacted ->
+                    throw new IOException("410 EXECUTION_RESULT_REDACTED: the execution result was never "
+                            + "retained" + tombstoneDetail(redacted.status(), redacted.terminationReason(),
+                                    redacted.payloadState()));
             case ExecutionLookup.Unknown unknown -> throw new IOException("404 UNKNOWN_EXECUTION: unknown execution");
         };
+    }
+
+    /**
+     * The parenthesised diagnostic suffix both {@code Expired} and {@code Redacted} append to their
+     * IOException message, and that {@link ai.ravenroot.cli.remote.RemoteBackend#renderError} derives
+     * independently from the same JSON body fields -- see that method's own Javadoc for why the two
+     * must be kept in step by construction rather than by convention. Carries {@code status} and
+     * {@code terminationReason} unconditionally, exactly as {@code RavenrootServer}'s own tombstone
+     * bodies do: reading {@code status} without {@code terminationReason} reports a cancelled
+     * execution as an ordinary failure. {@code payloadState} is appended only when non-null, which is
+     * every {@code Redacted} answer and no {@code Expired} one.
+     */
+    private static String tombstoneDetail(ai.ravenroot.api.application.ProcessInstanceStatus status,
+                                          ai.ravenroot.api.application.ExecutionTerminationReason reason,
+                                          ai.ravenroot.api.persistence.ResultPayloadState payloadState) {
+        var detail = new StringBuilder(" (status=").append(status);
+        if (reason != null) {
+            detail.append(", terminationReason=").append(reason);
+        }
+        if (payloadState != null) {
+            detail.append(", payloadState=").append(payloadState);
+        }
+        return detail.append(')').toString();
     }
 
     /** Tenant scoping is the same {@code requestContext} pass-through every other verb here
@@ -134,8 +170,73 @@ final class EmbeddedBackend implements CliBackend {
         return application.liveExecutions(requestContext).stream()
                 .map(execution -> new LiveView(execution.processInstanceId().toString(),
                         execution.traversalId().toString(), execution.executionId().toString(),
-                        execution.graphVersion(), execution.startedAt().toString()))
+                        execution.graphVersion(), execution.startedAt().toString(), execution.paused()))
                 .toList();
+    }
+
+    /** The per-request page size this backend pages {@link #inventory()} with. Matches
+     * {@code ProcessInventoryQuery.Builder}'s own default, so a tenant small enough to fit one page
+     * behaves exactly as before this method paged to completion -- see {@link CliBackend#inventory}'s
+     * own Javadoc for why pagination is internal rather than left to the caller. */
+    private static final int INVENTORY_PAGE_SIZE = 50;
+
+    /** Tenant scoping is the same {@code requestContext} pass-through every other verb here
+     * uses -- see {@link CliBackend#inventory}'s own Javadoc for why this loops to completion. */
+    @Override
+    public InventoryListing inventory() throws IOException {
+        try {
+            var items = new java.util.ArrayList<InventoryView>();
+            var query = ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(INVENTORY_PAGE_SIZE);
+            while (true) {
+                var page = application.processInventory(requestContext, query);
+                page.items().forEach(entry -> items.add(inventoryView(entry)));
+                if (page.nextCursor().isEmpty()) {
+                    return new InventoryListing(items, page.retainedFrom().toString());
+                }
+                query = query.after(page.nextCursor().get());
+            }
+        } catch (IllegalStateException unavailable) {
+            throw new IOException("501 PROCESS_INVENTORY_UNAVAILABLE: " + unavailable.getMessage());
+        }
+    }
+
+    @Override
+    public TraversalListing traversals(String processInstanceId) throws IOException {
+        UUID id;
+        try {
+            id = UUID.fromString(processInstanceId);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Not a process instance id: " + processInstanceId);
+        }
+        try {
+            var traversals = application.processInstanceTraversals(requestContext, id).stream()
+                    .map(entry -> new TraversalInventoryView(entry.traversalId().toString(), entry.position(),
+                            entry.ingressNodeId(), entry.status().name(), entry.disposition().name(),
+                            entry.invocationCount(), entry.parkedAttemptCount(),
+                            entry.terminationReason() == null ? null : entry.terminationReason().name()))
+                    .toList();
+            // Fetched only once the traversal read itself succeeded, so an absent/cross-tenant id
+            // stays a plain 404 rather than acquiring a retainedFrom value that a closed-vocabulary
+            // error body has nowhere to carry.
+            String retainedFrom = application.processInventoryRetainedFrom(requestContext).toString();
+            return new TraversalListing(traversals, retainedFrom);
+        } catch (IllegalStateException unavailable) {
+            throw new IOException("501 PROCESS_INVENTORY_UNAVAILABLE: " + unavailable.getMessage());
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                throw new IOException("404 UNKNOWN_PROCESS_INSTANCE: unknown process instance");
+            }
+            throw new IOException(storeFailure);
+        }
+    }
+
+    private static InventoryView inventoryView(ai.ravenroot.api.persistence.ProcessInventoryEntry entry) {
+        return new InventoryView(entry.key().processInstanceId().toString(), entry.status().name(),
+                entry.disposition().name(), entry.graphVersionPin().reference(),
+                entry.deploymentId().orElse(null), entry.workloadId().orElse(null),
+                entry.correlationId().orElse(null), entry.traversalCount(),
+                entry.createdAt().toString(), entry.updatedAt().toString(),
+                entry.terminationReason() == null ? null : entry.terminationReason().name());
     }
 
     @Override

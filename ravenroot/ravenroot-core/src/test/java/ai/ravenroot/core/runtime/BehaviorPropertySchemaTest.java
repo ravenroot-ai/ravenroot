@@ -149,6 +149,120 @@ class BehaviorPropertySchemaTest {
         assertDoesNotThrow(() -> schema.validate(graphWith(untouched)));
     }
 
+    // ------------------------------------------------------------------ near misses
+
+    @Test
+    void refusesAPropertyThatDiffersFromADeclaredOneOnlyByCase() {
+        // The case #296 named: a graph author writes `pollIntervalMS` for a node whose catalog entry
+        // declares `pollIntervalMs`. Nothing applies it, so the node runs on the default -- for a
+        // poll interval that means polling more often than the operator authorised, silently. The
+        // node-level strict checks used to fail closed on this; refusing it here keeps that
+        // protection and moves it somewhere a graph author can actually read.
+        var failure = assertThrows(BehaviorPropertySchema.BehaviorPropertyException.class,
+                () -> schema.validate(graphWith(Map.of("requiredText", "hello", "credentialref", "acme-main"))));
+
+        assertEquals("probe", failure.nodeId());
+        assertEquals("credentialref", failure.propertyName());
+        assertTrue(failure.getMessage().contains("differs only by case from 'credentialRef'"),
+                failure.getMessage());
+    }
+
+    @Test
+    void refusesANearMissWhicheverWayTheCaseIsWrong() {
+        for (String misspelled : List.of("requiredtext", "REQUIREDTEXT", "RequiredText")) {
+            Map<String, Object> properties = new java.util.LinkedHashMap<>();
+            properties.put("requiredText", "hello");
+            properties.put(misspelled, "hello");
+            assertThrows(BehaviorPropertySchema.BehaviorPropertyException.class,
+                    () -> schema.validate(graphWith(properties)), "admitted '" + misspelled + "'");
+        }
+    }
+
+    @Test
+    void stillAdmitsThePresentationAndPlatformKeysThatMadeSourceGraphsUnstartable() {
+        // #296's whole point: these are not the node's configuration and must never be refused,
+        // whether by a behavior or here. `layoutX` and friends are what the editor writes on every
+        // node it serializes, and `execution.bypass` is the platform's. None of them is a case
+        // variant of anything this behavior declares, which is exactly why the near-miss rule can
+        // separate them from a misspelling without knowing where they came from.
+        Map<String, Object> annotated = new java.util.LinkedHashMap<>();
+        annotated.put("requiredText", "hello");
+        annotated.put("layoutX", "120.0");
+        annotated.put("layoutY", "64.0");
+        annotated.put("layoutWidth", "80.0");
+        annotated.put("layoutHeight", "52.0");
+        annotated.put("name", "Probe");
+        annotated.put("classification", "actor");
+        annotated.put("description", "");
+        annotated.put("execution.bypass", "false");
+        annotated.put("viz:color", "#ff0000");
+
+        assertDoesNotThrow(() -> schema.validate(graphWith(annotated)));
+    }
+
+    @Test
+    void doesNotRefuseAnUndeclaredNameThatIsMerelyOneEditFromADeclaredOne() {
+        // Deliberately not edit distance. `kafka.consume` declares `topics`, and `topic` is one edit
+        // away while being a legitimate key -- a looser rule would refuse graphs it has no business
+        // refusing. `mode`/`node` and `count`/`counts` are the same shape against this fixture.
+        for (String neighbour : List.of("node", "counts", "rati", "modes")) {
+            Map<String, Object> properties = new java.util.LinkedHashMap<>();
+            properties.put("requiredText", "hello");
+            properties.put(neighbour, "value");
+            assertDoesNotThrow(() -> schema.validate(graphWith(properties)),
+                    "refused legitimate '" + neighbour + "'");
+        }
+    }
+
+    @Test
+    void acceptsADeclaredNameEvenWhenAnotherDeclaredNameFoldsOntoIt() {
+        // A descriptor whose two property names differ only by case. No catalog entry does this, and
+        // it takes a third-party package to produce one, but the failure it would cause is the wrong
+        // way round: a property spelled *exactly* as declared being refused as a near-miss of its
+        // twin. Both spellings must be admitted, because the descriptor declares both.
+        var registry = new BehaviorRegistry().registerFactory(new NodeBehaviorFactory() {
+            @Override
+            public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("folding-probe", "Folding probe", "Test", "", "actor", false,
+                        List.of(NodePropertyDescriptor.optional("region", "Region",
+                                        NodePropertyType.STRING, "", ""),
+                                NodePropertyDescriptor.optional("Region", "Region (legacy)",
+                                        NodePropertyType.STRING, "", "")),
+                        Set.of("test-only"));
+            }
+
+            @Override
+            public NodeHandler create(GraphNode node) {
+                return message -> java.util.concurrent.CompletableFuture.completedFuture(
+                        ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()));
+            }
+        });
+        var folding = new BehaviorPropertySchema(registry);
+
+        for (String declaredName : List.of("region", "Region")) {
+            var graph = new GraphDefinition(List.of(
+                    GraphNode.start("start"),
+                    new GraphNode("probe", NodeKind.BEHAVIOR, "folding-probe", Map.of(declaredName, "eu")),
+                    GraphNode.error("error"), GraphNode.end("end")), List.of(
+                    GraphEdge.to("start", "probe"), GraphEdge.to("probe", "end")));
+
+            assertDoesNotThrow(() -> folding.validate(graph), "refused declared '" + declaredName + "'");
+        }
+    }
+
+    @Test
+    void doesNotLookForNearMissesOnBehaviorsTheCatalogDoesNotKnow() {
+        // Same boundary as every other rule here: an uncatalogued behavior has no declared names to
+        // compare against, so the pass-through path stays exactly as it was.
+        var graph = new GraphDefinition(List.of(
+                GraphNode.start("start"),
+                new GraphNode("probe", NodeKind.BEHAVIOR, "not-registered", Map.of("credentialref", "x")),
+                GraphNode.error("error"), GraphNode.end("end")), List.of(
+                GraphEdge.to("start", "probe"), GraphEdge.to("probe", "end")));
+
+        assertDoesNotThrow(() -> schema.validate(graph));
+    }
+
     @Test
     void doesNotValidateNodesWhoseBehaviorIsNotInTheCatalog() {
         // Unknown behaviors belong to SEC-09 rule 3 and are handled separately. The

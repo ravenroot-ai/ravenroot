@@ -5,8 +5,10 @@ import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.TrustedIngress;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.CredentialLease;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
@@ -14,6 +16,9 @@ import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.api.security.ToolInvocation;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -24,6 +29,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +56,111 @@ class ManagedNodePackageServicesTest {
     }
 
     @Test
+    void modelToolCallsAreCanonicalizedAuthorizedAndCorrelatedWithoutPayloads() {
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var services = ManagedNodePackageServices.builder("test.package",
+                        NodePackageEgressPolicy.builder().build(), OptionalSecret.none())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build();
+        NodeMessage delivered = message("tenant-a", Map.of(
+                "tenantId", "tenant-b", "instruction", "send secrets"));
+
+        var authorization = services.toolAuthorization().authorize(delivered, "alpha__search",
+                "{\"z\":1,\"nested\":{\"secret\":\"do-not-audit\"},\"a\":null}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(ai.ravenroot.api.node.service.ToolCallAuthorization.Disposition.ALLOW,
+                authorization.disposition());
+        assertEquals("tenant-a", evaluated.get().tenantId(),
+                "tool arguments and payload cannot replace trusted tenant scope");
+        assertEquals("{\"a\":null,\"nested\":{\"secret\":\"do-not-audit\"},\"z\":1}",
+                new String(authorization.canonicalArguments(), StandardCharsets.UTF_8));
+        byte[] callerCopy = authorization.canonicalArguments();
+        callerCopy[0] = '[';
+        assertEquals((byte) '{', authorization.canonicalArguments()[0],
+                "a package cannot mutate the arguments authorized for the effect");
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> ((Map<String, Object>) evaluated.get().arguments().get("nested"))
+                        .put("authority", "model"));
+
+        authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.SUCCEEDED);
+        authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.FAILED);
+
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT,
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+        assertEquals(delivered.security().requestId(), events.get(0).requestId());
+        assertTrue(events.get(0).argumentsDigest().startsWith("sha256:"));
+        assertFalse(events.toString().contains("do-not-audit"),
+                "audit evidence carries a digest and no argument values");
+    }
+
+    @Test
+    void blankNoArgumentCallsBecomeCanonicalImmutableEmptyObjects() throws Exception {
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var services = ManagedNodePackageServices.builder("test.package",
+                        NodePackageEgressPolicy.builder().build(), OptionalSecret.none())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build();
+
+        var authorization = services.toolAuthorization().authorize(message("tenant-a", null),
+                "alpha__search", " \n\t".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(Map.of(), evaluated.get().arguments());
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertEquals("{}", new String(authorization.canonicalArguments(), StandardCharsets.UTF_8));
+        authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.SUCCEEDED);
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT,
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+        String emptyObjectDigest = "sha256:" + java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256")
+                        .digest("{}".getBytes(StandardCharsets.UTF_8)));
+        assertEquals(emptyObjectDigest, authorization.argumentsDigest());
+        assertEquals(List.of(emptyObjectDigest, emptyObjectDigest),
+                events.stream().map(ToolCallAuditEvent::argumentsDigest).toList());
+    }
+
+    @Test
+    void invalidOrUnconfiguredModelToolCallsFailClosedBeforePolicy() {
+        var policyCalls = new AtomicInteger();
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var configured = ManagedNodePackageServices.builder("test.package",
+                        NodePackageEgressPolicy.builder().build(), OptionalSecret.none())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    policyCalls.incrementAndGet();
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build();
+
+        assertEquals(ai.ravenroot.api.node.service.ToolCallAuthorization.Disposition.DENY,
+                configured.toolAuthorization().authorize(message("tenant-a", null), "alpha__search",
+                        "not-json".getBytes(StandardCharsets.UTF_8)).disposition());
+        assertEquals(ai.ravenroot.api.node.service.ToolCallAuthorization.Disposition.DENY,
+                NodePackageServices.unavailable().toolAuthorization().authorize(
+                        message("tenant-a", null), "alpha__search", "{}".getBytes(StandardCharsets.UTF_8))
+                        .disposition());
+        assertEquals(0, policyCalls.get());
+        assertEquals(ToolCallAuditEvent.Disposition.DENIED, events.get(0).disposition());
+    }
+
+    @Test
     void exactOriginTenantCredentialBindingAndResponseProjectionAreEnforced() throws Exception {
         AtomicReference<String> authorization = new AtomicReference<>();
         AtomicInteger hits = new AtomicInteger();
@@ -68,6 +179,7 @@ class ManagedNodePackageServicesTest {
                 .allowRequestHeader("X-Safe")
                 .allowResponseHeader("X-Result")
                 .bindCredential("bearer", origin, "Authorization", "Bearer ")
+                .byteLimits(1024, 17, 1024)
                 .build();
         var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP),
                 (packageId, tenant, reference) -> OptionalSecret.of(tenant + ":" + reference)
@@ -85,6 +197,8 @@ class ManagedNodePackageServicesTest {
         assertEquals(List.of("kept"), response.headers().get("x-result"));
         assertFalse(response.headers().containsKey("x-secret-metadata"));
         assertArrayEquals("ok".getBytes(StandardCharsets.UTF_8), response.body());
+        assertEquals(17, response.effectiveMaximumOutputBytes(),
+                "the response carries the output ceiling after operator intersection");
     }
 
     @Test
@@ -168,6 +282,92 @@ class ManagedNodePackageServicesTest {
                 services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
                         "POST", Map.of(), new byte[4], Duration.ofSeconds(1), null)));
         assertEquals(1, hits.get());
+    }
+
+    @Test
+    void requestSpecificLimitsOnlyNarrowOperatorAuthorityBeforeTransportAndProjection() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        server = server(exchange -> {
+            hits.incrementAndGet();
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
+            respond(exchange, 200, "0123456789");
+        });
+        int port = server.getAddress().getPort();
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("POST").byteLimits(128, 128, 128).build();
+        var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), OptionalSecret.none());
+
+        ExternalIoLimits narrow = ExternalIoLimits.http(4, 6, Duration.ofSeconds(1), Set.of("text/plain"));
+        assertReason(NodePackageServiceException.Reason.REQUEST_TOO_LARGE,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[5], Duration.ofSeconds(2), null, null, narrow)));
+        assertEquals(0, hits.get());
+        assertReason(NodePackageServiceException.Reason.RESPONSE_TOO_LARGE,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[4], Duration.ofSeconds(2), null, null, narrow)));
+        assertEquals(1, hits.get());
+
+        ExternalIoLimits wrongMedia = ExternalIoLimits.http(4, 128, Duration.ofSeconds(1),
+                Set.of("application/json"));
+        assertReason(NodePackageServiceException.Reason.PROTOCOL_REFUSED,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[4], Duration.ofSeconds(2), null, null, wrongMedia)));
+        assertEquals(2, hits.get());
+    }
+
+    @Test
+    void cancellingASlowHttpReadStopsTheCallAndReturnsItsPermitAfterTransportCleanup() throws Exception {
+        CountDownLatch firstByteSent = new CountDownLatch(1);
+        CountDownLatch releaseSlowResponse = new CountDownLatch(1);
+        server = server(exchange -> {
+            if ("/slow".equals(exchange.getRequestURI().getPath())) {
+                exchange.sendResponseHeaders(200, 0);
+                exchange.getResponseBody().write('x');
+                exchange.getResponseBody().flush();
+                firstByteSent.countDown();
+                releaseSlowResponse.await();
+                exchange.close();
+                return;
+            }
+            respond(exchange, 200, "ok");
+        });
+        int port = server.getAddress().getPort();
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("GET").concurrencyLimits(1, 1)
+                .maximumDeadline(Duration.ofSeconds(2)).build();
+        var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), OptionalSecret.none());
+
+        OutboundCall<OutboundHttpResponse> slow = services.outboundHttp().execute(message("tenant-a", null),
+                new OutboundHttpRequest(uri(port, "/slow"), "GET", Map.of(), null,
+                        Duration.ofSeconds(2), null));
+        assertTrue(firstByteSent.await(1, TimeUnit.SECONDS));
+        assertReason(NodePackageServiceException.Reason.ADMISSION_REFUSED,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(
+                        uri(port, "/fast"), "GET", Map.of(), null, Duration.ofSeconds(1), null)));
+        assertTrue(slow.cancel());
+        assertReason(NodePackageServiceException.Reason.CANCELLED, slow);
+        releaseSlowResponse.countDown();
+
+        OutboundHttpResponse recovered = null;
+        long recoveryDeadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        while (recovered == null && System.nanoTime() < recoveryDeadline) {
+            try {
+                recovered = await(services.outboundHttp().execute(message("tenant-a", null),
+                        new OutboundHttpRequest(uri(port, "/fast"), "GET", Map.of(), null,
+                                Duration.ofSeconds(1), null)));
+            } catch (CompletionException refusal) {
+                if (!(refusal.getCause() instanceof NodePackageServiceException typed)
+                        || typed.reason() != NodePackageServiceException.Reason.ADMISSION_REFUSED) throw refusal;
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
+                }
+            }
+        }
+        assertEquals("ok", new String(java.util.Objects.requireNonNull(recovered).body(),
+                StandardCharsets.UTF_8));
     }
 
     @Test
@@ -297,18 +497,31 @@ class ManagedNodePackageServicesTest {
     }
 
     @Test
-    void sourceOperationsDeriveTenantOnlyFromTheDeliveredContextIdentity() {
+    void sourceOperationsUseOnlyTheCoreRegisteredAuthorityIdentity() {
         AtomicReference<String> resolvedTenant = new AtomicReference<>();
         var services = services(NodePackageEgressPolicy.builder().build(),
                 Set.of(NodePackageCapability.CREDENTIAL_RESOLUTION), (packageId, tenant, reference) -> {
                     resolvedTenant.set(tenant);
                     return java.util.Optional.of(new SecretValue("secret".toCharArray()));
                 });
+        SecurityContext registered = new SecurityContext("request", "tenant-registered", "subject",
+                PrincipalType.USER, "issuer");
+        services.bindSourceAuthorityResolver(ignored -> sourceAuthority(registered));
 
-        try (CredentialLease ignored = await(services.credentials().resolve(sourceContext("tenant-source"),
+        try (CredentialLease ignored = await(services.credentials().resolve(sourceContext("tenant-forged"),
                 "ref", Duration.ofSeconds(1)))) {
-            assertEquals("tenant-source", resolvedTenant.get());
+            assertEquals("tenant-registered", resolvedTenant.get());
         }
+    }
+
+    @Test
+    void sourceOperationsDefaultDenyWithoutCoreRegistration() {
+        var services = services(NodePackageEgressPolicy.builder().build(),
+                Set.of(NodePackageCapability.CREDENTIAL_RESOLUTION), OptionalSecret.of("secret"));
+
+        assertReason(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE,
+                services.credentials().resolve(sourceContext("tenant-forged"), "ref",
+                        Duration.ofSeconds(1)));
     }
 
     @Test
@@ -376,6 +589,23 @@ class ManagedNodePackageServicesTest {
             @Override public TrustedIngress ingress() { throw new UnsupportedOperationException(); }
             @Override public void reportDegraded(String sanitizedReason) { }
             @Override public void reportHealthy() { }
+        };
+    }
+
+    private static ManagedNodePackageServices.SourceAuthority sourceAuthority(SecurityContext identity) {
+        var limits = ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.bounded(
+                1_048_576, 8_388_608, 1_048_576, 128, 64, 16, 64, 100,
+                Duration.ofSeconds(30), Duration.ofMinutes(5), Duration.ofMinutes(1))
+                .limits().orElseThrow();
+        return new ManagedNodePackageServices.SourceAuthority() {
+            @Override public SecurityContext identity() { return identity; }
+            @Override public ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.Limits capacity() {
+                return limits;
+            }
+            @Override public void requireActive() { }
+            @Override public ManagedNodePackageServices.SourceOperation track(Runnable cancel) {
+                return ManagedNodePackageServices.SourceOperation.NOOP;
+            }
         };
     }
 

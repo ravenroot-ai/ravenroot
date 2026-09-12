@@ -1,6 +1,6 @@
 # Public ADR curation manifest
 
-- Status: Complete for the published collection at 2026-08-30
+- Status: Complete for the published collection at 2026-09-06
 - Ordering: Chronological, then numerical
 - Publication scope: Accepted decisions and historically material superseded decisions
 
@@ -36,6 +36,16 @@ without presenting the same choice as two independent contracts.
 | 2026-08-29 | [0028](0028-iteration-correlated-fan-in.md) | Accepted | Defines fan-in correlation across graph iterations. |
 | 2026-08-29 | [0029](0029-model-provider-spi-after-externalization.md) | Accepted | Defines the model-provider extension boundary after AI-node externalization. |
 | 2026-08-30 | [0030](0030-zero-or-more-node-emissions.md) | Accepted contract | Defines a future emission contract and states its implementation status explicitly. |
+| 2026-09-03 | [0031](0031-durable-canonical-graph-definitions.md) | Accepted | Defines durable, content-addressed graph definitions and their relationship to ADR 0008 identity and ADR 0023 deployment versions. |
+| 2026-09-03 | [0032](0032-durable-process-inventory-is-authoritative-rows.md) | Superseded in part | Defines the durable, tenant-scoped process inventory as authoritative rows with a derived, unstored recovery classification. Its statement that the product keeps no durable record of an operator hold is superseded by 0033; the derived-classification decision stands. |
+| 2026-09-04 | [0033](0033-durable-operator-holds.md) | Accepted | Defines an operator hold on a traversal as a durable record committed at a writable traversal boundary, with the traversal stored as `WAITING`, no claimable work, and continuation only by an authorized resume. |
+| 2026-09-04 | [0034](0034-immutable-resolved-execution-manifests.md) | Accepted | Extends ADR 0031: the pinned document is joined by the resolved dependency set an execution was accepted against, and recovery verifies both. |
+| 2026-09-05 | [0035](0035-cancellation-as-a-distinct-termination-reason.md) | Accepted | Defines a nullable termination reason beside an unchanged terminal status, and a dedicated terminal event type, so a cancelled execution is distinguishable from an ordinary failure everywhere it is reported. |
+| 2026-09-04 | [0036](0036-layered-graph-drawing-in-the-design-editor.md) | Accepted | Defines the additive layered arrangements of the design editor: ELK layered placement and routing consumed together, one arrangement per axis of flow, label-aware spacing with the node name on the side the axis leaves free, back edges routed outside the band, and the existing arrangements left unchanged. |
+| 2026-09-05 | [0037](0037-durable-execution-results.md) | Accepted | Defines the durable canonical execution result: a four-state payload vocabulary, a fourth `ExecutionLookup` read answer, exactly-once-by-refusal recording, and a retention window that must not outlive the process instance it names. |
+| 2026-09-06 | [0038](0038-deployment-lifecycle-generations-and-typed-command-outcomes.md) | Accepted contract | Extends ADR 0023 and supersedes in part the `GraphDeployment` account of `stop`: three disjoint monotone axes for a deployment, stratified fencing with no third token, sealed lifecycle commands and returned typed outcomes, half-open barriers, and an explicit statement that no published contract changes with it. Absorbs the lease, fence and check-order rules the codebase cites as ADR 0010, which is not published in this collection. |
+| 2026-09-06 | [0039](0039-unreachable-executions-are-reconciled.md) | Accepted | Extends [ADR 0035](0035-cancellation-as-a-distinct-termination-reason.md)'s termination vocabulary with a second value and defines the caller-invoked recovery that ends a traversal proven unable to reach an outcome and returns its admission capacity. |
+| 2026-09-06 | [0040](0040-shared-persistence-adapters-share-ports-not-a-jdbc-core.md) | Accepted contract | Extends ADR 0014 to deployments whose processes are not on one host: a durable adapter is a standalone module sharing the ports, the closed capability set, the sealed failure vocabularies and the conformance suite, and sharing no production code; correctness rests on database transactions and row-level compare-and-set; all durable stores of one deployment address one database; migration is serialized by a database advisory lock. |
 
 ## Publication rules
 

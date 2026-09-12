@@ -233,6 +233,10 @@ public final class RemoteBackend implements CliBackend {
         Object payloadValue = body.get("payload");
         String payload = payloadValue == null ? null : MinimalJson.write(payloadValue);
         return new ResultView(MinimalJson.asString(body.get("executionId")), MinimalJson.asString(body.get("status")),
+                // "paused" defaults to false rather than throwing, the same convention "degraded"
+                // and "handledFailure" below already follow: an older server that predates the field
+                // sends no such key, and its executions were never held on a pause.
+                Boolean.TRUE.equals(body.get("paused")),
                 Boolean.TRUE.equals(body.get("degraded")),
                 MinimalJson.asArray(body.get("visitedNodes")).stream().map(MinimalJson::asString).sorted().toList(),
                 MinimalJson.asArray(body.get("defaultedNodes")).stream().map(MinimalJson::asString).sorted().toList(),
@@ -254,7 +258,10 @@ public final class RemoteBackend implements CliBackend {
                 // carries it as well instead of opening the same gap.
                 MinimalJson.asArray(body.get("untakenEdges")).stream().map(MinimalJson::asString)
                         .sorted().toList(),
-                payload);
+                payload,
+                // Absent on an older server that predates this field, exactly like "paused" above --
+                // and honestly so: an execution such a server ever reported carries no reason either.
+                MinimalJson.asStringOrNull(body.get("terminationReason")));
     }
 
     /** Reads {@code GET /v1/executions/live}: the server resolves the tenant from the
@@ -265,12 +272,70 @@ public final class RemoteBackend implements CliBackend {
         var body = MinimalJson.asObject(MinimalJson.parse(get("/v1/executions/live")));
         return MinimalJson.asArray(body.get("executions")).stream().map(entry -> {
             var execution = MinimalJson.asObject(entry);
+            // "paused" defaults to false rather than throwing: an older server that predates the
+            // field sends no such key, and an execution that server never held a pause on is,
+            // truthfully, not paused.
             return new LiveView(MinimalJson.asString(execution.get("processInstanceId")),
                     MinimalJson.asString(execution.get("traversalId")),
                     MinimalJson.asString(execution.get("executionId")),
                     MinimalJson.asString(execution.get("graphVersion")),
-                    MinimalJson.asString(execution.get("startedAt")));
+                    MinimalJson.asString(execution.get("startedAt")),
+                    Boolean.TRUE.equals(execution.get("paused")));
         }).toList();
+    }
+
+    /** Reads {@code GET /v1/executions/inventory?includeTerminal=true}, following {@code nextCursor}
+     * to completion: the server resolves the tenant from the bearer token, exactly as {@link #live}
+     * does -- see {@link CliBackend#inventory}'s own Javadoc for why {@code includeTerminal=true} is
+     * this verb's own default and why this loops rather than answering with one page. */
+    @Override
+    public InventoryListing inventory() throws IOException {
+        var items = new java.util.ArrayList<InventoryView>();
+        String cursor = null;
+        String retainedFrom;
+        while (true) {
+            String path = "/v1/executions/inventory?includeTerminal=true"
+                    + (cursor == null ? "" : "&cursor=" + java.net.URLEncoder.encode(cursor, StandardCharsets.UTF_8));
+            var body = MinimalJson.asObject(MinimalJson.parse(get(path)));
+            for (Object entry : MinimalJson.asArray(body.get("items"))) {
+                var item = MinimalJson.asObject(entry);
+                items.add(new InventoryView(MinimalJson.asString(item.get("processInstanceId")),
+                        MinimalJson.asString(item.get("status")), MinimalJson.asString(item.get("disposition")),
+                        MinimalJson.asString(item.get("graphVersion")),
+                        MinimalJson.asStringOrNull(item.get("deploymentId")),
+                        MinimalJson.asStringOrNull(item.get("workloadId")),
+                        MinimalJson.asStringOrNull(item.get("correlationId")),
+                        (int) MinimalJson.asLong(item.get("traversalCount")),
+                        MinimalJson.asString(item.get("createdAt")), MinimalJson.asString(item.get("updatedAt")),
+                        MinimalJson.asStringOrNull(item.get("terminationReason"))));
+            }
+            retainedFrom = MinimalJson.asString(body.get("retainedFrom"));
+            Object nextCursor = body.get("nextCursor");
+            if (nextCursor == null) {
+                return new InventoryListing(items, retainedFrom);
+            }
+            cursor = MinimalJson.asString(nextCursor);
+        }
+    }
+
+    /** Reads {@code GET /v1/executions/{id}/traversals} -- see {@link CliBackend#traversals}'s own
+     * Javadoc for why {@code processInstanceId} is not the same id space {@link #cancel} takes. */
+    @Override
+    public TraversalListing traversals(String processInstanceId) throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(
+                get("/v1/executions/" + java.net.URLEncoder.encode(processInstanceId, StandardCharsets.UTF_8)
+                        + "/traversals")));
+        var traversals = MinimalJson.asArray(body.get("traversals")).stream().map(entry -> {
+            var item = MinimalJson.asObject(entry);
+            return new TraversalInventoryView(MinimalJson.asString(item.get("traversalId")),
+                    (int) MinimalJson.asLong(item.get("position")),
+                    MinimalJson.asString(item.get("ingressNodeId")), MinimalJson.asString(item.get("status")),
+                    MinimalJson.asString(item.get("disposition")),
+                    (int) MinimalJson.asLong(item.get("invocationCount")),
+                    (int) MinimalJson.asLong(item.get("parkedAttemptCount")),
+                    MinimalJson.asStringOrNull(item.get("terminationReason")));
+        }).toList();
+        return new TraversalListing(traversals, MinimalJson.asString(body.get("retainedFrom")));
     }
 
     @Override
@@ -438,17 +503,49 @@ public final class RemoteBackend implements CliBackend {
      * Renders {@code ErrorEnvelope}'s wire shape ({@code {"code":..., "message":...}}) as the
      * exception message a caller's own error path (already routed through
      * {@code RavenrootCli#sanitizeForConsole}) will print. Never includes the raw response body
-     * verbatim -- only the two fields the server's own vocabulary defines -- so a caller cannot be
+     * verbatim -- only the fields the server's own closed vocabulary defines -- so a caller cannot be
      * shown more than the server chose to say.
+     *
+     * <p>{@link #tombstoneDetail} appends the same three fields
+     * {@code RavenrootServer#expiredExecutionJson} and {@code #redactedExecutionJson} carry beside
+     * the envelope, when the body carries them, so a 410 {@code EXECUTION_RESULT_EXPIRED} or
+     * {@code EXECUTION_RESULT_REDACTED} answer renders identically to what
+     * {@code EmbeddedBackend#tombstoneDetail} produces for the same execution on the other transport.
+     * Every other error body has no {@code status} key at all, so the suffix is empty for them.</p>
      */
     private static IOException renderError(HttpResponse<String> response) {
         try {
             Map<String, Object> envelope = MinimalJson.asObject(MinimalJson.parse(response.body()));
             String code = String.valueOf(envelope.getOrDefault("code", "UNKNOWN"));
             String message = String.valueOf(envelope.getOrDefault("message", "request failed"));
-            return new IOException(response.statusCode() + " " + code + ": " + message);
+            return new IOException(response.statusCode() + " " + code + ": " + message
+                    + tombstoneDetail(envelope));
         } catch (RuntimeException malformed) {
             return new IOException("HTTP " + response.statusCode());
         }
+    }
+
+    /**
+     * The {@code status}/{@code terminationReason}/{@code payloadState} suffix carried by an
+     * execution-result tombstone body, or the empty string when {@code envelope} carries none of
+     * them -- every error body that is not one of the two execution-result tombstones. {@code status}
+     * is unconditional once present, exactly as {@code EmbeddedBackend#tombstoneDetail} makes it:
+     * reading it without {@code terminationReason} reports a cancelled execution as an ordinary
+     * failure.
+     */
+    private static String tombstoneDetail(Map<String, Object> envelope) {
+        if (!envelope.containsKey("status")) {
+            return "";
+        }
+        var detail = new StringBuilder(" (status=").append(envelope.get("status"));
+        Object reason = envelope.get("terminationReason");
+        if (reason != null) {
+            detail.append(", terminationReason=").append(reason);
+        }
+        Object payloadState = envelope.get("payloadState");
+        if (payloadState != null) {
+            detail.append(", payloadState=").append(payloadState);
+        }
+        return detail.append(')').toString();
     }
 }

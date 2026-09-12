@@ -45,9 +45,17 @@ public final class TelemetrySupport {
      *         which case there is nothing to release
      */
     public static Optional<AutoCloseable> install(TelemetryConfiguration configuration, ExecutionMonitor monitor) {
+        return install(configuration, monitor, null);
+    }
+
+    /** Installs execution telemetry and, when supplied, the agent-budget aggregate sink. */
+    public static Optional<AutoCloseable> install(
+            TelemetryConfiguration configuration, ExecutionMonitor monitor,
+            ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay agentBudgets) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(monitor, "monitor");
         if (!configuration.enabled()) {
+            if (agentBudgets != null) agentBudgets.clear();
             return Optional.empty();
         }
 
@@ -69,8 +77,10 @@ public final class TelemetrySupport {
 
         TelemetryBridge bridge = new TelemetryBridge(sdk);
         AutoCloseable unsubscribe = monitor.subscribe(bridge);
+        if (agentBudgets != null) agentBudgets.install(bridge);
 
         return Optional.of(() -> {
+            if (agentBudgets != null) agentBudgets.clear();
             unsubscribe.close();
             bridge.close();
             tracerProvider.shutdown();

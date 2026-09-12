@@ -2,7 +2,7 @@
 
 The catalog returned by `GET /v1/node-types` is authoritative for the running deployment. The UI renders its palette and Inspector controls from this contract.
 
-## Shipped behavior families
+## Default core behavior families
 
 | Identifier | Purpose | Privileged dependency |
 |---|---|---|
@@ -10,24 +10,35 @@ The catalog returned by `GET /v1/node-types` is authoritative for the running de
 | `template` | Interpolate payload and attributes into text | None |
 | `cel-transform` | Compute a payload with CEL | CEL evaluator |
 | `cel-decision` | Select an outcome with CEL | CEL evaluator |
+| `boundary-guard` | Validate a publication candidate | Operator policy profile and audit sink |
 | `http-request` | Perform an outbound HTTP call | Egress and credentials |
 | `delay` | Resume after a bounded asynchronous delay | Scheduler |
+| `human-task` | Park for a durable authorized human decision | Durable execution store |
 | `json-parse` | Parse JSON text into a structured value | None |
 | `json-path` | Select ordered values with RFC 9535 JSONPath | JSONPath evaluator |
-| `llm-prompt` | Invoke a configured model profile | Model adapter and credential |
-| `agent` | Invoke a bounded agent runtime and tool set | Agent adapter and allowlist |
 | `program` | Execute an approved artifact | Sandbox supervisor |
 
 An unavailable privileged dependency does not become available because its identifier appears in a graph.
+
+Optional first-party packages contribute 48 additional node types only after explicit bundle
+installation and activation. See the [bundle reference](bundles/) and the
+[coverage inventory](coverage-inventory.md). In particular, `llm-prompt` and `agent` belong to the
+optional AI bundle and are not part of the default core catalog.
+
+`boundary-guard` declares the fixed outcomes `continue` and `violation`. It requires `policyId`, `policyVersion`, and `policyDigest`; the digest pins all effective immutable profile data. The default catalog includes the node but resolves no profiles, so it fails closed until an application supplies an operator-owned resolver. See [Publication boundary policies](../security/publication-boundaries.md) for candidate authoring, rule composition, provider re-evaluation, and limitations.
 
 ## Exact core properties
 
 | Behavior | Property | Type | Default or domain |
 |---|---|---|---|
 | `delay` | `durationMs` | integer | default 1000; 0–86,400,000 |
-| `json-parse` | `source` | string template | `{{payload}}` |
+| `json-parse` | `source` | string template | `{% raw %}{{payload}}{% endraw %}` |
 | `json-path` | `path` | string | required RFC 9535 expression |
 | `template` | `template` | string | required template text |
+| `human-task` | `title` / `description` | string / text | required / optional; UTF-8 budgets come from the Human Task operator policy |
+| `human-task` | `responseKind` / `maxResponseBytes` | enum / integer | `MAP` / policy default; graph value may narrow the policy ceiling |
+| `human-task` | `responseSchema` / `responseSchemaVersion` | string / string | `ravenroot.human-task.response` / `1`; fixed 1–128 ASCII `PayloadEnvelope` labels, with the policy able to narrow only `responseSchema` |
+| `human-task` | `escalateAfterSeconds` / `expiresAfterSeconds` | integer / integer | policy defaults and ceilings; zero escalation disables it and escalation precedes expiry |
 
 `delay` preserves payload and attributes and returns `continue`. `json-parse` accepts top-level scalars, arrays, or objects; 64-bit integers remain integers and fractional or exponent numbers become doubles. Invalid JSON fails. `json-path` returns an ordered array and returns `[]` when nothing matches.
 
@@ -45,3 +56,5 @@ An unavailable privileged dependency does not become available because its ident
 JSONPath additionally limits query length to 32,768 UTF-16 code units, selectors to 256, query depth to 64, AST nodes to 512, evaluations to 10,000, total work to 100,000, regex nesting to 64, regex nodes to 4,096, intermediate results to 10,000, and final results to 1,000.
 
 Limit violations are classified failures and never silently truncate a value or clamp a query. For route semantics see [Executions and outcomes](execution-events.md); for security ownership see [Input, secrets, and egress](../security/input-secrets-egress.md).
+
+See [Durable human tasks](human-tasks.md) for the full response, authorization, timer, re-entry, and inbox contract, and [Configuration and deployment defaults](configuration.md#human-task-operational-policy) for the operator-owned Human Task values and ranges.

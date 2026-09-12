@@ -24,10 +24,15 @@ final class BackupRestoreCommand {
     }
 
     int backup(BackupRestoreConfiguration configuration, Path destination) {
+        return backup(configuration, destination, RecoveryBundle.AuditCopyObserver.NONE);
+    }
+
+    int backup(BackupRestoreConfiguration configuration, Path destination,
+               RecoveryBundle.AuditCopyObserver observer) {
         try (var maintenance = SqliteStoreMaintenanceLock.acquire(configuration.executionStoreLocation())) {
             new RecoveryRestoreTransaction(configuration, RecoveryRestoreTransaction.Faults.NONE)
                     .recoverInterrupted();
-            RecoveryBundle.create(configuration, destination);
+            RecoveryBundle.create(configuration, destination, observer);
             output.println("recovery bundle created: version=2 verification=passed encryption=none");
             return 0;
         } catch (SqliteStoreMaintenanceLock.MaintenanceLockException failed) {

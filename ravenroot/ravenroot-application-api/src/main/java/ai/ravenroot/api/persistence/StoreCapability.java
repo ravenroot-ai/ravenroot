@@ -44,6 +44,63 @@ public enum StoreCapability {
     EVENT_JOURNAL,
 
     /**
+     * Named handlers can be registered, correlated and transitioned inside the same batch as the
+     * aggregate transitions beside them, and a terminal handler produces a claimable
+     * {@link PendingWork.HandlerTrigger} (PERS-05).
+     *
+     * <p>Separate from {@link #DURABLE} because the two are independent claims and both are needed
+     * for a human task that survives a full shutdown: this capability says the handler mechanism
+     * exists and is transactional with the transition beside it, and {@code DURABLE} says the rows
+     * survive process death. An in-memory adapter can honour this one honestly — the conformance
+     * suite runs every handler assertion against it — and must still not claim {@code DURABLE}.</p>
+     *
+     * <p>Declaring it asserts the property the whole mechanism exists for: a registration and the
+     * {@code WAITING} transition beside it commit together or neither does, and a resolution and the
+     * re-entry traversal it authorizes commit together or neither does. An adapter that wrote the
+     * handler outside the transaction would leave a process waiting on a handler that does not
+     * exist, or resumed by a traversal nothing authorized.</p>
+     */
+    DURABLE_HANDLERS,
+
+    /** Exact tool approvals can be registered and transitioned atomically with execution state. */
+    TOOL_APPROVALS,
+
+    /** Process-rooted agent grants and reservations share the execution batch transaction. */
+    AGENT_AUTHORITY_BUDGETS,
+
+    /** First-class human tasks can be registered, transitioned and listed atomically. */
+    HUMAN_TASKS,
+
+    /**
+     * Embedded Human Task confirmations have durable pinned presentation and comment limits,
+     * atomic attributable decisions, and an authorized exact-context attention query with stable
+     * paging and authoritative counts.
+     *
+     * <p>This is deliberately stronger than {@link #HUMAN_TASKS}. A store that implements the
+     * classic generic task lifecycle must not advertise embedded confirmation support unless it
+     * also implements the complete presentation, decision and attention contract.</p>
+     */
+    HUMAN_TASK_CONFIRMATIONS,
+
+    /**
+     * Operator holds on a traversal can be committed, read back and settled atomically with
+     * execution state.
+     *
+     * <p>Declaring it asserts what makes a hold survive a restart: the hold, its paired handler and
+     * the {@code WAITING} transitions beside them commit together or none of them does. An adapter
+     * that wrote the hold outside the transaction would produce the two states this capability
+     * exists to rule out — a traversal recorded as waiting that nothing is holding, so nothing can
+     * ever release it, and a hold over a traversal still recorded as running, which a recovery sweep
+     * would treat as ordinary interrupted work.</p>
+     *
+     * <p>Separate from {@link #DURABLE_HANDLERS} even though a hold always registers one: a handler
+     * carries no continuation by contract, so an adapter can support handlers in full and still have
+     * nowhere to put the bounded state a held traversal needs in order to be continued. A caller
+     * must be able to ask about the second without inferring it from the first.</p>
+     */
+    EXECUTION_PAUSES,
+
+    /**
      * The journal can be compacted on demand, discarding the payloads of records that are both
      * delivered to every destination and past their retention window.
      *
@@ -52,5 +109,72 @@ public enum StoreCapability {
      * additionally honour the replay floor. Splitting them keeps the second obligation from riding in
      * unannounced on the first.</p>
      */
-    JOURNAL_COMPACTION
+    JOURNAL_COMPACTION,
+
+    /**
+     * A durable, tenant-scoped inventory of process instances and their traversals can be listed with
+     * deterministic pagination and looked up directly, without any in-memory registry or event-stream
+     * completeness.
+     *
+     * <p>Declaring this asserts three things together, because a caller that gets two of them is worse
+     * off than one that gets none. First, the inventory is served from the same authoritative rows the
+     * lifecycle transitions write, so there is no projection that can lag, no offset to repair and no
+     * rebuild path that could invent successful work. Second, pagination is deterministic while new
+     * work is accepted: the sort key is immutable per row, so a row never moves between pages of an
+     * in-flight scan. Third, a key belonging to another tenant is indistinguishable from a missing
+     * one, so the inventory is not an existence oracle.</p>
+     *
+     * <p>Separate from {@link #DURABLE} because the two are independent claims: a non-durable adapter
+     * can serve a perfectly honest inventory of the state it currently holds, and it should, so that
+     * the conformance assertions for ordering, filtering and tenant isolation run against something
+     * rather than being skipped into invisibility.</p>
+     */
+    PROCESS_INVENTORY,
+
+    /**
+     * Terminal inventory rows are retained for a declared window and then removable on demand, with a
+     * per-tenant floor that says how far back the answer is still complete.
+     *
+     * <p>Separate from {@link #PROCESS_INVENTORY} for the reason {@link #JOURNAL_COMPACTION} is
+     * separate from {@link #EVENT_JOURNAL}: an adapter can honestly offer an inventory it never
+     * prunes — correct, and eventually a disk incident — while an adapter that prunes takes on the
+     * further obligation to publish the floor. Without the floor, a caller that fails to find an
+     * instance cannot tell "never existed" from "expired by policy", and those two demand opposite
+     * actions. Splitting the capabilities keeps the second obligation from riding in unannounced on
+     * the first.</p>
+     */
+    INVENTORY_RETENTION,
+
+    /**
+     * A bounded canonical result is recorded for every terminal execution, read back by traversal
+     * across a restart and from any instance sharing the store, refused rather than overwritten when
+     * a second, different outcome arrives for the same traversal, and retained for a declared window
+     * with a per-tenant floor.
+     *
+     * <p>Declaring this asserts four things together, and a caller given three of them is worse off
+     * than one given none. First, the record survives process death and is addressable by
+     * {@code (tenantId, traversalId)}, so a client that reconnects to a different instance reads the
+     * outcome rather than an absence. Second, recording is idempotent by <em>refusal</em>: an
+     * identical re-delivery changes nothing, and a conflicting one fails with
+     * {@link ExecutionStoreFailure.ExecutionResultNotRecordable} rather than replacing a terminal
+     * outcome that other records already name. Third, the read distinguishes unknown, expired,
+     * withheld and available, because {@link ResultPayloadState} is stored beside the result rather
+     * than reconstructed from whether bytes came back. Fourth, retention is explicit — nothing is
+     * deleted on a read — and its floor says how far back the answer is still complete.</p>
+     *
+     * <p>Retention is <strong>not</strong> split off into a second capability the way
+     * {@link #INVENTORY_RETENTION} is split from {@link #PROCESS_INVENTORY}, and the asymmetry is
+     * deliberate. An inventory that is never pruned is honest and its rows read the same either way.
+     * A result is different: its payload-retention state is a component of every read, so an adapter
+     * that kept results without a retention window could not answer the expired case at all — it
+     * would have to report an aged-out payload as an available one, or as none. There is no honest
+     * half of this capability to declare.</p>
+     *
+     * <p>Separate from {@link #DURABLE} for the reason {@link #DURABLE_HANDLERS} is: an in-memory
+     * adapter can honour idempotent refusal, tenant scoping, the four read states and retention
+     * exactly, and it should, so those assertions run against something rather than being skipped
+     * into invisibility. It still must not claim {@code DURABLE}, and a caller that needs the result
+     * to survive process death must check for both.</p>
+     */
+    EXECUTION_RESULTS
 }

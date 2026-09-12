@@ -30,11 +30,13 @@ import java.util.Optional;
  * @param sourceCount effective inbound SOURCE nodes validated from the registered graph; legitimately
  *                    zero, because a graph with no source is registrable and controllable as a local
  *                    deployment (this is what separates a deployment from a transient traversal)
+ * @param graphVersion immutable content-derived graph version registered for this deployment;
+ *                     absent only for compatibility producers that predate this projection
  * @param diagnostic fixed, bounded, operator-safe explanation, present only for degraded or failed
  *                   deployments
  */
 public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
-                                    Optional<String> diagnostic) {
+                                    Optional<String> graphVersion, Optional<String> diagnostic) {
     /** Honest ownership label returned on the wire; intentionally makes no multi-replica claim. */
     public static final String SCOPE = "LOCAL_PROCESS";
     /** Defense in depth for implementations other than the reference implementation. */
@@ -49,6 +51,9 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
         if (sourceCount < 0) {
             throw new IllegalArgumentException("sourceCount must not be negative");
         }
+        graphVersion = graphVersion == null ? Optional.empty() : graphVersion
+                .map(value -> ai.ravenroot.api.persistence.HandlerRegistration
+                        .requireBoundedKey(value, "graphVersion"));
         diagnostic = diagnostic == null ? Optional.empty() : diagnostic
                 .map(String::trim).filter(text -> !text.isEmpty())
                 .map(text -> text.substring(0, Math.min(text.length(), MAX_DIAGNOSTIC_CHARACTERS)));
@@ -59,6 +64,18 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
     }
 
     /**
+     * Compatibility constructor for status producers compiled before graph-version projection.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param state lifecycle state
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param diagnostic bounded operator-safe explanation
+     */
+    public LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
+                                 Optional<String> diagnostic) {
+        this(deploymentId, state, sourceCount, Optional.empty(), diagnostic);
+    }
+
+    /**
      * A status with nothing to explain.
      * @param deploymentId caller-supplied identity within the authenticated tenant
      * @param state lifecycle state that carries no incident explanation
@@ -66,7 +83,22 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
      * @return status carrying no diagnostic
      */
     public static LocalDeploymentStatus of(String deploymentId, LocalDeploymentState state, int sourceCount) {
-        return new LocalDeploymentStatus(deploymentId, state, sourceCount, Optional.empty());
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount,
+                Optional.empty(), Optional.empty());
+    }
+
+    /**
+     * Creates a status carrying the authoritative registered graph version.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param state lifecycle state
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param graphVersion immutable registered graph version
+     * @return status carrying the graph version and no diagnostic
+     */
+    public static LocalDeploymentStatus withGraph(String deploymentId, LocalDeploymentState state,
+                                                  int sourceCount, String graphVersion) {
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount,
+                Optional.ofNullable(graphVersion), Optional.empty());
     }
 
     /**
@@ -79,6 +111,23 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
      */
     public static LocalDeploymentStatus of(String deploymentId, LocalDeploymentState state, int sourceCount,
                                            String safeDiagnostic) {
-        return new LocalDeploymentStatus(deploymentId, state, sourceCount, Optional.ofNullable(safeDiagnostic));
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount,
+                Optional.empty(), Optional.ofNullable(safeDiagnostic));
+    }
+
+    /**
+     * Creates an incident status carrying both its authoritative graph version and safe diagnostic.
+     * @param deploymentId caller-supplied identity within the authenticated tenant
+     * @param state degraded or failed state requiring explanation
+     * @param sourceCount effective inbound SOURCE nodes
+     * @param graphVersion immutable registered graph version
+     * @param safeDiagnostic bounded operator-safe explanation
+     * @return incident status carrying the graph version and diagnostic
+     */
+    public static LocalDeploymentStatus withGraph(String deploymentId, LocalDeploymentState state,
+                                                  int sourceCount, String graphVersion,
+                                                  String safeDiagnostic) {
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount,
+                Optional.ofNullable(graphVersion), Optional.ofNullable(safeDiagnostic));
     }
 }

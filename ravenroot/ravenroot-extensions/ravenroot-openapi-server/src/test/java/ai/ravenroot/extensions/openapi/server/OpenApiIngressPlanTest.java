@@ -1,11 +1,14 @@
 package ai.ravenroot.extensions.openapi.server;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -146,6 +149,111 @@ class OpenApiIngressPlanTest {
                 request.relativePath(), request.query(), Map.of("idempotency-key", "key"), body);
         assertEquals(400, assertThrows(OpenApiIngressPlan.RequestFailure.class,
                 () -> plan.match(missingMedia)).status());
+    }
+
+    @Test void requestReplyProjectsOnlyDeclaredStatusHeadersMediaSchemaAndBoundedBody() throws Exception {
+        OpenApiIngressPlan.Match match = OpenApiIngressPlan.compileRequestReply(OpenApiServerTestSupport.profile(),
+                Set.of("createOrder"), OpenApiServerTestSupport.configuration().projection().allowedHeaders())
+                .match(OpenApiServerTestSupport.request("/orders/42", Map.of(),
+                        Map.of("idempotency-key", "key", "x-trace", "trace"),
+                        "{\"amount\":2}".getBytes(StandardCharsets.UTF_8)));
+        UUID correlation = UUID.randomUUID();
+        Map<String, Object> valid = response(correlation, 200, Map.of("result-id", "r-1"),
+                "application/json", Map.of("result", "ok"));
+        int exact = "{\"result\":\"ok\"}".getBytes(StandardCharsets.UTF_8).length;
+        assertEquals(200, match.projectResponse(valid, correlation, exact).status());
+        assertThrows(OpenApiIngressPlan.ResponseFailure.class, () -> match.projectResponse(valid, correlation,
+                exact - 1));
+
+        assertResponseRejected(match, response(correlation, 201, Map.of(), null, null), correlation);
+        assertResponseRejected(match, response(correlation, 200, Map.of("connection", "close"),
+                "application/json", Map.of("result", "ok")), correlation);
+        assertResponseRejected(match, response(correlation, 200, Map.of(), "text/plain",
+                Map.of("result", "ok")), correlation);
+        assertResponseRejected(match, response(correlation, 200, Map.of(), "application/json",
+                Map.of("unexpected", "value")), correlation);
+        assertResponseRejected(match, response(UUID.randomUUID(), 200, Map.of(), "application/json",
+                Map.of("result", "ok")), correlation);
+    }
+
+    @Test void asyncCompilationDoesNotAdmitOrInterpretResponseContracts() {
+        String invalidResponse = new String(OpenApiServerTestSupport.SPEC, StandardCharsets.UTF_8)
+                .replace("{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"string\","
+                                + "\"maxLength\":64}},\"required\":[\"result\"],\"additionalProperties\":false}",
+                        "{\"type\":\"unsupported\"}");
+        byte[] specification = invalidResponse.getBytes(StandardCharsets.UTF_8);
+        OpenApiServerProfile profile = new OpenApiServerProfile("orders", specification,
+                OpenApiServerTestSupport.sha256(specification), "/api", Set.of("createOrder", "specialOrder"),
+                Set.of("USER"), "idempotency-key", null, 4096, 128, 1000, 2);
+        OpenApiIngressPlan.compile(profile, Set.of("createOrder"), Set.of("idempotency-key", "x-trace"));
+        assertThrows(OpenApiServerException.class, () -> OpenApiIngressPlan.compileRequestReply(profile,
+                Set.of("createOrder"), Set.of("idempotency-key", "x-trace", "result-id")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"set-cookie", "set-cookie2", "www-authenticate", "proxy-authenticate",
+            "authentication-info", "proxy-authentication-info"})
+    void requestReplyCompilationRejectsCredentialPropagatingResponseHeaders(String header) {
+        OpenApiServerProfile profile = profileWithResponseHeader(header);
+        assertThrows(OpenApiServerException.class, () -> OpenApiIngressPlan.compileRequestReply(profile,
+                Set.of("createOrder"), Set.of("idempotency-key", "x-trace")));
+    }
+
+    @Test void headAndBodylessStatusesRejectMediaAndBodyEvenWhenTheSchemaDeclaresContent() throws Exception {
+        byte[] specification = """
+                {"openapi":"3.0.3","info":{"title":"T","version":"1"},"paths":{"/item":{"head":{
+                  "operationId":"inspect","responses":{"204":{"description":"empty","content":{
+                    "application/json":{"schema":{"type":"object","additionalProperties":true}}
+                  }}}
+                }}}}
+                """.getBytes(StandardCharsets.UTF_8);
+        OpenApiServerProfile profile = new OpenApiServerProfile("head", specification,
+                OpenApiServerTestSupport.sha256(specification), "/head", Set.of("inspect"), Set.of("USER"),
+                "idempotency-key", null, 1024, 128, 1000, 1);
+        OpenApiIngressPlan.Match match = OpenApiIngressPlan.compileRequestReply(profile, Set.of("inspect"), Set.of())
+                .match(new ai.ravenroot.api.ingress.IngressRequest(
+                        new ai.ravenroot.api.ingress.IngressPrincipal("tenant-a", "alice", "issuer", "USER"),
+                        "HEAD", "/item", Map.of(), Map.of(), new byte[0]));
+        UUID correlation = UUID.randomUUID();
+        Map<String, Object> empty = new java.util.LinkedHashMap<>();
+        empty.put("version", "openapi.response.v1");
+        empty.put("correlationId", correlation.toString());
+        empty.put("operationId", "inspect");
+        empty.put("status", 204);
+        empty.put("headers", Map.of());
+        empty.put("mediaType", null);
+        empty.put("body", null);
+        assertEquals(204, match.projectResponse(empty, correlation, 1024).status());
+        Map<String, Object> forbidden = new java.util.LinkedHashMap<>(empty);
+        forbidden.put("mediaType", "application/json");
+        forbidden.put("body", Map.of());
+        assertResponseRejected(match, forbidden, correlation);
+    }
+
+    private static void assertResponseRejected(OpenApiIngressPlan.Match match, Object response, UUID correlation) {
+        assertThrows(OpenApiIngressPlan.ResponseFailure.class, () -> match.projectResponse(response, correlation,
+                1024));
+    }
+
+    private static Map<String, Object> response(UUID correlation, int status, Map<String, Object> headers,
+                                                Object mediaType, Object body) {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("version", "openapi.response.v1");
+        result.put("correlationId", correlation.toString());
+        result.put("operationId", "createOrder");
+        result.put("status", status);
+        result.put("headers", headers);
+        result.put("mediaType", mediaType);
+        result.put("body", body);
+        return result;
+    }
+
+    static OpenApiServerProfile profileWithResponseHeader(String header) {
+        byte[] specification = new String(OpenApiServerTestSupport.SPEC, StandardCharsets.UTF_8)
+                .replace("\"result-id\"", "\"" + header + "\"").getBytes(StandardCharsets.UTF_8);
+        return new OpenApiServerProfile("orders", specification, OpenApiServerTestSupport.sha256(specification),
+                "/api", Set.of("createOrder", "specialOrder"), Set.of("USER"), "idempotency-key", null,
+                4096, 128, 1000, 2);
     }
 
     private static Map<String, String> with(Map<String, String> source, String key, String value) {

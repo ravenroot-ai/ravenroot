@@ -6,17 +6,30 @@ import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
+import ai.ravenroot.api.node.ToolCallContinuationAction;
+import ai.ravenroot.api.node.ToolCallContinuationInput;
+import ai.ravenroot.api.node.ToolCallContinuationResult;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.AgentResourceRequest;
+import ai.ravenroot.api.node.service.AgentResourceSession;
+import ai.ravenroot.api.node.service.AgentModelReservation;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
+import ai.ravenroot.api.node.service.ToolCallAuthorization;
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -50,8 +63,8 @@ import java.util.function.LongSupplier;
  *   the same tool forever, and only a finite bound ends it;</li>
  *   <li><b>the tool contract exists because the model chooses what to call</b> — a refusal must be an
  *   answer the model can read and correct, not a terminated traversal (see {@link AgentTool});</li>
- *   <li><b>the instructions live in the system turn</b>, which {@code llm-prompt} never uses — see
- *   {@link AgentTurn} rule 2.</li>
+ *   <li><b>only operator policy lives in the system turn</b>; graph instructions are a separate,
+ *   untrusted user turn — see {@link AgentTurn} rule 2.</li>
  * </ul>
  *
  * <h2>Three properties carried over from {@code llm-prompt} unchanged, and why each is not optional</h2>
@@ -71,11 +84,16 @@ import java.util.function.LongSupplier;
  *
  * <h2>The credential is never in this process's reach</h2>
  * <p>Like its sibling, this behavior requires {@link NodePackageCapability#OUTBOUND_HTTP} and
- * deliberately <b>not</b> {@code CREDENTIAL_RESOLUTION}. The profile names a binding; the runtime
- * resolves it and places it on the request. This bundle never holds a secret and has no code path
- * that could return one.</p>
+ * deliberately <b>not</b> {@code CREDENTIAL_RESOLUTION}; it additionally requires
+ * {@link NodePackageCapability#TOOL_AUTHORIZATION}. The profile names a binding; the runtime resolves
+ * it and places it on the request. This bundle never holds a secret and has no code path that could
+ * return one.</p>
  */
 public final class AgentNodeBehavior implements NodeBehavior {
+    private static final CancellationSignal NEVER_CANCELLED = new CancellationSignal() {
+        @Override public boolean cancelled() { return false; }
+        @Override public void onCancel(Runnable listener) { }
+    };
 
     /** The catalog name, preserved from the node formerly published by the core. */
     public static final String BEHAVIOR = "agent";
@@ -156,7 +174,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
 
     @Override
     public Set<NodePackageCapability> requiredServices() {
-        return Set.of(NodePackageCapability.OUTBOUND_HTTP);
+        return Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                NodePackageCapability.TOOL_AUTHORIZATION,
+                NodePackageCapability.AGENT_RESOURCES);
     }
 
     @Override
@@ -173,8 +193,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         "Name of a model profile this deployment declared in its environment "
                                 + "(RAVENROOT_LLM_PROFILE_<hex(name)>)."),
                 NodePropertyDescriptor.required("instructions", "Instructions", NodePropertyType.TEXT,
-                        "Who the agent is and how it should work. Sent in the system turn, below the "
-                                + "operator's preamble. Supports {{payload}}, {{payload.a.b}} and "
+                        "Who the agent is and how it should work. Sent as untrusted graph content, "
+                                + "separate from operator policy. Supports {{payload}}, {{payload.a.b}} and "
                                 + "{{attributes.x}}."),
                 NodePropertyDescriptor.required("objective", "Objective", NodePropertyType.TEXT,
                         "The task for this invocation. Sent as the first user turn. Supports "
@@ -196,7 +216,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                                 + DEFAULT_MAX_TURNS + ", never exceeds " + MAX_TURNS_CEILING + ".", ""),
                 NodePropertyDescriptor.optional("maxTotalTokens", "Max tokens", NodePropertyType.INTEGER,
                         "Cumulative reported tokens across the whole run before it is refused. "
-                                + "Unbounded when absent.", ""),
+                                + "The operator's finite ceiling still applies when absent.", ""),
                 NodePropertyDescriptor.optional("timeoutMs", "Deadline", NodePropertyType.INTEGER,
                         "Deadline for the WHOLE run, not for one turn. May only tighten the "
                                 + "profile deadline.", ""),
@@ -298,7 +318,45 @@ public final class AgentNodeBehavior implements NodeBehavior {
             servers.add(server.get());
         }
         Settings settings = Settings.compile(configuration, resolved.get(), skills, List.copyOf(servers));
-        return message -> invoke(message, services, settings);
+        return new NodeAction() {
+            @Override public CompletionStage<NodeResult> handle(NodeMessage message) {
+                return invoke(message, services, settings, NEVER_CANCELLED);
+            }
+            @Override public CompletionStage<NodeResult> handle(
+                    NodeMessage message, CancellationSignal cancellation) {
+                return invoke(message, services, settings,
+                        Objects.requireNonNull(cancellation, "cancellation"));
+            }
+        };
+    }
+
+    @Override
+    public Optional<ToolCallContinuationAction> createToolCallContinuation(
+            NodeConfiguration configuration, NodePackageServices services) {
+        List<AgentSkill> skills = AgentSkill.declaredOn(configuration);
+        String profileName = NodePropertyDescriptor.adapterIdOf(configuration.properties().get("provider"));
+        LlmProfile profile = profiles.resolve(profileName).orElseThrow(
+                () -> new IllegalStateException("agent continuation provider is unavailable"));
+        List<String> declared = mcpNames(configuration);
+        if (declared.size() > MAX_MCP_SERVERS) {
+            throw new IllegalStateException("agent continuation MCP inventory is invalid");
+        }
+        var servers = new ArrayList<McpProfile>();
+        for (String serverName : declared) {
+            servers.add(mcpProfiles.resolve(serverName).orElseThrow(
+                    () -> new IllegalStateException("agent continuation MCP profile is unavailable")));
+        }
+        Settings settings = Settings.compile(configuration, profile, skills, List.copyOf(servers));
+        return Optional.of(new ToolCallContinuationAction() {
+            @Override public void validate(ToolCallContinuationInput input) {
+                validateContinuation(input);
+            }
+
+            @Override public CompletionStage<ToolCallContinuationResult> resume(
+                    ToolCallContinuationInput input) {
+                return AgentNodeBehavior.this.resume(input, services, settings);
+            }
+        });
     }
 
     /**
@@ -417,7 +475,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
     }
 
     private CompletionStage<NodeResult> invoke(NodeMessage message, NodePackageServices services,
-                                               Settings settings) {
+                                               Settings settings, CancellationSignal cancellation) {
+        if (cancellation.cancelled()) {
+            return CompletableFuture.failedFuture(new AgentException(AgentException.Code.DEADLINE_EXCEEDED));
+        }
         // The key pairs the tenant with the profile, and the separator is a character neither can
         // contain: a profile name is masked to [A-Za-z0-9._-] before it is ever resolved.
         Admission.Lease lease = profileAdmission.tryAcquire(
@@ -432,22 +493,29 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // path is where a leak lives in every implementation that has one.
         var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
         leases.add(lease);
+        AgentResourceSession resources;
+        try {
+            resources = services.agentResources().admit(message, resourceRequest(settings));
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(sanitize(
+                    cleanupBeforeRun(leases, null, refused, false)));
+        }
         for (McpProfile server : settings.mcpServers()) {
             Admission.Lease held = mcpAdmission.tryAcquire(
                     message.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
-                leases.forEach(Admission.Lease::close);
-                return CompletableFuture.failedFuture(
-                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+                Throwable failure = cleanupBeforeRun(leases, resources,
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+                return CompletableFuture.failedFuture(failure);
             }
             leases.add(held);
         }
         Run run;
         try {
-            run = new Run(message, services, settings);
+            run = new Run(message, services, settings, resources);
         } catch (RuntimeException failure) {
-            leases.forEach(Admission.Lease::close);
-            return CompletableFuture.failedFuture(sanitize(failure));
+            return CompletableFuture.failedFuture(sanitize(
+                    cleanupBeforeRun(leases, resources, failure, false)));
         }
         var result = new CompletableFuture<NodeResult>();
         // ONE callback holding both actions, in this order, and not two callbacks written in this
@@ -464,37 +532,184 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // The leases are held until the LAST turn finishes, not until the first returns -- and, with
         // MCP servers declared, until after discovery, which happens before the first turn. Every
         // lease is idempotent, so a run that fails between two turns releases here exactly once.
-        result.whenComplete((ignored, alsoIgnored) -> {
-            try {
-                run.abort();
-            } finally {
-                // The finally is the whole point, and it was learned the expensive way. Fusing the
-                // two actions into one callback bought the ordering and lost something the two
-                // separate registrations had for free: independence. OutboundCall.cancel() is a
-                // runtime implementation and its contract does not promise it will not throw -- this
-                // file guards seven other crossings into the runtime for exactly that reason -- and
-                // without this finally, one throw there skips the release entirely. That is not a
-                // lost nanosecond: Admission.Gate is reference-counted and only leaves the map at
-                // zero, so the (tenant, profile) key stays poisoned for the life of the process.
-                for (Admission.Lease held : leases) {
-                    // One at a time and not forEach, so that a lease refusing to close cannot take
-                    // the ones after it down with it. Admission.releaseReference raises on a broken
-                    // invariant, which is deliberate and stays -- what changes is that it costs one
-                    // lease instead of all of them.
-                    try {
-                        held.close();
-                    } catch (RuntimeException broken) {
-                        // Deliberately swallowed HERE and nowhere else in this class: this is the
-                        // terminal callback of a run that has already completed, so there is nothing
-                        // left to fail and no caller to tell. Rethrowing would only lose the
-                        // remaining leases.
-                        continue;
-                    }
-                }
-            }
+        CompletionStage<NodeResult> exposed = cleanupView(result, run, leases, resources, true);
+        cancellation.onCancel(() -> {
+            run.abort();
+            result.completeExceptionally(new AgentException(AgentException.Code.DEADLINE_EXCEEDED));
         });
-        run.start(result);
-        return cancellableView(result);
+        if (!result.isDone()) run.start(result);
+        return exposed;
+    }
+
+    private CompletionStage<ToolCallContinuationResult> resume(ToolCallContinuationInput input,
+                                                                NodePackageServices services,
+                                                                Settings settings) {
+        RestartCheckpoint checkpoint;
+        try {
+            checkpoint = validateContinuation(input);
+        } catch (RuntimeException invalid) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("invalid agent continuation checkpoint"));
+        }
+        NodeMessage supplied = input.message();
+        NodeMessage restored = new NodeMessage(supplied.security(), supplied.processInstanceId(),
+                supplied.traversalId(), supplied.invocationId(), supplied.attemptId(),
+                supplied.parentInvocationIds(), supplied.nodeId(), null, checkpoint.inboundAttributes(),
+                supplied.command());
+        AgentResourceSession resources;
+        try {
+            resources = services.agentResources().resume(input, resourceRequest(settings));
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(sanitize(refused));
+        }
+        var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
+        Admission.Lease profile = profileAdmission.tryAcquire(
+                restored.tenantId() + " " + settings.profile().name(), settings.profile().maxConcurrency());
+        if (profile == null) {
+            Throwable failure = cleanupBeforeRun(leases, resources,
+                    new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+            return CompletableFuture.failedFuture(failure);
+        }
+        leases.add(profile);
+        for (McpProfile server : settings.mcpServers()) {
+            Admission.Lease held = mcpAdmission.tryAcquire(
+                    restored.tenantId() + " " + server.name(), server.maxConcurrency());
+            if (held == null) {
+                Throwable failure = cleanupBeforeRun(leases, resources,
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+                return CompletableFuture.failedFuture(failure);
+            }
+            leases.add(held);
+        }
+        Run run;
+        try {
+            run = new Run(restored, services, settings, checkpoint, resources);
+        } catch (RuntimeException invalid) {
+            return CompletableFuture.failedFuture(
+                    cleanupBeforeRun(leases, resources, invalid, false));
+        }
+        var result = new CompletableFuture<ToolCallContinuationResult>();
+        var exposed = new CompletableFuture<ToolCallContinuationResult>();
+        result.whenComplete((continued, failure) -> {
+            if (failure != null) {
+                Throwable terminal = cleanup(run, leases, resources, failure, false);
+                exposed.completeExceptionally(terminal);
+                return;
+            }
+            var cleanedNode = new CompletableFuture<NodeResult>();
+            continued.nodeResult().whenComplete((nodeResult, continuationFailure) -> {
+                Throwable terminal = cleanup(run, leases, resources, continuationFailure, false);
+                if (terminal != null) cleanedNode.completeExceptionally(terminal);
+                else cleanedNode.complete(nodeResult);
+            });
+            exposed.complete(new ToolCallContinuationResult(cleanedNode, continued.effectSucceeded()));
+        });
+        run.resume(input, checkpoint, result);
+        return exposed;
+    }
+
+    private static AgentResourceRequest resourceRequest(Settings settings) {
+        long perTurn = settings.tuning().maxTokens().orElse(0L);
+        return new AgentResourceRequest(settings.maxTurns(), settings.maxTotalTokens(), perTurn,
+                Duration.ofMillis(settings.deadlineMs()));
+    }
+
+    private static RestartCheckpoint validateContinuation(ToolCallContinuationInput input) {
+        if (input.version() != 1
+                || !input.checkpointDigest().equals(ToolApprovalRegistration.digest(input.checkpoint()))
+                || !input.argumentsDigest().equals(
+                        ToolApprovalRegistration.digest(input.canonicalArguments()))) {
+            throw new IllegalArgumentException("unsupported or invalid agent continuation");
+        }
+        RestartCheckpoint checkpoint = RestartCheckpoint.read(input.checkpoint());
+        AgentTurn.ToolCall current = checkpoint.calls().get(checkpoint.index());
+        if (!current.name().equals(input.tool())
+                || !java.util.Arrays.equals(canonicalArguments(current.arguments()),
+                        input.canonicalArguments())) {
+            throw new IllegalArgumentException("agent continuation scope mismatch");
+        }
+        return checkpoint;
+    }
+
+    private static byte[] canonicalArguments(String raw) {
+        byte[] supplied = raw == null || raw.isBlank()
+                ? "{}".getBytes(StandardCharsets.UTF_8) : raw.getBytes(StandardCharsets.UTF_8);
+        PayloadValue parsed = PayloadJson.read(supplied, PayloadLimits.DEFAULTS);
+        if (!(parsed instanceof PayloadValue.MapValue)) {
+            throw new IllegalArgumentException("tool arguments are not an object");
+        }
+        return PayloadJson.write(parsed).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private record RestartCheckpoint(List<PayloadValue> messages, List<AgentTurn.ToolCall> calls,
+                                     int index, int turns, int toolCalls, long tokens,
+                                     String finishReason, long remainingMillis,
+                                     Map<String, Object> inboundAttributes, Object provenance) {
+        private static final Set<String> KEYS = Set.of("messages", "calls", "index", "turns",
+                "toolCalls", "tokens", "finishReason", "remainingMillis", "inboundAttributes",
+                "provenance");
+
+        static RestartCheckpoint read(byte[] bytes) {
+            PayloadValue decoded = PayloadJson.read(bytes, PayloadLimits.DEFAULTS);
+            if (!(decoded instanceof PayloadValue.MapValue root) || !root.entries().keySet().equals(KEYS)) {
+                throw new IllegalArgumentException("invalid checkpoint object");
+            }
+            List<PayloadValue> messages = list(root, "messages");
+            var calls = new ArrayList<AgentTurn.ToolCall>();
+            for (PayloadValue value : list(root, "calls")) {
+                if (!(value instanceof PayloadValue.MapValue call)
+                        || !call.entries().keySet().equals(Set.of("id", "name", "arguments"))) {
+                    throw new IllegalArgumentException("invalid checkpoint tool call");
+                }
+                calls.add(new AgentTurn.ToolCall(text(call, "id"), text(call, "name"),
+                        text(call, "arguments")));
+            }
+            int index = exactInt(root, "index");
+            if (calls.isEmpty() || index < 0 || index >= calls.size()) {
+                throw new IllegalArgumentException("invalid checkpoint tool index");
+            }
+            Object attrs = required(root, "inboundAttributes").toJava();
+            if (!(attrs instanceof Map<?, ?> rawAttrs)
+                    || rawAttrs.keySet().stream().anyMatch(key -> !(key instanceof String))) {
+                throw new IllegalArgumentException("invalid checkpoint attributes");
+            }
+            @SuppressWarnings("unchecked") Map<String, Object> inbound = Map.copyOf((Map<String, Object>) rawAttrs);
+            long remaining = exactLong(root, "remainingMillis");
+            if (remaining < 1) throw new IllegalArgumentException("expired checkpoint");
+            return new RestartCheckpoint(List.copyOf(messages), List.copyOf(calls), index,
+                    exactInt(root, "turns"), exactInt(root, "toolCalls"), exactLong(root, "tokens"),
+                    text(root, "finishReason"), remaining, inbound,
+                    required(root, "provenance").toJava());
+        }
+
+        private static PayloadValue required(PayloadValue.MapValue map, String key) {
+            PayloadValue value = map.entries().get(key);
+            if (value == null) throw new IllegalArgumentException("missing checkpoint field");
+            return value;
+        }
+        private static List<PayloadValue> list(PayloadValue.MapValue map, String key) {
+            if (!(required(map, key) instanceof PayloadValue.ListValue value)) {
+                throw new IllegalArgumentException("checkpoint field is not a list");
+            }
+            return value.values();
+        }
+        private static String text(PayloadValue.MapValue map, String key) {
+            if (!(required(map, key) instanceof PayloadValue.TextValue value)) {
+                throw new IllegalArgumentException("checkpoint field is not text");
+            }
+            return value.value();
+        }
+        private static long exactLong(PayloadValue.MapValue map, String key) {
+            if (!(required(map, key) instanceof PayloadValue.IntegerValue value) || value.value() < 0) {
+                throw new IllegalArgumentException("checkpoint field is not a non-negative integer");
+            }
+            return value.value();
+        }
+        private static int exactInt(PayloadValue.MapValue map, String key) {
+            long value = exactLong(map, key);
+            if (value > Integer.MAX_VALUE) throw new IllegalArgumentException("checkpoint integer is too large");
+            return (int) value;
+        }
     }
 
     /**
@@ -514,29 +729,92 @@ public final class AgentNodeBehavior implements NodeBehavior {
      * this node's provenance marking must never allow. So the view is a future that forwards
      * cancellation inwards and takes its value only from the run.</p>
      */
-    private static CompletionStage<NodeResult> cancellableView(CompletableFuture<NodeResult> run) {
+    private static CompletionStage<NodeResult> cleanupView(CompletableFuture<NodeResult> result,
+                                                            Run run,
+                                                            List<Admission.Lease> leases,
+                                                            AgentResourceSession resources,
+                                                            boolean retryableFailure) {
         var exposed = new CompletableFuture<NodeResult>() {
             @Override
             public boolean cancel(boolean mayInterruptIfRunning) {
-                // This future first and the run second, so the return value does not depend on a
-                // subtlety of CompletableFuture. It was reported that the other order returns false
-                // on a cancellation that worked; MEASURED, it does not -- cancel() answers
-                // "cancelled || isCancelled()", and the exception the forwarding below propagates is
-                // itself a CancellationException, so the already-completed future still reports
-                // true. The order here is the one that stays correct without relying on that.
-                boolean cancelled = super.cancel(mayInterruptIfRunning);
-                run.cancel(mayInterruptIfRunning);
-                return cancelled;
+                boolean cancelled = result.cancel(mayInterruptIfRunning);
+                return cancelled || isCancelled();
             }
         };
-        run.whenComplete((value, failure) -> {
-            if (failure != null) {
-                exposed.completeExceptionally(failure);
-            } else {
-                exposed.complete(value);
-            }
+        result.whenComplete((value, failure) -> {
+            Throwable terminal = cleanup(run, leases, resources, failure, retryableFailure);
+            if (terminal != null) exposed.completeExceptionally(terminal);
+            else exposed.complete(value);
         });
         return exposed;
+    }
+
+    private static Throwable cleanup(Run run, List<Admission.Lease> leases,
+                                     AgentResourceSession resources, Throwable original,
+                                     boolean retryableFailure) {
+        Throwable failure = original;
+        try {
+            run.abort();
+        } catch (RuntimeException abortFailure) {
+            failure = appendFailure(failure, abortFailure);
+        }
+        try {
+            if (original == null) resources.complete();
+            else if (!run.suspended()) {
+                if (retryableFailure && !(rootCause(original) instanceof CancellationException)) {
+                    resources.failAttempt();
+                }
+                else resources.cancel();
+            }
+        } catch (RuntimeException resourceFailure) {
+            failure = appendFailure(failure, resourceFailure);
+        }
+        for (Admission.Lease held : leases) {
+            try {
+                held.close();
+            } catch (RuntimeException leaseFailure) {
+                failure = appendFailure(failure, leaseFailure);
+            }
+        }
+        return failure;
+    }
+
+    private static Throwable cleanupBeforeRun(List<Admission.Lease> leases,
+                                               AgentResourceSession resources,
+                                               Throwable original,
+                                               boolean retryableFailure) {
+        Throwable failure = original;
+        if (resources != null) {
+            try {
+                if (retryableFailure) resources.failAttempt();
+                else resources.cancel();
+            } catch (RuntimeException resourceFailure) {
+                failure = appendFailure(failure, resourceFailure);
+            }
+        }
+        for (Admission.Lease held : leases) {
+            try {
+                held.close();
+            } catch (RuntimeException leaseFailure) {
+                failure = appendFailure(failure, leaseFailure);
+            }
+        }
+        return failure;
+    }
+
+    private static Throwable appendFailure(Throwable primary, RuntimeException cleanupFailure) {
+        if (primary == null) return cleanupFailure;
+        if (primary != cleanupFailure) primary.addSuppressed(cleanupFailure);
+        return primary;
+    }
+
+    private static Throwable rootCause(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /**
@@ -567,6 +845,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
         /** The one {@link LoadSkillTool} of this invocation, kept so discovery cannot replace it. */
         private final AgentTool loadSkill;
         private final List<PayloadValue> messages = new ArrayList<>();
+        private final ModelInputProvenance provenance = new ModelInputProvenance();
         /**
          * The model call currently in flight, so a cancelled run can actually stop.
          *
@@ -576,6 +855,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
          * caller had said stop and after the admission had been given back.</p>
          */
         private volatile OutboundCall<OutboundHttpResponse> inFlight;
+        private volatile AgentModelReservation inFlightBudget;
+        private volatile boolean modelDispatched;
+        /** Expected durable approval suspension is detach-only, never grant cancellation. */
+        private volatile boolean suspended;
         /** Set once the run is over, by any route. Read before every step the loop would take next. */
         private volatile boolean over;
         private final long deadlineNanos;
@@ -583,22 +866,68 @@ public final class AgentNodeBehavior implements NodeBehavior {
         private int toolCalls;
         private long tokens;
         private String finishReason = "";
+        private final AgentResourceSession resources;
+        private long effectiveMaximumOutputBytes;
 
-        Run(NodeMessage message, NodePackageServices services, Settings settings) {
+        Run(NodeMessage message, NodePackageServices services, Settings settings,
+            AgentResourceSession resources) {
             this.message = message;
             this.services = services;
             this.settings = settings;
+            this.resources = resources;
             this.loadSkill = new LoadSkillTool(settings.skills());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
                     + Duration.ofMillis(settings.deadlineMs()).toNanos();
+            this.effectiveMaximumOutputBytes = settings.profile().maxResponseBytes();
             // Rendered once, here, and inside the try of the caller: a template that cannot render is
             // a property defect and must refuse before any byte leaves.
             String instructions = render(settings.instructions());
             String objective = render(settings.objective());
-            messages.add(AgentTurn.systemMessage(settings.profile().systemPreamble(), instructions,
-                    settings.skills()));
+            provenance.add(ModelInputProvenance.Kind.GRAPH_INSTRUCTIONS,
+                    "node:" + message.nodeId(), instructions);
+            provenance.add(ModelInputProvenance.Kind.GRAPH_OBJECTIVE,
+                    "node:" + message.nodeId(), objective);
+            provenance.add(ModelInputProvenance.Kind.INBOUND_PAYLOAD,
+                    "invocation:" + message.invocationId(), message.payload());
+            provenance.add(ModelInputProvenance.Kind.INBOUND_ATTRIBUTES,
+                    "invocation:" + message.invocationId(), message.attributes());
+            provenance.add(ModelInputProvenance.Kind.TOOL_DESCRIPTION, loadSkill.name(),
+                    Map.of("description", loadSkill.description(),
+                            "parameters", loadSkill.parameters().toJava()));
+            for (AgentSkill skill : settings.skills()) {
+                provenance.add(ModelInputProvenance.Kind.TOOL_DESCRIPTION,
+                        LoadSkillTool.NAME,
+                        Map.of("name", skill.name(), "description", skill.description()));
+            }
+            PayloadValue systemMessage = AgentTurn.systemMessage(settings.profile().systemPreamble());
+            PayloadValue authorMessage = AgentTurn.authorInstructionsMessage(instructions, settings.skills());
+            provenance.add(ModelInputProvenance.Kind.GENERATED_SYSTEM_MESSAGE,
+                    "agent-system", systemMessage.toJava());
+            provenance.add(ModelInputProvenance.Kind.GENERATED_AUTHOR_MESSAGE,
+                    "agent-author", authorMessage.toJava());
+            messages.add(systemMessage);
+            messages.add(authorMessage);
             messages.add(AgentTurn.userMessage(objective));
+        }
+
+        Run(NodeMessage message, NodePackageServices services, Settings settings,
+            RestartCheckpoint checkpoint, AgentResourceSession resources) {
+            this.message = message;
+            this.services = services;
+            this.settings = settings;
+            this.resources = resources;
+            this.loadSkill = new LoadSkillTool(settings.skills());
+            this.tools = List.of(loadSkill);
+            this.deadlineNanos = System.nanoTime()
+                    + Duration.ofMillis(Math.min(settings.deadlineMs(), checkpoint.remainingMillis())).toNanos();
+            this.messages.addAll(checkpoint.messages());
+            this.provenance.restore(checkpoint.provenance());
+            this.turns = checkpoint.turns();
+            this.toolCalls = checkpoint.toolCalls();
+            this.tokens = checkpoint.tokens();
+            this.finishReason = checkpoint.finishReason();
+            this.effectiveMaximumOutputBytes = settings.profile().maxResponseBytes();
         }
 
         private String render(String template) {
@@ -654,11 +983,81 @@ public final class AgentNodeBehavior implements NodeBehavior {
                             all.add(loadSkill);
                             all.addAll(discovered);
                             tools = List.copyOf(all);
+                            for (AgentTool tool : discovered) {
+                                provenance.add(ModelInputProvenance.Kind.TOOL_DESCRIPTION,
+                                        tool.name(), Map.of("description", tool.description(),
+                                                "parameters", tool.parameters().toJava()));
+                            }
                             step(result);
                         } catch (RuntimeException invalid) {
                             result.completeExceptionally(sanitize(invalid));
                         }
                     });
+        }
+
+        void resume(ToolCallContinuationInput input, RestartCheckpoint checkpoint,
+                    CompletableFuture<ToolCallContinuationResult> result) {
+            java.util.function.Consumer<List<AgentTool>> continueWith = discovered -> {
+                var all = new ArrayList<AgentTool>(discovered.size() + 1);
+                all.add(loadSkill);
+                all.addAll(discovered);
+                tools = List.copyOf(all);
+                resumeReady(input, checkpoint, result);
+            };
+            if (settings.mcpServers().isEmpty()) {
+                continueWith.accept(List.of());
+                return;
+            }
+            LongSupplier remaining = () -> over || result.isDone() ? 0 : remainingMillis();
+            McpToolset.discover(settings.mcpServers(), services, message, remaining)
+                    .whenComplete((discovered, failure) -> {
+                        if (failure != null) result.completeExceptionally(sanitize(failure));
+                        else if (!over && !result.isDone()) continueWith.accept(discovered);
+                    });
+        }
+
+        private void resumeReady(ToolCallContinuationInput input, RestartCheckpoint checkpoint,
+                                 CompletableFuture<ToolCallContinuationResult> result) {
+            AgentTurn.ToolCall requested = checkpoint.calls().get(checkpoint.index());
+            if (input.decision() != ToolCallContinuationInput.Decision.APPROVED) {
+                appendResumedToolResult(requested,
+                        "The server denied this tool call. It performed no effect.", checkpoint, result, false);
+                return;
+            }
+            AgentTool selected = tools.stream().filter(tool -> tool.name().equals(input.tool()))
+                    .findFirst().orElse(null);
+            if (selected == null) {
+                result.completeExceptionally(new IllegalStateException(
+                        "approved agent tool is unavailable after restart"));
+                return;
+            }
+            try {
+                selected.invoke(new String(input.canonicalArguments(), StandardCharsets.UTF_8))
+                        .whenComplete((toolResult, failure) -> {
+                            boolean succeeded = failure == null && toolResult != null && toolResult.succeeded();
+                            String text = failure == null && toolResult != null ? toolResult.text() : TOOL_FAILED;
+                            appendResumedToolResult(requested, text, checkpoint, result, succeeded);
+                        });
+            } catch (RuntimeException failure) {
+                appendResumedToolResult(requested, TOOL_FAILED, checkpoint, result, false);
+            }
+        }
+
+        private void appendResumedToolResult(AgentTurn.ToolCall requested, String text,
+                                             RestartCheckpoint checkpoint,
+                                             CompletableFuture<ToolCallContinuationResult> result,
+                                             boolean effectSucceeded) {
+            try {
+                String safe = text == null || text.isEmpty() ? TOOL_FAILED : text;
+                messages.add(AgentTurn.toolResultMessage(requested.id(), safe));
+                provenance.add(ModelInputProvenance.Kind.TOOL_RESULT,
+                        "tool-call:" + (checkpoint.index() + 1), safe);
+                var nodeResult = new CompletableFuture<NodeResult>();
+                result.complete(new ToolCallContinuationResult(nodeResult, effectSucceeded));
+                runTools(checkpoint.calls(), checkpoint.index() + 1, nodeResult);
+            } catch (RuntimeException invalid) {
+                result.completeExceptionally(sanitize(invalid));
+            }
         }
 
         void step(CompletableFuture<NodeResult> result) {
@@ -692,14 +1091,62 @@ public final class AgentNodeBehavior implements NodeBehavior {
             }
             turns++;
             OutboundCall<OutboundHttpResponse> call;
+            final AgentModelReservation turnBudget;
             try {
-                byte[] body = AgentTurn.writeRequest(settings.model(), messages, tools, settings.tuning());
+                turnBudget = resources.reserveModelTurn(turns);
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            inFlightBudget = turnBudget;
+            modelDispatched = false;
+            byte[] body;
+            long effectiveTimeout;
+            try {
+                long permittedOutput = turnBudget.maximumOutputTokens();
+                long permittedMillis = turnBudget.maximumDuration().toMillis();
+                if (permittedOutput <= 0 || permittedMillis <= 0) {
+                    throw new IllegalStateException("agent resource permit is empty");
+                }
+                Optional<Long> effectiveOutput = settings.tuning().maxTokens()
+                        .map(configured -> Math.min(configured, permittedOutput));
+                if (effectiveOutput.isEmpty() && permittedOutput < Long.MAX_VALUE) {
+                    effectiveOutput = Optional.of(permittedOutput);
+                }
+                var effectiveTuning = new OpenAiCompatibleChat.Tuning(effectiveOutput,
+                        settings.tuning().temperature(), settings.tuning().topP(), settings.tuning().seed());
+                body = AgentTurn.writeRequest(settings.model(), messages, tools, effectiveTuning);
+                effectiveTimeout = Math.min(remaining, permittedMillis);
+            } catch (RuntimeException failure) {
+                turnBudget.release();
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            if (over || result.isDone()) {
+                turnBudget.release();
+                return;
+            }
+            try {
+                turnBudget.dispatch();
+                modelDispatched = true;
+            } catch (RuntimeException failure) {
+                turnBudget.release();
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            try {
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
-                        Duration.ofMillis(remaining),
-                        settings.profile().credentialBinding().orElse(null)));
+                        Duration.ofMillis(effectiveTimeout),
+                        settings.profile().credentialBinding().orElse(null), null,
+                        ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                                settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
+                                settings.profile().maxResponseBytes(), 100,
+                                Duration.ofMillis(effectiveTimeout), Set.of("application/json")),
+                        ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             } catch (RuntimeException failure) {
+                turnBudget.indeterminate();
                 result.completeExceptionally(sanitize(failure));
                 return;
             }
@@ -716,24 +1163,43 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 }
                 try {
                     if (failure != null) {
+                        turnBudget.indeterminate();
                         result.completeExceptionally(sanitize(failure));
                     } else {
-                        advance(response, result);
+                        advance(response, result, turnBudget);
                     }
                 } catch (RuntimeException invalid) {
+                    turnBudget.indeterminate();
                     result.completeExceptionally(sanitize(invalid));
                 }
             });
         }
 
-        private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result) {
+        private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result,
+                             AgentModelReservation turnBudget) {
             int status = response.statusCode();
             if (status < 200 || status >= 300) {
                 // The body is NOT read into the failure. An endpoint's error document is remote text
                 // and may quote the objective back; the status is the operator-actionable part.
                 throw new AgentException(AgentException.Code.ENDPOINT_REJECTED);
             }
+            effectiveMaximumOutputBytes = Math.min(effectiveMaximumOutputBytes,
+                    response.effectiveMaximumOutputBytes());
             AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
+            turnBudget.settle(turn.promptTokens(), turn.completionTokens());
+            var modelOutput = new LinkedHashMap<String, Object>();
+            modelOutput.put("answer", turn.answer());
+            var requestedTools = new ArrayList<Map<String, Object>>(turn.toolCalls().size());
+            for (AgentTurn.ToolCall call : turn.toolCalls()) {
+                requestedTools.add(Map.of("id", call.id(), "name", call.name(),
+                        "arguments", call.arguments()));
+            }
+            modelOutput.put("toolCalls", List.copyOf(requestedTools));
+            modelOutput.put("finishReason", turn.finishReason());
+            turn.promptTokens().ifPresent(value -> modelOutput.put("promptTokens", value));
+            turn.completionTokens().ifPresent(value -> modelOutput.put("completionTokens", value));
+            provenance.add(ModelInputProvenance.Kind.MODEL_OUTPUT, "turn:" + turns,
+                    Map.copyOf(modelOutput));
             finishReason = turn.finishReason();
             // Prompt AND completion tokens, summed per turn. That over-counts against a conversation
             // measured once, and it is the right number anyway: an endpoint re-reads the whole
@@ -782,7 +1248,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             toolCalls++;
             CompletionStage<String> answering;
             try {
-                answering = run(call);
+                answering = run(call, requested, index);
             } catch (RuntimeException broken) {
                 answering = CompletableFuture.completedFuture(TOOL_FAILED);
             }
@@ -791,6 +1257,19 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     return;
                 }
                 try {
+                    Throwable cause = unwrap(failure);
+                    if (cause instanceof AgentApprovalSuspension suspension) {
+                        suspended = true;
+                        resources.suspend();
+                        result.completeExceptionally(suspension.signal());
+                        return;
+                    }
+                    if (cause instanceof NodePackageServiceException service
+                            && service.reason() == NodePackageServiceException.Reason
+                                    .EFFECT_OUTCOME_INDETERMINATE) {
+                        result.completeExceptionally(service);
+                        return;
+                    }
                     // A failed stage is a tool that broke its own contract. It costs a turn and not a
                     // traversal, for the reason on AgentTool: a defect in one tool must not be able to
                     // terminate an execution the model could still finish another way. Nothing of the
@@ -798,6 +1277,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     // was promised.
                     messages.add(AgentTurn.toolResultMessage(call.id(),
                             failure == null && text != null && !text.isEmpty() ? text : TOOL_FAILED));
+                    provenance.add(ModelInputProvenance.Kind.TOOL_RESULT, "tool-call:" + (index + 1),
+                            failure == null && text != null && !text.isEmpty() ? text : TOOL_FAILED);
                     runTools(requested, index + 1, result);
                 } catch (RuntimeException invalid) {
                     result.completeExceptionally(sanitize(invalid));
@@ -814,22 +1295,110 @@ public final class AgentNodeBehavior implements NodeBehavior {
          * in a tool should cost a turn, not a traversal — and nothing of the throwable reaches the
          * message, because a tool's internals are not content the model was promised.</p>
          */
-        private CompletionStage<String> run(AgentTurn.ToolCall requested) {
+        private CompletionStage<String> run(AgentTurn.ToolCall requested,
+                                            List<AgentTurn.ToolCall> currentCalls, int currentIndex) {
+            AgentTool selected = null;
             for (AgentTool tool : tools) {
                 if (tool.name().equals(requested.name())) {
-                    try {
-                        return tool.invoke(requested.arguments());
-                    } catch (RuntimeException broken) {
-                        return CompletableFuture.completedFuture(TOOL_FAILED);
-                    }
+                    selected = tool;
+                    break;
                 }
             }
+            // An invented name is still authorized and audited, but its attacker-controlled spelling
+            // is neither a policy input nor durable evidence. The fixed token states the only trusted
+            // fact about it: it was absent from this invocation's immutable inventory.
+            String canonicalTool = selected == null ? "unavailable-tool" : selected.name();
+            AgentTool authorizedTool = selected;
+            ToolCallAuthorization authorization;
+            try {
+                authorization = services.toolAuthorization().authorize(message, canonicalTool,
+                        requested.arguments().getBytes(StandardCharsets.UTF_8));
+            } catch (RuntimeException unavailable) {
+                return CompletableFuture.failedFuture(new AgentException(
+                        AgentException.Code.TRANSPORT_UNAVAILABLE));
+            }
+            if (authorization.disposition() == ToolCallAuthorization.Disposition.DENY) {
+                return CompletableFuture.completedFuture(
+                        "The server denied this tool call. It performed no effect.");
+            }
+            if (authorization.disposition() == ToolCallAuthorization.Disposition.REQUIRE_APPROVAL) {
+                return CompletableFuture.failedFuture(new AgentApprovalSuspension(
+                        authorization.suspend(1, checkpoint(currentCalls, currentIndex))));
+            }
+            String canonicalArguments = new String(authorization.canonicalArguments(),
+                    StandardCharsets.UTF_8);
+            if (authorizedTool != null) {
+                try {
+                    CompletionStage<AgentTool.Result> effect = authorizedTool.invoke(canonicalArguments);
+                    return effect.handle((toolResult, failure) -> {
+                        boolean succeeded = failure == null && toolResult != null
+                                && toolResult.succeeded();
+                        authorization.complete(succeeded
+                                ? ToolCallAuthorization.Outcome.SUCCEEDED
+                                : ToolCallAuthorization.Outcome.FAILED);
+                        return failure == null && toolResult != null
+                                ? toolResult.text()
+                                : TOOL_FAILED;
+                    });
+                } catch (RuntimeException broken) {
+                    authorization.complete(ToolCallAuthorization.Outcome.FAILED);
+                    return CompletableFuture.completedFuture(TOOL_FAILED);
+                }
+            }
+            authorization.complete(ToolCallAuthorization.Outcome.FAILED);
             // Reached by every name the model invented, including one that names a real tool on a
             // real server the operator did not permit: such a tool was never placed in the list, so
             // there is nothing here to match, and the model is told what it may call instead.
             return CompletableFuture.completedFuture(
                     "No tool by that name is available to you. The tools you may call are listed in "
                             + "this request; call one of those or answer without tools.");
+        }
+
+        /** Version-one restart checkpoint; bounded again by the managed approval service. */
+        private byte[] checkpoint(List<AgentTurn.ToolCall> requested, int index) {
+            var root = new LinkedHashMap<String, PayloadValue>();
+            root.put("messages", PayloadValue.list(List.copyOf(messages)));
+            var calls = new ArrayList<PayloadValue>(requested.size());
+            for (AgentTurn.ToolCall call : requested) {
+                calls.add(PayloadValue.map(Map.of("id", PayloadValue.of(call.id()),
+                        "name", PayloadValue.of(call.name()),
+                        "arguments", PayloadValue.of(call.arguments()))));
+            }
+            root.put("calls", PayloadValue.list(calls));
+            root.put("index", PayloadValue.of(index));
+            root.put("turns", PayloadValue.of(turns));
+            root.put("toolCalls", PayloadValue.of(toolCalls));
+            root.put("tokens", PayloadValue.of(tokens));
+            root.put("finishReason", PayloadValue.of(finishReason));
+            root.put("remainingMillis", PayloadValue.of(Math.max(1, remainingMillis())));
+            root.put("inboundAttributes", PayloadValue.fromJava(message.attributes(), PayloadLimits.DEFAULTS));
+            root.put("provenance", PayloadValue.fromJava(provenance.snapshot(), PayloadLimits.DEFAULTS));
+            return PayloadJson.write(PayloadValue.map(root)).getBytes(StandardCharsets.UTF_8);
+        }
+
+        private static Throwable unwrap(Throwable failure) {
+            Throwable current = failure;
+            while ((current instanceof CompletionException || current instanceof ExecutionException)
+                    && current.getCause() != null) {
+                current = current.getCause();
+            }
+            return current;
+        }
+
+
+        /** Package-private framing that distinguishes the one failure the agent must propagate. */
+        private final class AgentApprovalSuspension extends RuntimeException {
+            private static final long serialVersionUID = 1L;
+            private final RuntimeException signal;
+
+            private AgentApprovalSuspension(RuntimeException signal) {
+                super(null, null, false, false);
+                this.signal = Objects.requireNonNull(signal, "signal");
+            }
+
+            private RuntimeException signal() {
+                return signal;
+            }
         }
 
         private NodeResult answer(AgentTurn.Turn turn) {
@@ -843,8 +1412,17 @@ public final class AgentNodeBehavior implements NodeBehavior {
             attributes.put("agent.toolCalls", toolCalls);
             attributes.put("agent.finishReason", finishReason);
             attributes.put("agent.truncated", turn.truncated());
+            attributes.put(ModelInputProvenance.AGENT_ATTRIBUTE, provenance.snapshot());
             if (tokens > 0) {
                 attributes.put("agent.totalTokens", tokens);
+            }
+            try {
+                int outputLimit = Math.toIntExact(effectiveMaximumOutputBytes);
+                new PayloadLimits(outputLimit, 32, 50_000, 100_000, outputLimit, 4_096)
+                        .enforceAndMeasure(Map.of("payload", turn.answer(),
+                                "attributes", Map.copyOf(attributes)));
+            } catch (RuntimeException oversized) {
+                throw new AgentException(AgentException.Code.RESPONSE_TOO_LARGE);
             }
             return new NodeResult("continue", turn.answer(), Map.copyOf(attributes));
         }
@@ -866,10 +1444,18 @@ public final class AgentNodeBehavior implements NodeBehavior {
          */
         void abort() {
             over = true;
+            AgentModelReservation budget = inFlightBudget;
+            if (budget != null) {
+                if (modelDispatched) budget.indeterminate(); else budget.release();
+            }
             OutboundCall<OutboundHttpResponse> current = inFlight;
             if (current != null) {
                 current.cancel();
             }
+        }
+
+        boolean suspended() {
+            return suspended;
         }
     }
 
@@ -914,7 +1500,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE, RESPONSE_TOO_LARGE -> AgentException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> AgentException.Code.DEADLINE_EXCEEDED;
                 case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> AgentException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> AgentException.Code.TRANSPORT_UNAVAILABLE;
+                case BUDGET_EXHAUSTED -> AgentException.Code.TOKEN_BUDGET_EXHAUSTED;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        AgentException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new AgentException(AgentException.Code.TRANSPORT_UNAVAILABLE);

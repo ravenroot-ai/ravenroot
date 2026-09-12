@@ -166,7 +166,7 @@ describe('Property 4 -- arbitrary raw text never escapes detectAndParse as an un
     fc.assert(
       fc.property(fc.oneof(fc.string({ unit: 'binary', maxLength: 2048 }), loneSurrogateText), (text) => {
         try {
-          detectAndParse(text, 'fuzz-input.txt');
+          detectAndParse(text, 'fuzz-input.txt', 1024 * 1024);
         } catch (error) {
           const acceptable = error instanceof GraphInputRejection
             || error instanceof SyntaxError

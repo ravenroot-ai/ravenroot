@@ -50,4 +50,5 @@ Review product accuracy, technical accuracy, information architecture, links, du
 English-language consistency. Verify the complete public change in one review. Add security review
 for identity, credentials, egress, executable artifacts, AI, embed, audit, or deployment material.
 
-Return to the [documentation home](index.md) or read the repository [contribution guide](../CONTRIBUTING.md).
+Return to the [documentation home](index.md) or read the repository
+[contribution guide](https://github.com/ravenroot-ai/ravenroot/blob/dev/CONTRIBUTING.md).

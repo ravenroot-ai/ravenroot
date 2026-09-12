@@ -458,7 +458,7 @@ final class RequestReplyCoordinator implements AutoCloseable {
             }
             if (failure != null || result == null || !processInstanceId.equals(result.processInstanceId())
                     || !key.traversalId().equals(result.traversalId())) {
-                finish(failedOutcome(Set.of(), Set.of(), Set.of(), Set.of()), false);
+                finish(failedOutcome(Set.of(), Set.of(), Set.of(), Set.of(), failure), false);
                 return;
             }
 
@@ -470,15 +470,27 @@ final class RequestReplyCoordinator implements AutoCloseable {
                 finish(new RequestReplyOutcome(processInstanceId, key.traversalId(),
                         RequestReplyTerminalState.COMPLETED, Optional.of(execution)), false);
             } catch (PayloadException rejected) {
+                // A payload the caller cannot be handed is never a cancellation, whatever failure (if
+                // any) accompanied this settlement -- the traversal itself may have completed cleanly.
                 finish(failedOutcome(result.visitedNodes(), result.defaultedNodes(),
-                        result.bypassedNodes(), result.handledFailureNodes()), false);
+                        result.bypassedNodes(), result.handledFailureNodes(), null), false);
             }
         }
 
+        /**
+         * @param failure the throwable this settlement observed, or {@code null} when none did --
+         *                classified through {@link ExecutionTermination#reasonOf}, the same
+         *                package-private classifier {@link GraphRunner}'s own four terminal handlers
+         *                and {@link DefaultRavenrootApplication}'s result recording already share, so
+         *                a request/reply waiter cannot disagree with the durable aggregate about
+         *                whether the same termination was a cancellation.
+         */
         private RequestReplyOutcome failedOutcome(Set<String> visited, Set<String> defaulted,
-                                                  Set<String> bypassed, Set<String> handledFailures) {
+                                                  Set<String> bypassed, Set<String> handledFailures,
+                                                  Throwable failure) {
             var execution = new ExecutionOutcome(processInstanceId, key.traversalId(),
-                    ProcessInstanceStatus.FAILED, null, visited, defaulted, bypassed, handledFailures);
+                    ProcessInstanceStatus.FAILED, null, visited, defaulted, bypassed, handledFailures,
+                    Set.of(), false, ExecutionTermination.reasonOf(failure));
             return new RequestReplyOutcome(processInstanceId, key.traversalId(),
                     RequestReplyTerminalState.FAILED, Optional.of(execution));
         }

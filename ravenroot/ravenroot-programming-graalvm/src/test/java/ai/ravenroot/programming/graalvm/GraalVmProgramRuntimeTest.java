@@ -24,6 +24,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class GraalVmProgramRuntimeTest {
     private static final Path JAVA = Path.of(System.getProperty("java.home"), "bin", "java");
+    private static final String WORKER_SHA256_FIXTURE =
+            "0d345dfd8086b66e4ba9b847ad38b741e7512ca00ef797d4c5f1fedc618d45a6";
+    private static final String JRE_SHA256_FIXTURE =
+            "2e6800c4588c8fd4bb5a8d387f9d5fa5f69f44d9b445778f4f55c88c65c1f53e";
 
     /**
      * FIX-31, following FIX-27, FIX-29 and FIX-30 with the same shape: the temporal dependency is
@@ -278,9 +282,19 @@ class GraalVmProgramRuntimeTest {
         assertEquals(1, supervisor.launches, "the runtime must have launched exactly one supervisor session");
         assertEquals(0, supervisor.realSubprocessSpawns, "policy serialization must never depend on a "
                 + "real child JVM: a reintroduced spawn has to be caught by this counter, not by the clock");
-        assertEquals(List.of("--ravenroot-sandbox-supervisor=v1", "--deadline-ms=750", "--cpu-ms=750", "--memory-mib=64", "--max-pids=32", "--max-files=256", "--tmpfs-mib=64", "--max-output-bytes=2097152",
-                "--trusted-worker=" + Path.of(System.getProperty("java.class.path")).toAbsolutePath().normalize(), "--trusted-worker-sha256=" + supervisor.policy.workerIdentity(),
-                "--trusted-jre=" + JAVA.toAbsolutePath().normalize(), "--trusted-jre-sha256=" + supervisor.policy.jreIdentity()), supervisor.policy.arguments());
+        var expected = List.of("--ravenroot-sandbox-supervisor=v1", "--deadline-ms=750",
+                "--cpu-ms=750", "--memory-mib=64", "--max-pids=32", "--max-files=256",
+                "--tmpfs-mib=64", "--max-output-bytes=2097152",
+                "--trusted-worker=" + Path.of(System.getProperty("java.class.path"))
+                        .toAbsolutePath().normalize(),
+                "--trusted-worker-sha256=" + WORKER_SHA256_FIXTURE,
+                "--trusted-jre=" + JAVA.toAbsolutePath().normalize(),
+                "--trusted-jre-sha256=" + JRE_SHA256_FIXTURE);
+        var actual = supervisor.policy.arguments();
+        assertEquals(12, actual.size(), "the versioned policy vector has exactly twelve arguments");
+        assertEquals(expected, actual, "every serialized policy value must match its independent fixture");
+        assertThrows(UnsupportedOperationException.class, () -> actual.set(0, "mutated"),
+                "callers must not be able to mutate the serialized policy vector");
     }
 
     @Test void workerBytesCannotForgeSupervisorOutcome() {
@@ -294,9 +308,70 @@ class GraalVmProgramRuntimeTest {
         var timeout = assertThrows(ExecutionException.class, () -> runtime(deadline, Duration.ofSeconds(1)).test(artifact("() => 1", ArtifactState.VALIDATED), request("x")).toCompletableFuture().get());
         assertTrue(timeout.getCause().getMessage().contains("SANDBOX_DEADLINE_EXCEEDED")); assertEquals(1, deadline.terminations);
         var cancelled = new FakeSupervisor(); cancelled.block = true;
-        var future = runtime(cancelled, Duration.ofSeconds(5)).test(artifact("() => 1", ArtifactState.VALIDATED), request("x")).toCompletableFuture();
-        while (cancelled.launches == 0) Thread.yield(); assertTrue(future.cancel(true));
-        assertEquals(1, cancelled.terminations); assertTrue(cancelled.reaped);
+        cancelled.awaitEntered = new java.util.concurrent.CountDownLatch(1);
+        var admission = TestAdmission.of(artifact("() => 1", ArtifactState.ACTIVE));
+        var future = runtime(cancelled, Duration.ofSeconds(5)).execute(admission, request("x")).toCompletableFuture();
+        try {
+            assertTrue(cancelled.awaitEntered.await(2, TimeUnit.SECONDS),
+                    "the session must be published and awaiting its outcome before cancellation");
+            assertTrue(future.cancel(true));
+            awaitInvocationCleanup(admission);
+            assertEquals(1, cancelled.terminations); assertTrue(cancelled.reaped);
+        } finally {
+            if (!future.isDone()) future.cancel(true);
+        }
+    }
+
+    @Test void cancellationDuringLaunchRetainsAdmissionUntilThePublishedSessionIsReaped() throws Exception {
+        var supervisor = new FakeSupervisor();
+        supervisor.launchEntered = new java.util.concurrent.CountDownLatch(1);
+        supervisor.releaseLaunch = new java.util.concurrent.CountDownLatch(1);
+        var admission = TestAdmission.of(artifact("() => 1", ArtifactState.ACTIVE));
+        var future = runtime(supervisor, Duration.ofSeconds(5)).execute(admission, request("x"))
+                .toCompletableFuture();
+        try {
+            assertTrue(supervisor.launchEntered.await(2, TimeUnit.SECONDS));
+            assertEquals(1, supervisor.launches,
+                    "the launch counter is visible before launch returns its unpublished session");
+            assertTrue(future.cancel(true));
+            assertEquals(0, supervisor.terminations,
+                    "cleanup cannot terminate a session that launch has not returned");
+            assertFalse(supervisor.reaped);
+            assertEquals(0, admission.closes.get(),
+                    "a cancelled public future must not release admission while launch can still publish a session");
+        } finally {
+            supervisor.releaseLaunch.countDown();
+        }
+        awaitInvocationCleanup(admission);
+        assertEquals(1, supervisor.terminations);
+        assertTrue(supervisor.reaped);
+    }
+
+    @Test void sandboxPolicyExposesTheSameFiniteInputOutputDeadlineAndCancellationBoundsItEnforces() {
+        var limits = policy(Duration.ofMillis(750)).externalIoLimits();
+        assertEquals(GraalVmProgramRuntime.MAX_REQUEST_BYTES, limits.maximumRequestBytes());
+        assertEquals(2 * 1024 * 1024, limits.maximumEncodedResponseBytes());
+        assertEquals(2 * 1024 * 1024, limits.maximumDecodedResponseBytes());
+        assertEquals(2 * 1024 * 1024, limits.maximumOutputBytes());
+        assertEquals(Duration.ofMillis(750), limits.maximumDuration());
+        assertEquals(GraalVmProgramRuntime.REAP_TIMEOUT, limits.cancellationBound());
+        assertEquals(java.util.Set.of("identity"), limits.acceptedContentEncodings());
+    }
+
+    @Test void aggregateProgramRequestIsRefusedWhileStreamingBeforeSupervisorInputCanGrowUnbounded() {
+        var supervisor = new FakeSupervisor();
+        supervisor.response = FakeSupervisor.wellFormedValidateResponse();
+        String chunk = "x".repeat(1024 * 1024 - 1);
+        ProgramRequest oversized = request(java.util.Collections.nCopies(9, chunk));
+
+        ExecutionException failure = assertThrows(ExecutionException.class, () -> runtime(supervisor,
+                Duration.ofSeconds(5)).test(artifact("() => 1", ArtifactState.VALIDATED), oversized)
+                .toCompletableFuture().get(10, TimeUnit.SECONDS));
+
+        assertTrue(String.valueOf(failure.getCause().getMessage()).contains("SANDBOX_INPUT_LIMIT"),
+                String.valueOf(failure.getCause()));
+        assertEquals(1, supervisor.terminations);
+        assertTrue(supervisor.reaped);
     }
 
     /**
@@ -404,7 +479,20 @@ class GraalVmProgramRuntimeTest {
     }
 
     private static GraalVmProgramRuntime runtime(FakeSupervisor supervisor, Duration timeout) { return new GraalVmProgramRuntime(supervisor, policy(timeout)); }
-    private static SandboxPolicy policy(Duration timeout) { return new SandboxPolicy(timeout, Math.toIntExact(timeout.toMillis()), 64, 32, 256, 64, 2 * 1024 * 1024, Path.of(System.getProperty("java.class.path")), "worker-test-id", JAVA, "jre-test-id"); }
+    private static void awaitInvocationCleanup(TestAdmission admission) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (admission.closes.get() == 0 && System.nanoTime() - deadline < 0) {
+            Thread.onSpinWait();
+            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(2));
+        }
+        assertEquals(1, admission.closes.get(),
+                "admission closes only after invocation cleanup settles");
+    }
+    private static SandboxPolicy policy(Duration timeout) {
+        return new SandboxPolicy(timeout, Math.toIntExact(timeout.toMillis()), 64, 32, 256, 64,
+                2 * 1024 * 1024, Path.of(System.getProperty("java.class.path")),
+                WORKER_SHA256_FIXTURE, JAVA, JRE_SHA256_FIXTURE);
+    }
     private static ProgramRequest request(Object payload) { return new ProgramRequest(UUID.randomUUID(), "program-test", payload, Map.of("count", 1)); }
     private static GeneratedArtifact artifact(String source, ArtifactState state) { try { String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8))); Instant now = Instant.now(); return new GeneratedArtifact("test-artifact", "javascript", hash, source, state, 1, now, now, Map.of()); } catch (Exception e) { throw new AssertionError(e); } }
 }

@@ -6,6 +6,7 @@ import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.DeploymentState;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.deployment.IngressDisposition;
 import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.deployment.RequestReplyAdmission;
 import ai.ravenroot.api.deployment.RequestReplyRefusal;
@@ -188,6 +189,9 @@ public abstract class InboundSourceLifecycleContract {
         private final List<RecordingSource> issued;
         private final CompletionStage<Void> startResultOverride;
         private final AtomicInteger createSourceCalls = new AtomicInteger();
+        private final java.util.concurrent.CopyOnWriteArrayList<Object> receivedPayloads =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final CompletableFuture<Object> firstPayload = new CompletableFuture<>();
         /** Completed the instant {@link #createSource} runs -- the signal side of "wait for the
          * source to exist" that replaces polling {@link #issued} at an interval. */
         final CompletableFuture<RecordingSource> issuedSignal = new CompletableFuture<>();
@@ -216,7 +220,12 @@ public abstract class InboundSourceLifecycleContract {
 
         @Override
         public NodeAction create(NodeConfiguration configuration) {
-            return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            return message -> {
+                Object payload = message.payload();
+                receivedPayloads.add(payload);
+                firstPayload.complete(payload);
+                return CompletableFuture.completedFuture(NodeResult.continueWith(payload));
+            };
         }
 
         @Override
@@ -520,9 +529,9 @@ public abstract class InboundSourceLifecycleContract {
     }
 
     /**
-     * The security property {@link InboundSourceContext}'s own Javadoc documents: a source receives
-     * exactly its own deployment's ingress, by identity -- never a different deployment's, and never
-     * one it could have reached any other way.
+     * A source receives a distinct, activation-fenced ingress facade for exactly its own deployment.
+     * Stopping one deployment retires that source's facade without affecting a source owned by a
+     * different live deployment.
      */
     @Test
     final void eachSourceReceivesExactlyItsOwnDeploymentsIngress() throws Exception {
@@ -540,10 +549,29 @@ public abstract class InboundSourceLifecycleContract {
         deploymentX.start(TCK_IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
         deploymentY.start(TCK_IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-        assertSame(deploymentX.ingress(), issuedX.get(0).lastContext.get().ingress());
-        assertSame(deploymentY.ingress(), issuedY.get(0).lastContext.get().ingress());
-        assertNotSame(issuedX.get(0).lastContext.get().ingress(), issuedY.get(0).lastContext.get().ingress());
-        assertEquals(DeploymentId.of("ingress-x-deployment"), issuedX.get(0).lastContext.get().deploymentId());
+        InboundSourceContext contextX = issuedX.get(0).lastContext.get();
+        InboundSourceContext contextY = issuedY.get(0).lastContext.get();
+        assertNotSame(deploymentX.ingress(), contextX.ingress());
+        assertNotSame(deploymentY.ingress(), contextY.ingress());
+        assertNotSame(contextX.ingress(), contextY.ingress());
+        assertEquals(DeploymentId.of("ingress-x-deployment"), contextX.deploymentId());
+        assertEquals(DeploymentId.of("ingress-y-deployment"), contextY.deploymentId());
+        assertEquals(IngressDisposition.ACCEPTED,
+                contextX.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "x-only"));
+        assertEquals(IngressDisposition.ACCEPTED,
+                contextY.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "y-only"));
+        assertEquals("x-only", behaviorX.firstPayload.get(10, TimeUnit.SECONDS));
+        assertEquals("y-only", behaviorY.firstPayload.get(10, TimeUnit.SECONDS));
+        assertEquals(List.of("x-only"), behaviorX.receivedPayloads,
+                "source X must route only to deployment X's behavior");
+        assertEquals(List.of("y-only"), behaviorY.receivedPayloads,
+                "source Y must route only to deployment Y's behavior");
+
+        deploymentX.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED,
+                contextX.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "retired-x"));
+        assertEquals(IngressDisposition.ACCEPTED,
+                contextY.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "live-y"));
     }
 
     /** A behavior whose source always fails to start, to drive the rollback test. */

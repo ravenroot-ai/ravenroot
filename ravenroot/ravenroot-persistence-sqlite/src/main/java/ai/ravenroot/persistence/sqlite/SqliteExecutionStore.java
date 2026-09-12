@@ -1,27 +1,81 @@
 package ai.ravenroot.persistence.sqlite;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
+import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
+import ai.ravenroot.api.persistence.ExecutionResultNodes;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.EventDigest;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
+import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationLimits;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
+import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCursor;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
+import ai.ravenroot.api.persistence.InventoryCursor;
+import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryPage;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
+import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -48,7 +102,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * The durable single-host {@link ExecutionStore}, backed by one SQLite database in WAL mode (PERS-03).
+ * The durable single-host {@link ExecutionStore}, backed by one SQLite database in WAL mode.
  *
  * <h2>What it declares, and on what evidence</h2>
  * <ul>
@@ -64,8 +118,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   else.</strong> SQLite's locking is built on POSIX advisory locks, which are unreliable over NFS,
  *   SMB and most network or overlay filesystems — there the exclusion silently does not hold and two
  *   processes can both believe they own a lease. Placing the database on such a volume does not
- *   degrade this capability, it falsifies it. Multi-host coordination is PERS-08's problem, not a
- *   configuration of this one.</li>
+ *   degrade this capability, it falsifies it. Coordinating execution state across several hosts is
+ *   a different adapter's problem, not a configuration of this one.</li>
  *   <li>{@link StoreCapability#IDEMPOTENCY_PURGE} — {@code purgeExpiredIdempotencyRecords} is
  *   implemented and advances the per-tenant watermark.</li>
  * </ul>
@@ -105,9 +159,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>One connection, confined to one thread, with every operation submitted to it. That is what makes
  * the {@link CompletionStage} signatures honest: the port's own documentation says the adapter must
  * own its execution context because only the adapter knows its blocking profile, and this one blocks
- * on disk. Running the work on the caller's thread would put an fsync on an actor dispatcher once
- * PERS-04 lands. Thread confinement also removes any question of the connection's own thread safety
- * and makes intra-process write serialization structural rather than a lock to remember.</p>
+ * on disk. Running the work on the caller's thread would put an fsync on an actor dispatcher the
+ * moment one drives this store. Thread confinement also removes any question of the connection's own
+ * thread safety and makes intra-process write serialization structural rather than a lock to
+ * remember.</p>
  *
  * <h2>close() and the lease it does not release</h2>
  * <p>{@link ExecutionStore#close()} describes releasing this session's leases as a latency
@@ -129,7 +184,84 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoreCapability.CROSS_PROCESS_LEASE,
             StoreCapability.IDEMPOTENCY_PURGE,
             StoreCapability.EVENT_JOURNAL,
-            StoreCapability.JOURNAL_COMPACTION);
+            StoreCapability.JOURNAL_COMPACTION,
+            StoreCapability.DURABLE_HANDLERS,
+            // The inventory reads the same process_instance, traversal, invocation, attempt and lease
+            // rows that apply() writes inside one transaction, so it is atomic with the lifecycle by
+            // construction rather than by a projection that has to be kept in step. There is no
+            // offset to repair and no rebuild that could invent work.
+            StoreCapability.PROCESS_INVENTORY,
+            StoreCapability.INVENTORY_RETENTION,
+            StoreCapability.TOOL_APPROVALS,
+            StoreCapability.HUMAN_TASKS,
+            StoreCapability.HUMAN_TASK_CONFIRMATIONS,
+            StoreCapability.EXECUTION_PAUSES,
+            StoreCapability.AGENT_AUTHORITY_BUDGETS,
+            // The result table lives in the same file as the process_instance row it
+            // cascades from, so a recorded result is durable, readable from any process
+            // that opens the file, and removed by the same purge that removes its
+            // instance. Recording refuses a conflicting outcome rather than overwriting
+            // one, and the refusal is decided from the stored fingerprint alone, so it
+            // is the same answer on every retry and across a reopen.
+            StoreCapability.EXECUTION_RESULTS);
+
+    /**
+     * The one projection every handler read uses, aliased so a correlated subquery cannot silently
+     * bind an unqualified column to its own table instead of to this one.
+     */
+    private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
+    private static final String TOOL_APPROVAL_COLUMNS = "SELECT a.* FROM tool_approval a";
+    private static final String EXECUTION_PAUSE_COLUMNS = "SELECT p.* FROM execution_pause p";
+    private static final String HUMAN_TASK_COLUMNS = "SELECT t.* FROM human_task t";
+    private static final String HUMAN_TASK_ATTENTION_COLUMNS =
+            "SELECT t.process_instance_id, t.task_id, t.traversal_id, t.node_id, "
+                    + "t.generation, t.status, t.graph_version_pin, "
+                    + "t.created_at_epoch_second, t.created_at_nano, "
+                    + "t.expires_at_epoch_second, t.expires_at_nano, "
+                    + "t.escalate_at_epoch_second, t.escalate_at_nano, "
+                    + "t.required_roles, t.required_scopes, "
+                    + "t.requester_request_id, t.requester_subject, "
+                    + "t.requester_principal_type, t.requester_issuer, "
+                    + "t.confirmation_version, t.confirmation_prompt, "
+                    + "t.confirmation_comment_requirement, t.confirmation_actions, "
+                    + "t.confirmation_resolve_label, t.confirmation_deny_label, "
+                    + "t.confirmation_cancel_label, t.confirmation_max_prompt_bytes, "
+                    + "t.confirmation_max_action_label_bytes, "
+                    + "t.confirmation_max_comment_bytes, "
+                    + "p.deployment_id AS attention_deployment_id "
+                    + "FROM human_task t JOIN process_instance p "
+                    + "ON p.tenant_id = t.tenant_id "
+                    + "AND p.process_instance_id = t.process_instance_id "
+                    + "AND p.graph_version_pin = t.graph_version_pin ";
+
+    /**
+     * {@code ('WAITING', 'ESCALATED')} and {@code ('RESOLVED', 'DENIED', 'EXPIRED')}, derived from
+     * {@link HandlerStatus#terminal()} rather than written out as SQL text.
+     *
+     * <p>Restating the split as a literal in every query is how the two adapters come to disagree
+     * without anything failing: a sixth, non-terminal status would be enforced by the in-memory
+     * adapter's own {@code terminal()} check and quietly ignored by a hand-written {@code IN} list
+     * here, so correlation-key uniqueness would hold on one store and not the other. Deriving it
+     * means adding a status changes both at once.</p>
+     *
+     * <p>The frozen migration DDL cannot use these — a migration's text is history and must never be
+     * rewritten — so {@code SqliteHandlerStatusSqlTest} pins that literal against the same enum
+     * instead, and fails the build when a new status makes the shipped partial index wrong. That pin
+     * finds the migration by its <em>description</em>, not by its number: the handler migration
+     * shipped as 5 and became 6 when it merged behind another feature that had taken that number, so
+     * the number is a merge outcome rather than an identity.</p>
+     */
+    static final String LIVE_HANDLER_STATUSES = statusList(false);
+
+    /** The terminal counterpart of {@link #LIVE_HANDLER_STATUSES}. */
+    static final String TERMINAL_HANDLER_STATUSES = statusList(true);
+
+    private static String statusList(boolean terminal) {
+        return java.util.Arrays.stream(HandlerStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(status -> "'" + status.name() + "'")
+                .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
+    }
 
     private static final int SQLITE_PERM = 3;
     private static final int SQLITE_BUSY = 5;
@@ -143,38 +275,61 @@ public final class SqliteExecutionStore implements ExecutionStore {
     private final Path databaseFile;
     private final Clock clock;
     private final SqliteStoreConfig config;
+    private final ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy;
     private final CommitBoundary commitBoundary;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Connection connection;
 
     public SqliteExecutionStore(Path databaseFile, Clock clock) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, SqliteStoreConfig.defaults());
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, SqliteStoreConfig.defaults(),
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    public SqliteExecutionStore(Path databaseFile, Clock clock,
+                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, SqliteStoreConfig.defaults(), humanTaskPolicy);
     }
 
     public SqliteExecutionStore(Path databaseFile, Clock clock, SqliteStoreConfig config) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, config);
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, config,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
     }
 
     public SqliteExecutionStore(SqliteStoreLocation location, Clock clock) {
-        this(location, clock, SqliteStoreConfig.defaults());
+        this(location, clock, SqliteStoreConfig.defaults(),
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
     }
 
     public SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config) {
-        this(location, clock, config, CommitBoundary.NONE);
+        this(location, clock, config, ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    public SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config,
+                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        this(location, clock, config, humanTaskPolicy, CommitBoundary.NONE);
     }
 
     SqliteExecutionStore(Path databaseFile, Clock clock, SqliteStoreConfig config,
                          CommitBoundary commitBoundary) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, config, commitBoundary);
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, config,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS, commitBoundary);
     }
 
     SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config,
+                         CommitBoundary commitBoundary) {
+        this(location, clock, config, ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS,
+                commitBoundary);
+    }
+
+    SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config,
+                         ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
                          CommitBoundary commitBoundary) {
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
+        this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         this.commitBoundary = Objects.requireNonNull(commitBoundary, "commitBoundary");
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-" + this.databaseFile.getFileName());
@@ -207,29 +362,88 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public int maxHumanTaskPageSize() {
+        return humanTaskPolicy.inboxMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionPageSize() {
+        return humanTaskPolicy.confirmation().attentionMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionNodeCounts() {
+        return ai.ravenroot.api.persistence.HumanTaskPolicy.Confirmation
+                .HARD_MAX_ATTENTION_NODE_COUNTS;
+    }
+
+    @Override
+    public int maxHumanTaskResponsePayloadBytes() {
+        // Rows accepted by older configurations must remain resolvable after restart. The adapter
+        // therefore publishes the stable structured-payload ceiling rather than today's general
+        // execution-payload setting or the current Human Task policy.
+        return PayloadLimits.HARD_MAX_ENCODED_BYTES;
+    }
+
+    @Override
     public Duration maxClockSkew() {
         return config.maxClockSkew();
+    }
+
+    @Override
+    public int maxInventoryPageSize() {
+        return config.maxInventoryPageSize();
+    }
+
+    @Override
+    public Duration terminalRetention() {
+        return config.terminalRetention();
     }
 
     // ---------------------------------------------------------------- write path
 
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
+        return applyInternal(batch, null);
+    }
+
+    @Override
+    public CompletionStage<StoredProcessInstance> applyManaged(
+            ExecutionBatch batch, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) {
+        Objects.requireNonNull(authority, "authority");
+        return applyInternal(batch, authority);
+    }
+
+    private CompletionStage<StoredProcessInstance> applyInternal(
+            ExecutionBatch batch, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) {
         return async(() -> {
             Objects.requireNonNull(batch, "batch");
             // Decidable from the request alone, so it happens before a transaction is even opened.
             requireNoFencingTokenUnderNotPresent(batch);
-            batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
-            batch.idempotency().ifPresent(write -> {
-                requireWithinPayloadLimit(write.requestFingerprint());
-                requireWithinPayloadLimit(write.outcomeRef());
-            });
+            if (authority == null) requireBatchPayloads(batch);
             requireEnvelopesMatchBatch(batch);
-            return inWriteTransaction(batch.key(), () -> applyLocked(batch));
+            return inWriteTransaction(batch.key(), () -> applyLocked(batch, authority));
         });
     }
 
-    private StoredProcessInstance applyLocked(ExecutionBatch batch) throws SQLException {
+    private void requireBatchPayloads(ExecutionBatch batch) {
+        batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
+        batch.idempotency().ifPresent(write -> {
+            requireWithinPayloadLimit(write.requestFingerprint());
+            requireWithinPayloadLimit(write.outcomeRef());
+        });
+        batch.handlerTransitions().forEach(transition -> {
+            if (!isHumanTaskResolution(batch, transition)) requireWithinPayloadLimit(transition.outcomePayload());
+        });
+        batch.toolApprovalsToRegister().forEach(registration -> {
+            requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(), "application/json"));
+            requireWithinPayloadLimit(OpaquePayload.of(registration.continuation(),
+                    "application/vnd.ravenroot.tool-continuation"));
+        });
+    }
+
+    private StoredProcessInstance applyLocked(ExecutionBatch batch,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) throws SQLException {
         ExecutionKey key = batch.key();
         InstanceMeta existing = readMeta(key);
 
@@ -253,6 +467,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
             return replay;
         }
 
+        if (authority != null) {
+            requireManagedAuthority(key, authority);
+            requireBatchPayloads(batch);
+        }
+
         // Expectation LAST. A write that already happened necessarily bumped the revision, so a
         // retrying caller's expectation is stale by construction; checking it first would make every
         // legitimate replay fail with ConcurrencyConflict.
@@ -266,17 +485,88 @@ public final class SqliteExecutionStore implements ExecutionStore {
         long revision = existing == null ? 1L : existing.revision() + 1L;
         long fencingToken = existing == null ? 0L : existing.fencingToken();
 
-        writeInstanceRow(key, folded.status(), pin, revision, fencingToken, now);
+        // created_at is written once and never rewritten, which is what makes the inventory's sort key
+        // immutable and therefore its pagination stable while writes continue.
+        Instant createdAt = existing == null ? now : existing.createdAt();
+        // One increment per authoritative status transition ACTUALLY APPLIED, counted from the batch
+        // rather than by comparing the status before and after: a batch that moves an instance
+        // RUNNING -> WAITING -> RUNNING applied two transitions and an endpoint comparison would see
+        // none. Creation is itself the first transition, into the initial status. A replayed batch
+        // returns before this point, so an at-least-once redelivery cannot inflate the count, which is
+        // what keeps the generation meaningful under duplicate work delivery.
+        //
+        // It is NOT the fencing token and must never be conflated with one: a generation counts how
+        // far the lifecycle has moved, a token names who is allowed to move it. One worker applies
+        // many transitions under a single token, and a contested instance changes owner -- and token --
+        // without its status moving at all.
+        long generation = (existing == null ? 1L : existing.lifecycleGeneration())
+                + processTransitionCount(batch);
+        ExecutionOrigin origin = (existing == null ? ExecutionOrigin.none() : existing.origin())
+                .mergedWith(batch.origin());
+        // Retention starts when the instance becomes terminal and never restarts, because a terminal
+        // instance cannot transition again. A non-terminal row carries no deadline at all rather than a
+        // far-future one: NULL means "retention has not started", and a sentinel date would be readable
+        // as a real deadline by anyone looking at the row.
+        Instant retainedUntil = folded.status().terminal()
+                ? (existing != null && existing.retainedUntil() != null
+                        ? existing.retainedUntil() : plusClamped(now, config.terminalRetention()))
+                : null;
+
+        writeInstanceRow(key, folded.status(), folded.terminationReason(), pin, revision, fencingToken,
+                now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
         writeTimers(key, batch);
+        // After the aggregate, because a registration may name an invocation this batch created and a
+        // terminal transition must name a traversal this batch added; both are validated against the
+        // post-fold aggregate. A rejection rolls the enclosing transaction back, which is what makes
+        // a wait -- and a re-entry -- atomic with the transitions beside it.
+        writeHandlers(key, batch, folded, revision);
+        writeToolApprovals(key, batch, folded, pin, revision, now);
+        writeAgentAuthorityBudget(key, batch, folded, now);
+        writeExecutionPauses(key, batch, folded, pin, revision);
+        writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
-        // Inside the same transaction as the transition above, which is the entirety of PERS-07's
-        // shared transactional boundary. There is no publish step to crash between, because there is
-        // no publish step: delivery reads the committed journal afterwards.
+        // Inside the same transaction as the transition above, which is the entirety of the shared
+        // transactional boundary the event journal promises. There is no publish step to crash
+        // between, because there is no publish step: delivery reads the committed journal afterwards.
         writeJournal(key, batch, revision, now);
         dropAcknowledgementsForRescheduledWork(key);
 
         return new StoredProcessInstance(folded, revision, pin, key.tenantId(), now);
+    }
+
+    private void requireManagedAuthority(ExecutionKey key,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT digest, format_version, operational_policy FROM execution_manifest "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) throw failure(ExecutionStoreFailure.invalid(
+                        "managed execution has no pinned persistence authority"));
+                if (!authority.manifestDigest().value().equals(rows.getString(1))
+                        || (rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_3
+                        && rows.getInt(2) != ai.ravenroot.api.persistence.ExecutionManifest.FORMAT_VERSION_4)) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "managed execution persistence authority does not match its manifest"));
+                }
+                try {
+                    var policy = ai.ravenroot.api.persistence.ResolvedOperationalPolicy
+                            .decodeForManifest(rows.getString(3), rows.getInt(2));
+                    int pinned = policy.persistence().orElseThrow(
+                            () -> new IllegalArgumentException("persistence capacity is absent"))
+                            .maximumPayloadBytes();
+                    if (pinned != authority.maximumPayloadBytes() || pinned != config.maxPayloadBytes()) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "managed execution persistence capacity is incompatible"));
+                    }
+                } catch (IllegalArgumentException | NullPointerException malformed) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "managed execution persistence authority is unavailable"));
+                }
+            }
+        }
     }
 
     @Override
@@ -291,6 +581,71 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 ProcessInstance state = readAggregate(key, meta);
                 return new StoredProcessInstance(state, meta.revision(), meta.graphVersionPin(),
                         key.tenantId(), meta.updatedAt());
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> readAgentAuthorityBudget(key));
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return async(() -> inReadTransaction(null, this::readAgentAuthorityControl));
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return async(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            return inWriteTransaction(null, () -> {
+                AgentAuthorityControl current = readAgentAuthorityControl();
+                if (current.state() != expectedState || current.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                long nextEpoch;
+                try {
+                    nextEpoch = Math.addExact(expectedEpoch, 1);
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control epoch is exhausted"));
+                }
+                long releasedTeamActive = targetState == AgentAuthorityControlState.KILLED
+                        ? killAgentAuthorityBudgets(expectedEpoch) : 0;
+                AgentAuthorityControl next;
+                try {
+                    next = new AgentAuthorityControl(targetState, nextEpoch, clock.instant(),
+                            Math.addExact(current.teamActiveReleased(), releasedTeamActive));
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority release aggregate is exhausted"));
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "UPDATE agent_authority_control SET state = ?, epoch = ?, "
+                                + "changed_at_epoch_second = ?, changed_at_nano = ?, "
+                                + "team_active_released = ? "
+                                + "WHERE singleton = 1 AND state = ? AND epoch = ?")) {
+                    statement.setString(1, next.state().name());
+                    statement.setLong(2, next.epoch());
+                    statement.setLong(3, next.changedAt().getEpochSecond());
+                    statement.setInt(4, next.changedAt().getNano());
+                    statement.setLong(5, next.teamActiveReleased());
+                    statement.setString(6, expectedState.name());
+                    statement.setLong(7, expectedEpoch);
+                    if (statement.executeUpdate() != 1) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority control expectation is stale"));
+                    }
+                }
+                return next;
             });
         });
     }
@@ -314,6 +669,29 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     // Failing to ACQUIRE, not losing one that was held: ordinary contention, nothing
                     // started and nothing at risk. Reporting it as LeaseLost would bury the rare
                     // critical signal under routine noise.
+                    throw failure(new ExecutionStoreFailure.LeaseHeldByAnother(key, held.workerId(),
+                            held.expiresAt()));
+                }
+                return issueLease(key, meta.fencingToken(), held, workerId, ttl, now);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<LeaseHandle> claimManaged(ExecutionKey key, String workerId, Duration ttl,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority authority) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(authority, "authority");
+            requireLeaseTtl(ttl);
+            requireWorkerId(workerId);
+            return inWriteTransaction(key, () -> {
+                requireManagedAuthority(key, authority);
+                InstanceMeta meta = readMeta(key);
+                if (meta == null) throw failure(new ExecutionStoreFailure.NotFound(key));
+                Instant now = clock.instant();
+                LeaseHandle held = readLease(key, meta.fencingToken());
+                if (held != null && !held.workerId().equals(workerId) && now.isBefore(held.expiresAt())) {
                     throw failure(new ExecutionStoreFailure.LeaseHeldByAnother(key, held.workerId(),
                             held.expiresAt()));
                 }
@@ -385,9 +763,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
             return inReadTransaction(null, () -> {
                 Instant now = clock.instant();
                 var active = new ArrayList<LeaseHandle>();
-                String sql = "SELECT l.process_instance_id, l.worker_id, l.claimed_at_epoch_second, "
+                String sql = "SELECT l.process_instance_id, p.process_instance_id AS joined_process_id, "
+                        + "l.worker_id, l.claimed_at_epoch_second, "
                         + "l.claimed_at_nano, l.expires_at_epoch_second, l.expires_at_nano, p.fencing_token "
-                        + "FROM lease l JOIN process_instance p ON p.tenant_id = l.tenant_id "
+                        + "FROM lease l LEFT JOIN process_instance p ON p.tenant_id = l.tenant_id "
                         + "AND p.process_instance_id = l.process_instance_id "
                         + "WHERE l.tenant_id = ? AND " + StoredInstant.strictlyAfter("l.expires_at")
                         + " ORDER BY l.rowid";
@@ -396,8 +775,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     StoredInstant.bindComparison(statement, 2, now);
                     try (ResultSet rows = statement.executeQuery()) {
                         while (rows.next()) {
-                            var key = new ExecutionKey(tenantId,
-                                    UUID.fromString(rows.getString("process_instance_id")));
+                            var key = new ExecutionKey(tenantId, StoredUuid.required(rows, "lease",
+                                    "process_instance_id", tenantId));
+                            StoredUuid.requiredMatching(rows.getString("joined_process_id"),
+                                    "process_instance", "process_instance_id", key,
+                                    key.processInstanceId());
                             active.add(new LeaseHandle(key, rows.getString("worker_id"),
                                     rows.getLong("fencing_token"),
                                     StoredInstant.read(rows, "claimed_at"),
@@ -433,7 +815,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     }
                     List<ScheduledAttempt> attempts = claimableAttempts(key, now);
                     List<TimerSchedule> timers = claimableTimers(key, now);
-                    if (attempts.isEmpty() && timers.isEmpty()) {
+                    List<DurableHandler> triggers = claimableTriggers(key, now);
+                    if (attempts.isEmpty() && timers.isEmpty() && triggers.isEmpty()) {
                         continue;
                     }
                     LeaseHandle lease = issueLease(key, meta.fencingToken(),
@@ -449,6 +832,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             break;
                         }
                         claimed.add(claimTimer(key, timer, lease, now, leaseTtl));
+                    }
+                    for (DurableHandler handler : triggers) {
+                        if (claimed.size() >= limit) {
+                            break;
+                        }
+                        claimed.add(claimTrigger(key, handler, lease, now, leaseTtl));
                     }
                 }
                 return List.copyOf(claimed);
@@ -491,6 +880,122 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return List.copyOf(claimed);
             });
         });
+    }
+
+    @Override
+    public CompletionStage<List<PendingWork>> claimPendingWorkAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            java.util.Map<ExecutionKey, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified) {
+        return claimAmong(tenantId, workerId, limit, leaseTtl, verified, false)
+                .thenApply(items -> items.stream().map(PendingWork.class::cast).toList());
+    }
+
+    @Override
+    public CompletionStage<List<PendingWork.TimerDue>> claimDueTimersAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            java.util.Map<ExecutionKey, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified) {
+        return claimAmong(tenantId, workerId, limit, leaseTtl, verified, true)
+                .thenApply(items -> items.stream().map(PendingWork.TimerDue.class::cast).toList());
+    }
+
+    private CompletionStage<List<? extends PendingWork>> claimAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            java.util.Map<ExecutionKey, ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified,
+            boolean timersOnly) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            requireWorkerId(workerId);
+            requireLimit(limit);
+            requireLeaseTtl(leaseTtl);
+            var authorities = requireVerifiedAuthorities(tenantId, verified);
+            if (authorities.isEmpty()) return List.of();
+            return inWriteTransaction(null, () -> {
+                Instant now = clock.instant();
+                var claimed = new ArrayList<PendingWork>();
+                for (var entry : authorities.entrySet()) {
+                    if (claimed.size() >= limit) break;
+                    ExecutionKey key = entry.getKey();
+                    requireManagedAuthority(key, entry.getValue());
+                    InstanceMeta meta = readMeta(key);
+                    if (meta == null || leasedByOther(key, meta, workerId, now)) continue;
+                    List<TimerSchedule> timers = claimableTimers(key, now);
+                    List<ScheduledAttempt> attempts = timersOnly ? List.of() : claimableAttempts(key, now);
+                    List<DurableHandler> triggers = timersOnly ? List.of() : claimableTriggers(key, now);
+                    if (attempts.isEmpty() && timers.isEmpty() && triggers.isEmpty()) continue;
+                    LeaseHandle lease = issueLease(key, meta.fencingToken(),
+                            readLease(key, meta.fencingToken()), workerId, leaseTtl, now);
+                    if (!timersOnly) {
+                        for (ScheduledAttempt attempt : attempts) {
+                            if (claimed.size() >= limit) break;
+                            claimed.add(claimAttempt(key, attempt, lease, now, leaseTtl));
+                        }
+                    }
+                    for (TimerSchedule timer : timers) {
+                        if (claimed.size() >= limit) break;
+                        claimed.add(claimTimer(key, timer, lease, now, leaseTtl));
+                    }
+                    if (!timersOnly) {
+                        for (DurableHandler trigger : triggers) {
+                            if (claimed.size() >= limit) break;
+                            claimed.add(claimTrigger(key, trigger, lease, now, leaseTtl));
+                        }
+                    }
+                }
+                return List.copyOf(claimed);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.persistence.ManagedClaimCandidatePage> managedClaimCandidates(
+            String tenantId, String workerId, int limit, Duration leaseTtl, boolean timersOnly,
+            java.util.Optional<UUID> after) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            requireWorkerId(workerId);
+            requireLimit(limit);
+            requireLeaseTtl(leaseTtl);
+            Objects.requireNonNull(after, "after");
+            return inReadTransaction(null, () -> {
+                String sql = "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? "
+                        + (after.isPresent() ? "AND process_instance_id > ? " : "")
+                        + "ORDER BY process_instance_id LIMIT ?";
+                var keys = new ArrayList<ExecutionKey>();
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    int index = 1;
+                    statement.setString(index++, tenantId);
+                    if (after.isPresent()) statement.setString(index++, after.orElseThrow().toString());
+                    statement.setInt(index, limit);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) keys.add(new ExecutionKey(tenantId,
+                                StoredUuid.required(rows, 1, "process_instance", "process_instance_id", tenantId)));
+                    }
+                }
+                java.util.Optional<UUID> next = keys.size() == limit
+                        ? java.util.Optional.of(keys.get(keys.size() - 1).processInstanceId())
+                        : java.util.Optional.empty();
+                return new ai.ravenroot.api.persistence.ManagedClaimCandidatePage(keys, next);
+            });
+        });
+    }
+
+    private static java.util.NavigableMap<ExecutionKey,
+            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> requireVerifiedAuthorities(
+                    String tenantId,
+                    java.util.Map<ExecutionKey,
+                            ai.ravenroot.api.persistence.ExecutionPersistenceAuthority> verified) {
+        Objects.requireNonNull(verified, "verified");
+        var ordered = new java.util.TreeMap<ExecutionKey,
+                ai.ravenroot.api.persistence.ExecutionPersistenceAuthority>(
+                        java.util.Comparator.comparing(key -> key.processInstanceId().toString()));
+        verified.forEach((key, authority) -> {
+            Objects.requireNonNull(key, "verified key");
+            Objects.requireNonNull(authority, "verified authority");
+            if (!tenantId.equals(key.tenantId())) throw failure(ExecutionStoreFailure.invalid(
+                    "managed claim authority belongs to another tenant"));
+            ordered.put(key, authority);
+        });
+        return ordered;
     }
 
     @Override
@@ -634,6 +1139,820 @@ public final class SqliteExecutionStore implements ExecutionStore {
         });
     }
 
+    // ---------------------------------------------------------------- durable execution inventory
+
+    /**
+     * The columns every inventory row needs, plus the two aggregate counts and the lease, in one
+     * statement.
+     *
+     * <p>The counts are correlated subqueries rather than a {@code GROUP BY} over two joins, because
+     * joining traversals and attempts in the same query multiplies the rows and every aggregate then
+     * has to be de-duplicated with {@code DISTINCT} — which is both slower and, more to the point, the
+     * kind of query that is subtly wrong in a way no assertion notices until a row has two traversals
+     * and three attempts.</p>
+     *
+     * <p>The lease is a {@code LEFT JOIN}: an instance with no lease is the normal shape of interrupted
+     * work and must appear in the listing, so an inner join would hide precisely the cohort the
+     * inventory exists to surface.</p>
+     */
+    private static final String INVENTORY_COLUMNS =
+            "SELECT p.process_instance_id, p.status, p.termination_reason, p.graph_version_pin, "
+                    + "p.revision, p.fencing_token, "
+                    + "p.lifecycle_generation, p.deployment_id, p.workload_id, p.correlation_id, "
+                    + "p.created_at_epoch_second, p.created_at_nano, p.updated_at_epoch_second, "
+                    + "p.updated_at_nano, p.retained_until_epoch_second, p.retained_until_nano, "
+                    + "l.worker_id AS lease_worker_id, l.expires_at_epoch_second AS lease_expires_at_epoch_second, "
+                    + "l.expires_at_nano AS lease_expires_at_nano, "
+                    + "(SELECT COUNT(*) FROM traversal t WHERE t.tenant_id = p.tenant_id "
+                    + "AND t.process_instance_id = p.process_instance_id) AS traversal_count, "
+                    + "(SELECT COUNT(*) FROM attempt a WHERE a.tenant_id = p.tenant_id "
+                    + "AND a.process_instance_id = p.process_instance_id AND a.status = 'PARKED') "
+                    + "AS parked_count "
+                    + "FROM process_instance p LEFT JOIN lease l ON l.tenant_id = p.tenant_id "
+                    + "AND l.process_instance_id = p.process_instance_id ";
+
+    @Override
+    public CompletionStage<ProcessInventoryPage> listProcessInstances(String tenantId,
+                                                                      ProcessInventoryQuery query) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            requireInventoryQuery(query);
+            InventoryCursor.Position after = query.cursor()
+                    .map(cursor -> InventoryCursor.decode(tenantId, cursor))
+                    .orElse(null);
+            return inReadTransaction(null, () -> {
+                Instant now = clock.instant();
+                var sql = new StringBuilder(INVENTORY_COLUMNS).append("WHERE p.tenant_id = ?");
+                var binds = new ArrayList<Object>();
+                binds.add(tenantId);
+
+                if (!query.statuses().isEmpty()) {
+                    sql.append(" AND p.status IN (")
+                            .append("?, ".repeat(query.statuses().size() - 1)).append("?)");
+                    query.statuses().stream().map(Enum::name).forEach(binds::add);
+                }
+                if (!query.includeTerminal()) {
+                    // Built from the enum rather than written out, so a status added later is
+                    // classified by the domain's own terminal() rather than by a literal here that
+                    // nobody would remember to revisit.
+                    var terminal = java.util.Arrays.stream(ProcessInstanceStatus.values())
+                            .filter(ProcessInstanceStatus::terminal).map(Enum::name).toList();
+                    sql.append(" AND p.status NOT IN (")
+                            .append("?, ".repeat(terminal.size() - 1)).append("?)");
+                    binds.addAll(terminal);
+                }
+                query.deploymentId().ifPresent(deployment -> {
+                    sql.append(" AND p.deployment_id = ?");
+                    binds.add(deployment);
+                });
+                query.ownerWorkerId().ifPresent(worker -> {
+                    // A live lease only. A lapsed lease names the worker that has stopped renewing,
+                    // and answering "owned by w" with work w has abandoned is the opposite of what an
+                    // operator draining a worker is asking for.
+                    sql.append(" AND l.worker_id = ? AND ")
+                            .append(StoredInstant.strictlyAfter("l.expires_at"));
+                    binds.add(worker);
+                    binds.add(now);
+                });
+                if (after != null) {
+                    // Strictly after the cursor under (created_at DESC, process_instance_id DESC).
+                    // Written out rather than expressed as a row-value comparison because SQLite orders
+                    // the id as TEXT, and the in-memory adapter matches that with String.compareTo --
+                    // if the two disagreed on ties, a cursor minted by one would skip or repeat rows
+                    // against the other.
+                    sql.append(" AND (p.created_at_epoch_second < ? "
+                            + "OR (p.created_at_epoch_second = ? AND p.created_at_nano < ?) "
+                            + "OR (p.created_at_epoch_second = ? AND p.created_at_nano = ? "
+                            + "AND p.process_instance_id < ?))");
+                    // The first instant fills the (second, second, nano) shape every comparison
+                    // fragment in this adapter uses; the tie-breaking clause needs (second, nano, id)
+                    // instead, so its three operands are bound individually rather than through it.
+                    binds.add(after.createdAt());
+                    binds.add(after.createdAt().getEpochSecond());
+                    binds.add(after.createdAt().getNano());
+                    binds.add(after.processInstanceId().toString());
+                }
+                sql.append(" ORDER BY p.created_at_epoch_second DESC, p.created_at_nano DESC, "
+                        + "p.process_instance_id DESC LIMIT ?");
+
+                var page = new ArrayList<ProcessInventoryEntry>(query.limit());
+                boolean more = false;
+                try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                    int index = 1;
+                    for (Object bind : binds) {
+                        index = bindInventoryArgument(statement, index, bind);
+                    }
+                    // One row past the page. A next cursor minted merely because the page filled would
+                    // cost every caller an empty round trip, and a caller that reads a present cursor
+                    // as "there is more" would report outstanding work that does not exist.
+                    statement.setInt(index, query.limit() + 1);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            if (page.size() == query.limit()) {
+                                more = true;
+                                break;
+                            }
+                            page.add(readInventoryRow(tenantId, rows, now, null));
+                        }
+                    }
+                }
+                Optional<String> next = more
+                        ? Optional.of(InventoryCursor.encode(tenantId, page.getLast().createdAt(),
+                                page.getLast().key().processInstanceId()))
+                        : Optional.empty();
+                return new ProcessInventoryPage(List.copyOf(page), next, inventoryFloorOf(tenantId));
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                Instant now = clock.instant();
+                try (PreparedStatement statement = connection.prepareStatement(INVENTORY_COLUMNS
+                        + "WHERE p.tenant_id = ? AND p.process_instance_id = ?")) {
+                    // Both halves of the key are in the predicate, so a row belonging to another tenant
+                    // is not excluded by a check that could be forgotten -- it is not selected at all.
+                    // Absent and not-yours are therefore the same empty answer by construction, and the
+                    // store cannot be used as a cross-tenant existence oracle.
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next()
+                                ? Optional.of(readInventoryRow(key.tenantId(), rows, now, key))
+                                : Optional.<ProcessInventoryEntry>empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                InstanceMeta meta = readMeta(key);
+                if (meta == null) {
+                    // NotFound rather than an empty list: an instance that exists with no traversals
+                    // honestly reports none, and collapsing the two would make "you asked about
+                    // nothing" indistinguishable from "it has nothing".
+                    throw failure(new ExecutionStoreFailure.NotFound(key));
+                }
+                boolean leaseLive = leaseLive(key, clock.instant());
+                String sql = "SELECT t.traversal_id, t.position, t.ingress_node_id, t.status, "
+                        + "t.termination_reason, "
+                        + "(SELECT COUNT(*) FROM invocation i WHERE i.tenant_id = t.tenant_id "
+                        + "AND i.process_instance_id = t.process_instance_id "
+                        + "AND i.traversal_id = t.traversal_id) AS invocation_count, "
+                        + "(SELECT COUNT(*) FROM attempt a JOIN invocation i2 "
+                        + "ON i2.tenant_id = a.tenant_id "
+                        + "AND i2.process_instance_id = a.process_instance_id "
+                        + "AND i2.invocation_id = a.invocation_id "
+                        + "WHERE a.tenant_id = t.tenant_id "
+                        + "AND a.process_instance_id = t.process_instance_id "
+                        + "AND i2.traversal_id = t.traversal_id AND a.status = 'PARKED') AS parked_count "
+                        + "FROM traversal t WHERE t.tenant_id = ? AND t.process_instance_id = ? "
+                        + "ORDER BY t.position";
+                var rowsOut = new ArrayList<TraversalInventoryEntry>();
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            TraversalStatus status = traversalStatusOf(key, rows.getString("status"));
+                            int parked = rows.getInt("parked_count");
+                            rowsOut.add(new TraversalInventoryEntry(key,
+                                    StoredUuid.required(rows, "traversal", "traversal_id", key),
+                                    rows.getInt("position"), rows.getString("ingress_node_id"), status,
+                                    InventoryDisposition.ofTraversal(status, leaseLive, parked > 0),
+                                    rows.getInt("invocation_count"), parked,
+                                    terminationReasonOf(key, rows.getString("termination_reason"))));
+                        }
+                    }
+                }
+                return List.copyOf(rowsOut);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> inventoryRetainedFrom(String tenantId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            return inReadTransaction(null, () -> inventoryFloorOf(tenantId));
+        });
+    }
+
+    /**
+     * Purges in <strong>two</strong> transactions, floor first and deletions second, for the reason
+     * {@link #purgeExpiredIdempotencyRecords(String)} already records.
+     *
+     * <p>The interrupted state has to be real and reachable in order to have been chosen, and it has to
+     * be the conservative one. A floor ahead of the deletions says "rows before this instant may be
+     * gone" while they are in fact still present: a false alarm, and a caller that then finds the row
+     * is answered from the row. The reverse — deleting first and dying before the floor moved — leaves
+     * rows genuinely gone under a floor that claims completeness, and every absent instance then reads
+     * as one that never existed.</p>
+     *
+     * <p>The zero guard is load-bearing in the other direction. A purge that removed nothing must leave
+     * the floor exactly where it is, because advancing it would report a retention gap that does not
+     * exist, and a periodic purge job would report one on every tick.</p>
+     */
+    @Override
+    public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Instant now = clock.instant();
+            // updated_at + retention <= now, rearranged so the comparison is against a stored column
+            // rather than against an expression SQLite would have to evaluate per row.
+            Instant lapsed = minusClamped(now, config.terminalRetention());
+
+            Instant floor = inWriteTransaction(null, () -> latestExpiredDeadline(tenantId, now, lapsed));
+            if (floor == null) {
+                return 0L;
+            }
+            inWriteTransaction(null, () -> {
+                advanceInventoryFloor(tenantId, floor);
+                return null;
+            });
+            return inWriteTransaction(null, () -> {
+                // ON DELETE CASCADE clears the traversals, invocations, causal edges, attempts, timers,
+                // leases and work bookkeeping of every removed instance. The journal is deliberately
+                // NOT cascaded: its offsets must never be reissued, and journal_stream_sequence keeps
+                // the per-instance counter of a removed instance for exactly that reason. Retention on
+                // events is compactJournal's, and the two windows are independent by design.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM process_instance WHERE tenant_id = ? AND process_instance_id IN ("
+                                + expiredInstanceIdQuery() + ")")) {
+                    bindExpiredInstanceQuery(statement, tenantId, now, lapsed);
+                    return (long) statement.executeUpdate();
+                }
+            });
+        });
+    }
+
+    // ---------------------------------------------------------------- inventory helpers
+
+    /**
+     * The eligibility predicate, in one place because the floor query and the delete must not be able
+     * to disagree about what "expired" means.
+     *
+     * <p>Only terminal rows are eligible however old a non-terminal one is: age is not evidence that
+     * work has finished, and pruning a stuck instance would destroy the row an operator needs in order
+     * to discover that it is stuck. The second arm of the disjunction is the upgrade path — a terminal
+     * row written before schema 6 carries no deadline, and its updated_at <em>is</em> its terminal
+     * transition instant, because a terminal instance is never written again.</p>
+     */
+    private static String expiredInstanceIdQuery() {
+        var terminal = java.util.Arrays.stream(ProcessInstanceStatus.values())
+                .filter(ProcessInstanceStatus::terminal).map(name -> "'" + name.name() + "'").toList();
+        return "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? AND status IN ("
+                + String.join(", ", terminal) + ") AND ("
+                + "(retained_until_epoch_second IS NOT NULL AND "
+                + StoredInstant.atOrBefore("retained_until") + ") OR "
+                + "(retained_until_epoch_second IS NULL AND "
+                + StoredInstant.atOrBefore("updated_at") + "))";
+    }
+
+    /**
+     * Binds a statement of the form {@code ... WHERE tenant_id = ? AND process_instance_id IN
+     * (}{@link #expiredInstanceIdQuery()}{@code )}: the outer tenant, then the subquery's own tenant,
+     * then the two comparisons. The tenant appears twice because the subquery must carry it too — an
+     * instance id is unique only within a tenant, so a delete whose subquery were unscoped would match
+     * a colliding id belonging to somebody else.
+     */
+    private static void bindExpiredInstanceQuery(PreparedStatement statement, String tenantId, Instant now,
+                                                 Instant lapsed) throws SQLException {
+        statement.setString(1, tenantId);
+        statement.setString(2, tenantId);
+        int index = StoredInstant.bindComparison(statement, 3, now);
+        StoredInstant.bindComparison(statement, index, lapsed);
+    }
+
+    /**
+     * The <strong>latest</strong> retention deadline among the rows this purge will remove, or
+     * {@code null} when none is eligible. This is the floor.
+     *
+     * <p>It has to be the latest, and taking the earliest was a real defect. The floor's guarantee runs
+     * in the direction "everything past it is still here", so it must sit at or beyond every boundary
+     * the purge actually crossed. With the earliest, a run that removes two rows whose deadlines are
+     * further apart than the retention window publishes a floor the later row sits <em>after</em> — and
+     * a caller following the documented rule then concludes that a genuinely completed execution never
+     * existed. That is the ambiguity inverted into the unsafe direction, which is the exact opposite of
+     * what this method exists for. One row is the degenerate case where earliest and latest coincide,
+     * which is why the mistake survives any test that purges only one.</p>
+     *
+     * <p>It is deliberately not {@code now} either. Advancing to {@code now} would claim a gap covering
+     * every instant up to the present, including instants at which rows are still present, and a caller
+     * would treat live terminal instances as possibly expired — safe, but uselessly pessimistic. The
+     * latest crossed boundary is the tightest honest answer.</p>
+     */
+    private Instant latestExpiredDeadline(String tenantId, Instant now, Instant lapsed)
+            throws SQLException {
+        String sql = "SELECT retained_until_epoch_second, retained_until_nano, "
+                + "updated_at_epoch_second, updated_at_nano FROM process_instance "
+                + "WHERE tenant_id = ? AND process_instance_id IN (" + expiredInstanceIdQuery() + ")";
+        Instant latest = null;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindExpiredInstanceQuery(statement, tenantId, now, lapsed);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    // The same resolution the read publishes, so the floor is expressed in deadlines a
+                    // caller has actually been shown rather than in a quantity only this method knows.
+                    Instant deadline = retentionDueAt(nullableInstant(rows, "retained_until"),
+                            StoredInstant.read(rows, "updated_at"));
+                    if (latest == null || deadline.isAfter(latest)) {
+                        latest = deadline;
+                    }
+                }
+            }
+        }
+        return latest;
+    }
+
+    /**
+     * The instant a terminal row becomes purgeable: its stored deadline, or — for a row written before
+     * schema 6, which has none — its last write plus the configured retention. That fallback is exact
+     * rather than approximate, because a terminal instance is never written again, so its updated_at is
+     * its terminal transition instant.
+     */
+    private Instant retentionDueAt(Instant retainedUntil, Instant updatedAt) {
+        return retainedUntil != null ? retainedUntil : plusClamped(updatedAt, config.terminalRetention());
+    }
+
+    private Instant inventoryFloorOf(String tenantId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT retained_from_epoch_second, retained_from_nano FROM inventory_watermark "
+                        + "WHERE tenant_id = ?")) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                // An absent row IS Instant.MIN. Writing one when a tenant first appears would record a
+                // forgetting that never happened, in a table whose only purpose is to record one.
+                return rows.next() ? StoredInstant.read(rows, "retained_from") : Instant.MIN;
+            }
+        }
+    }
+
+    private void advanceInventoryFloor(String tenantId, Instant floor) throws SQLException {
+        // Monotonically non-decreasing: a floor never retreats, whatever order purges arrive in.
+        if (!floor.isAfter(inventoryFloorOf(tenantId))) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO inventory_watermark (tenant_id, retained_from_epoch_second, "
+                        + "retained_from_nano) VALUES (?, ?, ?) ON CONFLICT (tenant_id) DO UPDATE SET "
+                        + "retained_from_epoch_second = excluded.retained_from_epoch_second, "
+                        + "retained_from_nano = excluded.retained_from_nano")) {
+            statement.setString(1, tenantId);
+            StoredInstant.bindValue(statement, 2, floor);
+            statement.executeUpdate();
+        }
+    }
+
+    private boolean leaseLive(ExecutionKey key, Instant now) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT expires_at_epoch_second, expires_at_nano FROM lease "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                // Strictly before the expiry, matching the lease boundary the rest of this adapter
+                // uses: at exactly expiresAt the lease is already gone.
+                return rows.next() && now.isBefore(StoredInstant.read(rows, "expires_at"));
+            }
+        }
+    }
+
+    private ProcessInventoryEntry readInventoryRow(String tenantId, ResultSet rows, Instant now,
+                                                    ExecutionKey expectedKey)
+            throws SQLException {
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "process_instance", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "process_instance", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        ProcessInstanceStatus status = processStatusOf(key, rows.getString("status"));
+        String worker = rows.getString("lease_worker_id");
+        Instant leaseExpiresAt = worker == null ? null : nullableInstant(rows, "lease_expires_at");
+        boolean leaseLive = leaseExpiresAt != null && now.isBefore(leaseExpiresAt);
+        return new ProcessInventoryEntry(key, status,
+                InventoryDisposition.ofProcess(status, leaseLive, rows.getInt("parked_count") > 0),
+                rows.getLong("revision"), rows.getLong("lifecycle_generation"),
+                new GraphVersionPin(rows.getString("graph_version_pin")),
+                Optional.ofNullable(rows.getString("deployment_id")),
+                Optional.ofNullable(rows.getString("workload_id")),
+                Optional.ofNullable(rows.getString("correlation_id")),
+                leaseLive ? Optional.of(worker) : Optional.empty(),
+                rows.getLong("fencing_token"),
+                leaseLive ? Optional.of(leaseExpiresAt) : Optional.empty(),
+                rows.getInt("traversal_count"), StoredInstant.read(rows, "created_at"),
+                StoredInstant.read(rows, "updated_at"),
+                retainedUntilOf(status, nullableInstant(rows, "retained_until"),
+                        StoredInstant.read(rows, "updated_at")),
+                terminationReasonOf(key, rows.getString("termination_reason")));
+    }
+
+    /**
+     * What a reader is told about retention, resolved the same way the purge decides it.
+     *
+     * <p>The stored column is not the answer on its own. A terminal row written before schema 6 has no
+     * deadline stored, and the purge already resolves that case through {@link #retentionDueAt} — so a
+     * read that returned the raw column would report no deadline for a row the purge is about to remove
+     * on schedule. Two paths disagreeing about the same fact is how a caller comes to trust the wrong
+     * one; routing both through {@link #retentionDueAt} makes them incapable of it, which is the same
+     * treatment {@link #expiredInstanceIdQuery()} already gives the floor query and the delete.</p>
+     *
+     * <p>The terminal test is the gate, and it is what stops the fallback from inventing a deadline for
+     * a running instance: retention has not started for a non-terminal row, and absent is how that is
+     * said. That is also why the fallback is exact rather than approximate for the rows it does apply
+     * to — a terminal instance is never written again, so its {@code updated_at} is its terminal
+     * transition instant.</p>
+     */
+    private Optional<Instant> retainedUntilOf(ProcessInstanceStatus status, Instant storedDeadline,
+                                              Instant updatedAt) {
+        return status.terminal()
+                ? Optional.of(retentionDueAt(storedDeadline, updatedAt))
+                : Optional.empty();
+    }
+
+    /** Binds one accumulated filter argument; an instant occupies the three slots of a comparison. */
+    private static int bindInventoryArgument(PreparedStatement statement, int index, Object value)
+            throws SQLException {
+        if (value instanceof Instant instant) {
+            return StoredInstant.bindComparison(statement, index, instant);
+        }
+        if (value instanceof Long epochSecond) {
+            statement.setLong(index, epochSecond);
+            return index + 1;
+        }
+        if (value instanceof Integer nano) {
+            statement.setInt(index, nano);
+            return index + 1;
+        }
+        statement.setString(index, (String) value);
+        return index + 1;
+    }
+
+    private void requireInventoryQuery(ProcessInventoryQuery query) {
+        if (query == null) {
+            throw failure(ExecutionStoreFailure.invalid("query is mandatory"));
+        }
+        if (query.limit() < 1) {
+            throw failure(ExecutionStoreFailure.invalid("inventory limit must be positive"));
+        }
+        // Rejected rather than clamped. A silently reduced page is indistinguishable from a last page,
+        // and a caller paginating on "fewer rows than I asked for means I am done" would stop early and
+        // never learn that it had.
+        if (query.limit() > config.maxInventoryPageSize()) {
+            throw failure(ExecutionStoreFailure.invalid("inventory limit " + query.limit()
+                    + " exceeds the declared maximum " + config.maxInventoryPageSize()));
+        }
+        if (query.isSelfContradictory()) {
+            throw failure(ExecutionStoreFailure.invalid("a query that filters only for terminal "
+                    + "statuses while excluding terminal rows can never match; an empty page would be "
+                    + "indistinguishable from there being none"));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public Duration executionResultRetention() {
+        return config.executionResultRetention();
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return config.maxPayloadBytes();
+    }
+
+    /**
+     * Writes the result, or recognises that it is already written, inside one transaction.
+     *
+     * <p>The read and the decision share the transaction on purpose. Two processes recording the same
+     * terminal event concurrently would otherwise both see no row and both insert, and the loser
+     * would surface a primary-key violation as an adapter-specific error rather than as the
+     * idempotent success it actually is. Inside the write transaction the second one reads the first
+     * one's row and answers from the fingerprint, which is the same answer it would have given a
+     * second later.</p>
+     *
+     * <p>The deadline is computed from {@code endedAt} rather than from now, so the window a caller
+     * is promised starts when the execution ended and not when the write happened to land. A retry
+     * after an ambiguous write therefore reproduces the identical deadline, which is what lets the
+     * fingerprint comparison stay a comparison of what the producer decided.</p>
+     */
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return recordExecutionResult(result, config.maxPayloadBytes());
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
+        return async(() -> {
+            Objects.requireNonNull(result, "result");
+            ExecutionKey key = result.key();
+            requireResultPayloadWithinLimit(result, resolvedMaximumPayloadBytes);
+            DurableExecutionResult candidate = result.withRetainedUntil(
+                    plusClamped(result.endedAt(), config.executionResultRetention()));
+            Instant now = clock.instant();
+            return inWriteTransaction(key, () -> {
+                DurableExecutionResult stored = readExecutionResult(key.tenantId(), result.traversalId());
+                if (stored != null) {
+                    if (stored.fingerprint().equals(candidate.fingerprint())) {
+                        return stored;
+                    }
+                    throw failure(new ExecutionStoreFailure.ExecutionResultNotRecordable(
+                            result.traversalId(), stored.status(), candidate.status(),
+                            stored.fingerprint(), candidate.fingerprint()));
+                }
+                requireInstanceExists(key);
+                insertExecutionResult(candidate, now);
+                return candidate;
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                UUID traversalId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            Instant now = clock.instant();
+            return inReadTransaction(null, () -> {
+                DurableExecutionResult stored = readExecutionResult(tenantId, traversalId);
+                if (stored == null) {
+                    return Optional.<DurableExecutionResult>empty();
+                }
+                // Retained while now < retainedUntil, strictly, so the boundary matches the purge's
+                // exactly: a row eligible for collection is a row whose payload this read no longer
+                // offers. Any other pairing would produce an instant at which a result is purgeable
+                // and still readable in full, or readable as expired and not yet purgeable.
+                return Optional.of(now.isBefore(stored.retainedUntil()) ? stored : stored.expired());
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            return inReadTransaction(null, () -> executionResultFloorOf(tenantId));
+        });
+    }
+
+    /**
+     * Purges in <strong>two</strong> transactions, floor first and deletions second, exactly as
+     * {@link #purgeExpiredProcessInstances(String)} does and for the reason recorded there: an
+     * interrupted run must leave the conservative half committed. A floor ahead of the deletions
+     * raises a false alarm that the surviving row itself answers; deletions ahead of the floor leave
+     * rows genuinely gone under a floor claiming completeness.
+     */
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Instant now = clock.instant();
+            Instant floor = inWriteTransaction(null, () -> latestExpiredResultDeadline(tenantId, now));
+            if (floor == null) {
+                // A purge that removed nothing must leave the floor where it is. Advancing it would
+                // report a retention gap that does not exist, on every tick of a periodic job.
+                return 0L;
+            }
+            inWriteTransaction(null, () -> {
+                advanceExecutionResultFloor(tenantId, floor);
+                return null;
+            });
+            return inWriteTransaction(null, () -> {
+                // ON DELETE CASCADE clears execution_result_node. Nothing else references a result.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM execution_result WHERE tenant_id = ? AND "
+                                + StoredInstant.atOrBefore("retained_until"))) {
+                    statement.setString(1, tenantId);
+                    StoredInstant.bindComparison(statement, 2, now);
+                    return (long) statement.executeUpdate();
+                }
+            });
+        });
+    }
+
+    // ---------------------------------------------------------------- execution result helpers
+
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result, int maximumPayloadBytes) {
+        if (maximumPayloadBytes < 1) throw new IllegalArgumentException("maximumPayloadBytes must be positive");
+        ExecutionResultPayload payload = result.payload();
+        if (payload.state() == ResultPayloadState.RETAINED
+                && payload.bytes() > maximumPayloadBytes) {
+            // Refused rather than silently relabelled WITHHELD. The projection decides what to keep,
+            // and a store that rewrote that decision would report a payload as refused for size by an
+            // adapter the caller never asked about the size of.
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(),
+                    maximumPayloadBytes));
+        }
+        if (payload.state() == ResultPayloadState.EXPIRED) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "EXPIRED describes a record's age and is produced by a read; it cannot be stored"));
+        }
+    }
+
+    private void requireInstanceExists(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM process_instance WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    // Indistinguishable from another tenant's instance, which is the point: the key
+                    // carries the tenant, so a cross-tenant record is refused by the same miss.
+                    throw failure(new ExecutionStoreFailure.NotFound(key));
+                }
+            }
+        }
+    }
+
+    private void insertExecutionResult(DurableExecutionResult result, Instant recordedAt)
+            throws SQLException {
+        ExecutionResultPayload payload = result.payload();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_result (tenant_id, process_instance_id, traversal_id, "
+                        + "graph_version_pin, status, termination_reason, started_at_epoch_second, "
+                        + "started_at_nano, ended_at_epoch_second, ended_at_nano, "
+                        + "recorded_at_epoch_second, recorded_at_nano, retained_until_epoch_second, "
+                        + "retained_until_nano, payload_state, payload_redacted, payload_truncated, "
+                        + "payload_bytes, payload_content_type, payload, failure_classifier, "
+                        + "fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        + "?, ?, ?, ?)")) {
+            int index = 1;
+            statement.setString(index++, result.key().tenantId());
+            statement.setString(index++, result.key().processInstanceId().toString());
+            statement.setString(index++, result.traversalId().toString());
+            statement.setString(index++, result.graphVersionPin().reference());
+            statement.setString(index++, result.status().name());
+            statement.setString(index++, result.terminationReason() == null ? null
+                    : result.terminationReason().name());
+            index = StoredInstant.bindValue(statement, index, result.startedAt());
+            index = StoredInstant.bindValue(statement, index, result.endedAt());
+            index = StoredInstant.bindValue(statement, index, recordedAt);
+            index = StoredInstant.bindValue(statement, index, result.retainedUntil());
+            statement.setString(index++, payload.state().name());
+            statement.setInt(index++, payload.redacted() ? 1 : 0);
+            statement.setInt(index++, payload.truncated() ? 1 : 0);
+            statement.setInt(index++, payload.bytes());
+            statement.setString(index++, payload.contentType());
+            statement.setBytes(index++, payload.retained() == null ? null : payload.retained().bytes());
+            statement.setString(index++, result.failureClassifier());
+            statement.setString(index, result.fingerprint());
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_result_node (tenant_id, traversal_id, node_set, position, "
+                        + "value) VALUES (?, ?, ?, ?, ?)")) {
+            for (ExecutionResultNodes.Kind kind : ExecutionResultNodes.Kind.values()) {
+                List<String> entries = result.nodes().entries(kind);
+                for (int position = 0; position < entries.size(); position++) {
+                    statement.setString(1, result.key().tenantId());
+                    statement.setString(2, result.traversalId().toString());
+                    statement.setString(3, kind.name());
+                    statement.setInt(4, position);
+                    statement.setString(5, entries.get(position));
+                    statement.addBatch();
+                }
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private DurableExecutionResult readExecutionResult(String tenantId, UUID traversalId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM execution_result WHERE tenant_id = ? AND traversal_id = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, traversalId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    return null;
+                }
+                var key = new ExecutionKey(tenantId,
+                        StoredUuid.required(rows, "execution_result", "process_instance_id", tenantId));
+                return new DurableExecutionResult(key, traversalId,
+                        new GraphVersionPin(rows.getString("graph_version_pin")),
+                        processStatusOf(key, rows.getString("status")),
+                        terminationReasonOf(key, rows.getString("termination_reason")),
+                        StoredInstant.read(rows, "started_at"), StoredInstant.read(rows, "ended_at"),
+                        StoredInstant.read(rows, "retained_until"), readResultPayload(key, rows),
+                        rows.getString("failure_classifier"), readResultNodes(tenantId, traversalId));
+            }
+        }
+    }
+
+    private static ExecutionResultPayload readResultPayload(ExecutionKey key, ResultSet rows)
+            throws SQLException {
+        String name = rows.getString("payload_state");
+        ResultPayloadState state;
+        try {
+            state = ResultPayloadState.valueOf(name);
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            // The same route an unknown status name takes, and never a fallback to "no payload": a
+            // state this build cannot read is a rollback, and reporting it as an absent payload would
+            // tell a caller the run produced nothing when it produced something unreadable.
+            throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                    "payload state '" + name + "' is not a state this build understands"), unknown);
+        }
+        return new ExecutionResultPayload(state, rows.getInt("payload_redacted") != 0,
+                rows.getInt("payload_truncated") != 0, rows.getInt("payload_bytes"),
+                rows.getString("payload_content_type"),
+                state == ResultPayloadState.RETAINED
+                        ? OpaquePayload.of(rows.getBytes("payload"),
+                                rows.getString("payload_content_type"))
+                        : null);
+    }
+
+    private ExecutionResultNodes readResultNodes(String tenantId, UUID traversalId) throws SQLException {
+        var byKind = new java.util.EnumMap<ExecutionResultNodes.Kind, List<String>>(
+                ExecutionResultNodes.Kind.class);
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT node_set, value FROM execution_result_node WHERE tenant_id = ? AND "
+                        + "traversal_id = ? ORDER BY node_set, position")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, traversalId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    String setName = rows.getString("node_set");
+                    ExecutionResultNodes.Kind kind;
+                    try {
+                        kind = ExecutionResultNodes.Kind.valueOf(setName);
+                    } catch (IllegalArgumentException unknown) {
+                        throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(
+                                new ExecutionKey(tenantId, traversalId),
+                                "node set '" + setName + "' is not a set this build understands"),
+                                unknown);
+                    }
+                    byKind.computeIfAbsent(kind, ignored -> new java.util.ArrayList<>())
+                            .add(rows.getString("value"));
+                }
+            }
+        }
+        return new ExecutionResultNodes(byKind.getOrDefault(ExecutionResultNodes.Kind.VISITED, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.DEFAULTED, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.BYPASSED, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.HANDLED_FAILURE, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.UNTAKEN_EDGE, List.of()));
+    }
+
+    /**
+     * The <strong>latest</strong> retention deadline among the rows this purge will remove, or
+     * {@code null} when none is eligible. This is the floor, and it is the latest for the reason
+     * {@link #latestExpiredDeadline(String, Instant, Instant)} records at length: the guarantee runs
+     * in the direction "everything past this is still here", so the floor must sit at or beyond every
+     * boundary the purge crossed.
+     */
+    private Instant latestExpiredResultDeadline(String tenantId, Instant now) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT retained_until_epoch_second, retained_until_nano FROM execution_result "
+                        + "WHERE tenant_id = ? AND " + StoredInstant.atOrBefore("retained_until")
+                        + " ORDER BY retained_until_epoch_second DESC, retained_until_nano DESC "
+                        + "LIMIT 1")) {
+            statement.setString(1, tenantId);
+            StoredInstant.bindComparison(statement, 2, now);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? StoredInstant.read(rows, "retained_until") : null;
+            }
+        }
+    }
+
+    private Instant executionResultFloorOf(String tenantId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT retained_from_epoch_second, retained_from_nano FROM execution_result_watermark "
+                        + "WHERE tenant_id = ?")) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                // An absent row IS Instant.MIN. Writing one when a tenant first appears would record a
+                // forgetting that never happened, in a table whose only purpose is to record one.
+                return rows.next() ? StoredInstant.read(rows, "retained_from") : Instant.MIN;
+            }
+        }
+    }
+
+    private void advanceExecutionResultFloor(String tenantId, Instant floor) throws SQLException {
+        // Monotonically non-decreasing: a floor never retreats, whatever order purges arrive in.
+        if (!floor.isAfter(executionResultFloorOf(tenantId))) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_result_watermark (tenant_id, retained_from_epoch_second, "
+                        + "retained_from_nano) VALUES (?, ?, ?) ON CONFLICT (tenant_id) DO UPDATE SET "
+                        + "retained_from_epoch_second = excluded.retained_from_epoch_second, "
+                        + "retained_from_nano = excluded.retained_from_nano")) {
+            statement.setString(1, tenantId);
+            StoredInstant.bindValue(statement, 2, floor);
+            statement.executeUpdate();
+        }
+    }
+
     // ---------------------------------------------------------------- lifecycle
 
     @Override
@@ -661,6 +1980,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
         } catch (RuntimeException ignored) {
             // Already reported through the connection's own state; closing twice must not throw.
         } finally {
+            java.util.List<OwnedSourceCheckpoints> owners;
+            synchronized (sourceCheckpointOwners) { owners = java.util.List.copyOf(sourceCheckpointOwners); }
+            owners.forEach(OwnedSourceCheckpoints::close);
             worker.shutdown();
         }
     }
@@ -1015,10 +2337,29 @@ public final class SqliteExecutionStore implements ExecutionStore {
         return batch.transitions().stream().anyMatch(ExecutionTransition.ProcessCreated.class::isInstance);
     }
 
+    private static long processTransitionCount(ExecutionBatch batch) {
+        return batch.transitions().stream()
+                .filter(ExecutionTransition.ProcessTransitioned.class::isInstance)
+                .count();
+    }
+
     // ---------------------------------------------------------------- row access
 
+    /**
+     * @param createdAt          write-once, and half of the inventory's sort key
+     * @param lifecycleGeneration count of authoritative status transitions, exact from schema 6 and a
+     *                           floor of one for a row that predates it
+     * @param retainedUntil      the <em>raw</em> stored column and not the answer a caller is given:
+     *                           null while non-terminal, and also null on a terminal row written before
+     *                           schema 6. Every path that reports or acts on a deadline resolves it
+     *                           through {@link #retentionDueAt} instead, so no reader sees this value
+     *                           unmediated
+     */
     private record InstanceMeta(long revision, long fencingToken, GraphVersionPin graphVersionPin,
-                                ProcessInstanceStatus status, Instant updatedAt) {
+                                ProcessInstanceStatus status,
+                                ExecutionTerminationReason terminationReason, Instant updatedAt,
+                                Instant createdAt, long lifecycleGeneration, ExecutionOrigin origin,
+                                Instant retainedUntil) {
     }
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, UUID attemptId, int ordinal,
@@ -1027,8 +2368,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private InstanceMeta readMeta(ExecutionKey key) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT revision, fencing_token, graph_version_pin, status, updated_at_epoch_second, "
-                        + "updated_at_nano FROM process_instance "
+                "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, "
+                        + "updated_at_epoch_second, "
+                        + "updated_at_nano, created_at_epoch_second, created_at_nano, "
+                        + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
+                        + "retained_until_epoch_second, retained_until_nano FROM process_instance "
                         + "WHERE tenant_id = ? AND process_instance_id = ?")) {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
@@ -1038,15 +2382,85 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 }
                 return new InstanceMeta(rows.getLong("revision"), rows.getLong("fencing_token"),
                         new GraphVersionPin(rows.getString("graph_version_pin")),
-                        ProcessInstanceStatus.valueOf(rows.getString("status")),
-                        StoredInstant.read(rows, "updated_at"));
+                        processStatusOf(key, rows.getString("status")),
+                        terminationReasonOf(key, rows.getString("termination_reason")),
+                        StoredInstant.read(rows, "updated_at"),
+                        StoredInstant.read(rows, "created_at"),
+                        rows.getLong("lifecycle_generation"),
+                        ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
+                                rows.getString("correlation_id")),
+                        nullableInstant(rows, "retained_until"));
             }
+        }
+    }
+
+    /**
+     * Reads a two-column instant that may be NULL, which the plain reader cannot express: it would
+     * report a missing value as the epoch, and an epoch retention deadline is a deadline that has
+     * already passed.
+     */
+    private static Instant nullableInstant(ResultSet rows, String column) throws SQLException {
+        long second = rows.getLong(column + "_epoch_second");
+        if (rows.wasNull()) {
+            return null;
+        }
+        return Instant.ofEpochSecond(second, rows.getInt(column + "_nano"));
+    }
+
+    /**
+     * Maps an unrecognised stored status name to {@link ExecutionStoreFailure.Corrupted}.
+     *
+     * <p>Statuses are persisted by name, which is what lets a member be added without a data
+     * migration, and the cost of that is a one-way rollback gate: a row written by a newer binary is
+     * unreadable by an older one. It has to surface as corruption rather than as a raw
+     * {@link IllegalArgumentException} escaping the port, and above all it must never be skipped — an
+     * inventory that silently dropped the rows it could not parse would report a shorter, cleaner
+     * world than the one on disk, and nothing would say so.</p>
+     */
+    private static ProcessInstanceStatus processStatusOf(ExecutionKey key, String name) {
+        try {
+            return ProcessInstanceStatus.valueOf(name);
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                    "process instance status '" + name + "' is not a status this build understands"),
+                    unknown);
+        }
+    }
+
+    /**
+     * Maps a stored termination reason, distinguishing an absent one from an unreadable one.
+     *
+     * <p>NULL is the ordinary case and a meaningful one: nothing distinguishes this termination, and
+     * every row written before the column existed says exactly that. A <em>name</em> this build does
+     * not know is the rollback case, and it takes the same route an unknown status name takes --
+     * {@link ExecutionStoreFailure.Corrupted}, loudly. Reading it as an absent reason instead would
+     * report a run that was cancelled as one that failed, which is the misreading the reason exists
+     * to prevent, restored by the very code meant to carry it.</p>
+     */
+    private static ExecutionTerminationReason terminationReasonOf(ExecutionKey key, String name) {
+        if (name == null) {
+            return null;
+        }
+        try {
+            return ExecutionTerminationReason.valueOf(name);
+        } catch (IllegalArgumentException unknown) {
+            throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                    "termination reason '" + name + "' is not a reason this build understands"), unknown);
+        }
+    }
+
+    private static TraversalStatus traversalStatusOf(ExecutionKey key, String name) {
+        try {
+            return TraversalStatus.valueOf(name);
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                    "traversal status '" + name + "' is not a status this build understands"), unknown);
         }
     }
 
     private ProcessInstance readAggregate(ExecutionKey key, InstanceMeta meta) throws SQLException {
         try {
-            return AggregateStorage.read(connection, key, meta.status());
+            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason());
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             // The detection point the in-memory adapter can only simulate: rows that no longer
             // reconstruct into a legal aggregate must never escape into the runtime.
@@ -1055,25 +2469,58 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
-    private void writeInstanceRow(ExecutionKey key, ProcessInstanceStatus status, GraphVersionPin pin,
-                                  long revision, long fencingToken, Instant now) throws SQLException {
+    private void writeInstanceRow(ExecutionKey key, ProcessInstanceStatus status,
+                                  ExecutionTerminationReason terminationReason, GraphVersionPin pin,
+                                  long revision, long fencingToken, Instant now, Instant createdAt,
+                                  long lifecycleGeneration, ExecutionOrigin origin,
+                                  Instant retainedUntil) throws SQLException {
         // An upsert rather than INSERT OR REPLACE: REPLACE deletes the row first, which would cascade
         // through every child table and, with it, the leases and work claims that must outlive a write.
+        //
+        // created_at is deliberately absent from the DO UPDATE SET. It is bound in the VALUES so a
+        // first insert records it, and it is never assigned on conflict, which makes write-once a
+        // property of the statement rather than a rule the caller has to keep -- and write-once is
+        // exactly what makes the inventory's ordering stable while writes continue.
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO process_instance (tenant_id, process_instance_id, status, graph_version_pin, "
-                        + "revision, fencing_token, updated_at_epoch_second, updated_at_nano) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "INSERT INTO process_instance (tenant_id, process_instance_id, status, "
+                        + "termination_reason, graph_version_pin, "
+                        + "revision, fencing_token, updated_at_epoch_second, updated_at_nano, "
+                        + "created_at_epoch_second, created_at_nano, lifecycle_generation, "
+                        + "deployment_id, workload_id, correlation_id, retained_until_epoch_second, "
+                        + "retained_until_nano) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET status = excluded.status, "
+                        // Assigned on conflict, beside the status it qualifies and never apart from
+                        // it: the pair is one fact, so a row must never carry a new status with the
+                        // previous reason still attached to it.
+                        + "termination_reason = excluded.termination_reason, "
                         + "graph_version_pin = excluded.graph_version_pin, revision = excluded.revision, "
                         + "updated_at_epoch_second = excluded.updated_at_epoch_second, "
-                        + "updated_at_nano = excluded.updated_at_nano")) {
+                        + "updated_at_nano = excluded.updated_at_nano, "
+                        + "lifecycle_generation = excluded.lifecycle_generation, "
+                        + "deployment_id = excluded.deployment_id, workload_id = excluded.workload_id, "
+                        + "correlation_id = excluded.correlation_id, "
+                        + "retained_until_epoch_second = excluded.retained_until_epoch_second, "
+                        + "retained_until_nano = excluded.retained_until_nano")) {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
             statement.setString(3, status.name());
-            statement.setString(4, pin.reference());
-            statement.setLong(5, revision);
-            statement.setLong(6, fencingToken);
-            StoredInstant.bindValue(statement, 7, now);
+            statement.setString(4, terminationReason == null ? null : terminationReason.name());
+            statement.setString(5, pin.reference());
+            statement.setLong(6, revision);
+            statement.setLong(7, fencingToken);
+            int index = StoredInstant.bindValue(statement, 8, now);
+            index = StoredInstant.bindValue(statement, index, createdAt);
+            statement.setLong(index++, lifecycleGeneration);
+            statement.setString(index++, origin.deploymentId().orElse(null));
+            statement.setString(index++, origin.workloadId().orElse(null));
+            statement.setString(index++, origin.correlationId().orElse(null));
+            if (retainedUntil == null) {
+                statement.setNull(index++, java.sql.Types.INTEGER);
+                statement.setNull(index, java.sql.Types.INTEGER);
+            } else {
+                StoredInstant.bindValue(statement, index, retainedUntil);
+            }
             statement.executeUpdate();
         }
     }
@@ -1281,7 +2728,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(1, tenantId);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    keys.add(new ExecutionKey(tenantId, UUID.fromString(rows.getString(1))));
+                    keys.add(new ExecutionKey(tenantId, StoredUuid.required(rows, 1,
+                            "process_instance", "process_instance_id", tenantId)));
                 }
             }
         }
@@ -1296,10 +2744,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * {@code visible_again_at <= now}: an item with no claim row at all has never been delivered and
      * must be claimable, and a plain comparison against a missing row is never true.</p>
      *
-     * <h3>Why {@code RUNNING} is claimable, and why {@code PARKED} is not (PERS-04, ADR 0022)</h3>
+     * <h3>Why {@code RUNNING} is claimable, and why {@code PARKED} is not (ADR 0022)</h3>
      * <p>An attempt that is still {@code SCHEDULED} has provably not started, because the runtime
      * persists the {@code RUNNING} transition before the engine send. An attempt stuck in
-     * {@code RUNNING} is exactly the crash case PERS-04 exists for: dispatched, outcome never learned.
+     * {@code RUNNING} is exactly the crash case parking exists for: dispatched, outcome never learned.
      * Restricting this query to {@code SCHEDULED} would make that case <em>permanently invisible</em>
      * — the work would never be redelivered, so the decided ambiguity rule ({@code deliveryAttempt}
      * greater than one on a {@code RUNNING} attempt) could never fire and a crashed attempt would be
@@ -1316,10 +2764,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * dispatch outcome is known; it resumes through a timer or a trigger.</p>
      */
     private List<ScheduledAttempt> claimableAttempts(ExecutionKey key, Instant now) throws SQLException {
-        String sql = "SELECT i.traversal_id, a.invocation_id, a.attempt_id, a.ordinal, i.node_command "
-                + "FROM attempt a JOIN invocation i ON i.tenant_id = a.tenant_id "
+        String sql = "SELECT i.traversal_id, tr.traversal_id AS joined_traversal_id, "
+                + "a.invocation_id, i.invocation_id AS joined_invocation_id, "
+                + "a.attempt_id, a.ordinal, i.node_command "
+                + "FROM attempt a LEFT JOIN invocation i ON i.tenant_id = a.tenant_id "
                 + "AND i.process_instance_id = a.process_instance_id AND i.invocation_id = a.invocation_id "
-                + "JOIN traversal tr ON tr.tenant_id = i.tenant_id "
+                + "LEFT JOIN traversal tr ON tr.tenant_id = i.tenant_id "
                 + "AND tr.process_instance_id = i.process_instance_id AND tr.traversal_id = i.traversal_id "
                 + "WHERE a.tenant_id = ? AND a.process_instance_id = ? "
                 + "AND a.status IN ('SCHEDULED', 'RUNNING') "
@@ -1336,9 +2786,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(new ScheduledAttempt(UUID.fromString(rows.getString("traversal_id")),
-                            UUID.fromString(rows.getString("invocation_id")),
-                            UUID.fromString(rows.getString("attempt_id")), rows.getInt("ordinal"),
+                    UUID invocationId = StoredUuid.required(rows, "attempt", "invocation_id", key);
+                    StoredUuid.requiredMatching(rows.getString("joined_invocation_id"), "invocation",
+                            "invocation_id", key, invocationId);
+                    UUID traversalId = StoredUuid.required(rows, "invocation", "traversal_id", key);
+                    StoredUuid.requiredMatching(rows.getString("joined_traversal_id"), "traversal",
+                            "traversal_id", key, traversalId);
+                    ready.add(new ScheduledAttempt(traversalId,
+                            invocationId,
+                            StoredUuid.required(rows, "attempt", "attempt_id", key), rows.getInt("ordinal"),
                             ai.ravenroot.api.execution.NodeCommand.parse(rows.getString("node_command"))));
                 }
             }
@@ -1365,12 +2821,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, index, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    String traversalId = rows.getString("traversal_id");
-                    String invocationId = rows.getString("invocation_id");
-                    due.add(new TimerSchedule(UUID.fromString(rows.getString("timer_id")),
+                    due.add(new TimerSchedule(StoredUuid.required(rows, "timer", "timer_id", key),
                             StoredInstant.read(rows, "due_at"),
-                            traversalId == null ? null : UUID.fromString(traversalId),
-                            invocationId == null ? null : UUID.fromString(invocationId),
+                            StoredUuid.optional(rows, "timer", "traversal_id", key),
+                            StoredUuid.optional(rows, "timer", "invocation_id", key),
                             OpaquePayload.of(rows.getBytes("payload_bytes"),
                                     rows.getString("payload_content_type"))));
                 }
@@ -1432,15 +2886,21 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * would also let the table grow without bound across a long-lived instance.</p>
      */
     private void dropAcknowledgementsForRescheduledWork(ExecutionKey key) throws SQLException {
+        // Handler identities are work-item identities too, and a terminal handler is retained rather
+        // than deleted, so its acknowledgement must be retained with it. Omitting the third arm here
+        // would drop the acknowledgement on the next write and redeliver a resolved handler's trigger
+        // forever.
         String liveWork = "SELECT attempt_id FROM attempt WHERE tenant_id = ? AND process_instance_id = ? "
-                + "UNION ALL SELECT timer_id FROM timer WHERE tenant_id = ? AND process_instance_id = ?";
+                + "UNION ALL SELECT timer_id FROM timer WHERE tenant_id = ? AND process_instance_id = ? "
+                + "UNION ALL SELECT handler_id FROM execution_handler "
+                + "WHERE tenant_id = ? AND process_instance_id = ?";
         for (String table : List.of("work_acknowledgement", "work_claim")) {
             try (PreparedStatement statement = connection.prepareStatement(
                     "DELETE FROM " + table + " WHERE tenant_id = ? AND process_instance_id = ? "
                             + "AND work_item_id NOT IN (" + liveWork + ")")) {
                 String tenantId = key.tenantId();
                 String instanceId = key.processInstanceId().toString();
-                for (int pair = 0; pair < 3; pair++) {
+                for (int pair = 0; pair < 4; pair++) {
                     statement.setString(pair * 2 + 1, tenantId);
                     statement.setString(pair * 2 + 2, instanceId);
                 }
@@ -1454,6 +2914,1563 @@ public final class SqliteExecutionStore implements ExecutionStore {
         statement.setString(1, key.tenantId());
         statement.setString(2, key.processInstanceId().toString());
         statement.setString(3, workItemId.toString());
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(handlerId, "handlerId");
+            return inReadTransaction(key, () -> {
+                // Absent instance and absent handler answer the same way. Distinguishing them would
+                // let a probe learn that a process instance exists in a tenant it cannot read.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                                + "AND h.handler_id = ?")) {
+                    bindItem(statement, key, handlerId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readHandler(rows, key, handlerId))
+                                : Optional.<DurableHandler>empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> findHandler(String tenantId, String handlerName,
+                                                                 String correlationKey) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            HandlerRegistration.requireBoundedKey(handlerName, "handlerName");
+            HandlerRegistration.requireBoundedKey(correlationKey, "correlationKey");
+            return inReadTransaction(null, () -> {
+                // The partial unique index makes this at most one row, so the answer does not depend
+                // on ordering. A LIMIT here would have hidden a violated invariant behind an
+                // arbitrary winner.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
+                                + "AND h.status IN " + LIVE_HANDLER_STATUSES)) {
+                    statement.setString(1, tenantId);
+                    statement.setString(2, handlerName);
+                    statement.setString(3, correlationKey);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readHandler(rows)) : Optional.<DurableHandler>empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableHandler>> handlers(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                var found = new ArrayList<DurableHandler>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                                + "ORDER BY h.position")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            found.add(readHandler(rows, key, null));
+                        }
+                    }
+                }
+                return List.copyOf(found);
+            });
+        });
+    }
+
+    /**
+     * Folds this batch's registrations and handler transitions, inside the enclosing transaction.
+     *
+     * <p>Runs after the aggregate is written, because a registration may name an invocation the same
+     * batch created and a terminal transition must name a traversal the same batch added; both are
+     * validated against the post-fold aggregate that is already in {@code folded}. A rejection here
+     * rolls the whole transaction back, which is what makes a wait, or a re-entry, atomic.</p>
+     */
+    private void writeHandlers(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                               long revision) throws SQLException {
+        for (HandlerRegistration registration : batch.handlersToRegister()) {
+            registerHandler(key, folded, registration, revision);
+        }
+        for (HandlerTransition transition : batch.handlerTransitions()) {
+            transitionHandler(key, batch, folded, transition, revision);
+        }
+    }
+
+    private void registerHandler(ExecutionKey key, ProcessInstance folded, HandlerRegistration registration,
+                                 long revision) throws SQLException {
+        requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                "handler " + registration.handlerId());
+
+        DurableHandler byDeduplication = handlerByDeduplicationKey(key.tenantId(),
+                registration.deduplicationKey());
+        if (byDeduplication != null) {
+            // A retried wait re-sends the identical batch and must be a no-op. A DIFFERENT
+            // registration under the same key is a caller bug, and answering it as a success would
+            // silently discard a handler somebody asked for.
+            if (!byDeduplication.matches(registration)) {
+                throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                        + registration.deduplicationKey() + " already registers handler "
+                        + byDeduplication.handlerId() + ", which is not the handler being registered"));
+            }
+            return;
+        }
+        DurableHandler contender = liveHandler(key.tenantId(), registration.name(),
+                registration.correlationKey());
+        if (contender != null && !contender.handlerId().equals(registration.handlerId())) {
+            throw failure(new ExecutionStoreFailure.HandlerCorrelationTaken(registration.name(),
+                    registration.correlationKey()));
+        }
+        DurableHandler existing = readHandler(key, registration.handlerId());
+        if (existing != null) {
+            throw failure(ExecutionStoreFailure.invalid("handler " + registration.handlerId()
+                    + " is already registered under a different deduplication key"));
+        }
+        insertHandler(DurableHandler.waiting(key, registration, revision), nextHandlerPosition(key));
+    }
+
+    private void transitionHandler(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                   HandlerTransition transition, long revision) throws SQLException {
+        DurableHandler current = readHandler(key, transition.handlerId());
+        if (current == null) {
+            // InvalidRequest rather than NotFound: NotFound names a process instance, and the
+            // instance is present -- it is the handler inside it that this batch invented.
+            throw failure(ExecutionStoreFailure.invalid("unknown handler " + transition.handlerId()));
+        }
+        // A redelivered escalation timer must not be able to turn an escalation into a failure.
+        // Every other repeat is a duplicate and is refused.
+        if (transition.next() == HandlerStatus.ESCALATED && current.status() == HandlerStatus.ESCALATED) {
+            return;
+        }
+        if (!current.status().canTransitionTo(transition.next())) {
+            throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
+                    current.status(), transition.next()));
+        }
+        requireHandlerOutcomeWithinLimit(key, batch, transition);
+        if (transition.next().resumesProcess()) {
+            requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+            requireTraversalExists(folded, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+        }
+        if (transition.next() == HandlerStatus.RESOLVED) {
+            // Only a resolution supplies the body the handler was declared to be waiting for. A
+            // denial carries a refusal reason, which is a different shape by nature.
+            Optional<String> refusal = current.payloadSchema().rejectionOf(transition.outcomePayload());
+            if (refusal.isPresent()) {
+                throw failure(ExecutionStoreFailure.invalid("handler " + current.handlerId()
+                        + " payload was refused: " + refusal.get()));
+            }
+        }
+        updateHandler(current.apply(transition, revision));
+    }
+
+    private void insertHandler(DurableHandler handler, int position) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_handler (tenant_id, process_instance_id, handler_id, position, "
+                        + "name, traversal_id, invocation_id, correlation_key, deduplication_key, "
+                        + "schema_content_type, schema_ref, schema_max_bytes, required_roles, "
+                        + "required_scopes, status, resume_traversal_id, actor, outcome_content_type, "
+                        + "outcome_bytes, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, handler.key().tenantId());
+            statement.setString(2, handler.key().processInstanceId().toString());
+            statement.setString(3, handler.handlerId().toString());
+            statement.setInt(4, position);
+            statement.setString(5, handler.name());
+            statement.setString(6, handler.traversalId().toString());
+            statement.setString(7, handler.invocationId().toString());
+            statement.setString(8, handler.correlationKey());
+            statement.setString(9, handler.deduplicationKey());
+            statement.setString(10, handler.payloadSchema().contentType());
+            statement.setString(11, handler.payloadSchema().schemaRef());
+            statement.setInt(12, handler.payloadSchema().maxBytes());
+            statement.setString(13, joinTokens(handler.authorization().requiredRoles()));
+            statement.setString(14, joinTokens(handler.authorization().requiredScopes()));
+            statement.setString(15, handler.status().name());
+            statement.setString(16, handler.resumeTraversalId() == null ? null
+                    : handler.resumeTraversalId().toString());
+            statement.setString(17, handler.actor());
+            statement.setString(18, handler.outcomePayload().contentType());
+            statement.setBytes(19, handler.outcomePayload().bytes());
+            statement.setLong(20, handler.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateHandler(DurableHandler handler) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE execution_handler SET status = ?, resume_traversal_id = ?, actor = ?, "
+                        + "outcome_content_type = ?, outcome_bytes = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND handler_id = ?")) {
+            statement.setString(1, handler.status().name());
+            statement.setString(2, handler.resumeTraversalId() == null ? null
+                    : handler.resumeTraversalId().toString());
+            statement.setString(3, handler.actor());
+            statement.setString(4, handler.outcomePayload().contentType());
+            statement.setBytes(5, handler.outcomePayload().bytes());
+            statement.setLong(6, handler.revision());
+            statement.setString(7, handler.key().tenantId());
+            statement.setString(8, handler.key().processInstanceId().toString());
+            statement.setString(9, handler.handlerId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private int nextHandlerPosition(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM execution_handler "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableHandler readHandler(ExecutionKey key, UUID handlerId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? AND h.handler_id = ?")) {
+            bindItem(statement, key, handlerId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows, key, handlerId) : null;
+            }
+        }
+    }
+
+    private DurableHandler liveHandler(String tenantId, String handlerName, String correlationKey)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
+                        + "AND h.status IN " + LIVE_HANDLER_STATUSES)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, handlerName);
+            statement.setString(3, correlationKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows) : null;
+            }
+        }
+    }
+
+    private DurableHandler handlerByDeduplicationKey(String tenantId, String deduplicationKey)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.deduplication_key = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, deduplicationKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows) : null;
+            }
+        }
+    }
+
+    /**
+     * Reconstructs a stored handler through its canonical constructor.
+     *
+     * <p>A row that no longer satisfies the record's invariants — a resuming status with no resume
+     * traversal, an unknown status name written by a newer binary — surfaces as
+     * {@link ExecutionStoreFailure.Corrupted} rather than escaping into the runtime, matching how the
+     * aggregate itself is revalidated on the way out.</p>
+     */
+    private DurableHandler readHandler(ResultSet rows) throws SQLException {
+        return readHandler(rows, null, null);
+    }
+
+    private DurableHandler readHandler(ResultSet rows, ExecutionKey expectedKey, UUID expectedHandlerId)
+            throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "execution_handler", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "execution_handler", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            UUID handlerId = expectedHandlerId == null
+                    ? StoredUuid.required(rows, "execution_handler", "handler_id", key)
+                    : StoredUuid.requiredMatching(rows, "execution_handler", "handler_id", key,
+                            expectedHandlerId);
+            return new DurableHandler(handlerId, key,
+                    rows.getString("name"), StoredUuid.required(rows, "execution_handler",
+                            "traversal_id", key),
+                    StoredUuid.required(rows, "execution_handler", "invocation_id", key),
+                    rows.getString("correlation_key"),
+                    rows.getString("deduplication_key"),
+                    new HandlerPayloadSchema(rows.getString("schema_content_type"),
+                            rows.getString("schema_ref"), rows.getInt("schema_max_bytes")),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    HandlerStatus.valueOf(rows.getString("status")),
+                    StoredUuid.optional(rows, "execution_handler", "resume_traversal_id", key),
+                    rows.getString("actor"),
+                    OpaquePayload.of(rows.getBytes("outcome_bytes"),
+                            rows.getString("outcome_content_type")),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    /**
+     * Newline-delimited, which is unambiguous because {@link HandlerAuthorization} rejects a token
+     * carrying a control character. An escaping scheme invented here would be one every other adapter
+     * would have to reproduce exactly.
+     */
+    private static String joinTokens(java.util.Set<String> tokens) {
+        return String.join("\n", tokens);
+    }
+
+    private static java.util.Set<String> splitTokens(String stored) {
+        if (stored == null || stored.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return new java.util.LinkedHashSet<>(List.of(stored.split("\n", -1)));
+    }
+
+    // ---------------------------------------------------------------- durable tool approvals
+
+    @Override
+    public CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                           UUID approvalId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(approvalId, "approvalId");
+            return inReadTransaction(key, () -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        TOOL_APPROVAL_COLUMNS + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                                + "AND a.approval_id = ?")) {
+                    bindItem(statement, key, approvalId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readToolApproval(rows, key, approvalId))
+                                : Optional.empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                var approvals = new ArrayList<DurableToolApproval>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        TOOL_APPROVAL_COLUMNS + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                                + "ORDER BY a.position")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) approvals.add(readToolApproval(rows, key, null));
+                    }
+                }
+                return List.copyOf(approvals);
+            });
+        });
+    }
+
+    private void writeToolApprovals(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                    GraphVersionPin pin,
+                                    long revision, Instant now) throws SQLException {
+        for (ToolApprovalRegistration registration : batch.toolApprovalsToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "tool approval " + registration.approvalId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval identity or graph pin does not match its execution"));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("tool approval expiry must be after store time"));
+            }
+            DurableToolApproval existing = readToolApproval(key, registration.approvalId());
+            if (existing != null) {
+                if (!existing.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("tool approval " + registration.approvalId()
+                            + " is already registered with a different request"));
+                }
+                continue;
+            }
+            insertToolApproval(DurableToolApproval.pending(key, registration, revision),
+                    nextToolApprovalPosition(key));
+        }
+        for (ToolApprovalTransition transition : batch.toolApprovalTransitions()) {
+            DurableToolApproval current = readToolApproval(key, transition.approvalId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown tool approval "
+                        + transition.approvalId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), transition.next()));
+            }
+            if (transition.next() == ToolApprovalStatus.EXPIRED
+                    && now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            if ((transition.next() == ToolApprovalStatus.APPROVED
+                    || transition.next() == ToolApprovalStatus.DENIED
+                    || transition.next() == ToolApprovalStatus.CONSUMED)
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            updateToolApproval(current.apply(transition, revision));
+        }
+    }
+
+    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT aggregate FROM agent_authority_budget WHERE tenant_id = ? "
+                        + "AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                try {
+                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes(1)));
+                } catch (RuntimeException corrupted) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+            }
+        }
+    }
+
+    private AgentAuthorityControl readAgentAuthorityControl() throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state, epoch, changed_at_epoch_second, changed_at_nano, team_active_released "
+                        + "FROM agent_authority_control WHERE singleton = 1");
+             ResultSet rows = statement.executeQuery()) {
+            if (!rows.next()) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is unavailable"));
+            }
+            try {
+                return new AgentAuthorityControl(AgentAuthorityControlState.valueOf(rows.getString(1)),
+                        rows.getLong(2), Instant.ofEpochSecond(rows.getLong(3), rows.getInt(4)),
+                        rows.getLong(5));
+            } catch (RuntimeException invalid) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is invalid"));
+            }
+        }
+    }
+
+    private long killAgentAuthorityBudgets(long expectedEpoch) throws SQLException {
+        var replacements = new ArrayList<BudgetReplacement>();
+        long releasedTeamActive = 0;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                String tenantId = rows.getString(1);
+                ExecutionKey key = new ExecutionKey(tenantId, StoredUuid.required(rows, 2,
+                        "agent_authority_budget", "process_instance_id", tenantId));
+                DurableAgentAuthorityBudget budget;
+                try {
+                    budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes(3));
+                } catch (RuntimeException invalid) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+                if (budget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                        && budget.controlEpoch() == expectedEpoch) {
+                    DurableAgentAuthorityBudget killed = AgentAuthorityBudgetFold.apply(key, budget,
+                            new AgentBudgetOperation.KillRoot(expectedEpoch), clock.instant());
+                    try {
+                        releasedTeamActive = Math.addExact(releasedTeamActive,
+                                budget.reserved().teamActive() - killed.reserved().teamActive());
+                    } catch (ArithmeticException overflow) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority release aggregate is exhausted"));
+                    }
+                    replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
+                }
+            }
+        }
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE agent_authority_budget SET aggregate = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            for (BudgetReplacement replacement : replacements) {
+                update.setBytes(1, replacement.aggregate());
+                update.setString(2, replacement.key().tenantId());
+                update.setString(3, replacement.key().processInstanceId().toString());
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+        return releasedTeamActive;
+    }
+
+    private record BudgetReplacement(ExecutionKey key, byte[] aggregate) { }
+
+    private void writeAgentAuthorityBudget(ExecutionKey key, ExecutionBatch batch,
+                                           ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.agentBudgetOperations().isEmpty()) return;
+        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(key).orElse(null);
+        AgentAuthorityControl control = readAgentAuthorityControl();
+        for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+            requireAgentAuthorityControl(operation, control);
+            if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                var invocation = folded.traversals().values().stream()
+                        .flatMap(traversal -> traversal.invocations().values().stream())
+                        .filter(candidate -> candidate.invocationId().equals(register.binding().invocationId()))
+                        .findFirst().orElse(null);
+                if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                        || !invocation.parentInvocationIds()
+                                .equals(register.binding().causalParentInvocationIds())) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent grant binding does not name the post-fold invocation"));
+                }
+            }
+            try {
+                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+            } catch (IllegalArgumentException | IllegalStateException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+        }
+        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        if (encoded.length > config.maxPayloadBytes()) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length, config.maxPayloadBytes()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO agent_authority_budget (tenant_id, process_instance_id, aggregate) "
+                        + "VALUES (?, ?, ?) ON CONFLICT(tenant_id, process_instance_id) "
+                        + "DO UPDATE SET aggregate = excluded.aggregate")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setBytes(3, encoded);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void requireAgentAuthorityControl(AgentBudgetOperation operation,
+                                                      AgentAuthorityControl control) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (control.state() != AgentAuthorityControlState.ACTIVE
+                || control.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "agent authority control is not active for this epoch"));
+        }
+    }
+
+    private void insertToolApproval(DurableToolApproval approval, int position) throws SQLException {
+        ToolApprovalRegistration request = approval.request();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO tool_approval (tenant_id, process_instance_id, approval_id, position, "
+                        + "traversal_id, invocation_id, attempt_id, call_id, node_id, tool, "
+                        + "canonical_arguments, arguments_digest, requester_request_id, requester_subject, "
+                        + "requester_principal_type, requester_issuer, graph_version_pin, policy_version, "
+                        + "expires_at_epoch_second, expires_at_nano, required_roles, required_scopes, "
+                        + "requester_may_approve, continuation_version, continuation, continuation_digest, "
+                        + "status, actor, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        + "?, ?, ?, ?, ?)")) {
+            statement.setString(1, approval.key().tenantId());
+            statement.setString(2, approval.key().processInstanceId().toString());
+            statement.setString(3, request.approvalId().toString());
+            statement.setInt(4, position);
+            statement.setString(5, request.traversalId().toString());
+            statement.setString(6, request.invocationId().toString());
+            statement.setString(7, request.attemptId().toString());
+            statement.setString(8, request.callId().toString());
+            statement.setString(9, request.nodeId());
+            statement.setString(10, request.tool());
+            statement.setBytes(11, request.canonicalArguments());
+            statement.setString(12, request.argumentsDigest());
+            statement.setString(13, request.requester().requestId());
+            statement.setString(14, request.requester().subject());
+            statement.setString(15, request.requester().principalType().name());
+            statement.setString(16, request.requester().issuer());
+            statement.setString(17, request.graphVersionPin().reference());
+            statement.setString(18, request.policyVersion());
+            StoredInstant.bindValue(statement, 19, request.expiresAt());
+            statement.setString(21, joinTokens(request.approverRequirements().requiredRoles()));
+            statement.setString(22, joinTokens(request.approverRequirements().requiredScopes()));
+            statement.setInt(23, request.requesterMayApprove() ? 1 : 0);
+            statement.setInt(24, request.continuationVersion());
+            statement.setBytes(25, request.continuation());
+            statement.setString(26, request.continuationDigest());
+            statement.setString(27, approval.status().name());
+            statement.setString(28, approval.actor());
+            statement.setLong(29, approval.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateToolApproval(DurableToolApproval approval) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE tool_approval SET status = ?, actor = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND approval_id = ?")) {
+            statement.setString(1, approval.status().name());
+            statement.setString(2, approval.actor());
+            statement.setLong(3, approval.revision());
+            statement.setString(4, approval.key().tenantId());
+            statement.setString(5, approval.key().processInstanceId().toString());
+            statement.setString(6, approval.request().approvalId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private int nextToolApprovalPosition(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM tool_approval "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableToolApproval readToolApproval(ExecutionKey key, UUID approvalId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                TOOL_APPROVAL_COLUMNS + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                        + "AND a.approval_id = ?")) {
+            bindItem(statement, key, approvalId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readToolApproval(rows, key, approvalId) : null;
+            }
+        }
+    }
+
+    private DurableToolApproval readToolApproval(ResultSet rows) throws SQLException {
+        return readToolApproval(rows, null, null);
+    }
+
+    private DurableToolApproval readToolApproval(ResultSet rows, ExecutionKey expectedKey,
+                                                  UUID expectedApprovalId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "tool_approval", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "tool_approval", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            UUID approvalId = expectedApprovalId == null
+                    ? StoredUuid.required(rows, "tool_approval", "approval_id", key)
+                    : StoredUuid.requiredMatching(rows, "tool_approval", "approval_id", key,
+                            expectedApprovalId);
+            var request = new ToolApprovalRegistration(
+                    approvalId,
+                    StoredUuid.required(rows, "tool_approval", "traversal_id", key),
+                    StoredUuid.required(rows, "tool_approval", "invocation_id", key),
+                    StoredUuid.required(rows, "tool_approval", "attempt_id", key),
+                    StoredUuid.required(rows, "tool_approval", "call_id", key), rows.getString("node_id"),
+                    rows.getString("tool"), rows.getBytes("canonical_arguments"),
+                    rows.getString("arguments_digest"),
+                    new ai.ravenroot.api.security.SecurityContext(
+                            rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            ai.ravenroot.api.security.PrincipalType.valueOf(
+                                    rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    rows.getString("policy_version"), StoredInstant.read(rows, "expires_at"),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    rows.getInt("requester_may_approve") == 1,
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"));
+            return new DurableToolApproval(key, request,
+                    ToolApprovalStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            return inReadTransaction(key, () -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                                + "AND p.pause_id = ?")) {
+                    bindItem(statement, key, pauseId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readExecutionPause(rows, key, pauseId))
+                                : Optional.empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                var pauses = new ArrayList<DurableExecutionPause>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                                + "ORDER BY p.position")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) pauses.add(readExecutionPause(rows, key, null));
+                    }
+                }
+                return List.copyOf(pauses);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            return inReadTransaction(null, () -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.traversal_id = ? "
+                                + "AND p.status = 'HELD'")) {
+                    statement.setString(1, tenantId);
+                    statement.setString(2, traversalId.toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readExecutionPause(rows)) : Optional.empty();
+                    }
+                }
+            });
+        });
+    }
+
+    private void writeExecutionPauses(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                      GraphVersionPin pin, long revision) throws SQLException {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            DurableExecutionPause existing = readExecutionPause(key, registration.pauseId());
+            if (existing != null) {
+                if (!existing.request().equals(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                            + " is already committed with a different hold"));
+                }
+                continue;
+            }
+            // Refused here rather than left to the partial unique index, so the caller is told which
+            // hold already owns the traversal instead of reading a constraint name.
+            DurableExecutionPause held = readHeldExecutionPause(key.tenantId(), registration.traversalId());
+            if (held != null) {
+                throw failure(ExecutionStoreFailure.invalid("traversal " + registration.traversalId()
+                        + " is already held by " + held.request().pauseId()));
+            }
+            insertExecutionPause(DurableExecutionPause.held(key, registration, revision),
+                    nextExecutionPausePosition(key));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = readExecutionPause(key, transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            updateExecutionPause(current.apply(transition, revision));
+        }
+    }
+
+    private void insertExecutionPause(DurableExecutionPause pause, int position) throws SQLException {
+        ExecutionPauseRegistration request = pause.request();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_pause (tenant_id, process_instance_id, pause_id, position, "
+                        + "traversal_id, after_invocation_id, node_id, command_directive, command_name, "
+                        + "requester_request_id, requester_subject, requester_principal_type, "
+                        + "requester_issuer, graph_version_pin, continuation_version, continuation, "
+                        + "continuation_digest, status, actor, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, pause.key().tenantId());
+            statement.setString(2, pause.key().processInstanceId().toString());
+            statement.setString(3, request.pauseId().toString());
+            statement.setInt(4, position);
+            statement.setString(5, request.traversalId().toString());
+            statement.setString(6, request.afterInvocationId().toString());
+            statement.setString(7, request.nodeId());
+            statement.setString(8, request.commandDirective());
+            statement.setString(9, request.commandName());
+            statement.setString(10, request.requester().requestId());
+            statement.setString(11, request.requester().subject());
+            statement.setString(12, request.requester().principalType().name());
+            statement.setString(13, request.requester().issuer());
+            statement.setString(14, request.graphVersionPin().reference());
+            statement.setInt(15, request.continuationVersion());
+            statement.setBytes(16, request.continuation());
+            statement.setString(17, request.continuationDigest());
+            statement.setString(18, pause.status().name());
+            statement.setString(19, pause.actor());
+            statement.setLong(20, pause.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateExecutionPause(DurableExecutionPause pause) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE execution_pause SET status = ?, actor = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND pause_id = ?")) {
+            statement.setString(1, pause.status().name());
+            statement.setString(2, pause.actor());
+            statement.setLong(3, pause.revision());
+            statement.setString(4, pause.key().tenantId());
+            statement.setString(5, pause.key().processInstanceId().toString());
+            statement.setString(6, pause.request().pauseId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private int nextExecutionPausePosition(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM execution_pause "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableExecutionPause readExecutionPause(ExecutionKey key, UUID pauseId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                        + "AND p.pause_id = ?")) {
+            bindItem(statement, key, pauseId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readExecutionPause(rows) : null;
+            }
+        }
+    }
+
+    private DurableExecutionPause readHeldExecutionPause(String tenantId, UUID traversalId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.traversal_id = ? "
+                        + "AND p.status = 'HELD'")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, traversalId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readExecutionPause(rows) : null;
+            }
+        }
+    }
+
+    private DurableExecutionPause readExecutionPause(ResultSet rows) throws SQLException {
+        return readExecutionPause(rows, null, null);
+    }
+
+    private DurableExecutionPause readExecutionPause(ResultSet rows, ExecutionKey expectedKey,
+                                                       UUID expectedPauseId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "execution_pause", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "execution_pause", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            UUID pauseId = expectedPauseId == null
+                    ? StoredUuid.required(rows, "execution_pause", "pause_id", key)
+                    : StoredUuid.requiredMatching(rows, "execution_pause", "pause_id", key,
+                            expectedPauseId);
+            var request = new ExecutionPauseRegistration(
+                    pauseId,
+                    StoredUuid.required(rows, "execution_pause", "traversal_id", key),
+                    StoredUuid.required(rows, "execution_pause", "after_invocation_id", key),
+                    rows.getString("node_id"), rows.getString("command_directive"),
+                    rows.getString("command_name"),
+                    new ai.ravenroot.api.security.SecurityContext(
+                            rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            ai.ravenroot.api.security.PrincipalType.valueOf(
+                                    rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"));
+            return new DurableExecutionPause(key, request,
+                    ExecutionPauseStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable human tasks
+
+    @Override
+    public CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(taskId, "taskId");
+            return inReadTransaction(null, () ->
+                    Optional.ofNullable(readHumanTask(tenantId, taskId)));
+        });
+    }
+
+    @Override
+    public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            if (query.limit() < 1 || query.limit() > maxHumanTaskPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskPageSize()));
+            }
+            return inReadTransaction(null, () -> {
+                if (query.cursor().isPresent()
+                        && readHumanTask(tenantId, query.cursor().orElseThrow()) == null) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "human-task cursor does not belong to this tenant"));
+                }
+                List<HumanTaskStatus> admitted = java.util.Arrays.stream(HumanTaskStatus.values())
+                        .filter(query::admits).toList();
+                if (admitted.isEmpty()) return new HumanTaskPage(List.of(), Optional.empty());
+                var matching = new ArrayList<DurableHumanTask>();
+                String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ?"
+                        + (query.cursor().isPresent() ? " AND t.task_id > ?" : "")
+                        + " AND t.status IN (" + admitted.stream().map(ignored -> "?")
+                                .collect(java.util.stream.Collectors.joining(",")) + ")"
+                        + " ORDER BY t.task_id LIMIT ?";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    int parameter = 1;
+                    statement.setString(parameter++, tenantId);
+                    if (query.cursor().isPresent()) {
+                        statement.setString(parameter++, query.cursor().orElseThrow().toString());
+                    }
+                    for (HumanTaskStatus status : admitted) statement.setString(parameter++, status.name());
+                    statement.setInt(parameter, query.limit() + 1);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            matching.add(readHumanTask(rows, tenantId, null));
+                        }
+                    }
+                }
+                int end = Math.min(query.limit(), matching.size());
+                List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
+                Optional<UUID> next = matching.size() > end
+                        ? Optional.of(page.getLast().request().taskId()) : Optional.empty();
+                return new HumanTaskPage(page, next);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            Objects.requireNonNull(authorization, "authorization");
+            if (query.limit() > maxHumanTaskAttentionPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskAttentionPageSize()));
+            }
+            HumanTaskAttentionCursor.Boundary boundary;
+            try {
+                boundary = query.cursor().map(cursor -> cursor.boundary(
+                        tenantId, query, authorization)).orElse(null);
+            } catch (IllegalArgumentException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+            return inReadTransaction(null, () -> {
+                StringBuilder sql = new StringBuilder(
+                        HUMAN_TASK_ATTENTION_COLUMNS
+                                + "WHERE t.tenant_id = ? AND t.graph_version_pin = ? "
+                                + "AND t.status IN ('WAITING', 'ESCALATED') "
+                                + "AND t.confirmation_version > 0");
+                if (query.deploymentId().isPresent()) sql.append(" AND p.deployment_id = ?");
+                if (query.processInstanceId().isPresent()) sql.append(" AND t.process_instance_id = ?");
+                if (query.traversalId().isPresent()) sql.append(" AND t.traversal_id = ?");
+                if (query.nodeId().isPresent()) sql.append(" AND t.node_id = ?");
+                if (query.taskId().isPresent()) sql.append(" AND t.task_id = ?");
+                if (query.generation().isPresent()) sql.append(" AND t.generation = ?");
+                sql.append(" ORDER BY t.created_at_epoch_second, t.created_at_nano, t.task_id");
+                long pending = 0;
+                long escalated = 0;
+                var nodeCounts = new java.util.TreeMap<String, long[]>();
+                var pageRows = new ArrayList<HumanTaskAttentionItem>(query.limit() + 1);
+                try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                    int parameter = 1;
+                    statement.setString(parameter++, tenantId);
+                    statement.setString(parameter++, query.graphVersion());
+                    if (query.deploymentId().isPresent()) {
+                        statement.setString(parameter++, query.deploymentId().orElseThrow());
+                    }
+                    if (query.processInstanceId().isPresent()) {
+                        statement.setString(parameter++, query.processInstanceId().orElseThrow().toString());
+                    }
+                    if (query.traversalId().isPresent()) {
+                        statement.setString(parameter++, query.traversalId().orElseThrow().toString());
+                    }
+                    if (query.nodeId().isPresent()) {
+                        statement.setString(parameter++, query.nodeId().orElseThrow());
+                    }
+                    if (query.taskId().isPresent()) {
+                        statement.setString(parameter++, query.taskId().orElseThrow().toString());
+                    }
+                    if (query.generation().isPresent()) {
+                        statement.setLong(parameter, query.generation().orElseThrow());
+                    }
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            HumanTaskAttentionItem item = readHumanTaskAttentionItem(
+                                    rows, tenantId, authorization);
+                            if (item == null) continue;
+
+                            pending++;
+                            if (item.status() == HumanTaskStatus.ESCALATED) escalated++;
+                            if (query.nodeId().isEmpty()) {
+                                long[] node = nodeCounts.get(item.nodeId());
+                                if (node == null) {
+                                    if (nodeCounts.size() == maxHumanTaskAttentionNodeCounts()) {
+                                        throw failure(new ExecutionStoreFailure.HumanTaskAttentionTooLarge(
+                                                nodeCounts.size() + 1L,
+                                                maxHumanTaskAttentionNodeCounts()));
+                                    }
+                                    node = new long[2];
+                                    nodeCounts.put(item.nodeId(), node);
+                                }
+                                node[0]++;
+                                if (item.status() == HumanTaskStatus.ESCALATED) node[1]++;
+                            }
+
+                            if ((boundary == null || after(item, boundary))
+                                    && pageRows.size() <= query.limit()) pageRows.add(item);
+                        }
+                    }
+                }
+                int end = Math.min(query.limit(), pageRows.size());
+                List<HumanTaskAttentionItem> page = List.copyOf(pageRows.subList(0, end));
+                Optional<HumanTaskAttentionCursor> next = pageRows.size() > end
+                        ? Optional.of(HumanTaskAttentionCursor.issue(tenantId, query, authorization,
+                                page.getLast().createdAt(), page.getLast().taskId()))
+                        : Optional.empty();
+                List<HumanTaskNodeAttentionCounts> perNode = nodeCounts.entrySet().stream()
+                        .map(entry -> new HumanTaskNodeAttentionCounts(
+                                entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+                        .toList();
+                return new HumanTaskAttentionPage(page, next,
+                        new HumanTaskAttentionCounts(pending, escalated), perNode);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(locator, "locator");
+            Objects.requireNonNull(authorization, "authorization");
+            return inReadTransaction(null, () -> {
+                String sql = HUMAN_TASK_ATTENTION_COLUMNS
+                        + "WHERE t.tenant_id = ? AND t.task_id = ? AND t.generation = ? "
+                        + "AND t.status IN ('WAITING', 'ESCALATED') "
+                        + "AND t.confirmation_version > 0";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, tenantId);
+                    statement.setString(2, locator.taskId().toString());
+                    statement.setLong(3, locator.generation());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        if (!rows.next()) return Optional.empty();
+                        return Optional.ofNullable(readHumanTaskAttentionItem(
+                                rows, tenantId, authorization));
+                    }
+                }
+            });
+        });
+    }
+
+    private static boolean after(HumanTaskAttentionItem item,
+                                 HumanTaskAttentionCursor.Boundary boundary) {
+        int time = item.createdAt().compareTo(boundary.createdAt());
+        return time > 0 || time == 0
+                && item.taskId().toString().compareTo(boundary.taskId().toString()) > 0;
+    }
+
+    /**
+     * Reads only the bounded columns needed to authorize and construct an attention row. A null result
+     * means the caller has no currently available action and must learn neither the row nor its count.
+     */
+    private static HumanTaskAttentionItem readHumanTaskAttentionItem(
+            ResultSet rows, String tenantId, HumanTaskAttentionAuthorization authorization)
+            throws SQLException {
+        UUID processInstanceId = StoredUuid.required(
+                rows, "human_task", "process_instance_id", tenantId);
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            var requirements = new HandlerAuthorization(
+                    splitTokens(rows.getString("required_roles")),
+                    splitTokens(rows.getString("required_scopes")));
+            String requesterActor = new ai.ravenroot.api.security.SecurityContext(
+                    rows.getString("requester_request_id"), tenantId,
+                    rows.getString("requester_subject"),
+                    ai.ravenroot.api.security.PrincipalType.valueOf(
+                            rows.getString("requester_principal_type")),
+                    rows.getString("requester_issuer")).qualifiedIdentity();
+            List<HumanTaskConfirmationAction> pinnedActions =
+                    splitConfirmationActions(rows.getString("confirmation_actions"));
+            List<HumanTaskConfirmationAction> actions = authorization.permittedActions(
+                    requirements, requesterActor, pinnedActions);
+            if (actions.isEmpty()) return null;
+
+            var presentation = new HumanTaskConfirmationPresentation(
+                    rows.getInt("confirmation_version"),
+                    rows.getString("confirmation_prompt"),
+                    HumanTaskCommentRequirement.valueOf(
+                            rows.getString("confirmation_comment_requirement")),
+                    pinnedActions,
+                    rows.getString("confirmation_resolve_label"),
+                    rows.getString("confirmation_deny_label"),
+                    rows.getString("confirmation_cancel_label"));
+
+            Instant escalation = nullableInstant(rows, "escalate_at");
+            return new HumanTaskAttentionItem(
+                    StoredUuid.required(rows, "human_task", "task_id", key),
+                    rows.getLong("generation"),
+                    HumanTaskStatus.valueOf(rows.getString("status")),
+                    rows.getString("graph_version_pin"),
+                    Optional.ofNullable(rows.getString("attention_deployment_id")),
+                    processInstanceId,
+                    StoredUuid.required(rows, "human_task", "traversal_id", key),
+                    rows.getString("node_id"),
+                    StoredInstant.read(rows, "created_at"),
+                    StoredInstant.read(rows, "expires_at"),
+                    Optional.ofNullable(escalation), presentation,
+                    rows.getInt("confirmation_max_prompt_bytes"),
+                    rows.getInt("confirmation_max_action_label_bytes"),
+                    rows.getInt("confirmation_max_comment_bytes"), actions);
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    private void writeHumanTasks(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                 GraphVersionPin pin, long revision, Instant now) throws SQLException {
+        for (HumanTaskRegistration registration : batch.humanTasksToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "human task " + registration.taskId());
+            requireAttemptExists(folded, registration.traversalId(), registration.invocationId(),
+                    registration.attemptId(), "human task " + registration.taskId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task identity or graph pin does not match its execution"));
+            }
+            DurableHumanTask deduplicated = humanTaskByDeduplicationKey(
+                    key.tenantId(), registration.deduplicationKey());
+            if (deduplicated != null) {
+                if (!deduplicated.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                            + registration.deduplicationKey()
+                            + " already registers a different human task"));
+                }
+                continue;
+            }
+            try {
+                humanTaskPolicy.requireNewRegistration(registration, now);
+            } catch (IllegalArgumentException refused) {
+                throw failure(ExecutionStoreFailure.invalid(refused.getMessage()));
+            }
+            if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
+                throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                        registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
+            }
+            if (registration.escalateAt().isPresent()
+                    && !now.isBefore(registration.escalateAt().orElseThrow())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task escalation must be after store time"));
+            }
+            if (readHumanTask(key.tenantId(), registration.taskId()) != null) {
+                throw failure(ExecutionStoreFailure.invalid("human task " + registration.taskId()
+                        + " is already registered under a different deduplication key"));
+            }
+            if (liveHumanTaskByCorrelationKey(key.tenantId(), registration.correlationKey()) != null) {
+                throw failure(ExecutionStoreFailure.invalid("correlation key "
+                        + registration.correlationKey() + " already identifies a live human task"));
+            }
+            insertHumanTask(DurableHumanTask.waiting(key, registration, revision, now));
+        }
+        for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
+            DurableHumanTask current = readHumanTask(key.tenantId(), transition.taskId());
+            if (current == null || !current.key().equals(key)) {
+                throw failure(ExecutionStoreFailure.invalid("unknown human task " + transition.taskId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (transition.expectedGeneration() != current.generation()
+                    || !current.status().canTransitionTo(transition.next())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.EXPIRED && now.isBefore(current.request().expiresAt())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.ESCALATED
+                    && (current.request().escalateAt().isEmpty()
+                    || now.isBefore(current.request().escalateAt().orElseThrow())
+                    || !now.isBefore(current.request().expiresAt()))) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() != HumanTaskStatus.EXPIRED
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                        current.request().taskId(), current.status(), HumanTaskStatus.EXPIRED,
+                        transition.expectedGeneration(), current.generation()));
+            }
+            updateHumanTask(current.apply(transition, revision));
+        }
+    }
+
+    private ExecutionStoreException humanTaskConflict(DurableHumanTask current,
+                                                       HumanTaskTransition transition) {
+        return failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                current.request().taskId(), current.status(), transition.next(),
+                transition.expectedGeneration(), current.generation()));
+    }
+
+    private void insertHumanTask(DurableHumanTask task) throws SQLException {
+        HumanTaskRegistration request = task.request();
+        String columns = "tenant_id, process_instance_id, task_id, traversal_id, invocation_id, "
+                + "attempt_id, node_id, correlation_key, deduplication_key, title, description, "
+                + "response_content_type, response_schema, response_schema_version, response_kind, "
+                + "response_max_bytes, required_roles, required_scopes, requester_request_id, "
+                + "requester_subject, requester_principal_type, requester_issuer, graph_version_pin, "
+                + "escalate_at_epoch_second, escalate_at_nano, expires_at_epoch_second, expires_at_nano, "
+                + "resolved_outcome, denied_outcome, expired_outcome, cancelled_outcome, "
+                + "decision_body_max_bytes, response_max_depth, response_max_collection_size, response_max_value_count, "
+                + "response_max_text_length, response_max_key_length, write_attempts, "
+                + "continuation_version, continuation, continuation_digest, "
+                + "confirmation_version, confirmation_prompt, confirmation_comment_requirement, "
+                + "confirmation_actions, confirmation_resolve_label, confirmation_deny_label, "
+                + "confirmation_cancel_label, confirmation_max_prompt_bytes, "
+                + "confirmation_max_action_label_bytes, confirmation_max_comment_bytes, "
+                + "created_at_epoch_second, created_at_nano, "
+                + "status, actor, decision_comment, generation, revision";
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(57) + "?)")) {
+            int index = 1;
+            statement.setString(index++, task.key().tenantId());
+            statement.setString(index++, task.key().processInstanceId().toString());
+            statement.setString(index++, request.taskId().toString());
+            statement.setString(index++, request.traversalId().toString());
+            statement.setString(index++, request.invocationId().toString());
+            statement.setString(index++, request.attemptId().toString());
+            statement.setString(index++, request.nodeId());
+            statement.setString(index++, request.correlationKey());
+            statement.setString(index++, request.deduplicationKey());
+            statement.setString(index++, request.metadata().title());
+            statement.setString(index++, request.metadata().description());
+            statement.setString(index++, request.responseSchema().contentType());
+            statement.setString(index++, request.responseSchema().schema());
+            statement.setString(index++, request.responseSchema().schemaVersion());
+            statement.setString(index++, request.responseSchema().kind().name());
+            statement.setInt(index++, request.responseSchema().maxBytes());
+            statement.setString(index++, joinTokens(request.responderRequirements().requiredRoles()));
+            statement.setString(index++, joinTokens(request.responderRequirements().requiredScopes()));
+            statement.setString(index++, request.requester().requestId());
+            statement.setString(index++, request.requester().subject());
+            statement.setString(index++, request.requester().principalType().name());
+            statement.setString(index++, request.requester().issuer());
+            statement.setString(index++, request.graphVersionPin().reference());
+            if (request.escalateAt().isPresent()) {
+                index = StoredInstant.bindValue(statement, index, request.escalateAt().orElseThrow());
+            } else {
+                statement.setNull(index++, java.sql.Types.BIGINT);
+                statement.setNull(index++, java.sql.Types.INTEGER);
+            }
+            index = StoredInstant.bindValue(statement, index, request.expiresAt());
+            statement.setString(index++, request.reentryMapping().resolvedOutcome());
+            statement.setString(index++, request.reentryMapping().deniedOutcome());
+            statement.setString(index++, request.reentryMapping().expiredOutcome());
+            statement.setString(index++, request.reentryMapping().cancelledOutcome());
+            statement.setInt(index++, request.executionLimits().decisionBodyMaxBytes());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxDepth());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxCollectionSize());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxValueCount());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxTextLength());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxKeyLength());
+            statement.setInt(index++, request.executionLimits().writeAttempts());
+            statement.setInt(index++, request.continuationVersion());
+            statement.setBytes(index++, request.continuation());
+            statement.setString(index++, request.continuationDigest());
+            HumanTaskConfirmationPresentation presentation = request.confirmationPresentation();
+            statement.setInt(index++, presentation.version());
+            statement.setString(index++, presentation.prompt());
+            statement.setString(index++, presentation.commentRequirement().name());
+            statement.setString(index++, joinConfirmationActions(presentation.actions()));
+            statement.setString(index++, presentation.resolveLabel());
+            statement.setString(index++, presentation.denyLabel());
+            statement.setString(index++, presentation.cancelLabel());
+            HumanTaskConfirmationLimits confirmationLimits = request.confirmationLimits();
+            statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
+            statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
+            statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            index = StoredInstant.bindValue(statement, index, task.createdAt());
+            statement.setString(index++, task.status().name());
+            statement.setString(index++, task.actor());
+            statement.setString(index++, task.decisionComment());
+            statement.setLong(index++, task.generation());
+            statement.setLong(index, task.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateHumanTask(DurableHumanTask task) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE human_task SET status = ?, actor = ?, decision_comment = ?, generation = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND task_id = ?")) {
+            statement.setString(1, task.status().name());
+            statement.setString(2, task.actor());
+            statement.setString(3, task.decisionComment());
+            statement.setLong(4, task.generation());
+            statement.setLong(5, task.revision());
+            statement.setString(6, task.key().tenantId());
+            statement.setString(7, task.request().taskId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private DurableHumanTask readHumanTask(String tenantId, UUID taskId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ? AND t.task_id = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, taskId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHumanTask(rows, tenantId, taskId) : null;
+            }
+        }
+    }
+
+    private DurableHumanTask humanTaskByDeduplicationKey(String tenantId, String deduplicationKey)
+            throws SQLException {
+        return readHumanTaskBy(tenantId, "deduplication_key", deduplicationKey, false);
+    }
+
+    private DurableHumanTask liveHumanTaskByCorrelationKey(String tenantId, String correlationKey)
+            throws SQLException {
+        return readHumanTaskBy(tenantId, "correlation_key", correlationKey, true);
+    }
+
+    private DurableHumanTask readHumanTaskBy(String tenantId, String column, String value, boolean liveOnly)
+            throws SQLException {
+        String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ? AND t." + column + " = ?"
+                + (liveOnly ? " AND t.status IN ('WAITING', 'ESCALATED')" : "");
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, value);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHumanTask(rows) : null;
+            }
+        }
+    }
+
+    private DurableHumanTask readHumanTask(ResultSet rows) throws SQLException {
+        return readHumanTask(rows, null, null);
+    }
+
+    private DurableHumanTask readHumanTask(ResultSet rows, String expectedTenantId, UUID expectedTaskId)
+            throws SQLException {
+        String tenantId = expectedTenantId == null ? rows.getString("tenant_id") : expectedTenantId;
+        var key = new ExecutionKey(tenantId, StoredUuid.required(rows, "human_task",
+                "process_instance_id", tenantId));
+        try {
+            long escalationSecond = rows.getLong("escalate_at_epoch_second");
+            boolean noEscalation = rows.wasNull();
+            Optional<Instant> escalation = noEscalation ? Optional.empty()
+                    : Optional.of(Instant.ofEpochSecond(escalationSecond,
+                            rows.getInt("escalate_at_nano")));
+            UUID taskId = expectedTaskId == null
+                    ? StoredUuid.required(rows, "human_task", "task_id", key)
+                    : StoredUuid.requiredMatching(rows, "human_task", "task_id", key, expectedTaskId);
+            var request = new HumanTaskRegistration(
+                    taskId,
+                    StoredUuid.required(rows, "human_task", "traversal_id", key),
+                    StoredUuid.required(rows, "human_task", "invocation_id", key),
+                    StoredUuid.required(rows, "human_task", "attempt_id", key),
+                    rows.getString("node_id"), rows.getString("correlation_key"),
+                    rows.getString("deduplication_key"),
+                    new HumanTaskMetadata(rows.getString("title"), rows.getString("description")),
+                    new HumanTaskResponseSchema(rows.getString("response_content_type"),
+                            rows.getString("response_schema"), rows.getString("response_schema_version"),
+                            ai.ravenroot.api.payload.PayloadKind.valueOf(rows.getString("response_kind")),
+                            rows.getInt("response_max_bytes")),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    new ai.ravenroot.api.security.SecurityContext(
+                            rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            ai.ravenroot.api.security.PrincipalType.valueOf(
+                                    rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")), escalation,
+                    StoredInstant.read(rows, "expires_at"),
+                    new HumanTaskReentryMapping(rows.getString("resolved_outcome"),
+                            rows.getString("denied_outcome"), rows.getString("expired_outcome"),
+                            rows.getString("cancelled_outcome")),
+                    new ai.ravenroot.api.persistence.HumanTaskExecutionLimits(
+                            new ai.ravenroot.api.payload.PayloadLimits(
+                                    rows.getInt("response_max_bytes"),
+                                    rows.getInt("response_max_depth"),
+                                    rows.getInt("response_max_collection_size"),
+                                    rows.getInt("response_max_value_count"),
+                                    rows.getInt("response_max_text_length"),
+                                    rows.getInt("response_max_key_length")),
+                            rows.getInt("decision_body_max_bytes"),
+                            rows.getInt("write_attempts")),
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"),
+                    new HumanTaskConfirmationPresentation(rows.getInt("confirmation_version"),
+                            rows.getString("confirmation_prompt"),
+                            HumanTaskCommentRequirement.valueOf(
+                                    rows.getString("confirmation_comment_requirement")),
+                            splitConfirmationActions(rows.getString("confirmation_actions")),
+                            rows.getString("confirmation_resolve_label"),
+                            rows.getString("confirmation_deny_label"),
+                            rows.getString("confirmation_cancel_label")),
+                    new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
+                            rows.getInt("confirmation_max_action_label_bytes"),
+                            rows.getInt("confirmation_max_comment_bytes")));
+            return new DurableHumanTask(key, request,
+                    HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getString("decision_comment"), rows.getLong("generation"),
+                    rows.getLong("revision"), StoredInstant.read(rows, "created_at"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    private static String joinConfirmationActions(List<HumanTaskConfirmationAction> actions) {
+        return actions.stream().map(Enum::name).collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static List<HumanTaskConfirmationAction> splitConfirmationActions(String stored) {
+        if (stored == null || stored.isEmpty()) return List.of();
+        return java.util.Arrays.stream(stored.split(","))
+                .map(HumanTaskConfirmationAction::valueOf)
+                .toList();
+    }
+
+    private void requireAttemptExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                      UUID attemptId, String what) {
+        var traversal = folded == null ? null : folded.traversals().get(traversalId);
+        var invocation = traversal == null ? null : traversal.invocations().get(invocationId);
+        if (invocation == null || invocation.attempts().stream()
+                .noneMatch(attempt -> attempt.attemptId().equals(attemptId))) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names attempt " + attemptId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    private void requireTraversalExists(ProcessInstance folded, UUID traversalId, String what) {
+        if (folded == null || !folded.traversals().containsKey(traversalId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    /**
+     * Requires that {@code traversalId} is a traversal <em>this batch created</em>.
+     *
+     * <p>Existence in the post-fold aggregate is not enough. A terminal handler transition naming a
+     * traversal that was already there — the very traversal that was waiting, for instance — would
+     * commit, and the trigger the store then offers would point a claimant at a traversal still in
+     * {@code WAITING} that nothing authorized it to resume. The re-entry point has to be created by
+     * the same batch that authorizes it, which is the whole of "the resolution and the traversal it
+     * authorizes commit together or neither does".</p>
+     */
+    private void requireBatchCreatedTraversal(ExecutionBatch batch, UUID traversalId, String what) {
+        boolean created = batch.transitions().stream()
+                .anyMatch(transition -> transition instanceof ExecutionTransition.TraversalAdded added
+                        && added.traversal().traversalId().equals(traversalId));
+        if (!created) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch did not create"));
+        }
+    }
+
+    private void requireInvocationExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                         String what) {
+        requireTraversalExists(folded, traversalId, what);
+        if (!folded.traversals().get(traversalId).invocations().containsKey(invocationId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names invocation " + invocationId
+                    + ", which traversal " + traversalId + " does not contain"));
+        }
+    }
+
+    private List<DurableHandler> claimableTriggers(ExecutionKey key, Instant now) throws SQLException {
+        String sql = HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                + "AND h.status IN " + TERMINAL_HANDLER_STATUSES + " "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = h.tenant_id "
+                + "AND k.process_instance_id = h.process_instance_id AND k.work_item_id = h.handler_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = h.tenant_id "
+                + "AND c.process_instance_id = h.process_instance_id AND c.work_item_id = h.handler_id "
+                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + ") "
+                + "ORDER BY h.position";
+        var ready = new ArrayList<DurableHandler>();
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            StoredInstant.bindComparison(statement, 3, now);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    ready.add(readHandler(rows, key, null));
+                }
+            }
+        }
+        return ready;
+    }
+
+    private PendingWork.HandlerTrigger claimTrigger(ExecutionKey key, DurableHandler handler,
+                                                    LeaseHandle lease, Instant now, Duration leaseTtl)
+            throws SQLException {
+        int delivery = registerClaim(key, handler.handlerId(), now, leaseTtl);
+        // The RE-ENTRY traversal, never the one that was waiting: the claimant runs the traversal the
+        // resolution authorized, and the waiting traversal's own history stays closed.
+        //
+        // The invocation is ABSENT, not the waiting one. Pairing a new traversal with an invocation
+        // that lives under the old one produces a pair no lookup resolves -- a claimant asking the
+        // re-entry traversal for that invocation gets null -- and it is the invocation the wait is
+        // over for, so naming it would also read as work still to do. The claimant creates the
+        // re-entry invocation itself; the waiting one stays reachable through the handler, whose id
+        // is this item's own workItemId.
+        return new PendingWork.HandlerTrigger(key, handler.handlerId(), handler.resumeTraversalId(),
+                null, handler.name(), handler.outcomePayload(),
+                lease.fencingToken(), lease.expiresAt(), delivery);
     }
 
     // ---------------------------------------------------------------- validation
@@ -1523,6 +4540,32 @@ public final class SqliteExecutionStore implements ExecutionStore {
         if (payload.size() > config.maxPayloadBytes()) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), config.maxPayloadBytes()));
         }
+    }
+
+    private void requireHandlerOutcomeWithinLimit(ExecutionKey key, ExecutionBatch batch,
+                                                  HandlerTransition transition) throws SQLException {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= config.maxPayloadBytes()) return;
+        if (!isHumanTaskResolution(batch, transition)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        DurableHumanTask task = readHumanTask(key.tenantId(), transition.handlerId());
+        if (task == null || !task.key().equals(key)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) return false;
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
     }
 
     private void requireLeaseTtl(Duration ttl) {
@@ -1609,24 +4652,25 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * it.</p>
      */
     private JournalRecord readJournalRecord(String tenantId, ResultSet rows) throws SQLException {
-        UUID instanceId = UUID.fromString(rows.getString("process_instance_id"));
+        UUID instanceId = StoredUuid.required(rows, "event_journal", "process_instance_id", tenantId);
+        var key = new ExecutionKey(tenantId, instanceId);
         var envelope = new EventEnvelope(
                 rows.getInt("envelope_version"),
-                UUID.fromString(rows.getString("event_id")),
+                StoredUuid.required(rows, "event_journal", "event_id", key),
                 tenantId,
                 rows.getString("event_type"),
                 instanceId,
-                UUID.fromString(rows.getString("traversal_id")),
-                uuidOrNull(rows.getString("invocation_id")),
-                uuidOrNull(rows.getString("attempt_id")),
-                uuidOrNull(rows.getString("causation_id")),
+                StoredUuid.required(rows, "event_journal", "traversal_id", key),
+                StoredUuid.optional(rows, "event_journal", "invocation_id", key),
+                StoredUuid.optional(rows, "event_journal", "attempt_id", key),
+                StoredUuid.optional(rows, "event_journal", "causation_id", key),
                 rows.getString("correlation_id"),
                 rows.getString("graph_version"),
                 StoredInstant.read(rows, "occurred_at"),
                 OpaquePayload.of(rows.getBytes("payload_bytes"), rows.getString("payload_content_type")),
                 EventDigest.of(rows.getBytes("digest")));
         if (!envelope.digestMatchesContent()) {
-            throw failure(new ExecutionStoreFailure.Corrupted(new ExecutionKey(tenantId, instanceId),
+            throw failure(new ExecutionStoreFailure.Corrupted(key,
                     "journal offset " + rows.getLong("journal_offset") + " carries digest "
                             + envelope.digest().hex() + ", which does not match its stored content"));
         }
@@ -1640,6 +4684,156 @@ public final class SqliteExecutionStore implements ExecutionStore {
             requireTenantId(tenantId);
             return inReadTransaction(null, () -> readRetainedFrom(tenantId));
         });
+    }
+
+    /**
+     * Uses host-local OS ownership over a stable, hashed sidecar; the file is never unlinked, which
+     * avoids replacing a locked inode. Like SQLite itself this requires a local filesystem.
+     */
+    @Override
+    public ai.ravenroot.api.persistence.SourceCheckpointStore openSourceCheckpointStore(
+            String tenantId, String namespace) {
+        requireTenantId(tenantId);
+        requireDestination(namespace);
+        if (closed.get()) throw new IllegalStateException("source checkpoint store is closed");
+        java.nio.channels.FileChannel channel = null;
+        Path reservedPath = null;
+        Object reservation = new Object();
+        try {
+            // Resolve parent symlinks so aliases of the same database choose the same lock file.
+            Path database = databaseFile.toRealPath();
+            byte[] identity = (tenantId.length() + ":" + tenantId + namespace)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String hash = java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(identity));
+            Path lockPath = database.resolveSibling(database.getFileName() + ".source-" + hash + ".lock");
+            // Closing a second descriptor can release this JVM's POSIX locks on some platforms.
+            // Reserve locally before opening any descriptor; the OS lock still excludes other JVMs.
+            if (SOURCE_FILE_OWNERS.putIfAbsent(lockPath, reservation) != null)
+                throw new IllegalStateException("source checkpoint owner is active");
+            reservedPath = lockPath;
+            requireSafeSourceLock(lockPath);
+            channel = java.nio.channels.FileChannel.open(lockPath,
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS);
+            requireSafeSourceLock(lockPath);
+            java.nio.channels.FileLock ownership = channel.tryLock();
+            if (ownership == null) throw new IllegalStateException("source checkpoint owner is active");
+            var handle = new OwnedSourceCheckpoints(tenantId, namespace, channel, ownership, lockPath, reservation);
+            synchronized (sourceCheckpointOwners) {
+                if (closed.get()) {
+                    ownership.release(); channel.close();
+                    throw new IllegalStateException("source checkpoint store is closed");
+                }
+                sourceCheckpointOwners.add(handle);
+            }
+            return handle;
+        } catch (java.io.IOException | java.security.NoSuchAlgorithmException | RuntimeException failure) {
+            if (channel != null) try { channel.close(); } catch (java.io.IOException ignored) { }
+            if (reservedPath != null) SOURCE_FILE_OWNERS.remove(reservedPath, reservation);
+            throw new IllegalStateException("exclusive source checkpoint ownership unavailable");
+        }
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<Path, Object> SOURCE_FILE_OWNERS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void requireSafeSourceLock(Path path) throws java.io.IOException {
+        if (java.nio.file.Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && !java.nio.file.Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS).isRegularFile())
+            throw new IllegalStateException("unsafe source lock artifact");
+    }
+
+    private final java.util.Set<OwnedSourceCheckpoints> sourceCheckpointOwners = new java.util.HashSet<>();
+
+    private final class OwnedSourceCheckpoints implements ai.ravenroot.api.persistence.SourceCheckpointStore {
+        private final String tenant;
+        private final String prefix;
+        private final java.nio.channels.FileChannel channel;
+        private final java.nio.channels.FileLock ownership;
+        private final Path lockPath;
+        private final Object reservation;
+        private boolean retired;
+        private int pending;
+
+        OwnedSourceCheckpoints(String tenant, String namespace, java.nio.channels.FileChannel channel,
+                               java.nio.channels.FileLock ownership, Path lockPath, Object reservation) {
+            this.lockPath = lockPath;
+            this.reservation = reservation;
+            this.tenant = tenant;
+            // Legacy deployment destinations always contain '/'; this alphabet never does.
+            this.prefix = "source-v1:" + java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(namespace.getBytes(java.nio.charset.StandardCharsets.UTF_8)) + ".";
+            this.channel = channel;
+            this.ownership = ownership;
+        }
+
+        private String destination(String sourceId) {
+            if (sourceId == null || sourceId.isBlank() || sourceId.length() > 4096)
+                throw new IllegalArgumentException("invalid source identity");
+            return prefix + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    sourceId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        private synchronized <T> CompletionStage<T> admitted(
+                java.util.function.Supplier<CompletionStage<T>> operation) {
+            if (retired || closed.get() || !ownership.isValid())
+                return CompletableFuture.failedFuture(new IllegalStateException("source ownership is retired"));
+            pending++;
+            try {
+                CompletionStage<T> underlying = operation.get();
+                // Never expose the underlying future: cancellation must not release ownership before
+                // the already queued JDBC operation actually settles.
+                var result = new CompletableFuture<T>();
+                underlying.whenComplete((value, failure) -> {
+                    synchronized (OwnedSourceCheckpoints.this) {
+                        pending--;
+                        if (retired && pending == 0) releaseOwnership();
+                    }
+                    if (failure == null) result.complete(value); else result.completeExceptionally(failure);
+                });
+                return result;
+            } catch (RuntimeException failure) {
+                pending--;
+                return CompletableFuture.failedFuture(failure);
+            }
+        }
+
+        @Override public CompletionStage<JournalCursor> checkpoint(String sourceId) {
+            return admitted(() -> outboxCursor(tenant, destination(sourceId)));
+        }
+        @Override public CompletionStage<JournalCursor> advance(JournalCursor expected, long position) {
+            return admitted(() -> {
+                if (expected == null || !tenant.equals(expected.tenantId())
+                        || !expected.destination().startsWith(prefix)
+                        || !canonicalSuffix(expected.destination().substring(prefix.length())))
+                    throw new IllegalArgumentException("foreign source checkpoint");
+                return advanceOutboxCursor(expected, position);
+            });
+        }
+        private boolean canonicalSuffix(String suffix) {
+            if (suffix.isEmpty() || suffix.length() > 21846 || !suffix.matches("[A-Za-z0-9_-]+")) return false;
+            try {
+                byte[] decoded = java.util.Base64.getUrlDecoder().decode(suffix);
+                String source = java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(
+                        java.nio.ByteBuffer.wrap(decoded)).toString();
+                return destination(source).equals(prefix + suffix);
+            } catch (RuntimeException | java.nio.charset.CharacterCodingException invalid) { return false; }
+        }
+        @Override public CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId, Duration retention) {
+            return admitted(() -> recordInboxDelivery(tenant, destination(sourceId), eventId, retention));
+        }
+        @Override public synchronized void close() {
+            retired = true;
+            if (pending == 0) releaseOwnership();
+        }
+        private void releaseOwnership() {
+            try { ownership.release(); } catch (java.io.IOException ignored) { }
+            try { channel.close(); } catch (java.io.IOException ignored) { }
+            SOURCE_FILE_OWNERS.remove(lockPath, reservation);
+            synchronized (sourceCheckpointOwners) { sourceCheckpointOwners.remove(this); }
+        }
     }
 
     @Override
@@ -1816,9 +5010,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
      *
      * <p>Called from {@code applyLocked}, between the aggregate write and the return, so the event
      * rows and the transition rows are inside one {@code COMMIT}. That single fact is the whole of
-     * PERS-07's first contract requirement and the whole of its documented requirements: there is no
-     * window between committing the transition and recording the event, because there is no second
-     * write to perform.</p>
+     * the event journal's atomicity requirement: there is no window between committing the transition
+     * and recording the event, because there is no second write to perform.</p>
      */
     private void writeJournal(ExecutionKey key, ExecutionBatch batch, long revision, Instant now)
             throws SQLException {
@@ -1961,10 +5154,6 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private static String textOrNull(UUID value) {
         return value == null ? null : value.toString();
-    }
-
-    private static UUID uuidOrNull(String value) {
-        return value == null ? null : UUID.fromString(value);
     }
 
     /**

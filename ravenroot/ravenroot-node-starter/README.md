@@ -88,6 +88,47 @@ The contract needs no engine and no `ravenroot-core` on the test classpath. Pass
 is well-formed and can be trusted to register; it says nothing about whether a behavior does what it
 claims.
 
+The contract also discovers every property declared with
+`NodePropertyDescriptor.adapterId(...)`. Such a binding may be blank while a graph is being
+configured, so the behavior must still construct its action. If traversal later reaches the node,
+the action must return an exceptionally completed stage without a `NodeResult`. The shared contract
+checks that refusal for each adapter-binding property; package-specific tests should additionally
+assert the classified failure and the configured success path.
+
+## External I/O limits
+
+Every external operation must have finite limits before it crosses its transport or process
+boundary. For managed HTTP, attach `ExternalIoLimits` to `OutboundHttpRequest`. The runtime
+intersects caller limits with operator policy; request code can tighten a ceiling but cannot widen
+one. Keep wire bytes, decoded bytes, and the final projected/canonical output as separate limits.
+Declare accepted media types and content encodings explicitly. A missing media type is accepted only
+for an empty response, and the shipped decoder accepts identity plus, when requested, one complete
+gzip member under a finite expansion ratio. Unknown, stacked, malformed, trailing, or concatenated
+encodings fail closed.
+
+The managed HTTP bridge bounds materialized request bodies before admission and response bytes while
+they arrive, cancels the body subscription on refusal, applies one total deadline, and retains its
+admission permit until the transport worker exits. `OutboundCall.cancel()` cooperatively interrupts
+the worker and cancels the transport. The `cancellationBound` field communicates the requested
+cleanup bound, but the JDK HTTP bridge does not claim a forced socket-teardown deadline; its narrower
+guarantee is prompt terminal cancellation plus permit retention until cleanup. Runtime-neutral forced
+termination and deployment fencing are separate lifecycle responsibilities.
+
+First-party adapters follow the same invariant at their actual boundary:
+
+| Boundary | Shipped limit behavior |
+|---|---|
+| AI, MCP, Assistant, GitHub, OpenAPI client | bounded JSON wire/decoded/output, explicit media type, identity or single bounded gzip, total deadline, cooperative transport cancellation |
+| Object storage | bounded request/response/output, profile media allowlist for reads, identity encoding only, total deadline, cancellation propagated to the managed call |
+| GraalVM programs | streaming request ceiling, supervisor wire/output ceiling, total deadline, admission held through bounded terminate/reap cleanup |
+| WebSocket | bounded handshake, message bytes, fragments, queue, lifetime and idle time; compression is not negotiated |
+| Mail, AMQP, Kafka, JDBC, OCR, Telegram | protocol-specific finite profile limits and admission/cancellation rules documented in each extension README; unsupported compression or unbounded projections are refused rather than delegated to graph data |
+
+Tests for a package that performs I/O should cover declared and undeclared oversized streams, slow
+completion/deadline, cancellation before and during handoff, representation expansion, projection
+size, and release of every admission or worker resource. Do not substitute a larger timeout for an
+observable cleanup assertion.
+
 ## Status
 
 The Node SDK has not been published as a release artifact, and this repository makes no compatibility

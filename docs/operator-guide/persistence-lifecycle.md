@@ -8,15 +8,248 @@ Protect accepted executions and audit evidence across drain, backup, restart, an
 2. Call `POST /v1/drain`, wait for the live-execution set to reach the approved boundary, and stop the process cleanly.
 3. Take a storage-consistent backup only after the write boundary is established; record release and schema identity with it.
 4. Restore into an isolated target, start against the restored state, and reconcile executions and recent events before promotion.
+5. After restart or restore, the durable process inventory (`GET /v1/executions/inventory`, or `ravenroot inventory`) is queryable immediately, with no rebuild delay: it is read from the same rows the lifecycle committed, not from a projection that has to catch up. Use it, not the process-local live-execution view, to find work that outlived the restart. `ravenroot inventory` reads the tenant's whole answer in one call — it pages through the HTTP route internally rather than returning a first page, so its output is never a truncated view of a large tenant.
+6. When an instance you expect to find is absent from `GET /v1/executions/inventory` or `ravenroot inventory`, do not compare against its creation time — the `retainedFrom` floor every inventory listing carries (both process-instance and per-instance traversal listings, and the trailing `retained-from=` line the CLI prints) is measured in retention-deadline space, not creation space, and the boundary is exclusive: a row whose own deadline (`retainedUntil`, or its terminal-transition instant plus the configured terminal retention if you never read the row) sits strictly after the floor is guaranteed still present, while a deadline at or before the floor may have been purged. Compare the instance's deadline against the floor, not when it was created, before concluding the identifier is wrong. In this release that comparison will read as "still present" for every terminal instance regardless of age: see Authority below for why.
+
+## Graph definitions
+
+Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored. An accepted execution is therefore always one whose graph is retained, and the retained document — not a copy held by whichever process accepted it — is the authoritative record of what that execution was accepted to run.
+
+Definitions are stored with execution state, so they are inside the same backup and come back with the same restore. They are scoped to one tenant, and two executions share one stored document only when the documents are byte-identical and belong to the same tenant. Definitions hold graph content and non-secret references only; credentials are supplied at execution time and are never stored with a definition.
+
+Retained definitions are read back on the continuation paths that resume durably paused work, human-task continuations and tool-approval continuations, each of which reconstructs the graph from the stored document rather than from a copy held in memory. They are also read back by the recovery loop itself: startup classification uses the retained document to decide whether this deployment can rebuild an interrupted execution, and the loop uses it to recover the author's repeatability declaration for an effect whose outcome a crash left unknown. Reclaiming stored definitions is still not an exposed operator command. Outside those paths, treat a retained definition as the authoritative record of what an execution was accepted to run, not as a recovery procedure you can invoke directly.
+
+## Execution manifests
+
+Accepting an execution also records the dependency set it was resolved against: the document's content address, the submission policy and unknown-behavior stance it runs under, the graph and traversal limits in force, digests identifying the engine, the execution store and the program runtime, and every installed node package by id together with a digest of its declared version and SDK contract. The record is written after the document and before the execution, so an accepted execution always has one, and acceptance is refused if it cannot be written. It is immutable, scoped to one tenant, and holds references, versions and digests only — there is no field in it a credential could occupy.
+
+Before an execution is first dispatched, and before it is recovered, resumed, restarted after a hold or taken over by another worker, the record is read back, checked against the digest stored beside it, and compared with what the deployment resolves now. Every dimension is compared exactly. If anything differs, or the record is missing or damaged, the work is refused rather than run: on the recovery loop the claimed item is left claimable and unacknowledged, so nothing is lost and nothing is silently run against a different environment. `GET /v1/executions/{id}/manifest` reports one instance's record identity and the current verdict, naming the dimensions that stopped matching. It deliberately does not report what they changed to, nor how many node packages the record pins: those describe your deployment rather than the caller's execution. When you need the values, read them from the server-side diagnostic the refusal logs.
+
+Three limits are worth knowing before you rely on this. A node package is identified by its id together with a digest of the version and Node SDK contract it declares, and **not** by a digest of its content — a package republished under an unchanged version is not detected. A program artifact's source is inside the pinned document, so its content is pinned with the document, but its approval state is deliberately not pinned and is re-checked when the artifact is executed, so revoking an artifact still stops work that was already accepted. And an execution accepted before a deployment began recording these is refused by the paths that verify, rather than reconstructed from the environment the restarted process happens to compose; nothing backfills such a record, because a backfilled one would describe today and claim to describe the moment of acceptance.
+
+Plan an upgrade with that intolerance in mind: changing an execution limit, an engine capability set or an installed node package version will make retained work refuse to resume until the change is reverted or that work is abandoned deliberately.
+
+Two things this checking does **not** do, because reading it as a repair would be wrong. It refuses a mismatch; it does not restore the pinned values and resume under them. And it only happens where a deployment composes a record store — an embedded application that composes none still resumes under whatever policy and limits its process happens to hold, exactly as before. The server composes one whenever a durable store is configured.
+
+Records are reclaimed by an explicit, tenant-scoped operation, and **no operator-facing command invokes it in this release** — the same position graph definitions are in. Two populations therefore accumulate in the store until one exists: records pinned for a submission that was then refused, and records whose process instance a later retention pass removed. Each is a handful of small rows per execution, and none of them is reachable, so the cost is disk rather than correctness; size the store with that in mind on a deployment that accepts and retires a high volume of executions.
+
+## Restart recovery and readiness
+
+After a restart, the process classifies the work it inherited before it reports ready. It lists the tenant's interrupted instances from the durable inventory and, for each one, reads back the retained document and the execution manifest it was accepted against. Until that pass finishes, `GET /ready` answers `503` with `"state":"RECOVERING"`. The pass is bounded at 500 instances, and the bound reaches the inventory pager itself rather than trimming a cohort that was already fetched — so readiness never waits on a scan whose length is a function of how much work the deployment inherited. Anything past the bound is discovered and decided by the ordinary sweep instead, and the startup log line reports whether the report was truncated. Two conditions are deliberately kept apart here. A pass that cannot read the store at all does not finish, so readiness stays closed and the pass retries — that is the same condition the store probe reports, and it clears on its own. A pass that finishes having *refused* some instances does open readiness: an inherited execution this deployment cannot rebuild is a fact for you to act on, not a reason to stop serving the tenants it has nothing to do with. Each refusal is logged individually with the instance and the reason, so one damaged item never hides the rest of the cohort. An execution store that offers no durable inventory has nothing to scan, and the pass completes immediately saying so rather than holding the deployment closed waiting for an answer that cannot exist.
+
+Recovery now runs wherever a durable store is configured, not only where durable tool approvals or human tasks are enabled. Both transient submissions and deployment-hosted traversals are discovered and classified by the same authority, and each keeps its own relationship: a deployment-hosted instance reports the deployment and workload it belongs to, and a transient one reports neither rather than being given an invented deployment.
+
+What the loop does with an interrupted item follows the write-ordering contract, and the three cases are distinct. An effect that is recorded as finished is never sent again, including when the crash fell between the result being committed and the claim being acknowledged. An attempt still recorded as scheduled provably never started, so nothing has to be undone before it could run — though whether anything runs it is a separate question, answered below. An attempt recorded as running was dispatched and its outcome was never learned; that one is repeated only when the node's own `recovery.repeatable` declaration — read from the retained document, so it survives the process that accepted the execution — authorises it, and it is parked for a human decision otherwise.
+
+Work this deployment cannot rebuild is withheld rather than dispatched, and how long it stays withheld depends on whether waiting could change the answer. If the durable state simply could not be read, the item waits indefinitely and consumes no part of its delivery budget: that condition clears on its own, and spending the budget during a storage incident would park every ambiguous attempt that happened to be outstanding, the moment storage came back. The budget is counted in deliveries that actually reached a decision, not in claims, and the deliveries recovery withheld are recorded on the attempt itself — so an incident that straddles a restart still costs the attempt nothing, because the process that resumes reads the record rather than remembering it. If the retained document or the manifest is absent, does not verify, or describes a deployment other than this one, waiting repairs nothing by itself — only a redeployment does. Those are withheld for a bounded number of deliveries, which is your window to correct the deployment, and then:
+
+- An attempt recorded as **running** is parked, with a cause naming the deployment fault rather than reporting the node as though its author had declared nothing. It has to be parked: it stands for an effect that already happened and whose outcome nobody knows, and withholding that forever is worse than putting the decision in front of you. The bound is the same `maxRecoveryDeliveriesPerAttempt` that governs every other recovery redelivery; there is no second setting to tune.
+- An attempt recorded as **scheduled** is never parked, however long the refusal lasts. Parking asks you to adjudicate an effect, and this attempt provably produced none — the durable model refuses that transition for the same reason. It stays untouched and still claimable, and a corrected deployment picks it up.
+
+Two waits are deliberately not bounded by this, and you should know which. A settled handler whose execution cannot be rebuilt stays waiting, because it carries no attempt against which a decision could be recorded; the startup report is what surfaces it. And a plain interrupted node attempt is not dispatched by any shipped adapter whatever its classification — see the limit below — so in a default deployment that path ends in the item being reported rather than run.
+
+Due timers are deliberately outside full graph compatibility. A timer closes a durable wait by
+committing store transitions under its own claim's fence: no graph is loaded, no runner is built, no
+authored behaviour runs. It does still require the manifest's format-3 generic persistence capacity,
+because expiry writes durable payloads. Recovery pages past executions whose capacity is absent or no
+longer equals the immutable live store capacity and atomically claims only verified keys. What an
+expiry then produces — a re-entry that rebuilds a runner — is gated by the complete manifest as usual.
+
+One limit is worth stating plainly, because it bounds what "resumes" means. The durable execution record holds lifecycle state — traversals, invocations, attempts and their statuses — and not the data flowing between nodes. An interrupted node attempt therefore has no recorded input, and Ravenroot does not re-execute one by inventing it. What resumes automatically is work whose committed boundary recorded enough to continue from: a settled durable handler, a due timer, a tool-approval or human-task continuation, and an operator-resumed hold. An ordinary interrupted attempt is discovered, classified and reported, and then waits for an operator decision.
 
 ## Authority
 
 Only an operator may drain, copy or replace durable state, restore a deployment, or approve an upgrade. API consumers observe these transitions but do not perform storage mutation.
 
+**No shipped surface removes expired terminal rows from the durable inventory in this release.** The retention operation exists at the store level — nothing is ever deleted implicitly by a listing or a lookup, only terminal instances are ever eligible, and running it advances the retention floor for the tenant it was run against and no other — but there is no CLI verb, no HTTP route, and no scheduler that calls it. It is reachable today only by an embedder composing its own execution store directly. This is a deliberate scoping decision, not an oversight: a verb that permanently deletes terminal execution records is destructive and needs its own confirmation posture, and it was left out of this change rather than added late. Until a future change exposes it to an operator, the retention floor stays at its minimum in every real deployment and every terminal row is retained regardless of age. That minimum is not hidden as `null`: every `retainedFrom` field and the CLI's `retained-from=` line serialise it like any other instant, so what you will actually see today is the literal `-1000000000-01-01T00:00:00Z`. Read that value as "nothing has ever been forgotten," not as a malformed timestamp — collapsing it to `null` would erase the one distinction the field exists to make, between "nothing purged yet" and "unknown."
+
+Terminal-retention configuration cannot be set shorter than event-journal retention, so once retention removal is exposed, a terminal instance will never be pruned while its own events are still readable. The default terminal retention is seven days, chosen to span a weekend so a failure late on a Friday is still discoverable when someone looks on Monday — a bound that constrains configuration today but removes nothing until the operation above is reachable.
+
+## Telling a cancellation from a failure
+
+A cancelled execution is recorded, and always has been recorded, with `status == FAILED`. That is
+correct and unlikely to change: cancellation is not a completion, since no end node ran and there is
+no result payload. It means status alone can never tell you whether a `FAILED` run broke or was
+stopped on request — you must read the termination reason beside it, on whichever surface you are
+looking at:
+
+- **`GET /v1/executions/{id}`** (live result, and the `410` body once retention has expired it) — the
+  `terminationReason` field reports `"CANCELLED"`, and the `cancelled` field is the same fact as a
+  boolean. Both are always present, `null`/`false` when nothing distinguishes the termination.
+- **`GET /v1/executions/inventory` and `GET /v1/executions/{id}/traversals`** — the same two fields, on
+  every row, surviving a restart because they are read from the same durable columns as `status`.
+- **`ravenroot result`** — prints `termination-reason=CANCELLED` only when the status is qualified;
+  its absence on a `FAILED` result means an ordinary failure.
+- **`ravenroot inventory` and `ravenroot traversals`** — print `termination-reason=` on every row,
+  unconditionally, matching those commands' own convention for `disposition=` and the other fields.
+- **The live SSE stream (`GET /v1/events`)** — a cancelled traversal publishes `EXECUTION_CANCELLED`,
+  not `EXECUTION_FAILED`. A monitoring rule built before this distinction existed and still matches on
+  `EXECUTION_FAILED` alone will no longer count a cancellation as a failure — update it to include or
+  separately track `EXECUTION_CANCELLED` if you want cancellations visible in the same dashboard.
+- **Metrics (`ravenroot.execution.events`)** — cancellations are counted under the `EXECUTION_CANCELLED`
+  label and are no longer folded into `EXECUTION_FAILED`; a trace span for a cancelled traversal ends
+  with an unset status rather than the error status a fault produces.
+- **The audit trail** — a cancellation is its own action, `execution.cancelled`, recorded as allowed
+  rather than failed; it no longer appears as an ordinary `execution.failed` entry.
+
+Reading `status` alone on any of these surfaces, without its neighboring reason, is the one mistake to
+avoid: it is exactly what previously made an operator's deliberate stop indistinguishable from an
+incident. The decision record below states why the status itself was deliberately left unchanged.
+
+## Paused traversals
+
+A traversal an operator pauses is held, and a hold now survives the process that took it. The hold is written down at the moment the traversal is actually stopped — between the node that has just finished and the node that has not yet started — together with the small amount of state needed to continue it: the node it was about to enter, the payload and attributes that dispatch was carrying, and the pinned graph version to run them against. It commits in the same transaction that moves the traversal to `WAITING`, so there is no instant at which a traversal is held and nothing records it, or is recorded as waiting with nothing able to release it.
+
+**Recovery leaves a held traversal held, and cannot do otherwise.** A hold produces no claimable work of any kind: no scheduled attempt, no timer, no trigger. A recovery sweep across a restarted process finds nothing belonging to a held traversal and therefore dispatches nothing for it. Nothing after the hold's boundary can run in any process either, because the aggregate refuses to record a node as started on a traversal that is `WAITING` — so a held traversal is stopped by the stored state itself, not only by the process that was running it.
+
+**Only an explicit, authorized resume continues one.** Resume and cancel are authorized and audited exactly as they were before, on the same `EXECUTION_CONTROL` decision, and both work after a restart. A resume rebuilds what it needs from the pinned graph and continues from the committed boundary: it starts the node the hold withheld, which has never run, so nothing already completed is repeated. A cancel settles the hold and ends the traversal. Whichever happens, the settled hold is retained beside the process instance as the record of who decided and what they decided, and is removed only when retention removes the instance itself.
+
+**Stopping a deployment or a process decides nothing.** A shutdown releases the runtime resources a held traversal was occupying and leaves the hold exactly as it was, with no actor recorded against it. The next process to start reports the traversal as held, and the same resume and cancel remain available.
+
+### Timed joins while a traversal is held
+
+A fan-in can carry a timeout — the `joinTimeout` property on the fan-in node — and that timeout measures **active execution time**: the interval a traversal spends held by an operator is excluded from it. Taking a hold stops the deadline and records what was left of its budget; releasing the hold gives the join exactly that remainder and nothing more. A traversal held for an hour with twelve seconds left on a thirty-second `joinTimeout` resumes with eighteen seconds, not with thirty and not with none. So pausing an execution can no longer fail the work it was pausing, which is what a hold longer than the remaining budget used to do.
+
+A hold decides nothing, and it does not create budget either. If the deadline had already run out at the moment the hold was taken, the remainder is zero and the join times out the instant it resumes rather than at some point during the hold. That is the same rule, not an exception to it: the join is given exactly what was left, and what was left was nothing.
+
+The stopping is real rather than bookkeeping. While a traversal is held, no join of it is waiting on a deadline: the scheduled task is cancelled, and one the runtime's scheduler declines to cancel is refused when it fires instead, so a held traversal cannot be timed out either way. A branch that reaches a fan-in during a hold is recorded as arrived and its bucket is opened, but its deadline is only recorded and not started, so it too begins counting at the resume. A join that is satisfied, or that proves its quorum unreachable, while the traversal is held keeps that outcome; the resume does not give a settled join a second deadline.
+
+What a hold does not do is survive on its own. **While a join's deadline is running, its traversal is not one a hold can be written down for.** A hold is committed at the boundary between two nodes — after one has finished and before the next has started — and a branch entering a fan-in never reaches that boundary, because it is handed to the join instead of being started as a node. The branch a timed join is waiting on is therefore never the branch a durable hold records. A restart consequently has no stored hold to reconcile against a remaining budget: it drops the process-local hold and the in-memory deadline together, along with the traversal itself. If you need a specific execution to be pausable across a restart, keep its held section linear, exactly as described below.
+
+### What is held durably, and what is held only in the process
+
+Not every point a traversal can be paused at is one a hold can be written down for. A hold is written down when the traversal is a single branch at a single completed node. It is **not** written down when the traversal has fanned out at any point, when the hold lands on the traversal's very first node, when a loop is in progress, or when the hold lands on a fan-in — a continuation carries one hop, and writing one for a traversal that has more than one would silently discard the others on restart.
+
+Those holds still work; they are simply the process-local holds that existed before this change, and a restart forgets them. The distinction is visible where it matters: after a restart, a traversal that was held durably is reported as paused and a traversal that was not is not reported at all, because the process running it is gone. If it matters to you that a specific execution can be paused across a restart, keep its held section linear.
+
+A payload the type model cannot represent is no longer one of these cases. Such a value is refused at the payload boundary, which the traversal crosses before any hold is considered, so the traversal fails there and no hold of either kind is taken — a failed traversal is not resumable and reports nothing held.
+
+### Stores that predate this state
+
+Durable holds are a declared store capability, not an assumption. A store that does not declare it cannot be asked to write a hold, and pausing a traversal against one keeps the process-local behaviour described above, unchanged and without error.
+
+For the bundled SQLite store this is a schema addition and nothing else. A database file written by an earlier release upgrades in place by adding one table for holds; no existing table is altered, no row is rewritten, and no data is migrated. Existing traversals are unaffected — a traversal in flight across the upgrade has no hold, and holds are only ever created by a pause issued after it. The usual downgrade rule applies unchanged: a file upgraded by this release is refused by a build that predates it, so take a backup before upgrading if you may need to roll the binary back.
+
+## Durable execution results
+
+A terminal execution's canonical result is now kept in the configured store, keyed by tenant and
+traversal, rather than only in one process's bounded in-memory cache. `GET /v1/executions/{id}` and
+`ravenroot result` answer an execution still in flight from the process-local cache, and read every
+terminal answer from the durable record — including one the cache is still holding. So a result
+readable before a restart is readable after one, readable from a second instance that never ran the
+traversal, and no longer served by the instance that ran it once the record says its retention
+deadline has passed. That last part is why the cache is not consulted for a terminal answer: it is
+bounded by a count of executions and not by time, so an instance quiet enough to still be holding a
+result cannot notice the deadline going by. The cost is one store read per terminal read; polling an
+execution that has not finished still costs none. All of this holds as long as a durable,
+result-capable store is composed. Without one, the gap this closes reopens: a result readable before
+a restart still reads as unknown afterward, indistinguishable from an id that never existed.
+
+**Why does this result have no payload?** Four distinct facts can produce that question, and the
+answer tells you which one applies. A `200` body with no payload and `payloadState` absent means the
+execution genuinely produced nothing — the ordinary shape for a failure, a cancellation, or a
+completion whose terminal node returned no value. A `410 EXECUTION_RESULT_EXPIRED` means the execution
+completed and its result was retained, but the retention deadline has since passed; the terminal
+status and termination reason are still reported. A `410 EXECUTION_RESULT_REDACTED` means the payload
+was never retained in the first place, and its `payloadState` field says why. `UNCONVERTIBLE` means
+the value does not project onto the closed payload model at all — a node returning a type no remote
+adapter could ever persist, or a document the payload boundary rejected as malformed — which is not a
+limit to raise. `WITHHELD` means a configured budget refused the payload, and **there are two such
+budgets; read the `bytes` on the record before touching either.** A non-zero size means the encoded
+projection was measured against the store's byte cap and exceeded it, and the size says by how much to
+raise the cap. A zero size means the runtime's own payload limits rejected the value before anything
+was ever encoded, and the traversal terminated on that rejection: the store's cap is not involved and
+raising it changes nothing, so the budget to look at is the payload limits — the encoded-size, depth,
+element-count, value-count and length bounds the deployment configures.
+
+Of those two, the zero-size one is the one to expect. A node whose payload the limits refuse fails its
+traversal, and the built-in JSON parse and path behaviours raise exactly that refusal at default
+settings. The store-cap one is very nearly unreachable by comparison: the payload projection bounds an
+output to 16 KiB before it is ever compared against the store's cap (1 MiB by default), so a huge
+payload is truncated and retained rather than withheld unless the cap has been configured well below
+the projection's own bound.
+
+**Why does this execution id return a result I do not recognise?** The store records a terminal result
+exactly once per `(tenantId, traversalId)` and refuses, rather than overwrites, a conflicting
+re-recording. If you submitted two executions under the same id — most commonly by generating the id
+client-side and reusing it after a retry whose outcome was unclear — the second execution still ran to
+completion, but its result was refused when the runtime tried to record it, because a different result
+was already committed under that id. Every subsequent read, cache-warm or cold, restart or not, returns
+the **first** submission's result. There is nothing to reconcile after the fact: the fix is to mint a
+distinct id per submission, never to reuse one you are not certain settled.
+
+**Multi-instance sharing is host-local, not a cluster feature.** The SQLite adapter's cross-process
+exclusion depends on POSIX advisory locks, which are unreliable over NFS, SMB, and most network or
+distributed filesystems — a lock can be silently ignored, cached, or lost on a client reconnect. Do not
+place the database file on shared network storage expecting several hosts to coordinate through it;
+that does not degrade the guarantee, it removes it. Within one host, a second process's read is still
+not a live subscription: a traversal still running elsewhere, or one whose result has not yet
+committed, reads as unknown from that instance until the write lands.
+
+**Retention here follows the same ordering rule as the rest of this store.** A recorded result names
+the process instance and traversal it belongs to, so its retention window can never be configured
+longer than that instance's own terminal-retention window; both bundled adapters refuse to start
+otherwise. As with the durable inventory and the idempotency ledger, **no shipped surface purges
+expired results in this release** — no CLI verb, no HTTP route, no scheduler calls
+`purgeExpiredExecutionResults`. Where an embedder calls it directly, the purge appends its own audit
+record naming the tenant, the count removed, and the operator, whether it succeeded or was refused, so
+a gap in the result table is distinguishable from unaccounted-for loss.
+
+## Deployment lifecycle records
+
+An adopter who wires the SQLite deployment registry gets four new tables in the same database file
+the execution store already uses: the deployment aggregate itself, its immutable graph versions, the
+lease that says which process currently owns it, and the command ledger that makes a retried
+lifecycle command idempotent. Co-location is the same decision graph definitions and execution
+manifests already follow — one backup captures a deployment together with the executions that ran
+under it, and one schema version describes both, so a binary cannot open a file whose executions it
+understands and whose deployments it does not.
+
+**Upgrading is a schema addition and nothing else.** A database file written by an earlier release
+upgrades in place by adding those four tables; no existing table is altered, no index is dropped, no
+row is rewritten, and no data is migrated. The execution store's own schema is untouched. The usual
+downgrade rule applies unchanged: a file upgraded by this release is refused by a build that predates
+it, so take a backup before upgrading if you may need to roll the binary back.
+
+**Ownership is a lease and a fence, evaluated against the store's clock.** Exactly one process at a
+time may drive a deployment's runtime, and a process that loses ownership is refused on its next
+write rather than being asked to notice on its own. A lease is never reaped in the background: it is
+judged lazily, when someone presents a token, which is why a process that is killed still excludes a
+successor until its window lapses. That interval is the lease TTL and not a bug to engineer away — it
+is the only thing that makes "one current owner" decidable when the previous owner cannot be asked.
+The fencing counter lives with the deployment rather than with the lease, so releasing a lease, or
+losing one to a crash, never lets a token be reissued.
+
+**The command ledger is bounded, and nothing purges it for you in this release.** Every recorded
+lifecycle command carries an expiry, and the adapter exposes a tenant-scoped
+`purgeExpiredCommandRecords` that removes the ones past it. As with the durable inventory, the
+idempotency ledger and retained execution results, **no CLI verb, HTTP route or scheduler calls it**:
+it is reachable today only by an embedder composing the registry directly. Until one exists, the
+ledger grows with the number of lifecycle commands the installation has ever accepted. Each entry is
+a handful of small columns and none of them is reachable once expired, so the cost is disk rather
+than correctness — but size the store with that in mind if you drive lifecycle commands at volume,
+and note that an unbounded ledger is first noticed when it is too large to migrate.
+
+**Nothing on the external surface reaches any of this yet.** The HTTP routes, the CLI verbs and
+`openapi.json` keep exactly the behaviour they had; no running service accepts a lifecycle command in
+this vocabulary, and a deployment's lifecycle in a shipped Ravenroot is still the process-local one.
+What these tables give an adopter today is a durable authority to compose against, not a change to
+what an operator can do from the outside.
+
 ## Verification
 
-After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, and execute a bounded Test graph before reopening Run traffic.
+After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, and execute a bounded Test graph before reopening Run traffic. Also confirm that a process instance discoverable through the durable inventory before the restart is still discoverable afterward, and read each instance's reported disposition rather than only its lifecycle status: `PARKED` means an attempt's real-world effect outcome is still unresolved and awaits a human decision (see [Durable process inventory](../architecture/process-inventory.md)), and it can appear on an otherwise-finished instance, so do not treat a terminal status alone as "nothing left to do."
+
+One limit to keep in mind when reading the inventory: a traversal admitted through the live request/reply ingress contract is deliberately live and process-local and writes nothing to the execution store, so the inventory is not a complete log of every traversal a deployment has ever admitted — it is complete for the admission paths that do write to the store.
+
+A held traversal reads as `WAITING`, like any other durable wait, and is therefore not part of the interrupted cohort a restart needs to act on. Which wait it is comes from the hold itself, described under [Paused traversals](#paused-traversals) above.
 
 - [Contract](../architecture/durability-events.md)
+- [Durable process inventory](../architecture/process-inventory.md)
+- [Durable execution results](../architecture/execution-results.md)
+- [Decision record](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0031-durable-canonical-graph-definitions.md)
+- [Cancellation decision record](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0035-cancellation-as-a-distinct-termination-reason.md)
+- [Execution results decision record](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0037-durable-execution-results.md)
 - [Runbook](../troubleshooting/embed-backup.md)
 - [Bundle format and commands](../reference/backup-recovery.md)
+- [HTTP API and CLI](../reference/api-cli.md)

@@ -31,7 +31,8 @@ function withDeploymentService(page) {
     calls.push({ method: request.method(), id, command });
 
     if (request.method() === 'POST' && !command) {
-      const entry = { deploymentId: id, state: 'REGISTERED', sourceCount: 0, scope: 'LOCAL_PROCESS', diagnostic: null };
+      const entry = { deploymentId: id, state: 'REGISTERED', sourceCount: 0,
+        graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null };
       held.set(id, entry);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(entry) });
       return;

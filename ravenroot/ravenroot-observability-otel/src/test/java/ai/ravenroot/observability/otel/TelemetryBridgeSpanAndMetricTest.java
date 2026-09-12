@@ -102,6 +102,72 @@ class TelemetryBridgeSpanAndMetricTest {
         assertEquals(StatusCode.ERROR, span.getStatus().getStatusCode());
     }
 
+    /**
+     * Regression probe: {@code TelemetryBridge} previously matched only
+     * {@code EXECUTION_COMPLETED}/{@code EXECUTION_FAILED} in its traversal-terminal switch, so
+     * {@code EXECUTION_CANCELLED} fell through as an unhandled type. The traversal span was never
+     * ended, leaking an entry in {@code traversalSpans} and leaving the trace open forever -- and the
+     * active-executions gauge, which is backed by that very map's size, would over-count active work
+     * for as long as the process ran.
+     */
+    @Test
+    void executionCancelledEndsTheTraversalSpanWithNeitherOkNorErrorStatus() {
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        Instant start = Instant.parse("2026-08-10T00:00:00Z");
+
+        bridge.accept(traversalEvent(1, start, processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_STARTED, "execution accepted"));
+        bridge.accept(traversalEvent(2, start.plusSeconds(1), processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_CANCELLED, "cancelled"));
+
+        List<SpanData> finished = spans.getFinishedSpanItems();
+        assertEquals(1, finished.size(), "a cancelled traversal's span must be ended, not leaked open");
+        SpanData span = finished.get(0);
+        assertEquals(StatusCode.UNSET, span.getStatus().getStatusCode(),
+                "a cancellation is neither the success EXECUTION_COMPLETED reports nor the error "
+                        + "EXECUTION_FAILED reports");
+
+        MetricData executionDuration = onlyMetric(metrics, "ravenroot.execution.duration");
+        assertEquals(1, executionDuration.getHistogramData().getPoints().size(),
+                "a cancelled traversal still recorded a real duration");
+    }
+
+    /**
+     * The end-to-end proof for "no cancellation path is counted as an ordinary execution failure
+     * metric" (priority three of this feature): {@code ravenroot.execution.events} is labelled only
+     * by {@code ravenroot.event_type}, so this asserts directly on the label a failure-rate dashboard
+     * would actually query -- the metric must record one {@code EXECUTION_CANCELLED} series and must
+     * not add to (or create) an {@code EXECUTION_FAILED} series, rather than trusting that a distinct
+     * enum value implies a distinct series without ever reading the series back.
+     */
+    @Test
+    void aCancelledExecutionIsCountedUnderItsOwnEventTypeNeverUnderExecutionFailed() {
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        Instant start = Instant.parse("2026-08-10T00:00:00Z");
+
+        bridge.accept(traversalEvent(1, start, processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_STARTED, "execution accepted"));
+        bridge.accept(traversalEvent(2, start.plusSeconds(1), processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_CANCELLED, "cancelled"));
+
+        MetricData events = onlyMetric(metrics, "ravenroot.execution.events");
+        var points = events.getLongSumData().getPoints();
+        var cancelledPoint = points.stream()
+                .filter(point -> "EXECUTION_CANCELLED".equals(
+                        point.getAttributes().get(TelemetryBridge.METRIC_ATTR_EVENT_TYPE)))
+                .findFirst();
+        assertTrue(cancelledPoint.isPresent(), "no EXECUTION_CANCELLED series was recorded at all");
+        assertEquals(1, cancelledPoint.get().getValue());
+
+        boolean anyFailedSeries = points.stream().anyMatch(point -> "EXECUTION_FAILED".equals(
+                point.getAttributes().get(TelemetryBridge.METRIC_ATTR_EVENT_TYPE)));
+        assertFalse(anyFailedSeries,
+                "a cancellation must never add to an EXECUTION_FAILED series -- that is exactly the "
+                        + "failure-rate inflation this event type exists to stop");
+    }
+
     @Test
     void aNodeSpanIsAChildOfItsTraversalSpan() {
         UUID processInstanceId = UUID.randomUUID();
@@ -320,6 +386,75 @@ class TelemetryBridgeSpanAndMetricTest {
                 io.opentelemetry.api.common.AttributeKey.stringKey("ravenroot.deployment_id")));
         assertEquals("", span.getAttributes().get(
                 io.opentelemetry.api.common.AttributeKey.stringKey("ravenroot.workload_id")));
+    }
+
+    /**
+     * A retried attempt closes its own span and opens the retry's, and the two retry counters stay
+     * separate.
+     *
+     * <h2>The span-leak half is the one a reader would not think to check</h2>
+     * <p>Node spans are keyed by attempt id, and a retry runs under a new one. If
+     * {@code NODE_RETRY_SCHEDULED} did not close the failed attempt's span, that entry would stay in
+     * the bridge's map for the life of the process and the trace an operator opened would never end —
+     * a leak that no assertion about the retry counter would notice. So this asserts both spans exist
+     * and both are ended, and that the first is ERROR: an attempt that failed did fail, whatever
+     * happened afterwards.</p>
+     */
+    @Test
+    void aRetriedAttemptClosesItsOwnSpanAndCountsSeparatelyFromAConnectorsInternalRetries() {
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID retryAttempt = UUID.randomUUID();
+        Instant t0 = Instant.parse("2026-08-10T00:00:00Z");
+
+        bridge.accept(traversalEvent(1, t0, processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_STARTED, "execution accepted"));
+        bridge.accept(attemptEvent(2, t0.plusMillis(1), processInstanceId, traversalId, invocationId,
+                firstAttempt, ExecutionEventType.NODE_STARTED, "call", null, 1, 0));
+        // The connector tried three times inside this one attempt and still failed, so the policy
+        // scheduled a second orchestration attempt.
+        bridge.accept(attemptEvent(3, t0.plusMillis(9), processInstanceId, traversalId, invocationId,
+                firstAttempt, ExecutionEventType.NODE_RETRY_SCHEDULED, "call", "retryable-no-effect", 1, 3));
+        bridge.accept(attemptEvent(4, t0.plusMillis(20), processInstanceId, traversalId, invocationId,
+                retryAttempt, ExecutionEventType.NODE_STARTED, "call", null, 2, 0));
+        bridge.accept(attemptEvent(5, t0.plusMillis(25), processInstanceId, traversalId, invocationId,
+                retryAttempt, ExecutionEventType.NODE_COMPLETED, "call", "continue", 2, 1));
+
+        List<SpanData> nodeSpans = spans.getFinishedSpanItems().stream()
+                .filter(span -> span.getName().equals("ravenroot.node"))
+                .toList();
+        assertEquals(2, nodeSpans.size(),
+                "each attempt is its own span; a retry that reused the first would leave one open");
+        assertEquals(StatusCode.ERROR, nodeSpans.get(0).getStatus().getStatusCode(),
+                "an attempt that failed did fail, and a trace that showed it as OK because a later "
+                        + "attempt recovered would hide exactly what the trace was opened to find");
+        assertEquals(StatusCode.OK, nodeSpans.get(1).getStatus().getStatusCode());
+
+        MetricData retries = onlyMetric(metrics, "ravenroot.node.retries");
+        assertEquals(1, retries.getLongSumData().getPoints().size());
+        assertEquals(1, retries.getLongSumData().getPoints().iterator().next().getValue(),
+                "one orchestration retry, counted once");
+        assertEquals("retryable-no-effect", retries.getLongSumData().getPoints().iterator().next()
+                        .getAttributes().get(TelemetryBridge.METRIC_ATTR_RETRY_CLASSIFICATION),
+                "the classification is the label an operator slices by to tell timeouts from stale reads");
+
+        MetricData connector = onlyMetric(metrics, "ravenroot.node.connector_retries");
+        assertEquals(2, connector.getLongSumData().getPoints().iterator().next().getValue(),
+                "three connector attempts are two connector RETRIES, and the completion's single "
+                        + "attempt adds nothing -- a connector that did not retry must not inflate a "
+                        + "retry counter");
+    }
+
+    /** A node event carrying the attempt-scoped counts this bridge reads. */
+    private static ExecutionEvent attemptEvent(long sequence, Instant occurredAt, UUID processInstanceId,
+                                               UUID traversalId, UUID invocationId, UUID attemptId,
+                                               ExecutionEventType type, String nodeId, String publicReason,
+                                               int attemptOrdinal, int connectorAttempts) {
+        return new ExecutionEvent(sequence, occurredAt, TENANT_ID, REQUEST_ID, "test", "v1", processInstanceId,
+                traversalId, invocationId, attemptId, type, nodeId, 0, false, "detail", null, null, null,
+                null, null, 0, publicReason, null, null, null, attemptOrdinal, connectorAttempts);
     }
 
     private long activeExecutionsValue() {

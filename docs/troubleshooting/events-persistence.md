@@ -10,6 +10,14 @@ Protect the last safe cursor and durable store before reconciling gaps, expired 
 
 **Verify:** Confirm that subsequent events are ascending and that no state was inferred across the declared gap.
 
+## A stream reader reports an unsupported or contradictory envelope
+
+**Diagnosis:** An execution frame has an unsupported `schemaVersion` or source, conflicting compatibility aliases, or an ID that disagrees with its native cursor. The JSON schema describes execution `data`, not the whole SSE response body.
+
+**Action:** Parse SSE framing before JSON. Use `eventType` with legacy `type` fallback, preserve the exact string `id`, and keep cursor state scoped to the authenticated tenant and source. Accept unknown extra fields in a supported version, but do not guess how an unsupported version works. RING IDs cannot be carried across a known process restart.
+
+**Verify:** Decode a captured response body with `ravenroot events decode < capture.sse`. Confirm the source and schema headers agree with execution data when the HTTP client exposes them. A missing final frame delimiter reports an incomplete capture; neither a complete capture nor a keepalive proves that an execution terminated.
+
 ## An execution result is no longer available
 
 **Diagnosis:** Terminal-result retention expired even though the execution once completed.
@@ -17,6 +25,19 @@ Protect the last safe cursor and durable store before reconciling gaps, expired 
 **Action:** Use audit or durable event records allowed by retention policy; do not fabricate a result from an incomplete client cache. Adjust retention only through operator configuration.
 
 **Verify:** Execute a new bounded Test and verify its result remains retrievable for the configured interval.
+
+## A failed result might actually be a cancellation
+
+**Diagnosis:** `status` reports `FAILED` for both an ordinary failure and a cancellation issued through
+`POST .../cancel` — `status` alone cannot distinguish them, by design.
+
+**Action:** Read `terminationReason` (or `cancelled`) beside `status` on the same response, the durable
+inventory row, or the CLI result; a value of `CANCELLED` means the run was stopped on request, not
+that it broke. On the event stream, a cancelled traversal publishes `EXECUTION_CANCELLED` rather than
+`EXECUTION_FAILED`, and metrics and audit entries key off that same event type.
+
+**Verify:** Confirm the reason is present exactly on the executions you know you cancelled, and absent
+(or `null`) on genuine failures.
 
 ## Restart recovery does not become ready
 

@@ -17,6 +17,7 @@ import {
   finishPointerEdgeGesture,
   idleEdgeGesture,
   nearestEndpoint,
+  pointerNodeGestureIntent,
   updatePointerEdgeGesture,
   validateEdgeConnection,
   validateEdgeId,
@@ -298,6 +299,29 @@ describe('pointer edge intent is explicit and continuously classified', () => {
     const deliberate = move(pressed, EDGE_POINTER_HOLD_DISTANCE, 0,
       100 + EDGE_POINTER_HOLD_MS, 'review', true);
     expect(deliberate.phase).toBe('target-self');
+  });
+});
+
+describe('pointer node intent uses selection captured on press', () => {
+  it('reserves selected Editing nodes for movement and leaves unselected sources for edge authoring', () => {
+    const common = { editing: true, navigating: false, connectArmed: false, edgeGestureActive: false };
+    expect(pointerNodeGestureIntent({ ...common, selectedAtPointerStart: true, sourceEligible: true }))
+      .toBe('move');
+    expect(pointerNodeGestureIntent({ ...common, selectedAtPointerStart: false, sourceEligible: true }))
+      .toBe('connect');
+    expect(pointerNodeGestureIntent({ ...common, selectedAtPointerStart: false, sourceEligible: false }))
+      .toBe('none');
+  });
+
+  it('does not replace navigation, armed-connect, or existing-session routes', () => {
+    expect(pointerNodeGestureIntent({ editing: false, selectedAtPointerStart: true, sourceEligible: true }))
+      .toBe('none');
+    expect(pointerNodeGestureIntent({ editing: true, navigating: true, sourceEligible: true }))
+      .toBe('none');
+    expect(pointerNodeGestureIntent({ editing: true, connectArmed: true, sourceEligible: true }))
+      .toBe('none');
+    expect(pointerNodeGestureIntent({ editing: true, edgeGestureActive: true, sourceEligible: true }))
+      .toBe('none');
   });
 });
 

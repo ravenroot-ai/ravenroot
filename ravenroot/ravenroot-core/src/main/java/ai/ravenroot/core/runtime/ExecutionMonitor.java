@@ -8,6 +8,7 @@ import ai.ravenroot.api.application.RuntimeActivityData;
 import ai.ravenroot.api.application.RuntimeActivityData.OutputProjection;
 import ai.ravenroot.api.application.RuntimeActivityData.TextProjection;
 import ai.ravenroot.api.application.RuntimeSnapshot;
+import ai.ravenroot.api.execution.ConnectorRetryReport;
 import ai.ravenroot.api.execution.NodeActionDiagnostic;
 import ai.ravenroot.core.graph.GraphEdge;
 
@@ -27,6 +28,16 @@ import java.util.function.LongSupplier;
 /** In-memory live counters designed to be exposed by adapters without leaking engine types. */
 public final class ExecutionMonitor {
     private static final int HISTORY_LIMIT = 2_048;
+
+    /**
+     * The attempt ordinal reported when this monitor has no attempt in hand: an event above attempt
+     * scope, or a settle path for an attempt whose start it never saw.
+     *
+     * <p>Deliberately not {@code 1}. One means "this is the initial attempt", which is a claim, and a
+     * reader distinguishing an initial attempt from a retry must not have that claim manufactured for
+     * them out of the monitor's own ignorance.</p>
+     */
+    static final int UNSTATED_ORDINAL = 0;
 
     /**
      * The {@code NODE_BYPASSED} detail for a bypass the traversal imposed: an inbound
@@ -149,6 +160,68 @@ public final class ExecutionMonitor {
     }
 
     /**
+     * Publishes a traversal that was stopped on request, as a termination of its own.
+     *
+     * <p>Byte for byte the bookkeeping {@link #executionFailed} does -- the same gauge decrement, the
+     * same discarded attempt starts -- and a different event type, because the event type is the only
+     * dimension this stream is labelled by. While a cancellation published
+     * {@code EXECUTION_FAILED}, the failure counter and the cancellation counter were the same
+     * series, so a deployment whose operators stopped more work reported itself as breaking more
+     * often. Nothing but a distinct type can separate them: a classifier on the event cannot, because
+     * it is not a metric dimension here.</p>
+     *
+     * <p>{@code publicReason} still carries the deepest cause's class, exactly as the failed event
+     * does. That class name was, until this type existed, the <em>only</em> way an observer could
+     * tell a cancellation from a fault, and it is retained rather than dropped so that an observer
+     * still matching on it is not silently blinded during the window in which it migrates to the
+     * type. It is no longer the contract: the type is, and a consumer should read the type.</p>
+     */
+    void executionCancelled(ExecutionIdentity identity, Throwable error) {
+        activeExecutions.decrementAndGet();
+        discardAttemptStarts(identity.traversalId());
+        publish(identity, null, null, ExecutionEventType.EXECUTION_CANCELLED, null, 0, false,
+                message(error), null, null, 0, failureClass(error));
+    }
+
+    /**
+     * Publishes a traversal's hold.
+     *
+     * <p>Deliberately touches neither counter this class keeps. {@code activeExecutions} is not
+     * decremented because a paused traversal <em>is</em> active: it holds its state, it is still
+     * listed live and it is still cancellable, and a gauge that dropped on a pause would report the
+     * runtime as quieter than it is at the exact moment an operator has parked work in it.
+     * {@code attemptStarts} is not discarded for the same reason it is discarded on a terminal event
+     * and not here: the attempt whose start it holds is still going to settle, and dropping its start
+     * would silently remove the processing duration from the node that was running when the pause
+     * arrived.</p>
+     *
+     * <p>The detail is a fixed, source-authored phrase in the same register as
+     * {@code "execution accepted"}. Nothing about a hold is caller-supplied, so there is nothing here
+     * that could carry operator text onto the event.</p>
+     *
+     * @param identity the traversal's publication identity, which is what makes this event
+     *                 attributable to the same tenant and request as every other event of this run
+     */
+    void executionPaused(ExecutionIdentity identity) {
+        publish(identity, ExecutionEventType.EXECUTION_PAUSED, null, 0, false, "execution paused");
+    }
+
+    /**
+     * Publishes a traversal's release, and says only what the release itself decided.
+     *
+     * <p>"Resumed" here means the hold is gone and the parked hop has been handed a thread, not that
+     * the hop has run: the runtime deliberately does not wait for it, so an event claiming the node
+     * had restarted would be a claim this call cannot make. The node announces itself with its own
+     * {@code NODE_STARTED}.</p>
+     *
+     * @param identity the traversal's publication identity, matching the {@code EXECUTION_PAUSED}
+     *                 this event pairs with
+     */
+    void executionResumed(ExecutionIdentity identity) {
+        publish(identity, ExecutionEventType.EXECUTION_RESUMED, null, 0, false, "execution resumed");
+    }
+
+    /**
      * @param liveInstances how many runtime instances of this node's actor are alive, measured by the
      *                      caller at the moment of the call. The monitor cannot derive this: the
      *                      instances live in {@code GraphRunner}'s {@code WorkerInstanceRegistry} for the
@@ -158,12 +231,75 @@ public final class ExecutionMonitor {
      */
     void nodeStarted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
                      int liveInstances) {
+        nodeStarted(identity, nodeId, invocationId, attemptId, liveInstances, UNSTATED_ORDINAL);
+    }
+
+    /**
+     * The attempt-aware start, which is the one the runner uses.
+     *
+     * <p>{@code attemptOrdinal} is recorded here and read back by every settle path for this attempt,
+     * so a retry's completion, failure or further retry reports the ordinal its own start reported
+     * without any of them being given the number again.</p>
+     *
+     * @param attemptOrdinal the one-based ordinal of this attempt: {@code 1} for an initial attempt
+     *                       and greater for an orchestration retry, or {@link #UNSTATED_ORDINAL} from
+     *                       a caller that has no attempt history in hand
+     */
+    void nodeStarted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
+                     int liveInstances, int attemptOrdinal) {
         if (attemptId != null) {
-            attemptStarts.put(attemptId, new AttemptStart(identity.traversalId(), monotonicNanos.getAsLong()));
+            attemptStarts.put(attemptId,
+                    new AttemptStart(identity.traversalId(), monotonicNanos.getAsLong(), attemptOrdinal));
         }
         int arrivals = increment(nodeId);
         publish(identity, invocationId, attemptId, ExecutionEventType.NODE_STARTED, nodeId, liveInstances, false,
-                "node processing started", null, null, arrivals);
+                "node processing started", null, null, arrivals, null, null, null,
+                attemptOrdinal, ConnectorRetryReport.NOT_REPORTED);
+    }
+
+    /**
+     * Publishes the orchestrator's decision to make a further durable attempt.
+     *
+     * <p>Named for the decision and not for the failure, because the failure is not the event: an
+     * attempt that failed and will be retried settles once, here, instead of publishing
+     * {@code NODE_FAILED} and then contradicting it. See
+     * {@link ExecutionEventType#NODE_RETRY_SCHEDULED} for why that replacement is the shape rather
+     * than a second event, and note the arrival is decremented and the attempt timing finished
+     * exactly as {@link #nodeFailed} does — this attempt is over, and the retry's own
+     * {@code NODE_STARTED} increments again.</p>
+     *
+     * @param identity          the traversal-scoped identity every event carries
+     * @param nodeId            the node whose attempt failed
+     * @param invocationId      the invocation the failed attempt belongs to
+     * @param attemptId         the attempt that failed, never the one being scheduled
+     * @param nextOrdinal       the ordinal the scheduled retry will carry
+     * @param delay             how long the runtime will wait before that retry
+     * @param classification    the failure's retry classification, as a bounded classifier token.
+     *                          It occupies {@code publicReason} rather than the failure's class name,
+     *                          which {@code NODE_FAILED} puts there: on a retry the classification is
+     *                          the fact that explains the decision, and the class name is carried in
+     *                          the diagnostic beside it rather than lost
+     * @param error             the failure this attempt produced, whose deepest cause's class and
+     *                          message become the event's diagnostic and its author-facing text
+     * @param connectorAttempts connector-level attempts inside the failed attempt, or
+     *                          {@link ConnectorRetryReport#NOT_REPORTED}
+     * @param liveInstances     live runtime instances of this node, measured by the caller
+     */
+    void nodeRetryScheduled(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
+                            int nextOrdinal, Duration delay, String classification, Throwable error,
+                            int connectorAttempts, int liveInstances) {
+        int arrivals = decrement(nodeId);
+        int failedOrdinal = ordinalOf(attemptId);
+        // The retry facts lead and the failure text follows, deliberately. ExecutionEvent bounds
+        // `detail` at 512 chars with a visible truncation marker, and a node whose exception message
+        // is a page of text would otherwise push the ordinal and the delay off the end -- so the two
+        // facts that are always short and always wanted are the two that always survive.
+        String detail = "retrying as attempt " + nextOrdinal + " after " + delay.toMillis() + "ms: "
+                + failureClass(error) + ": " + message(error);
+        publish(identity, invocationId, attemptId, ExecutionEventType.NODE_RETRY_SCHEDULED, nodeId,
+                liveInstances, false, detail,
+                null, finishAttempt(attemptId), arrivals, classification, null, null,
+                failedOrdinal, connectorAttempts);
     }
 
     void nodeCompleted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
@@ -175,10 +311,25 @@ public final class ExecutionMonitor {
     void nodeCompleted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
                        boolean fallback, String outcome, int liveInstances,
                        NodeActionDiagnostic actionDiagnostic) {
+        nodeCompleted(identity, nodeId, invocationId, attemptId, fallback, outcome, liveInstances,
+                actionDiagnostic, ConnectorRetryReport.NOT_REPORTED);
+    }
+
+    /**
+     * The runner's completion path: a typed author-display action plus the connector's own report.
+     *
+     * @param connectorAttempts connector-level attempts inside this orchestration attempt, taken from
+     *                          {@link ai.ravenroot.api.execution.NodeResult#connectorAttempts()}, or
+     *                          {@link ConnectorRetryReport#NOT_REPORTED} when the node said nothing
+     */
+    void nodeCompleted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
+                       boolean fallback, String outcome, int liveInstances,
+                       NodeActionDiagnostic actionDiagnostic, int connectorAttempts) {
         nodeCompleted(identity, nodeId, invocationId, attemptId, fallback,
                 "unknown behavior executed as pass-through", outcome, liveInstances,
                 actionDiagnostic == null || actionDiagnostic.kind() != NodeActionDiagnostic.Kind.LOG
-                        ? null : actionDiagnostic.output());
+                        ? null : actionDiagnostic.output(),
+                connectorAttempts);
     }
 
     /**
@@ -221,20 +372,40 @@ public final class ExecutionMonitor {
     void nodeBypassed(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
                       int liveInstances, boolean authoredByGraph) {
         int arrivals = decrement(nodeId);
+        int ordinal = ordinalOf(attemptId);
         publish(identity, invocationId, attemptId, ExecutionEventType.NODE_BYPASSED, nodeId, liveInstances, false,
                 authoredByGraph ? AUTHORED_BYPASS_DETAIL : COMMAND_BYPASS_DETAIL,
                 null, finishAttempt(attemptId), arrivals,
-                authoredByGraph ? ExecutionEvent.BYPASS_REASON_AUTHORED : ExecutionEvent.BYPASS_REASON_COMMAND);
+                authoredByGraph ? ExecutionEvent.BYPASS_REASON_AUTHORED : ExecutionEvent.BYPASS_REASON_COMMAND,
+                // A bypassed node never ran a connector, so nothing is reported rather than one.
+                null, null, ordinal, ConnectorRetryReport.NOT_REPORTED);
     }
 
     void nodeCompleted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
                        boolean fallback, String fallbackDetail, String outcome, int liveInstances,
                        OutputProjection output) {
+        nodeCompleted(identity, nodeId, invocationId, attemptId, fallback, fallbackDetail, outcome,
+                liveInstances, output, ConnectorRetryReport.NOT_REPORTED);
+    }
+
+    /**
+     * The completion that also reports what the node's connector did inside this one attempt.
+     *
+     * @param connectorAttempts connector-level attempts within this orchestration attempt, or
+     *                          {@link ConnectorRetryReport#NOT_REPORTED} when the node said nothing.
+     *                          It is carried on the completion and on the defaulted row beside it,
+     *                          because both describe the same attempt and a reader filtering on
+     *                          either must see the same number
+     */
+    void nodeCompleted(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
+                       boolean fallback, String fallbackDetail, String outcome, int liveInstances,
+                       OutputProjection output, int connectorAttempts) {
         int arrivals = decrement(nodeId);
+        int ordinal = ordinalOf(attemptId);
         Duration processingDuration = finishAttempt(attemptId);
         if (fallback) {
             publish(identity, invocationId, attemptId, ExecutionEventType.NODE_DEFAULTED, nodeId, liveInstances,
-                    true, fallbackDetail, null, null, arrivals);
+                    true, fallbackDetail, null, null, arrivals, null, null, null, ordinal, connectorAttempts);
         }
         // The same outcome, twice, for two different readers. The diagnostic keeps its
         // "outcome=" prose shape because logs and existing parsers read it; the classifier is the bare
@@ -244,14 +415,32 @@ public final class ExecutionMonitor {
         publish(identity, invocationId, attemptId, ExecutionEventType.NODE_COMPLETED, nodeId, liveInstances,
                 fallback, "outcome=" + routedOutcome, null, processingDuration,
                 arrivals, routedOutcome,
-                "log".equals(identity.catalogKeyFor(nodeId)) ? output : null);
+                "log".equals(identity.catalogKeyFor(nodeId)) ? output : null, null, ordinal, connectorAttempts);
     }
 
     void nodeFailed(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId, Throwable error,
                     int liveInstances) {
+        nodeFailed(identity, nodeId, invocationId, attemptId, error, liveInstances,
+                ConnectorRetryReport.NOT_REPORTED);
+    }
+
+    /**
+     * The failure that also reports what the node's connector did inside this one attempt.
+     *
+     * <p>This is the terminal failure of a visit: an attempt whose failure the retry policy accepted
+     * publishes {@link ExecutionEventType#NODE_RETRY_SCHEDULED} instead, so the count of these stays
+     * the count of node visits that actually failed.</p>
+     *
+     * @param connectorAttempts connector-level attempts within this orchestration attempt, or
+     *                          {@link ConnectorRetryReport#NOT_REPORTED} when the node said nothing
+     */
+    void nodeFailed(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId, Throwable error,
+                    int liveInstances, int connectorAttempts) {
         int arrivals = decrement(nodeId);
+        int ordinal = ordinalOf(attemptId);
         publish(identity, invocationId, attemptId, ExecutionEventType.NODE_FAILED, nodeId, liveInstances, false,
-                message(error), null, finishAttempt(attemptId), arrivals, failureClass(error));
+                message(error), null, finishAttempt(attemptId), arrivals, failureClass(error),
+                null, null, ordinal, connectorAttempts);
     }
 
     /**
@@ -503,6 +692,22 @@ public final class ExecutionMonitor {
      * Removes and settles one attempt exactly once. A missing entry is an orphan terminal event: the
      * notification is still useful and is published with no fabricated duration.
      */
+    /**
+     * Reads an attempt's recorded ordinal without ending its timing.
+     *
+     * <p>Separate from {@link #finishAttempt(UUID)}, which removes the entry, so a settle path can
+     * read the number and then close the timing in either order without one call destroying the
+     * other's input. An attempt this monitor never saw start answers {@link #UNSTATED_ORDINAL} rather
+     * than {@code 1}: it did not observe an initial attempt, it observed nothing.</p>
+     */
+    private int ordinalOf(UUID attemptId) {
+        if (attemptId == null) {
+            return UNSTATED_ORDINAL;
+        }
+        AttemptStart started = attemptStarts.get(attemptId);
+        return started == null ? UNSTATED_ORDINAL : started.ordinal();
+    }
+
     private Duration finishAttempt(UUID attemptId) {
         if (attemptId == null) {
             return null;
@@ -589,8 +794,38 @@ public final class ExecutionMonitor {
                          String nodeId, int active, boolean fallback, String detail, Duration joinWaitDuration,
                          Duration processingDuration, int inFlightArrivals, String publicReason,
                          OutputProjection authorOutput, String edgeId) {
+        publish(identity, invocationId, attemptId, type, nodeId, active, fallback, detail, joinWaitDuration,
+                processingDuration, inFlightArrivals, publicReason, authorOutput, edgeId,
+                UNSTATED_ORDINAL, ConnectorRetryReport.NOT_REPORTED);
+    }
+
+    /**
+     * The full overload, and the only one that sets the attempt-scoped counts.
+     *
+     * <p>Every narrower overload defaults both to "not stated", which is correct rather than lazy for
+     * the same reason {@code publicReason} defaults to {@code null}: the events that reach them —
+     * execution started and failed, the join family, edge traversal — are not about one attempt, and
+     * a fabricated {@code 1} there would assert that they described an initial attempt.</p>
+     *
+     * @param attemptOrdinal    the failing or running attempt's one-based ordinal, or
+     *                          {@link #UNSTATED_ORDINAL}
+     * @param connectorAttempts connector-level attempts reported for that attempt, or
+     *                          {@link ConnectorRetryReport#NOT_REPORTED}
+     */
+    private void publish(ExecutionIdentity identity, UUID invocationId, UUID attemptId, ExecutionEventType type,
+                         String nodeId, int active, boolean fallback, String detail, Duration joinWaitDuration,
+                         Duration processingDuration, int inFlightArrivals, String publicReason,
+                         OutputProjection authorOutput, String edgeId, int attemptOrdinal,
+                         int connectorAttempts) {
         TextProjection authorMessage = switch (type) {
-            case NODE_FAILED, JOIN_FAILED, EXECUTION_FAILED -> RuntimeActivityData.message(detail);
+            // NODE_RETRY_SCHEDULED belongs here because it SETTLES an attempt that failed, and it is
+            // the only settlement that attempt ever gets: it replaces NODE_FAILED rather than
+            // preceding it. Without it, a node that fails twice and then succeeds leaves no record
+            // anywhere of what went wrong -- the two diagnostics an author most needs would be the
+            // two the runtime silently dropped, and the successful third attempt would make the
+            // execution look untroubled.
+            case NODE_FAILED, JOIN_FAILED, EXECUTION_FAILED, NODE_RETRY_SCHEDULED ->
+                    RuntimeActivityData.message(detail);
             default -> null;
         };
         var event = new ExecutionEvent(eventSequence.incrementAndGet(), Instant.now(),
@@ -611,7 +846,7 @@ public final class ExecutionMonitor {
                 // it downstream: every caller below already holds the structured value, and a server
                 // that had to parse "outcome=" back out of detail would be one regex away from
                 // publishing the diagnostic it is forbidden to publish.
-                publicReason, authorMessage, authorOutput, edgeId);
+                publicReason, authorMessage, authorOutput, edgeId, attemptOrdinal, connectorAttempts);
         synchronized (history) {
             history.addLast(event);
             while (history.size() > HISTORY_LIMIT) {
@@ -627,7 +862,20 @@ public final class ExecutionMonitor {
         });
     }
 
-    private record AttemptStart(UUID traversalId, long nanoTime) {
+    /**
+     * What is remembered between a node attempt's start and its settlement.
+     *
+     * <p>{@code ordinal} rides here rather than being threaded through every settle-path signature,
+     * and that is the same argument the catalog key already uses inside {@link #publish}: the value
+     * is established once, at the one point that knows it, and read where it is needed. It also makes
+     * the two projections structurally unable to disagree — a completion cannot report an ordinal its
+     * own start did not report, because there is only one place the number is written.</p>
+     *
+     * @param traversalId the traversal whose end discards this entry
+     * @param nanoTime    the monotonic reading taken when the attempt started
+     * @param ordinal     the one-based attempt ordinal; {@code 1} initial, greater on a retry
+     */
+    private record AttemptStart(UUID traversalId, long nanoTime, int ordinal) {
     }
 
     /**
@@ -648,21 +896,55 @@ public final class ExecutionMonitor {
         if (error == null) {
             return null;
         }
-        Throwable current = error;
-        while (current.getCause() != null) {
-            current = current.getCause();
+        GraphExecutionLimitException limited = executionLimitIn(error,
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+        if (limited != null) {
+            return limited.reason().publicCode();
         }
-        return current.getClass().getSimpleName();
+        return deepestCause(error).getClass().getSimpleName();
+    }
+
+    /**
+     * Bounded the same way {@link ExecutionTermination#reasonOf} bounds its own walk of the identical
+     * chain, and for the identical reason: this runs on a traversal's completion path, which has no
+     * timeout above it, and an unbounded {@code while (current.getCause() != null)} trusted a cause
+     * chain to terminate on its own. {@link Throwable#initCause} refuses only a direct self-reference
+     * ({@code cause == this}), not a longer cycle -- two throwables can be constructed to name each
+     * other as cause, at which point the previous unbounded walk here never returned. A depth this
+     * large is already far past anything a real wrapping produces, so the bound is a safety stop
+     * rather than a policy, exactly as {@link ExecutionTermination}'s own Javadoc states for its walk.
+     */
+    private static final int MAX_CAUSE_DEPTH = 64;
+
+    private static Throwable deepestCause(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
+            Throwable cause = current.getCause();
+            if (cause == null || cause == current) {
+                return current;
+            }
+            current = cause;
+        }
+        return current;
+    }
+
+    private static GraphExecutionLimitException executionLimitIn(Throwable error, java.util.Set<Throwable> seen) {
+        if (error == null || !seen.add(error)) return null;
+        if (error instanceof GraphExecutionLimitException limited) return limited;
+        GraphExecutionLimitException caused = executionLimitIn(error.getCause(), seen);
+        if (caused != null) return caused;
+        for (Throwable suppressed : error.getSuppressed()) {
+            GraphExecutionLimitException nested = executionLimitIn(suppressed, seen);
+            if (nested != null) return nested;
+        }
+        return null;
     }
 
     private static String message(Throwable error) {
         if (error == null) {
             return "unknown failure";
         }
-        Throwable current = error;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
+        Throwable current = deepestCause(error);
         return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 

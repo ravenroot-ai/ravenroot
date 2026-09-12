@@ -41,9 +41,9 @@ class MailConcurrencyAdmissionTest {
             } else independentLookups.incrementAndGet();
             return Optional.empty();
         };
-        var behavior = new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
+        var behavior = MailTestSupport.loopbackBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
                 tenant, name, "127.0.0.1", 1, "STARTTLS", "smtp-user",
-                tenant.equals("tenant-a") && name.equals("slow") ? "slow" : "independent", 0, 1)));
+                tenant.equals("tenant-a") && name.equals("slow") ? "slow" : "independent", 0, 1)), "127.0.0.1");
         NodeAction slow = behavior.create(MailTestSupport.configuration(Map.of("mailProfile", "slow")));
         CompletionStage<NodeResult> first = slow.handle(message("tenant-a"));
         try {
@@ -78,8 +78,8 @@ class MailConcurrencyAdmissionTest {
             await(release);
             return Optional.empty();
         };
-        var behavior = new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
-                tenant, name, "127.0.0.1", 1, "STARTTLS", "smtp-user", "slow", 0, 16)));
+        var behavior = MailTestSupport.loopbackBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
+                tenant, name, "127.0.0.1", 1, "STARTTLS", "smtp-user", "slow", 0, 16)), "127.0.0.1");
         NodeAction action = behavior.create(MailTestSupport.configuration(Map.of("mailProfile", "global")));
         List<CompletionStage<NodeResult>> admitted = new ArrayList<>();
         for (int i = 0; i < 32; i++) admitted.add(action.handle(message("tenant-global-" + i)));
@@ -110,8 +110,8 @@ class MailConcurrencyAdmissionTest {
             CountDownLatch release = new CountDownLatch(1);
             AtomicInteger lookups = new AtomicInteger();
             CredentialResolver credentials = ref -> { lookups.incrementAndGet(); entered.countDown(); await(release); return Optional.empty(); };
-            var behavior = new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
-                    tenant, name, "127.0.0.1", 1, "STARTTLS", "smtp-user", "slow", 0, 16)));
+            var behavior = MailTestSupport.loopbackBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
+                    tenant, name, "127.0.0.1", 1, "STARTTLS", "smtp-user", "slow", 0, 16)), "127.0.0.1");
             NodeAction lax = behavior.create(MailTestSupport.configuration(Map.of("mailProfile", "primary")));
             NodeAction strict = behavior.create(MailTestSupport.configuration(Map.of("mailProfile", "primary", "maxConcurrency", "1")));
             CompletionStage<NodeResult> first = (strictFirst ? strict : lax).handle(message("tenant-tightening"));
@@ -141,9 +141,9 @@ class MailConcurrencyAdmissionTest {
             else { entered.countDown(); await(release); }
             return Optional.empty();
         };
-        var behavior = new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
+        var behavior = MailTestSupport.loopbackBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
                 tenant, name, "127.0.0.1", 1, "STARTTLS", "smtp-user",
-                tenant.equals("tenant-independent") ? "independent" : "slow", 0, 16)));
+                tenant.equals("tenant-independent") ? "independent" : "slow", 0, 16)), "127.0.0.1");
         List<CompletionStage<NodeResult>> admitted = new ArrayList<>();
         for (int i = 0; i < 16; i++) {
             NodeAction action = behavior.create(MailTestSupport.configuration(Map.of("mailProfile", "profile-" + i)));

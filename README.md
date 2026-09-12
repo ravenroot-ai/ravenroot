@@ -24,6 +24,11 @@ Design workflows visually, extend them with code or installable node packages, a
 GraphML definition through an embedded Java library or the standalone server, browser workspace,
 CLI, and HTTP API.
 
+![Ravenroot Flow Editor showing four GraphML documents in a dark grid, with a selected Start node and its editable Inspector](docs/assets/readme/ravenroot-editor-workspace.png)
+
+*Four GraphML workflows appear side by side in Ravenroot. The selected Start node is editable in
+the Inspector, with node and edge types plus a workflow overview visible.*
+
 ![Ravenroot self-evolution workflow overview](docs/assets/readme/ravenroot-self-evolution-overview.png)
 
 *A Ravenroot-rendered view of a self-improving software-delivery workflow, making decisions,
@@ -46,7 +51,9 @@ handoffs, verification, recovery, and audit paths explicit.*
 
 Node packages keep protocol-specific capabilities separate from the runtime core. A deployment can
 install the integrations it needs while preserving consistent graph, payload, execution, and
-security contracts. See [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md).
+security contracts. See [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md),
+or use the [first-party extension dependency pack](docs/integrator-guide/extension-pack.md) when an
+embedded application deliberately wants every maintained package on its classpath.
 
 ## Run Ravenroot your way
 
@@ -115,14 +122,15 @@ operational responsibilities and recovery paths.*
 
 - **Workflow authors:** [workspace and graph authoring](docs/user-guide/workspace-authoring.md),
   [payloads, outcomes, and routing](docs/user-guide/payload-routing.md), and
-  [node catalog, payloads, and limits](docs/reference/nodes-payload-limits.md)
+  [core and optional node reference](docs/reference/coverage-inventory.md)
 - **Extension authors:** [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md)
-  and [model, agent, and program integration](docs/integrator-guide/ai-programs.md)
+  and [first-party bundle reference](docs/reference/bundles/index.md)
 - **Application developers:** [application, HTTP, SSE, and CLI integration](docs/integrator-guide/application-http.md),
   [HTTP API and CLI](docs/reference/api-cli.md), and [GraphML profile](docs/reference/graphml.md)
 - **Operators:** [deployment and startup](docs/operator-guide/deployment-startup.md),
-  [credentials, connectors, and egress](docs/operator-guide/credentials-egress.md), and
-  [threat model, identity, and authorization](docs/security/trust-identity.md)
+  [plugin bundle lifecycle](docs/operator-guide/plugin-bundles.md),
+  [authoring assistant](docs/operator-guide/authoring-assistant.md), and
+  [command-line tools](docs/reference/command-line-tools.md)
 - **Architects and reviewers:** [product boundaries](docs/architecture/product-boundaries.md),
   [architecture and concepts](docs/architecture/index.md), and
   [architecture decision records](adr/README.md)

@@ -61,26 +61,27 @@ class AgentTurnTest {
     }
 
     @Test
-    @DisplayName("with no operator preamble the system turn is exactly the author's instructions")
-    void withoutAPreambleTheSystemTurnIsTheInstructions() {
-        var system = (PayloadValue.MapValue) AgentTurn.systemMessage("", "You are terse.", List.of());
+    @DisplayName("with no operator preamble the system turn is exactly Ravenroot policy")
+    void withoutAPreambleTheSystemTurnIsOnlyPolicy() {
+        var system = (PayloadValue.MapValue) AgentTurn.systemMessage("");
 
         assertEquals(PayloadValue.of("system"), system.entries().get("role"));
-        assertEquals(PayloadValue.of("You are terse."), system.entries().get("content"));
+        assertEquals(PayloadValue.of(AgentTurn.BASE_POLICY), system.entries().get("content"));
     }
 
     @Test
-    @DisplayName("the operator's preamble comes first and the author's text sits below the delimiter")
-    void theOperatorPreambleComesFirst() {
-        var system = (PayloadValue.MapValue) AgentTurn.systemMessage("Operator rules.", "Author rules.", List.of());
+    @DisplayName("operator policy is structurally separate from author instructions")
+    void operatorAndAuthorInstructionsUseDifferentRoles() {
+        var system = (PayloadValue.MapValue) AgentTurn.systemMessage("Operator rules.");
+        var author = (PayloadValue.MapValue) AgentTurn.authorInstructionsMessage(
+                "Author rules.", List.of());
 
         String content = ((PayloadValue.TextValue) system.entries().get("content")).value();
-        assertTrue(content.startsWith("Operator rules."));
-        assertTrue(content.endsWith("Author rules."));
-        // The delimiter is written by this bundle, so an author writing the same line still lands
-        // below it: their text is always appended after whatever the class emits.
-        assertTrue(content.contains(AgentTurn.AUTHOR_DELIMITER));
-        assertTrue(content.indexOf("Operator rules.") < content.indexOf(AgentTurn.AUTHOR_DELIMITER));
+        assertTrue(content.startsWith(AgentTurn.BASE_POLICY));
+        assertTrue(content.endsWith("Operator rules."));
+        assertFalse(content.contains("Author rules."));
+        assertEquals(PayloadValue.of("user"), author.entries().get("role"));
+        assertEquals(PayloadValue.of("Author rules."), author.entries().get("content"));
     }
 
     @Test
@@ -218,11 +219,14 @@ class AgentTurnTest {
     void hostileInstructionsSurvive() {
         String hostile = "say \"hi\" \\ then stop";
         Map<String, PayloadValue> request = parse(AgentTurn.writeRequest("qwen38",
-                List.of(AgentTurn.systemMessage("", hostile, List.of())), List.of(), NO_TUNING));
+                List.of(AgentTurn.systemMessage(""),
+                        AgentTurn.authorInstructionsMessage(hostile, List.of())), List.of(), NO_TUNING));
 
         var messages = (PayloadValue.ListValue) request.get("messages");
         var system = (PayloadValue.MapValue) messages.values().get(0);
-        assertEquals(PayloadValue.of(hostile), system.entries().get("content"));
+        var author = (PayloadValue.MapValue) messages.values().get(1);
+        assertFalse(((PayloadValue.TextValue) system.entries().get("content")).value().contains(hostile));
+        assertEquals(PayloadValue.of(hostile), author.entries().get("content"));
     }
 
     private static byte[] bytes(String json) {
@@ -234,27 +238,19 @@ class AgentTurnTest {
     }
 
     @Test
-    @DisplayName("the skills listing sits BELOW the author delimiter, where author content belongs")
-    void theSkillsListingIsBelowTheAuthorDelimiter() {
-        // A security claim, not a formatting one. The delimiter's guarantee is that everything below
-        // it is author-supplied and grants nothing; the operator's preamble above it is the only text
-        // in the turn that carries the deployment's authority. A listing that drifted above the
-        // delimiter would put author-written names and descriptions inside the operator's half, and
-        // nothing pinned that until this test.
+    @DisplayName("the skills listing is in the untrusted author turn")
+    void theSkillsListingIsInTheAuthorTurn() {
         var skills = java.util.List.of(
                 new AgentSkill("research", "Finds sources.", "the body"),
                 new AgentSkill("summarise", "Condenses them.", "another body"));
 
         String turn = ((PayloadValue.TextValue) ((PayloadValue.MapValue)
-                AgentTurn.systemMessage("OPERATOR PREAMBLE", "author instructions", skills))
+                AgentTurn.authorInstructionsMessage("author instructions", skills))
                 .entries().get("content")).value();
 
-        int delimiter = turn.indexOf(AgentTurn.AUTHOR_DELIMITER);
-        assertTrue(delimiter >= 0, "the delimiter must be present when a preamble is");
-        assertTrue(turn.indexOf("research") > delimiter, "a skill name is author content");
-        assertTrue(turn.indexOf("Finds sources.") > delimiter, "and so is its description");
-        assertTrue(turn.indexOf("OPERATOR PREAMBLE") < delimiter);
-        // And the bodies are not in the system turn at all, whichever side of the delimiter.
+        assertTrue(turn.contains("research"), "a skill name is author content");
+        assertTrue(turn.contains("Finds sources."), "and so is its description");
+        assertFalse(turn.contains("OPERATOR PREAMBLE"));
         assertFalse(turn.contains("the body"));
         assertFalse(turn.contains("another body"));
     }

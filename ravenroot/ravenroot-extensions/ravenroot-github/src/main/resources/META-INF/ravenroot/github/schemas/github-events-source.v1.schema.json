@@ -1,0 +1,9 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"urn:ravenroot:github:github-events-source:v1",
+  "title":"github-events-source payload contracts",
+  "$defs":{
+    "event":{"type":"object","additionalProperties":false,"required":["version","event","action","deliveryId","repositoryId","installationId","body"],"properties":{"version":{"const":"github.event.v1"},"event":{"type":"string","minLength":1,"maxLength":64},"action":{"type":"string","maxLength":64},"deliveryId":{"type":"string","pattern":"^[A-Za-z0-9-]{1,128}$"},"repositoryId":{"type":"integer","minimum":1},"installationId":{"type":"integer","minimum":1},"body":{"type":"object"}}},
+    "receipt":{"type":"object","additionalProperties":false,"required":["version","deliveryId","receipt"],"properties":{"version":{"const":"github.event.receipt.v1"},"deliveryId":{"type":"string","pattern":"^[A-Za-z0-9-]{1,128}$"},"receipt":{"enum":["committed","duplicate"]}}}
+  }
+}

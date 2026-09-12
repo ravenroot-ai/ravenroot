@@ -53,9 +53,16 @@ public final class RavenrootCli {
                 // says otherwise. RavenrootCliMain intercepts it before an engine is ever built, so
                 // this case is the embedded-object entry point rather than the usual one.
                 case "validate" -> GraphMlValidateCommand.run(args, output, errors);
+                case "events" -> EventStreamDecodeCommand.run(args, System.in, output, errors);
                 case "run" -> runGraph(args);
                 case "result" -> result(args);
                 case "live" -> liveExecutions();
+                // Issue 154: the durable inventory, distinct from 'live' -- see #inventory's own
+                // Javadoc. Tenant is never a flag here, the same rule 'live' and every other verb
+                // follow: the embedded backend reads its own constructor RequestContext and the
+                // remote backend relies on the bearer token.
+                case "inventory" -> inventory();
+                case "traversals" -> traversals(args);
                 case "cancel" -> cancelExecution(args);
                 case "drain" -> drainServer();
                 // One verb, seven subcommands, mirroring 'credentials' below: a listing, a
@@ -206,6 +213,21 @@ public final class RavenrootCli {
         var view = backend.result(args[1]);
         output.println("execution-id=" + view.executionId());
         output.println("status=" + view.status());
+        // Printed only when the terminal status is qualified, following the convention every other
+        // exceptional signal on this command already uses (defaulted-nodes, bypassed-nodes,
+        // handled-failure below): the common case leaves nothing to act on, and a line that appeared
+        // on every clean run would bury the occasions it matters. A cancelled execution reports
+        // status=FAILED above, exactly like an ordinary failure -- this is the line that tells the two
+        // apart, and it must be read beside status, never in place of it.
+        if (view.terminationReason() != null) {
+            output.println("termination-reason=" + view.terminationReason());
+        }
+        // Printed unconditionally, beside status rather than folded into it, for the reason
+        // ExecutionOutcome#paused's own Javadoc gives: status alone cannot say a RUNNING execution is
+        // deliberately holding rather than merely in progress, and a reader who cannot tell the two
+        // apart needs an always-present line, not one that appears only on the surprising case. Always
+        // false once status is terminal, matching that same contract.
+        output.println("paused=" + view.paused());
         output.println("degraded=" + view.degraded());
         // Degraded must stay visible even when nobody thought to ask: unresolved pass-through defaults
         // are a correctness signal, not a footnote, so they get their own line whenever there are any.
@@ -270,8 +292,70 @@ public final class RavenrootCli {
                     + "\tprocess-instance-id=" + execution.processInstanceId()
                     + "\texecution-id=" + execution.executionId()
                     + "\tgraph-version=" + sanitizeForConsole(execution.graphVersion())
-                    + "\tstarted-at=" + execution.startedAt());
+                    + "\tstarted-at=" + execution.startedAt()
+                    + "\tpaused=" + execution.paused());
         }
+        return 0;
+    }
+
+    /**
+     * Lists this tenant's durable process inventory: what this deployment's own
+     * persisted record says exists, surviving a restart -- distinct from {@code live}, which is
+     * unchanged and remains the process-local runtime view. See {@link CliBackend#inventory}'s own
+     * Javadoc for the full distinction, including why the backend pages this to completion rather
+     * than answering with one page. One line per instance, followed by one trailing
+     * {@code retained-from=} line -- printed even for an idle tenant, deliberately the one exception
+     * to the "absence of output IS the answer" convention {@code live} uses: the retention floor is
+     * exactly what an operator needs to read when the listing above it is empty, to tell "nothing
+     * ever ran" from "it ran and aged out".
+     */
+    private int inventory() throws IOException {
+        var listing = backend.inventory();
+        for (var entry : listing.items()) {
+            output.println("process-instance-id=" + entry.processInstanceId()
+                    + "\tstatus=" + entry.status()
+                    // Beside status, following the same tab-separated, always-present convention as
+                    // deployment-id/workload-id/correlation-id below: empty rather than absent when
+                    // nothing distinguishes the termination, so a cancelled instance's FAILED status is
+                    // never read as an incident once this is the only place left to ask.
+                    + "\ttermination-reason=" + sanitizeForConsole(entry.terminationReason())
+                    + "\tdisposition=" + entry.disposition()
+                    + "\tgraph-version=" + sanitizeForConsole(entry.graphVersion())
+                    + "\tdeployment-id=" + sanitizeForConsole(entry.deploymentId())
+                    + "\tworkload-id=" + sanitizeForConsole(entry.workloadId())
+                    + "\tcorrelation-id=" + sanitizeForConsole(entry.correlationId())
+                    + "\ttraversal-count=" + entry.traversalCount()
+                    + "\tcreated-at=" + entry.createdAt()
+                    + "\tupdated-at=" + entry.updatedAt());
+        }
+        output.println("retained-from=" + listing.retainedFrom());
+        return 0;
+    }
+
+    /**
+     * Lists one durable process instance's traversals from the inventory:
+     * {@code ravenroot traversals <process-instance-id>}. The argument is a process instance id, not
+     * the traversal/execution id {@code cancel} and {@code result} take -- see
+     * {@link CliBackend#traversals}'s own Javadoc for why the two id spaces are deliberately distinct.
+     * One line per traversal, followed by the same trailing {@code retained-from=} line
+     * {@link #inventory()} prints, for the same reason.
+     */
+    private int traversals(String[] args) throws IOException {
+        if (args.length != 2) {
+            return invalid("Usage: traversals <process-instance-id>");
+        }
+        var listing = backend.traversals(args[1]);
+        for (var entry : listing.traversals()) {
+            output.println("traversal-id=" + entry.traversalId()
+                    + "\tposition=" + entry.position()
+                    + "\tingress-node-id=" + sanitizeForConsole(entry.ingressNodeId())
+                    + "\tstatus=" + entry.status()
+                    + "\ttermination-reason=" + sanitizeForConsole(entry.terminationReason())
+                    + "\tdisposition=" + entry.disposition()
+                    + "\tinvocation-count=" + entry.invocationCount()
+                    + "\tparked-attempt-count=" + entry.parkedAttemptCount());
+        }
+        output.println("retained-from=" + listing.retainedFrom());
         return 0;
     }
 
@@ -443,7 +527,16 @@ public final class RavenrootCli {
     private void help() {
         output.println("Usage: ravenroot [--server <url> --token-file <path>] "
                 + "<status|runtime|node-types|inspect <graph.graphml>|run <graph.graphml> [payload]"
-                + "|result <execution-id>|live|cancel <traversal-id>|drain|credentials|deployments>");
+                + "|result <execution-id>|live|inventory|traversals <process-instance-id>"
+                + "|cancel <traversal-id>|drain|credentials|deployments>");
+        // Issue 154: 'inventory' is the durable, tenant-scoped process inventory -- what this
+        // deployment's own persisted record says exists, surviving a restart -- as opposed to
+        // 'live', which is unchanged and remains the process-local runtime view. 'traversals' takes
+        // a process-instance-id, not the traversal/execution id 'cancel' and 'result' take.
+        output.println("       'inventory' lists the durable process inventory (survives a restart); "
+                + "'live' remains the process-local runtime view. 'traversals <process-instance-id>' "
+                + "lists one instance's traversals from the inventory -- note the argument is a "
+                + "process-instance-id, not the traversal/execution id 'cancel' and 'result' take.");
         // Listed separately, like 'credentials' is: seven related actions under one verb rather
         // than seven top-level commands. 'run' above starts a transient traversal that ends when it
         // completes or is cancelled; a deployment is the opposite shape -- a long-lived, addressable,
@@ -466,6 +559,7 @@ public final class RavenrootCli {
         // Listed separately because it is answered locally whether or not --server is
         // given -- the document is on this machine and so is the profile that reads it.
         output.println("       ravenroot validate <graph.graphml>");
+        output.println("       ravenroot events decode   (decode a captured SSE body from stdin)");
         // Listed separately for the opposite reason to 'validate': this REQUIRES
         // --server, because stored credentials live in a running server's own store, not in anything
         // the embedded (no --server) CLI composes -- BehaviorEnvironment.safeDefaults() has no
@@ -592,7 +686,11 @@ public final class RavenrootCli {
         output.println("       'result' node lists are sets: a repeat visit still prints once. This CLI "
                 + "reports no visit counts. GET /v1/events over HTTP, read directly (no filter "
                 + "parameter exists) and matched client-side to a traversal and node id, carries one "
-                + "NODE_STARTED/NODE_BYPASSED/NODE_DEFAULTED/NODE_FAILED event per visit, under "
+                + "NODE_STARTED/NODE_BYPASSED/NODE_DEFAULTED/NODE_FAILED event per visit -- except "
+                + "on a node with an orchestration retry policy, where a visit is one NODE_STARTED "
+                + "per attempt and every attempt but the last settles as NODE_RETRY_SCHEDULED, so "
+                + "counting NODE_STARTED overcounts visits there and this response's node lists, "
+                + "being sets, do not. Under "
                 + "either of that stream's sources -- with two silent-undercount caveats where a "
                 + "journal serves it. NODE_DEFAULTED rows exist only in a journal written by a build "
                 + "that emits them, and envelopeVersion does not change to say so (the envelope's "

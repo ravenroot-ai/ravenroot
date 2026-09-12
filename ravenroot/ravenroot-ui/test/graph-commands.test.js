@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  commandPositionNodeIds,
   applyCommand,
   batchUpdateNodePropertiesCommand,
   commandTargets,
@@ -164,6 +165,18 @@ describe('graph command primitives', () => {
     ]))).toEqual({ nodeIds: ['n1', 'n2'], edgeIds: ['e1', 'e2'] });
   });
 
+  it('reports only move-owned node positions, recursing into grouped commands', () => {
+    expect(commandPositionNodeIds(compositeCommand([
+      removeNodesCommand(['removed']),
+      insertNodesCommand([{ node: { id: 'inserted' }, index: 0 }]),
+      moveNodesCommand([{ id: 'moved', ox: 1, oy: 2 }]),
+      compositeCommand([
+        moveNodesCommand([{ id: 'nested', ox: 3, oy: 4 }]),
+        updateNodeCommand('metadata', { name: 'changed' }),
+      ]),
+    ]))).toEqual(['moved', 'nested']);
+  });
+
   it('preflights a property batch before mutation and leaves every map unchanged on failure', () => {
     const graph = createWorkflowDocument();
     const history = createCommandHistory();
@@ -276,6 +289,29 @@ describe('command history', () => {
     expect(history.isDirty()).toBe(true);
     history.undo(graph);
     expect(graph.nodeMap.dosomething.name).toBe('A');
+    expect(history.isDirty()).toBe(false);
+  });
+
+  it('coalesces updateEdgeFields within a focus session and stops at the save point', () => {
+    const graph = createWorkflowDocument();
+    const history = createCommandHistory();
+    const edge = graph.edges.find(candidate => candidate.id === 'edge-dosomething-end');
+    const before = edge.description;
+
+    updateEdgeFields(graph, edge.id, { description: 'A' }, history, { coalesceKey: 'edge-description' });
+    updateEdgeFields(graph, edge.id, { description: 'AB' }, history, { coalesceKey: 'edge-description' });
+    expect(history.depth()).toBe(1);
+    expect(edge.description).toBe('AB');
+    history.undo(graph);
+    expect(edge.description).toBe(before);
+    history.redo(graph);
+    expect(edge.description).toBe('AB');
+
+    history.markSaved();
+    updateEdgeFields(graph, edge.id, { description: 'ABC' }, history, { coalesceKey: 'edge-description' });
+    expect(history.depth()).toBe(2);
+    history.undo(graph);
+    expect(edge.description).toBe('AB');
     expect(history.isDirty()).toBe(false);
   });
 

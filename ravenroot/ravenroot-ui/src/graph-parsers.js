@@ -4,6 +4,7 @@
 // Reading the one list instead of maintaining two removes the class of bug, not just this instance
 // of it. graph-document.js has no imports of its own, so this does not create a cycle.
 import { assertStableEdgeId } from './stable-edge-id.js';
+import { VISUAL_GROUPS_PROPERTY, readVisualGroupMetadataElement } from './visual-groups.js';
 import { authoredNodeType, classifyFailureRoutes, kindOwnsNodeType, kindToNodeType, NODE_KINDS }
   from './graph-document.js';
 
@@ -26,11 +27,10 @@ const GRAPHML_SCALAR_TYPES = new Set(['boolean', 'int', 'long', 'float', 'double
 // serialized - see serializeGraphML in graph-document.js.
 export const SYNTHESIZED_EDGE_ID_PREFIX = 'ravenroot-synthesized-edge-';
 
-// Keep these aligned with the server-side GraphML import defaults. They are
-// deliberately generous for normal exported workflows while putting a hard
-// ceiling in front of the browser's DOM parser and renderer.
+// Keep these structural limits aligned with the server-side GraphML import defaults. The encoded
+// document byte limit deliberately does NOT live here: the connected runtime resolves that
+// operator-owned value and every ingress path must receive it explicitly.
 export const GRAPH_INPUT_LIMITS = Object.freeze({
-  maxBytes: 10 * 1024 * 1024,
   maxNodes: 10_000,
   maxEdges: 25_000,
   maxProperties: 100_000,
@@ -61,31 +61,38 @@ function inputError(message, reason = GRAPH_INPUT_REJECTION_REASONS.RESOURCE_LIM
   return new GraphInputRejection(reason, message);
 }
 
-/** Reject content that cannot safely be buffered before format detection. */
-export function assertInputWithinByteLimit(text) {
-  const length = new TextEncoder().encode(String(text)).length;
-  if (length > GRAPH_INPUT_LIMITS.maxBytes) {
-    throw inputError(
-      'document exceeds the 10 MiB byte limit',
-      GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
-    );
+function requireDocumentByteLimit(maxBytes) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new TypeError('Graph document byte limit must be a positive safe integer');
   }
+  return maxBytes;
+}
+
+function documentTooLarge() {
+  return inputError(
+    'document exceeds the configured byte limit',
+    GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
+  );
+}
+
+/** Reject content that cannot safely be buffered before format detection. */
+export function assertInputWithinByteLimit(text, maxBytes) {
+  requireDocumentByteLimit(maxBytes);
+  const length = new TextEncoder().encode(String(text)).length;
+  if (length > maxBytes) throw documentTooLarge();
 }
 
 /** Guard the FileReader path before it can allocate the file text. */
-export function assertLocalFileWithinByteLimit(file) {
+export function assertLocalFileWithinByteLimit(file, maxBytes) {
+  requireDocumentByteLimit(maxBytes);
   if (!file || !Number.isFinite(file.size)) {
     throw inputError('file size is unavailable');
   }
-  if (file.size > GRAPH_INPUT_LIMITS.maxBytes) {
-    throw inputError(
-      'document exceeds the 10 MiB byte limit',
-      GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
-    );
-  }
+  if (file.size > maxBytes) throw documentTooLarge();
 }
 
-async function readResponseTextWithinByteLimit(response) {
+async function readResponseTextWithinByteLimit(response, maxBytes) {
+  requireDocumentByteLimit(maxBytes);
   const reader = response.body?.getReader();
   if (!reader) throw new Error('Unable to read response safely');
   const decoder = new TextDecoder();
@@ -96,12 +103,15 @@ async function readResponseTextWithinByteLimit(response) {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > GRAPH_INPUT_LIMITS.maxBytes) {
-        await reader.cancel();
-        throw inputError(
-          'document exceeds the 10 MiB byte limit',
-          GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
-        );
+      if (total > maxBytes) {
+        // Cancellation is cleanup, not the admission verdict. A transport whose cancel itself
+        // fails must not replace the stable document-too-large rejection the byte count proved.
+        try {
+          await reader.cancel();
+        } catch {
+          // The stream is already rejected locally and the lock is released below.
+        }
+        throw documentTooLarge();
       }
       text += decoder.decode(value, { stream: true });
     }
@@ -112,27 +122,28 @@ async function readResponseTextWithinByteLimit(response) {
 }
 
 /** Guard URL content-length and streamed bodies before parsing or rendering. */
-export async function fetchInputTextWithinByteLimit(url, fetchImpl = fetch) {
+export async function fetchInputTextWithinByteLimit(url, maxBytes, fetchImpl = fetch) {
+  requireDocumentByteLimit(maxBytes);
   const response = await fetchImpl(url);
   if (!response.ok) throw new Error('HTTP ' + response.status);
-  const contentLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(contentLength) && contentLength > GRAPH_INPUT_LIMITS.maxBytes) {
-    throw inputError(
-      'document exceeds the 10 MiB byte limit',
-      GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
-    );
+  const rawContentLength = response.headers.get('content-length');
+  if (rawContentLength !== null && /^\s*\d+\s*$/.test(rawContentLength)) {
+    const contentLength = Number(rawContentLength);
+    if (!Number.isSafeInteger(contentLength) || contentLength > maxBytes) {
+      throw documentTooLarge();
+    }
   }
-  return readResponseTextWithinByteLimit(response);
+  return readResponseTextWithinByteLimit(response, maxBytes);
 }
 
 /**
  * The actual browser file-loading orchestration. Dependencies are injected so
  * the pre-read boundary can be exercised without creating a UI graph.
  */
-export function loadLocalGraphInput(file, handlers) {
+export function loadLocalGraphInput(file, maxBytes, handlers) {
   const { createReader, onStart, parseAndRender, onRejected, onError, onComplete } = handlers;
   try {
-    assertLocalFileWithinByteLimit(file);
+    assertLocalFileWithinByteLimit(file, maxBytes);
   } catch (error) {
     onRejected(error);
     return false;
@@ -157,11 +168,11 @@ export function loadLocalGraphInput(file, handlers) {
 }
 
 /** The actual browser URL-loading orchestration, with an injectable fetch. */
-export async function loadUrlGraphInput(url, handlers) {
+export async function loadUrlGraphInput(url, maxBytes, handlers) {
   const { fetchImpl, onStart, parseAndRender, onError, onComplete } = handlers;
   try {
     onStart();
-    const text = await fetchInputTextWithinByteLimit(url, fetchImpl);
+    const text = await fetchInputTextWithinByteLimit(url, maxBytes, fetchImpl);
     await parseAndRender(text);
     return true;
   } catch (error) {
@@ -326,8 +337,6 @@ function elementNamespace(qualifiedName, declarations, namespaceScopes) {
  * counts resource-bearing constructs and rejects DTD/entity declarations.
  */
 export function assertGraphMLWithinLimits(xmlText) {
-  assertInputWithinByteLimit(xmlText);
-
   const text = String(xmlText);
   const stack = [];
   const namespaceScopes = [];
@@ -627,6 +636,8 @@ export function parseGraphML(xmlText) {
       defaultValue: defaultElement && defaultElement.children.length === 0
         ? defaultElement.textContent
         : null,
+      ...(name === VISUAL_GROUPS_PROPERTY && ['graph', 'all'].includes(scope) && defaultElement?.children.length
+        ? { defaultComplex: true } : {}),
     };
     if (definition.defaultValue !== null) {
       validateScalar(definition, definition.defaultValue, 'default');
@@ -716,6 +727,7 @@ export function parseGraphML(xmlText) {
       if (definition.scope !== 'all' && definition.scope !== el.localName) {
         throw new Error(`GraphML key '${keyId}' cannot be used on ${el.localName} '${el.id}'`);
       }
+      if (el.localName === 'graph' && definition.name === VISUAL_GROUPS_PROPERTY) continue;
       if (seen.has(keyId)) throw new Error(`Duplicate GraphML data key '${keyId}' on ${el.localName} '${el.id}'`);
       seen.add(keyId);
       // Complex extension XML remains in sourceXml and is deliberately not flattened.
@@ -740,11 +752,10 @@ export function parseGraphML(xmlText) {
       // Save -> export -> reimport -> Create then produced a DIFFERENT sha256 from the one the
       // document names, with a 201 and a green pipeline -- the same failure mode as the asynchronous
       // starter overwrite, appearing one step later during the round trip.
-      // Named canonical fields (`description`, `classname`, `outcome`, `behavior`, `kind`, ...)
-      // are unaffected: they resolve through `dataVal`/`dataValByName` above, an independent DOM
-      // read with its own `.trim()`, never through this map. This trim only ever touched the
-      // generic UNKNOWN-property bag (`additionalProperties`, and now `source`/`language`), so
-      // removing it does not touch anything with its own defined whitespace handling.
+      // Every scalar <data> is represented here, including named canonical fields such as
+      // `description`, `classname`, `outcome`, `behavior`, and `kind`. The dedicated model fields
+      // below independently read those values with `dataVal`/`dataValByName` and normalize them;
+      // keeping this generic map raw preserves the authored value without changing that precedence.
       properties[name] = child.textContent;
       propertyTypes[name] = definition.type || 'string';
     }
@@ -1041,6 +1052,8 @@ export function parseGraphML(xmlText) {
   // validation (declared, unambiguous, scalar-typed) as everything else in this file -- no
   // graph-scope-specific parsing invented here.
   const graphProperties = simpleProperties(graphElement).properties;
+  const visualGroupsMetadata = readVisualGroupMetadataElement(graphElement, keyDefinitions, GRAPHML_NS);
+  if (visualGroupsMetadata) graphProperties[VISUAL_GROUPS_PROPERTY] = visualGroupsMetadata.raw;
 
   // Classified here, where the nodes an edge's classification depends on finally exist.
   // Done at parse as well as at render so that a caller reading the parsed document directly -- the
@@ -1049,7 +1062,8 @@ export function parseGraphML(xmlText) {
   // and returns the same object it is given, so `graphProperties` rides through untouched --
   // it must, since this is exactly the field a distracted conflict resolution here would drop.
   return classifyFailureRoutes(
-    { nodes, edges, nodeMap, format: 'graphml', sourceXml: xmlText, keyDefinitions, graphProperties });
+    { nodes, edges, nodeMap, format: 'graphml', sourceXml: xmlText, keyDefinitions, graphProperties,
+      ...(visualGroupsMetadata?.invalid ? { _visualGroupsMetadata: visualGroupsMetadata } : {}) });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1060,8 +1074,8 @@ export const GFY_MAX_WARN = 4000;   // warn + offer sampling above this threshol
 export const GFY_SAMPLE   = 3000;   // keep top-N hub nodes when sampling
 
 /** Detect file format from content and dispatch to the right parser. */
-export function detectAndParse(text, filename) {
-  assertInputWithinByteLimit(text);
+export function detectAndParse(text, filename, maxBytes) {
+  assertInputWithinByteLimit(text, maxBytes);
   const trimmed = text.trimStart();
   if (trimmed.startsWith('<')) return parseGraphML(text);
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {

@@ -2,8 +2,10 @@ package ai.ravenroot.api.persistence;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -62,6 +64,17 @@ import java.util.concurrent.CompletionStage;
  * successor, the runtime, CORE-03 and PERS-04 respectively.</p>
  */
 public interface ExecutionStore extends AutoCloseable {
+
+    /**
+     * Whether this view routes every managed mutation through the format-3 manifest authority.
+     * Raw adapters return {@code false}; a composition boundary may return {@code true} only when it
+     * also refuses unsupported atomic adapter seams instead of falling back to raw mutations.
+     *
+     * @return whether managed persistence authority protects every managed mutation
+     */
+    default boolean protectsManagedPersistence() {
+        return false;
+    }
 
     /**
      * Facilities this adapter honours. Static self-description, therefore synchronous;
@@ -149,6 +162,27 @@ public interface ExecutionStore extends AutoCloseable {
     CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch);
 
     /**
+     * Applies managed work under an exact, durably pinned persistence authority.
+     *
+     * <p>The authority belongs to {@link ExecutionBatch#key()} and identifies both the manifest
+     * digest and the generic payload capacity accepted for that execution. For creation, an adapter
+     * must validate the manifest and insert the process in the same transaction, so orphan cleanup
+     * cannot remove the manifest between those acts. For an existing process, fencing and a matching
+     * committed idempotency replay take precedence; before any new fold or effect, the adapter must
+     * validate the authority and require its capacity to equal the adapter's immutable live
+     * capacity. Implementations that cannot provide those guarantees must retain the default
+     * fail-closed response.</p>
+     *
+     * @param batch atomic set of managed persistence changes
+     * @param authority exact manifest and persistence capacity authorizing the batch
+     * @return updated durable aggregate after the authorized batch commits
+     */
+    default CompletionStage<StoredProcessInstance> applyManaged(
+            ExecutionBatch batch, ExecutionPersistenceAuthority authority) {
+        return unsupportedManagedOperation();
+    }
+
+    /**
      * Loads an already-validated aggregate.
      *
      * <p>Fails with {@link ExecutionStoreFailure.NotFound} when the instance is absent <em>or</em>
@@ -172,6 +206,21 @@ public interface ExecutionStore extends AutoCloseable {
  * @return acquired lease, or empty when another worker already owns it.
      */
     CompletionStage<LeaseHandle> claim(ExecutionKey key, String workerId, Duration ttl);
+
+    /**
+     * Claims one managed execution only after atomically validating the exact manifest authority
+     * for {@code key} and its equality with the adapter's immutable live capacity.
+     *
+     * @param key tenant-scoped execution to claim
+     * @param workerId stable identity of the claiming worker
+     * @param ttl duration for which the lease remains valid
+     * @param authority exact manifest and persistence capacity authorizing the claim
+     * @return acquired lease, or empty when another worker owns the execution
+     */
+    default CompletionStage<LeaseHandle> claimManaged(ExecutionKey key, String workerId, Duration ttl,
+                                                      ExecutionPersistenceAuthority authority) {
+        return unsupportedManagedOperation();
+    }
 
 /**
  * Extends a held lease. Fails with {@link ExecutionStoreFailure.LeaseLost} if it was already lost.
@@ -238,6 +287,26 @@ public interface ExecutionStore extends AutoCloseable {
                                                         Duration leaseTtl);
 
     /**
+     * Atomically claims pending work only among the explicitly verified execution keys.
+     *
+     * <p>Every map key must belong to {@code tenantId}. The adapter revalidates each authority in
+     * the claim transaction. An empty map means that no key is eligible and must return an empty
+     * result; it must never fall through to an unfiltered claim.</p>
+     *
+     * @param tenantId tenant whose verified executions may be claimed
+     * @param workerId stable identity of the claiming worker
+     * @param limit maximum work items to claim
+     * @param leaseTtl duration for which each new lease remains valid
+     * @param verified exact persistence authority for every eligible execution key
+     * @return claimed work among the verified executions
+     */
+    default CompletionStage<List<PendingWork>> claimPendingWorkAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            Map<ExecutionKey, ExecutionPersistenceAuthority> verified) {
+        return unsupportedManagedOperation();
+    }
+
+    /**
      * Claims up to {@code limit} timers of {@code tenantId} that are due on the <em>store's</em> clock.
      *
      * <p>There is deliberately no {@code dueTimers(now, limit)}: a caller-supplied clock would
@@ -258,6 +327,51 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<List<PendingWork.TimerDue>> claimDueTimers(String tenantId, String workerId, int limit,
                                                                Duration leaseTtl);
+
+    /**
+     * Atomically claims due timers only among the explicitly verified execution keys, with the
+     * same tenant, authority-revalidation, and empty-map semantics as
+     * {@link #claimPendingWorkAmong(String, String, int, Duration, Map)}.
+     *
+     * @param tenantId tenant whose verified timers may be claimed
+     * @param workerId stable identity of the claiming worker
+     * @param limit maximum due timers to claim
+     * @param leaseTtl duration for which each new lease remains valid
+     * @param verified exact persistence authority for every eligible execution key
+     * @return claimed due timers among the verified executions
+     */
+    default CompletionStage<List<PendingWork.TimerDue>> claimDueTimersAmong(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            Map<ExecutionKey, ExecutionPersistenceAuthority> verified) {
+        return unsupportedManagedOperation();
+    }
+
+    /**
+     * Reads one bounded, deterministic page of keys that may yield claimable work, without claiming
+     * it. The page is tenant-scoped and ordered by process UUID. The cursor is the last process UUID
+     * inspected; callers pass it back to make progress past incompatible executions. An empty
+     * {@link ManagedClaimCandidatePage#nextAfter()} means the scan reached the end. Keys that appear
+     * after a page is read wait for a later sweep, and a subsequent atomic {@code claim*Among} call
+     * rechecks authority, eligibility, lease, and timer conditions.
+     *
+     * @param tenantId tenant whose execution keys are scanned
+     * @param workerId stable identity of the worker that will claim candidates
+     * @param limit maximum candidate keys returned in one page
+     * @param leaseTtl requested lease duration used to prefilter candidates
+     * @param timersOnly whether only executions with due timers are eligible
+     * @param after cursor naming the last process UUID inspected, or empty for the first page
+     * @return deterministic page of candidate keys and its continuation cursor
+     */
+    default CompletionStage<ManagedClaimCandidatePage> managedClaimCandidates(
+            String tenantId, String workerId, int limit, Duration leaseTtl,
+            boolean timersOnly, java.util.Optional<UUID> after) {
+        return unsupportedManagedOperation();
+    }
+
+    private static <T> CompletionStage<T> unsupportedManagedOperation() {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                ExecutionStoreFailure.invalid("this adapter does not support managed persistence authority")));
+    }
 
     /**
      * Acknowledges a claimed work item so it is not redelivered. This is the write-back half of the
@@ -351,6 +465,342 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<Long> purgeExpiredIdempotencyRecords(String tenantId);
 
+    // ---------------------------------------------------------------- durable handlers
+
+    /**
+     * Reads one registered handler of this instance, or empty when the instance holds no handler
+     * with that identity (PERS-05).
+     *
+     * <p>Empty is an <em>answer</em>, not a failure, for the reason
+     * {@link #lookupIdempotency(String, String, java.time.Instant)} already gives: absence is the
+     * ordinary outcome of asking about a handler that has not been registered, and modelling the
+     * common path as a thrown exception would make every caller wrap a catch to learn it may
+     * proceed. A handler belonging to another tenant is indistinguishable from an absent one, so the
+     * store cannot be used as a cross-tenant existence oracle.</p>
+     *
+     * <p>A terminal handler is still returned. It is the evidence a duplicate or late trigger is
+     * refused against and the record an operator reads to see who resolved a human task.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @param handlerId the stable handler id used to identify the requested resource.
+     * @return stored handler, or empty when this instance has none with that identity.
+     */
+    default CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
+        return handlersUnsupported();
+    }
+
+    /**
+     * Resolves the single <em>live</em> handler of {@code tenantId} registered under
+     * {@code handlerName} for {@code correlationKey}, or empty when there is none (PERS-05).
+     *
+     * <p>This is the lookup an inbound trigger performs, and it is the reason a correlation key is
+     * unique per {@code (tenantId, name, correlationKey)} among handlers that are not terminal: a
+     * trigger carries a business identity and must resolve to exactly one handler, deterministically.
+     * Terminal handlers are excluded so that a correlation key becomes reusable once the wait it
+     * named is over.</p>
+     *
+     * <p>Tenant-scoped as its first parameter, like every other operation that does not already carry
+     * an {@link ExecutionKey}: the trigger arrives knowing a tenant and a business key and does not
+     * yet know which process instance it belongs to — finding that out is precisely what this call is
+     * for. A cross-tenant trigger therefore reads as empty rather than as a denial, which is
+     * {@link ExecutionKey}'s own rule and is what keeps a probe for another tenant's correlation keys
+     * from succeeding as a side channel.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @param handlerName opaque handler name presented by the trigger.
+     * @param correlationKey business identity presented by the trigger.
+     * @return the single live handler for that key, or empty when none is waiting.
+     */
+    default CompletionStage<Optional<DurableHandler>> findHandler(String tenantId, String handlerName,
+                                                                  String correlationKey) {
+        return handlersUnsupported();
+    }
+
+    /**
+     * Lists every handler registered against one instance, live and terminal, in registration order
+     * (PERS-05).
+     *
+     * <p>Exposed because without it the retention of terminal handlers is unverifiable by the
+     * conformance suite and undiagnosable by an operator, who would otherwise have to guess a handler
+     * identity in order to ask about it — the same reason {@link #leases(String)} and
+     * {@link #journalRetainedFrom(String)} exist.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @return handlers of this instance in registration order, empty when it has none.
+     */
+    default CompletionStage<List<DurableHandler>> handlers(ExecutionKey key) {
+        return handlersUnsupported();
+    }
+
+    /**
+     * The failed stage every handler operation returns when this adapter does not declare
+     * {@link StoreCapability#DURABLE_HANDLERS}.
+     *
+     * <p>These four operations are {@code default} rather than abstract deliberately. PERS-05 is
+     * additive to a port that adapters — including out-of-tree ones — have already implemented, and
+     * abstract methods would turn a new capability into a breaking change to every existing adapter.
+     * The default is not silence: it is a declared, classified refusal, which is the same discipline
+     * {@link #purgeExpiredIdempotencyRecords(String)} applies to
+     * {@link StoreCapability#IDEMPOTENCY_PURGE}. An adapter that overrides these must declare the
+     * capability, and one that declares it must override all of them.</p>
+     * @param <T> result type of the operation being refused.
+     * @return stage already failed with {@link ExecutionStoreFailure.CapabilityNotSupported}.
+     */
+    private static <T> CompletionStage<T> handlersUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.DURABLE_HANDLERS)));
+        return refused;
+    }
+
+    // ---------------------------------------------------------------- durable tool approvals
+
+    /**
+     * Reads one tool approval without exposing another tenant's existence.
+     *
+     * @param key tenant and process scope
+     * @param approvalId approval to load
+     * @return approval when it exists in the supplied scope
+     */
+    default CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                            UUID approvalId) {
+        return toolApprovalsUnsupported();
+    }
+
+    /**
+     * Lists tool approvals retained for one process in registration order.
+     *
+     * @param key tenant and process scope
+     * @return immutable approval snapshot list
+     */
+    default CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return toolApprovalsUnsupported();
+    }
+
+    /**
+     * Loads this process's durable agent authority ledger, when registered.
+     *
+     * @param key tenant and process scope
+     * @return current budget when registered
+     */
+    default CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        if (!supports(StoreCapability.AGENT_AUTHORITY_BUDGETS)) {
+            return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                    new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
+        }
+        return java.util.concurrent.CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    /**
+     * Reads the store-global agent-authority control epoch.
+     *
+     * @return current durable control state
+     */
+    default CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
+    }
+
+    /**
+     * Atomically advances the store-global control state from the exact expected snapshot.
+     *
+     * @param expectedState state required for the compare-and-set
+     * @param expectedEpoch epoch required for the compare-and-set
+     * @param targetState target state
+     * @return newly committed control snapshot
+     */
+    default CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
+    }
+
+    /** Additive fail-closed default for adapters that have not implemented tool approvals. */
+    private static <T> CompletionStage<T> toolApprovalsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.TOOL_APPROVALS)));
+        return refused;
+    }
+
+    // ---------------------------------------------------------------- durable human tasks
+
+    /**
+     * Largest page the tenant-scoped human-task inbox will return.
+     *
+     * @return positive implementation limit.
+     */
+    default int maxHumanTaskPageSize() {
+        return HumanTaskPolicy.DEFAULTS.inboxMaxPageSize();
+    }
+
+    /**
+     * Largest embedded-confirmation attention page this adapter materializes.
+     *
+     * @return positive implementation limit.
+     */
+    default int maxHumanTaskAttentionPageSize() {
+        return HumanTaskPolicy.DEFAULTS.confirmation().attentionMaxPageSize();
+    }
+
+    /**
+     * Largest complete per-node attention-count projection this adapter materializes.
+     *
+     * @return positive implementation limit.
+     */
+    default int maxHumanTaskAttentionNodeCounts() {
+        return HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_NODE_COUNTS;
+    }
+
+    /**
+     * Stable adapter capacity for a durable Human Task response.
+     *
+     * <p>This is separate from {@link #maxPayloadBytes()} because a Human Task pins its response
+     * contract when it is registered. An adapter may keep a smaller general execution-payload
+     * budget, but this capacity must cover both newly accepted policy values and every older pinned
+     * task it can reopen.</p>
+     *
+     * @return positive encoded-response byte capacity.
+     */
+    default int maxHumanTaskResponsePayloadBytes() {
+        return maxPayloadBytes();
+    }
+
+    /**
+     * Reads a task by opaque identity without exposing another tenant's task.
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param taskId opaque task identity.
+     * @return stage yielding the tenant-owned task, or empty when absent.
+     */
+    default CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return humanTasksUnsupported();
+    }
+
+    /**
+     * Lists one deterministic, bounded page from a tenant's human-task inbox.
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param query bounded inbox query.
+     * @return stage yielding one deterministic page.
+     */
+    default CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return humanTasksUnsupported();
+    }
+
+    /**
+     * Lists authorized actionable embedded Human Tasks in one exact durable runtime context.
+     *
+     * <p>Implementations must apply tenant isolation, context filters and current caller authority
+     * before counts, paging or projection. A cursor is an immutable ordering boundary and must not
+     * be resolved by looking up the task that originally produced it.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param query exact bounded context query.
+     * @param authorization current caller authority used before projection.
+     * @return stage yielding one safe authorized page and authoritative counts.
+     */
+    default CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
+    /**
+     * Finds one currently actionable embedded Human Task from its durable identity and generation.
+     *
+     * <p>The adapter must apply tenant and current-action authorization before constructing the safe
+     * projection. Absent, terminal, stale-generation and unauthorized rows all return empty so this
+     * recovery path cannot be used as a task-existence oracle.</p>
+     *
+     * @param tenantId authenticated tenant scope.
+     * @param locator exact task and generation retained by the client.
+     * @param authorization authenticated actor, roles and scopes.
+     * @return an authorized safe row, or empty without disclosing why it is unavailable.
+     */
+    default CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
+    // ---------------------------------------------------------------- durable execution pauses
+
+    /**
+     * Reads one durable operator hold without exposing another tenant's existence.
+     *
+     * <p>Empty is an answer rather than a failure, exactly as it is for a handler: asking whether a
+     * traversal is held is the ordinary question, and the ordinary answer is that it is not.</p>
+     *
+     * @param key the owning process instance.
+     * @param pauseId the hold identity.
+     * @return stage yielding the stored hold, or empty when this instance has none with that identity.
+     */
+    default CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                                UUID pauseId) {
+        return executionPausesUnsupported();
+    }
+
+    /**
+     * Lists every hold recorded against one process instance, held and settled, in commit order.
+     *
+     * <p>Held and settled together, for the reason {@link #handlers(ExecutionKey)} lists both: the
+     * retention of settled holds is otherwise unverifiable by the conformance suite and
+     * undiagnosable by an operator, who cannot ask about a hold identity nobody told them.</p>
+     *
+     * @param key the owning process instance.
+     * @return stage yielding this instance's holds in commit order, empty when it has none.
+     */
+    default CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return executionPausesUnsupported();
+    }
+
+    /**
+     * Resolves the single <em>held</em> hold of {@code tenantId} over {@code traversalId}.
+     *
+     * <p>This is the lookup that answers "is this traversal still paused" after a restart, and it is
+     * the reason a traversal may carry at most one hold that is not terminal: a resume presents a
+     * traversal id and must resolve to exactly one hold, deterministically, in a process that was
+     * not running when the hold was taken. Settled holds are excluded so a traversal that was
+     * resumed and paused again resolves to its current hold rather than its history.</p>
+     *
+     * <p>Tenant-scoped as its first parameter, like every other operation that does not already
+     * carry an {@link ExecutionKey}: an operator asking about a traversal knows a tenant and a
+     * traversal id and does not yet know the process instance. A traversal of another tenant reads
+     * as empty rather than as a denial, so this is not a cross-tenant existence oracle.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param traversalId the traversal being asked about.
+     * @return stage yielding the traversal's current hold, or empty when it is not held.
+     */
+    default CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                     UUID traversalId) {
+        return executionPausesUnsupported();
+    }
+
+    /** Additive fail-closed default for adapters that do not implement durable holds. */
+    private static <T> CompletionStage<T> executionPausesUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_PAUSES)));
+        return refused;
+    }
+
+    /** Additive fail-closed default for adapters that do not implement human tasks. */
+    private static <T> CompletionStage<T> humanTasksUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.HUMAN_TASKS)));
+        return refused;
+    }
+
+    /** Additive fail-closed default for adapters without the complete confirmation contract. */
+    private static <T> CompletionStage<T> humanTaskConfirmationsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(
+                        StoreCapability.HUMAN_TASK_CONFIRMATIONS)));
+        return refused;
+    }
+
     // ---------------------------------------------------------------- event journal and outbox
 
     /**
@@ -402,6 +852,20 @@ public interface ExecutionStore extends AutoCloseable {
  * @return earliest journal offset still retained for the tenant.
      */
     CompletionStage<Long> journalRetainedFrom(String tenantId);
+
+    /**
+     * Opens exclusive source checkpoint/inbox ownership, scoped to tenant and namespace.
+     * The default refuses: process-local synchronization cannot establish shared-store ownership.
+     * Implementations must retain ownership through every admitted asynchronous write, including
+     * cancelled or timed-out calls, and release it on process death within their supported topology.
+     * @param tenantId owning tenant
+     * @param namespace stable source identity, independent of a transient deployment ID
+     * @return exclusive store handle
+     * @throws UnsupportedOperationException when safe ownership is unavailable
+     */
+    default SourceCheckpointStore openSourceCheckpointStore(String tenantId, String namespace) {
+        throw new UnsupportedOperationException("exclusive source checkpoints are unavailable");
+    }
 
     /**
      * Reads a publisher destination's durable position. A destination that has never delivered
@@ -511,6 +975,348 @@ public interface ExecutionStore extends AutoCloseable {
  * @return number of journal records removed by compaction.
      */
     CompletionStage<Long> compactJournal(String tenantId);
+
+    // ---------------------------------------------------------------- durable execution inventory
+
+    /**
+     * The largest page {@link #listProcessInstances(String, ProcessInventoryQuery)} will return. Static
+     * self-description, therefore synchronous.
+     *
+     * <p>Declared rather than enforced silently, because the alternative is clamping: a store that
+     * quietly reduced a caller's limit would return a short page that is indistinguishable from the
+     * last page, and a caller paginating on "fewer rows than I asked for means I am done" would stop
+     * early and never learn it. An over-limit request is rejected with
+     * {@link ExecutionStoreFailure.InvalidRequest} instead, and this is the number that says what the
+     * limit is before the rejection happens.</p>
+     * @return the maximum page size this adapter accepts.
+     */
+    int maxInventoryPageSize();
+
+    /**
+     * How long a terminal process instance is retained before
+     * {@link #purgeExpiredProcessInstances(String)} may remove it. Static self-description, therefore
+     * synchronous.
+     *
+     * <p>The counterpart of {@link #journalRetention()} for instances, and declared for the same
+     * reason: it is the window inside which a completed or failed execution is still discoverable, and
+     * an operator or an audit caller needs to read that bound rather than discover it as a missing row
+     * during an investigation. Adapters that never prune still answer, because an inventory that is
+     * never pruned retains everything and its bound is honestly unbounded.</p>
+     * @return the retention window applied to terminal instances.
+     */
+    Duration terminalRetention();
+
+    /**
+     * Lists one page of {@code tenantId}'s durable process instances, ordered by
+     * {@code (createdAt descending, processInstanceId descending)}.
+     *
+     * <h4>Determinism, and what a scan deliberately does not see</h4>
+     * <p>Both components of the sort key are immutable for the life of a row, so a row cannot move
+     * between pages while a scan is under way. Work created after the scan started sorts <em>before</em>
+     * page one and is therefore not returned by that scan; that is the cost of a stable cursor and it
+     * is chosen deliberately over an ordering on {@code updatedAt}, which would let an updated row jump
+     * the cursor and be returned twice, or fall behind it and be skipped — silently, in both
+     * directions. Terminal work expiring mid-scan removes rows the scan has not reached yet, which is
+     * a short page rather than a hole, and {@link ProcessInventoryPage#retainedFrom()} says so.</p>
+     *
+     * <h4>Rejections</h4>
+     * <p>Fails with {@link ExecutionStoreFailure.InvalidRequest} when the limit is not positive, when
+     * it exceeds {@link #maxInventoryPageSize()}, when the cursor does not decode or was minted for
+     * another tenant, and when the query is self-contradictory — a status filter naming only terminal
+     * statuses while excluding terminal rows. Each of those returns nothing under a lenient reading,
+     * and an empty page that means "your request was wrong" is indistinguishable from one that means
+     * "there is none". Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#PROCESS_INVENTORY} is declared.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @param query the page to return: filters, cursor and limit.
+     * @return one deterministic page of the tenant's process instances.
+     */
+    CompletionStage<ProcessInventoryPage> listProcessInstances(String tenantId, ProcessInventoryQuery query);
+
+    /**
+     * Reads one instance's inventory row directly, without a scan.
+     *
+     * <p><strong>Empty is the answer for an instance that does not exist and for one that belongs to
+     * another tenant, and the two are indistinguishable by design</strong> — the same rule
+     * {@link #load(ExecutionKey)} follows, for the same reason: a distinguishable denial would make the
+     * store a cross-tenant existence oracle, and a caller could enumerate another tenant's instance ids
+     * through the difference. It is also empty for an instance whose retention window elapsed; a caller
+     * that needs to tell that case apart compares against
+     * {@link #inventoryRetainedFrom(String)} rather than against a second failure channel.</p>
+     *
+     * <p>Absence is an empty value and not a failure, because it is the ordinary outcome of a lookup
+     * and modelling the ordinary outcome as a thrown exception would put a catch block on the common
+     * path. A stored row that no longer reconstructs into a legal aggregate is a different matter and
+     * still fails with {@link ExecutionStoreFailure.Corrupted}, so a malformed row is never silently
+     * dropped from a listing or misread as a well-formed one.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @return the instance's inventory row, or empty when it is absent or not visible to the key's tenant.
+     */
+    CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key);
+
+    /**
+     * Lists every traversal of one instance, in {@code position} order.
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.NotFound} when the instance is absent <em>or</em> not
+     * visible to the key's tenant — indistinguishable, exactly as {@link #load(ExecutionKey)} is. An
+     * instance with no traversals yet is a different answer and is an empty list, because it exists and
+     * the honest report of its contents is that there are none.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @return the instance's traversals, in insertion order.
+     */
+    CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key);
+
+    /**
+     * The per-tenant inventory retention floor: the <strong>latest retention deadline this tenant has
+     * actually crossed</strong>. Every terminal instance whose deadline is strictly after this instant
+     * is still present; one whose deadline is at or before it may have been purged. Monotonically
+     * non-decreasing, never retreating, and {@link java.time.Instant#MIN} until something is purged.
+     *
+     * <h4>The floor is measured in deadlines, not in end instants</h4>
+     * <p>It lives in the same space the purge decides in — the {@code retainedUntil} that
+     * {@link #findProcessInstance(ExecutionKey)} publishes for every terminal row — and that is the
+     * point: a floor expressed in a different space than the predicate needs a conversion, and the
+     * conversion is exactly where an off-by-one or an inverted bound hides. It also matches
+     * {@link #forgottenBefore(String)}, which is stated in its records' {@code expiresAt} rather than
+     * in when they were written. A caller holding an execution it once read compares that row's own
+     * {@code retainedUntil}; one that never read the row derives the deadline from the instant the
+     * execution ended plus {@link #terminalRetention()}, both of which are published.</p>
+     *
+     * <h4>Latest, not earliest, and the boundary is exclusive</h4>
+     * <p>The guarantee runs in the direction "everything past this is still here", so the floor must
+     * sit at or beyond every boundary a purge crossed. Publishing the <em>earliest</em> deadline
+     * removed breaks it as soon as one run removes two rows whose deadlines are further apart than the
+     * retention window: the later row is gone and sits after the published floor, so a caller following
+     * this rule concludes that a genuinely completed execution never existed — the ambiguity inverted
+     * into the unsafe direction, which is the opposite of what this method is for. A run that removes
+     * exactly one row is the degenerate case where earliest and latest coincide, so no single-row test
+     * can tell the two apart.</p>
+     *
+     * <p>The boundary is exclusive because collection is inclusive: a row is purged when its deadline
+     * is at or before the store's now, so the row sitting exactly on the floor is precisely one that
+     * was removed. This is one of the store's non-uniform boundary conventions and is stated here on
+     * its own merits rather than assumed to match a neighbour's.</p>
+     *
+     * <p>The counterpart of {@link #forgottenBefore(String)} and {@link #journalRetainedFrom(String)},
+     * and it exists for the identical reason: it is what turns an absent row from an ambiguity into an
+     * answer. Without it a caller cannot distinguish an instance that never existed from one that
+     * expired by policy, and those call for opposite actions — investigate a bad identifier, or accept
+     * a completed execution that aged out.</p>
+     *
+     * <p>Asynchronous because it reads stored state.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the earliest instant from which this tenant's terminal inventory is complete.
+     */
+    CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId);
+
+    /**
+     * Removes {@code tenantId}'s terminal instances whose {@link #terminalRetention()} window has
+     * elapsed, returning how many were removed, and advances that tenant's
+     * {@link #inventoryRetainedFrom(String)} floor — and <strong>only</strong> that tenant's.
+     *
+     * <p><strong>Nothing is ever deleted implicitly on a read.</strong> Retention is an explicit
+     * operator or scheduler action, exactly like {@link #purgeExpiredIdempotencyRecords(String)} and
+     * {@link #compactJournal(String)}, so a listing has no side effect and two identical listings
+     * return identical pages. A read that pruned would make the inventory's own contents depend on who
+     * happened to look at it.</p>
+     *
+     * <p>Only <em>terminal</em> rows are eligible. A non-terminal instance is never removed however old
+     * it is, because age is not evidence that work is finished: pruning a long-running or interrupted
+     * instance would destroy the very row an operator needs in order to discover that it is stuck.</p>
+     *
+     * <p>A tenant that lost nothing must keep its floor exactly where it was, at
+     * {@link java.time.Instant#MIN} if it has never purged. Advancing a floor for a tenant that forgot
+     * nothing would report a retention gap that does not exist, and a periodic purge job would report
+     * one on every tick.</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#INVENTORY_RETENTION} is declared — its absence is declared, never
+     * silent.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the number of expired terminal instances removed.
+     */
+    CompletionStage<Long> purgeExpiredProcessInstances(String tenantId);
+
+    // ------------------------------------------------------------- durable execution results
+
+    /**
+     * How long a recorded terminal result is retained before
+     * {@link #purgeExpiredExecutionResults(String)} may remove it, and before a read stops offering
+     * its payload. Static self-description, therefore synchronous.
+     *
+     * <p>{@link Duration#ZERO} means this adapter retains no results at all, which is what an adapter
+     * that does not declare {@link StoreCapability#EXECUTION_RESULTS} reports. That is an honest
+     * answer rather than a placeholder: the bound a caller needs is "how long is this readable", and
+     * for a store that never writes one the answer is no time at all.</p>
+     *
+     * <p><strong>It must not exceed {@link #terminalRetention()}.</strong> A result names the process
+     * instance and the traversal it belongs to, so a result outliving its instance would name a row
+     * the inventory can no longer describe — the same dangling reference {@code terminalRetention}
+     * already refuses to create against {@link #journalRetention()}, in the same direction. Adapters
+     * enforce the ordering in configuration rather than discovering it as a missing parent row.</p>
+     *
+     * @return the retention window applied to recorded terminal results.
+     */
+    default Duration executionResultRetention() {
+        return Duration.ZERO;
+    }
+
+    /**
+     * The largest stored result payload this adapter accepts, in bytes. Static self-description,
+     * therefore synchronous.
+     *
+     * <p>Defaults to {@link #maxPayloadBytes()} because a result payload is a payload and a second
+     * unrelated number would be one more thing to keep in step for no gain. It is published
+     * separately all the same, because a caller projecting a result needs to know the cap it will be
+     * measured against before it builds the record, and
+     * {@link DurableExecutionResult#project(Object, int)} takes exactly this number.</p>
+     *
+     * @return the byte cap above which a result payload is recorded as
+     *         {@link ResultPayloadState#WITHHELD}.
+     */
+    default int maxExecutionResultPayloadBytes() {
+        return maxPayloadBytes();
+    }
+
+    /**
+     * Records one terminal execution's canonical result, or accepts that it is already recorded.
+     *
+     * <h4>Idempotent by refusal, never by overwrite</h4>
+     * <p>Three outcomes, and no fourth. No record exists: it is written, with
+     * {@link DurableExecutionResult#retainedUntil()} assigned from the store's clock and
+     * {@link #executionResultRetention()}. A record exists whose
+     * {@link DurableExecutionResult#fingerprint()} equals this one's: nothing is written and the
+     * stored record is returned, so a duplicate terminal event is free and a retry after an
+     * ambiguous write is safe. A record exists with a different fingerprint: the call fails with
+     * {@link ExecutionStoreFailure.ExecutionResultNotRecordable}, which carries both digests, and
+     * the committed outcome is left exactly as it was.</p>
+     *
+     * <p>The third case is a refusal and not a merge on purpose. A terminal outcome is the answer
+     * other systems have already been given; replacing it would make a result that was read once and
+     * a result read again disagree, with nothing in either read to say which is current. Refusing
+     * makes the disagreement visible at the write, where it can still be diagnosed.</p>
+     *
+     * <h4>Rejections</h4>
+     * <p>Fails with {@link ExecutionStoreFailure.NotFound} when the record names a process instance
+     * this tenant does not have — a result whose instance does not exist is a dangling row, and it is
+     * refused rather than written and later found orphaned. Fails with
+     * {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#EXECUTION_RESULTS} is declared.</p>
+     *
+     * @param result the record to store, built with {@link DurableExecutionResult#of}, which is
+     *               where the payload boundary is crossed.
+     * @return the stored record, carrying the deadline the store assigned.
+     */
+    default CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return executionResultsUnsupported();
+    }
+
+    /**
+     * Records against the immutable payload limit accepted for this execution. Adapters that can
+     * honor historical pins override this method; an older adapter fails closed when its current
+     * limit differs rather than silently substituting it.
+     *
+     * @param result execution result to store
+     * @param resolvedMaximumPayloadBytes payload ceiling pinned for the execution
+     * @return stored execution result after enforcing the pinned ceiling
+     */
+    default CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
+        if (resolvedMaximumPayloadBytes < 1) {
+            throw new IllegalArgumentException("resolvedMaximumPayloadBytes must be positive");
+        }
+        if (resolvedMaximumPayloadBytes != maxExecutionResultPayloadBytes()) {
+            return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                    ExecutionStoreFailure.invalid("the execution store cannot honor the pinned result limit")));
+        }
+        return recordExecutionResult(result);
+    }
+
+    /**
+     * Reads one traversal's recorded result.
+     *
+     * <p><strong>Empty is the answer for a traversal that has no result, for one belonging to another
+     * tenant, and for one whose record has been purged, and the three are indistinguishable by
+     * design</strong> — the rule {@link #load(ExecutionKey)} and
+     * {@link #findProcessInstance(ExecutionKey)} already follow, for the reason they follow it: a
+     * distinguishable denial would make the store a cross-tenant existence oracle. A caller that
+     * needs to separate "purged by policy" from "never existed" compares against
+     * {@link #executionResultsRetainedFrom(String)}.</p>
+     *
+     * <p>A record whose retention deadline has passed on the store's clock is still returned, with
+     * its payload dropped and {@link ResultPayloadState#EXPIRED} in its place. That is a real,
+     * reachable state rather than a formality, because retention here is an explicit purge and never
+     * a side effect of a read: between the deadline and the next purge the record is present and its
+     * payload is not, which is exactly the answer "it ran, here is how it ended, its output is
+     * gone".</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#EXECUTION_RESULTS} is declared.</p>
+     *
+     * @param tenantId    the stable tenant id used to identify the requested resource.
+     * @param traversalId the caller-facing execution id to read.
+     * @return the recorded result, or empty when it is absent, purged, or not visible to this tenant.
+     */
+    default CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                 UUID traversalId) {
+        return executionResultsUnsupported();
+    }
+
+    /**
+     * The per-tenant result retention floor: the <strong>latest retention deadline this tenant has
+     * actually crossed</strong>. Every recorded result whose deadline is strictly after this instant
+     * is still present; one whose deadline is at or before it may have been purged. Monotonically
+     * non-decreasing, never retreating, and {@link java.time.Instant#MIN} until something is purged.
+     *
+     * <p>The exact shape of {@link #inventoryRetainedFrom(String)}, deliberately, including its two
+     * non-obvious halves. It is the <em>latest</em> deadline crossed rather than the earliest,
+     * because the guarantee runs in the direction "everything past this is still here" — publishing
+     * the earliest breaks as soon as one run removes two rows whose deadlines are further apart than
+     * the retention window, and a caller following the rule then concludes a genuinely completed
+     * execution never existed. And the boundary is <em>exclusive</em>, because collection is
+     * inclusive: a row is purged when its deadline is at or before the store's now, so the row
+     * sitting exactly on the floor is precisely one that was removed.</p>
+     *
+     * <p>Asynchronous because it reads stored state.</p>
+     *
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the earliest instant from which this tenant's recorded results are complete.
+     */
+    default CompletionStage<java.time.Instant> executionResultsRetainedFrom(String tenantId) {
+        return executionResultsUnsupported();
+    }
+
+    /**
+     * Removes {@code tenantId}'s recorded results whose {@link #executionResultRetention()} window
+     * has elapsed, returning how many were removed, and advances that tenant's
+     * {@link #executionResultsRetainedFrom(String)} floor — and <strong>only</strong> that tenant's.
+     *
+     * <p><strong>Nothing is ever deleted implicitly on a read</strong>, exactly as
+     * {@link #purgeExpiredProcessInstances(String)} and {@link #compactJournal(String)} state.
+     * Retention is an explicit operator or scheduler action, so two identical reads return identical
+     * answers and a result's lifetime does not depend on who happened to look at it.</p>
+     *
+     * <p>A tenant that lost nothing must keep its floor exactly where it was, at
+     * {@link java.time.Instant#MIN} if it has never purged. Advancing a floor for a tenant that
+     * forgot nothing would report a retention gap that does not exist, and a periodic purge job would
+     * report one on every tick.</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#EXECUTION_RESULTS} is declared.</p>
+     *
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the number of expired results removed.
+     */
+    default CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return executionResultsUnsupported();
+    }
+
+    private static <T> CompletionStage<T> executionResultsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_RESULTS)));
+        return refused;
+    }
 
     /**
      * Releases what the <em>process</em> owns and <strong>no lease</strong>.

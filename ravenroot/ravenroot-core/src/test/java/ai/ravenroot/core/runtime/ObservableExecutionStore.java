@@ -10,6 +10,10 @@ import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryPage;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 
@@ -202,6 +206,84 @@ final class ObservableExecutionStore implements ExecutionStore {
     @Override
     public Duration journalRetention() {
         return delegate.journalRetention();
+    }
+
+    // The durable inventory is pure delegation here. This double exists to perturb one
+    // named operation; forwarding everything else unchanged is what keeps the perturbation the only
+    // difference between it and the store it wraps.
+
+    @Override
+    public int maxInventoryPageSize() {
+        return delegate.maxInventoryPageSize();
+    }
+
+    @Override
+    public Duration terminalRetention() {
+        return delegate.terminalRetention();
+    }
+
+    @Override
+    public CompletionStage<ProcessInventoryPage> listProcessInstances(String tenantId,
+                                                                      ProcessInventoryQuery query) {
+        return delegate.listProcessInstances(tenantId, query);
+    }
+
+    @Override
+    public CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key) {
+        return delegate.findProcessInstance(key);
+    }
+
+    @Override
+    public CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key) {
+        return delegate.listTraversals(key);
+    }
+
+    @Override
+    public CompletionStage<Instant> inventoryRetainedFrom(String tenantId) {
+        return delegate.inventoryRetainedFrom(tenantId);
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+        return delegate.purgeExpiredProcessInstances(tenantId);
+    }
+
+    // Forwarded rather than left on the interface defaults. Every method below is a `default` that
+    // refuses with CapabilityNotSupported, so a decorator that publishes the delegate's capabilities
+    // while inheriting them would declare EXECUTION_RESULTS and then refuse every result call -- a
+    // wrapper that behaves unlike the store it wraps, in exactly the direction that makes a passing
+    // test evidence about nothing.
+
+    @Override
+    public java.time.Duration executionResultRetention() {
+        return delegate.executionResultRetention();
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return delegate.maxExecutionResultPayloadBytes();
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.persistence.DurableExecutionResult> recordExecutionResult(
+            ai.ravenroot.api.persistence.DurableExecutionResult result) {
+        return delegate.recordExecutionResult(result);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionResult>>
+            loadExecutionResult(String tenantId, java.util.UUID traversalId) {
+        return delegate.loadExecutionResult(tenantId, traversalId);
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return delegate.executionResultsRetainedFrom(tenantId);
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return delegate.purgeExpiredExecutionResults(tenantId);
     }
 
     @Override

@@ -8,17 +8,16 @@ import java.util.Optional;
  * What a deployment hands an {@link InboundSource} at every lifecycle hook (ADR 0021 D2
  * follow-up).
  *
- * <h2>Security-relevant: this is the only channel, and it is one-way</h2>
- * <p>A plugin never constructs one of these. Every implementation of this interface is a private
- * inner class of the {@link GraphDeployment} that owns it, so the only way a third-party
- * {@code NodeBehavior} ever sees a {@link SecurityContext} paired with a live {@link TrustedIngress}
- * is as the parameter this interface's methods are called with. There is no factory, no builder and
- * no static accessor anywhere in the SDK a plugin depends on that produces one; nothing in
- * {@code ai.ravenroot.api.node} returns a {@link TrustedIngress} or a {@link SecurityContext} at all.
- * A plugin that could mint its own context — or reach a {@link TrustedIngress} belonging to a
- * deployment it was never given — would manufacture deployment authority rather than receive it.
- * {@code createSource} receiving this as a parameter,
- * rather than a source reaching out to obtain one, is the whole of the enforcement.</p>
+ * <h2>Security-relevant: runtime provenance, identity and lifetime are the authority</h2>
+ * <p>This public interface can be implemented by plugins, tests and embedding code, but implementing
+ * it does not mint runtime authority. The core issues the production context passed to
+ * {@code createSource}, registers that exact object for its package, deployment, node and activation
+ * generation, and recognizes it by object identity at managed-service boundaries. Unregistered,
+ * foreign and retired contexts are refused. Its ingress and request/reply facades are likewise bound
+ * to that source activation, so retaining a context after stop, rollback, restart or undeploy cannot
+ * reach the replacement generation. A caller-created implementation may carry a
+ * {@link SecurityContext} or a {@link TrustedIngress} of its own, but the core never treats those
+ * values as proof that it issued the context.</p>
  *
  * <h2>Reporting health is the source's job, not a poll</h2>
  * <p>Nothing here is asked "are you healthy?" on a timer. A source that detects it can no longer do
@@ -48,8 +47,11 @@ public interface InboundSourceContext {
     SecurityContext identity();
 
 /**
- * This deployment's trusted inbound surface. See {@link TrustedIngress} before deciding when to ack.
- * @return deployment-owned inbound facade available to this source.
+ * This source activation's trusted inbound surface. It may be a distinct facade from
+ * {@link GraphDeployment#ingress()} because it is fenced to this context's activation and lifetime;
+ * after the context is retired it refuses new work. The caller still supplies the
+ * {@link SecurityContext} required by {@link TrustedIngress}.
+ * @return source-scoped, deployment-owned inbound facade available to this source.
  */
     TrustedIngress ingress();
 

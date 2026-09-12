@@ -18,6 +18,7 @@ import ai.ravenroot.api.payload.PayloadException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.programming.ArtifactLifecycleAuditSink;
 import ai.ravenroot.api.programming.GeneratedArtifact;
 import ai.ravenroot.api.programming.ProgramDeadlineExceededException;
@@ -78,8 +79,9 @@ import java.util.Set;
 
 /** Lightweight JDK HTTP adapter. Business use cases remain in RavenrootApplication. */
 public final class RavenrootServer implements AutoCloseable {
-    private static final int MAX_GRAPH_BYTES = GraphMlLimits.DEFAULTS.maxBytes();
-    private static final int MAX_PROGRAM_BYTES = 1024 * 1024;
+    private static final String EVENT_SOURCE_HEADER = "X-Ravenroot-Event-Source";
+    private static final String EVENT_CONTINUITY_HEADER = "X-Ravenroot-Event-Continuity";
+    private static final String EVENT_SCHEMA_VERSION_HEADER = "X-Ravenroot-Event-Schema-Version";
     /** The same ceiling {@code AssistantTurn.TURN_LIMITS} parses under, applied before parsing. */
     private static final int MAX_ASSISTANT_TURN_BYTES =
             ai.ravenroot.server.assistant.AssistantTurn.TURN_LIMITS.maxEncodedBytes();
@@ -236,30 +238,17 @@ public final class RavenrootServer implements AutoCloseable {
      * {@link IllegalStateException} if it dies instead of being answered.
      * {@code JdkHeaderCapOrderingHazardTest} demonstrates the hazard exactly this way -- a fresh JVM,
      * a foreign {@code HttpServer.create()} before the first {@code RavenrootServer} -- rather than
-     * assuming it, because a test that instead relied on this suite's own class-loading order would
-     * pass or fail depending on which test class Surefire happens to run first, which is exactly the
-     * failure mode being guarded against. This module's own test suite closes, at the source, every
-     * foreign {@code HttpServer.create()} known to run inside its own shared Surefire JVM -- two sites.
-     * {@code security/TestOidcProvider.java}'s own static initializer touches this class
-     * ({@code Class.forName(RavenrootServer.class.getName())}, which the JLS specifies to run this
-     * class's static initializer, unlike a bare {@code .class} literal) before creating its own foreign
-     * {@code HttpServer}, and {@code JdkHeaderCapConnectFailureClassificationTest} does the same before
-     * its own. A third {@code HttpServer.create()} lives in this module, in
-     * {@code JdkHeaderCapOrderingHazardBoundary}, but it is not a third instance of this hazard: it runs
-     * in its own freshly launched {@code java} process (see {@code JdkHeaderCapOrderingHazardTest}), never
-     * inside this module's shared Surefire JVM, so it cannot lose or win this race at all. Each in-process
-     * guard wins its own race regardless of which test class Surefire schedules first, but the guard is
-     * per call site, not general: it does nothing for a {@code HttpServer.create()} added to this module's
-     * test sources tomorrow without the same guard -- see
-     * {@code docs/qa/what-the-testkits-do-not-cover.md} for the measurement behind that limit. Setting the
-     * property on the {@code java} command line -- guaranteed to apply before any class loads, so it
-     * cannot lose this race at all -- is not available the same way here: {@code ravenroot-server/pom.xml}
-     * cannot add its own {@code -D} to the forked test JVM (Maven's argLine composition is reactor-wide,
-     * by design; see {@code scripts/check_argline.py}), which is why an in-process guard at each known
-     * foreign call site, plus this runtime verification as the general-purpose backstop, is what covers
-     * this module's own suite. The command-line recommendation is real for a deployment, though, where it
-     * is this class's own process and nothing stops an operator from setting it: see
-     * {@code docs/deployment.md}.</p>
+     * assuming it. The server module's Maven tests avoid that race generally: its POM populates the
+     * parent's composable {@code ravenroot.surefire.extraArgLine}, so the reused Surefire JVM starts with
+     * the property before any test class can load. The same boundary test reads that actual JVM input
+     * argument, forwards only the observed token to a fresh process, creates a bare zero-context server
+     * first, and brackets the live cap with real requests. Existing call-site initialization guards stay
+     * as defense for nonstandard direct test launches, but the fork argument is the module-wide invariant.
+     *
+     * <p>This runtime verification remains the general-purpose backstop for embedders, whose process may
+     * create an unrelated {@code HttpServer} before this class. A deployment should set the property on
+     * its {@code java} command line, where it is guaranteed to apply before any class loads; see the
+     * deployment documentation.</p>
      *
      * <p>Read, not overwritten, if already set: an operator's own {@code -D} takes precedence, and so
      * does a test that needs a different value -- {@code JdkHeaderCapOrderingHazardTest} also covers
@@ -311,6 +300,22 @@ public final class RavenrootServer implements AutoCloseable {
     private final AtomicBoolean started = new AtomicBoolean();
     /** Installed only by the composition root before {@link #start()}; packages never see {@code HttpServer}. */
     private ai.ravenroot.server.ingress.ManagedIngressRegistry managedIngress;
+    /** Installed only by the packaged composition before start; absent hosts expose no approval authority. */
+    private ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
+    private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
+    /** Installed only when the execution store supports first-class durable human tasks. */
+    private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
+    private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
+    private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
+    private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
+    /** Installed only by the packaged composition when durable agent authority is enabled. */
+    /**
+     * The manifest projection, or {@code null} when this host composes no manifest store and the
+     * route below answers {@code 501} rather than inventing a state it cannot observe.
+     */
+    private ai.ravenroot.core.manifest.ExecutionManifestService executionManifests;
+    private ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentAuthorityControl;
+    private ai.ravenroot.api.application.ExecutionControlAuditSink agentAuthorityControlAudit;
     /**
      * Injectable: the narrower constructors below default to the stdout
      * {@link StructuredGraphMlRejectionLogger}/{@code StructuredPayloadRejectionLogger}, but
@@ -328,6 +333,11 @@ public final class RavenrootServer implements AutoCloseable {
      * being merely loosenable.
      */
     private final PayloadLimits payloadLimits = PayloadLimits.DEFAULTS;
+    /** One graph-document byte budget for raw and structured HTTP admission. */
+    private final int graphDocumentMaxBytes;
+    /** Typed representation returned to the connected authoring client. */
+    private final ServedConfiguration servedConfiguration;
+    private final ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits;
     /** Populated by every {@link #apiContext} call; see {@link #registeredRoutes()}. */
     private final List<ai.ravenroot.server.spec.RouteDescriptor> registeredRoutes = new java.util.ArrayList<>();
     /**
@@ -357,10 +367,6 @@ public final class RavenrootServer implements AutoCloseable {
      */
     private final ai.ravenroot.server.credential.CredentialAdmission credentialAdmission;
 
-    /** Client address resolved once per exchange, so post-authentication audits can name the caller. */
-    private static final String CLIENT_ADDRESS = RavenrootServer.class.getName() + ".clientAddress";
-    private static final String CLIENT_FORWARDED = RavenrootServer.class.getName() + ".clientForwarded";
-
     public RavenrootServer(RavenrootApplication application, int port) {
         this(application, new InetSocketAddress(InetAddress.getLoopbackAddress(), port), null,
                 new RejectingAuthenticator());
@@ -379,6 +385,21 @@ public final class RavenrootServer implements AutoCloseable {
     public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
                            RequestAuthenticator authenticator) {
         this(application, address, uiDirectory, authenticator, true);
+    }
+
+    /** Embedded-host seam that keeps the safe defaults while supplying an explicit graph limit. */
+    public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
+                           RequestAuthenticator authenticator, GraphMlLimits graphMlLimits) {
+        this(application, address, uiDirectory, true, authenticator, defaultHttpSecurity(address.getPort()),
+                Clock.systemUTC(), new DefaultAuthorizationService(new StructuredAuthorizationLogger(System.out)),
+                defaultRateLimiter(), new StructuredArtifactLifecycleLogger(System.out),
+                ai.ravenroot.server.readiness.ReadinessGate.engineOnly(() -> application.status().state()),
+                ai.ravenroot.server.readiness.ReadinessConfiguration.defaults().httpStopDelay(),
+                new StructuredGraphMlRejectionLogger(System.out),
+                new StructuredPayloadRejectionLogger(System.out), event -> { },
+                ai.ravenroot.server.readiness.ReadinessConfiguration.defaults().drainGracePeriod(),
+                event -> { }, ai.ravenroot.server.assistant.AssistantService.fromEnvironment(Map.of()),
+                ai.ravenroot.server.embed.EmbedBrowserConfiguration.disabled(), null, graphMlLimits);
     }
 
     public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
@@ -658,6 +679,33 @@ public final class RavenrootServer implements AutoCloseable {
                     ai.ravenroot.server.assistant.AssistantService assistant,
                     ai.ravenroot.server.embed.EmbedBrowserConfiguration embedConfiguration,
                     ai.ravenroot.server.credential.UserCredentialStore credentials) {
+        this(application, address, uiDirectory, artifactDualControl, authenticator, httpSecurity, clock,
+                authorization, rateLimiter, artifactAudit, readinessGate, httpStopDelay, graphMlRejections,
+                payloadRejections, decisionalEvents, drainBound, controlAudit, assistant,
+                embedConfiguration, credentials, GraphMlLimits.DEFAULTS);
+    }
+
+    /**
+     * Explicit embedded-host seam for the operator-owned graph-document budget. The shipped
+     * composition root supplies the same instance to core and durable persistence.
+     */
+    public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
+                    boolean artifactDualControl, RequestAuthenticator authenticator,
+                    HttpSecurityConfiguration httpSecurity, Clock clock,
+                    AuthorizationService authorization, RateLimiter rateLimiter,
+                    ArtifactLifecycleAuditSink artifactAudit,
+                    ai.ravenroot.server.readiness.ReadinessGate readinessGate, Duration httpStopDelay,
+                    GraphMlRejectionAuditSink graphMlRejections, PayloadRejectionAuditSink payloadRejections,
+                    java.util.function.Consumer<ExecutionEvent> decisionalEvents, Duration drainBound,
+                    ai.ravenroot.api.application.ExecutionControlAuditSink controlAudit,
+                    ai.ravenroot.server.assistant.AssistantService assistant,
+                    ai.ravenroot.server.embed.EmbedBrowserConfiguration embedConfiguration,
+                    ai.ravenroot.server.credential.UserCredentialStore credentials,
+                    GraphMlLimits graphMlLimits) {
+        this.programAuthoringLimits = java.util.Objects.requireNonNull(application, "application")
+                .programAuthoringLimits();
+        this.servedConfiguration = ServedConfiguration.from(graphMlLimits, programAuthoringLimits);
+        this.graphDocumentMaxBytes = servedConfiguration.graphDocumentMaxBytes();
         this.assistant = java.util.Objects.requireNonNull(assistant, "assistant");
         // Null is a real composition, not an oversight: a host that composes no credential
         // store gets no /v1/credentials context at all (see the registration below) and a permissive
@@ -681,6 +729,7 @@ public final class RavenrootServer implements AutoCloseable {
                 java.util.Objects.requireNonNull(artifactAudit, "artifactAudit"), artifactDualControl,
                 AuthorizedRavenrootApplication.DEFAULT_EXECUTION_OWNERSHIP_LIMIT,
                 java.util.Objects.requireNonNull(controlAudit, "controlAudit"));
+        this.agentAuthorityControlAudit = controlAudit;
         this.authenticator = java.util.Objects.requireNonNull(authenticator, "authenticator");
         this.httpSecurity = java.util.Objects.requireNonNull(httpSecurity, "httpSecurity");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
@@ -703,7 +752,8 @@ public final class RavenrootServer implements AutoCloseable {
         decisionalEventSubscription = application.subscribeToExecutionEvents(decisionalEvents);
         // /health and the static UI are the only unauthenticated surfaces, which makes them the cheapest
         // amplification targets on the server. They are limited too, by address, for exactly that reason.
-        server.createContext("/health", publicContext(exchange -> json(exchange, 200, "{\"status\":\"UP\"}")));
+        server.createContext("/health", publicContext((exchange, httpContext) ->
+                json(exchange, 200, "{\"status\":\"UP\"}")));
         // Deliberately a SEPARATE route from /health, not a redefinition of it.
         // /health is wired as the LIVENESS probe in every deployment surface (Docker HEALTHCHECK,
         // Kubernetes, Helm) -- a liveness probe that starts failing on a readiness condition (store
@@ -712,9 +762,12 @@ public final class RavenrootServer implements AutoCloseable {
         // address-based limiting as /health because it is unauthenticated for the same reason and is
         // exactly as cheap an amplification target.
         server.createContext("/ready", publicContext(this::ready));
+        apiContext("/v1/configuration", this::configuration);
         apiContext("/v1/status", this::status);
         apiContext("/v1/runtime", this::runtime);
+        apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
+        apiContext("/v1/human-tasks", this::humanTasks);
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
@@ -761,20 +814,20 @@ public final class RavenrootServer implements AutoCloseable {
             var embed = new ai.ravenroot.server.embed.EmbedBrowserHttpHandler(embedConfiguration);
             // S2S only: authentication applies, general browser CORS deliberately does not.
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.CREATE_PATH,
-                    publicContext(exchange -> {
+                    publicContext((exchange, httpContext) -> {
                         if (!ai.ravenroot.server.embed.EmbedBrowserHttpHandler.requireExactPath(exchange,
                                 ai.ravenroot.server.embed.EmbedBrowserHttpHandler.CREATE_PATH)) return;
                         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
                         exchange.getResponseHeaders().set("Pragma", "no-cache");
-                        protectedRequest(embed::createSession).handle(exchange);
+                        protectedRequest(embed::createSession).handle(exchange, httpContext);
                     }));
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH,
-                    publicContext(exchange -> {
+                    publicContext((exchange, httpContext) -> {
                         if (!ai.ravenroot.server.embed.EmbedBrowserHttpHandler.requireExactPath(exchange,
                                 ai.ravenroot.server.embed.EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH)) return;
                         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
                         exchange.getResponseHeaders().set("Pragma", "no-cache");
-                        protectedRequest(embed::acknowledgeParent).handle(exchange);
+                        protectedRequest(embed::acknowledgeParent).handle(exchange, httpContext);
                     }));
             // Browser routes perform their own exact viewer Origin/Sec-Fetch checks and emit no CORS.
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.LAUNCH_PATH,
@@ -784,7 +837,8 @@ public final class RavenrootServer implements AutoCloseable {
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.PROJECTION_PATH,
                     publicContext(embed::projection));
         }
-        server.createContext("/", publicContext(new StaticUiHandler(uiDirectory)));
+        var staticUi = new StaticUiHandler(uiDirectory);
+        server.createContext("/", publicContext((exchange, ignored) -> staticUi.handle(exchange)));
     }
 
     /**
@@ -794,7 +848,7 @@ public final class RavenrootServer implements AutoCloseable {
      * with no table entry fails fast, here, rather than registering silently undocumented — the
      * mechanism that makes "adding a route without the table doesn't register it" true.
      */
-    private void apiContext(String path, com.sun.net.httpserver.HttpHandler handler) {
+    private void apiContext(String path, HttpRequestContext.Handler handler) {
         var descriptor = ai.ravenroot.server.spec.RouteTable.ALL.stream()
                 .filter(candidate -> candidate.path().equals(path) && candidate.registersContext())
                 .findFirst()
@@ -812,14 +866,14 @@ public final class RavenrootServer implements AutoCloseable {
                         || (!candidate.registersContext() && candidate.path().startsWith(path + "/")))
                 .flatMap(candidate -> candidate.methods().stream())
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        server.createContext(path, publicContext(exchange -> {
+        server.createContext(path, publicContext((exchange, httpContext) -> {
             if (httpSecurity.browserOrigins().handlePreflight(exchange, contextMethods)) {
                 return;
             }
             if (!httpSecurity.browserOrigins().acceptActual(exchange)) {
                 return;
             }
-            protectedRequest(handler).handle(exchange);
+            protectedRequest(handler).handle(exchange, httpContext);
         }));
     }
 
@@ -845,38 +899,38 @@ public final class RavenrootServer implements AutoCloseable {
      * is request shape examined, and only after all of that does CORS or authentication run — both of
      * which are more expensive than any check above them.</p>
      */
-    private com.sun.net.httpserver.HttpHandler publicContext(com.sun.net.httpserver.HttpHandler handler) {
-        return secured(exchange -> {
+    private com.sun.net.httpserver.HttpHandler publicContext(HttpRequestContext.Handler handler) {
+        return secured((exchange, httpContext) -> {
             var resolution = rateLimiter.resolveClient(exchange.getRemoteAddress(), exchange.getRequestHeaders());
             if (resolution instanceof TrustedProxyConfiguration.Resolution.Rejected rejected) {
                 // A forwarded chain that contradicts the configured topology is never downgraded to a
                 // peer-keyed fallback: that would collapse every client behind the proxy onto one key.
-                refuse(exchange, RateLimitDecision.rejected(400, rejected.code(), "request"), null, false);
+                refuse(exchange, httpContext,
+                        RateLimitDecision.rejected(400, rejected.code(), "request"));
                 return;
             }
             var client = (TrustedProxyConfiguration.Resolution.Client) resolution;
-            exchange.setAttribute(CLIENT_ADDRESS, client.address());
-            exchange.setAttribute(CLIENT_FORWARDED, client.forwarded());
+            var clientContext = httpContext.withClient(client.address(), client.forwarded());
 
             var addressBudget = rateLimiter.checkAddress(client.address());
             if (!addressBudget.isAllowed()) {
-                refuse(exchange, addressBudget, client.address(), client.forwarded());
+                refuse(exchange, clientContext, addressBudget);
                 return;
             }
             var shape = rateLimiter.checkRequestShape(exchange.getRequestHeaders(),
                     exchange.getRequestURI().getRawQuery());
             if (!shape.isAllowed()) {
-                refuse(exchange, shape, client.address(), client.forwarded());
+                refuse(exchange, clientContext, shape);
                 return;
             }
-            handler.handle(exchange);
+            handler.handle(exchange, clientContext);
         });
     }
 
-    private com.sun.net.httpserver.HttpHandler secured(com.sun.net.httpserver.HttpHandler handler) {
+    private com.sun.net.httpserver.HttpHandler secured(HttpRequestContext.Handler handler) {
         return exchange -> {
             httpSecurity.responseHeaders().apply(exchange.getResponseHeaders());
-            handler.handle(exchange);
+            handler.handle(exchange, HttpRequestContext.create());
         };
     }
 
@@ -887,13 +941,11 @@ public final class RavenrootServer implements AutoCloseable {
      * request, so it is bounded by construction rather than by a length check. {@code Retry-After} is
      * sent in delta-seconds whenever the decision carries retry advice.</p>
      */
-    private void refuse(HttpExchange exchange, RateLimitDecision decision, String clientAddress,
-                        boolean forwarded) throws IOException {
-        AuthenticatedPrincipal principal =
-                exchange.getAttribute(AuthenticatedPrincipalAttribute.NAME) instanceof AuthenticatedPrincipal known
-                        ? known : null;
+    private void refuse(HttpExchange exchange, HttpRequestContext httpContext,
+                        RateLimitDecision decision) throws IOException {
+        AuthenticatedPrincipal principal = httpContext.principal().orElse(null);
         rateLimiter.audit().record(new RateLimitAuditEvent(clock.instant(),
-                AuthenticatedPrincipalAttribute.requestId(exchange), clientAddress, forwarded,
+                httpContext.requestId(), httpContext.clientAddress(), httpContext.forwarded(),
                 principal == null ? RateLimitAuditEvent.UNKNOWN : principal.tenantId(),
                 principal == null ? RateLimitAuditEvent.UNKNOWN : principal.subject(),
                 exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
@@ -902,21 +954,7 @@ public final class RavenrootServer implements AutoCloseable {
             exchange.getResponseHeaders().set("Retry-After", Long.toString(decision.retryAfterSeconds()));
         }
         fail(exchange, decision.status(), ErrorEnvelope.ofServerCode(decision.code(),
-                ErrorCode.REQUEST_LIMIT_EXCEEDED, AuthenticatedPrincipalAttribute.requestId(exchange)));
-    }
-
-    /** Refusal for a path that has already resolved the client address onto the exchange. */
-    private void refuse(HttpExchange exchange, RateLimitDecision decision) throws IOException {
-        refuse(exchange, decision, clientAddress(exchange), forwarded(exchange));
-    }
-
-    private static String clientAddress(HttpExchange exchange) {
-        return exchange.getAttribute(CLIENT_ADDRESS) instanceof String address
-                ? address : RateLimitAuditEvent.UNKNOWN;
-    }
-
-    private static boolean forwarded(HttpExchange exchange) {
-        return exchange.getAttribute(CLIENT_FORWARDED) instanceof Boolean flag && flag;
+                ErrorCode.REQUEST_LIMIT_EXCEEDED, httpContext.requestId()));
     }
 
     /** Limits enforced with the defaults when no limiter is supplied. */
@@ -929,8 +967,14 @@ public final class RavenrootServer implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             throw new IllegalStateException("server is already started");
         }
-        server.start();
-        verifyRequestHeaderCapTookEffect();
+        try {
+            if (interactionWebSockets != null) interactionWebSockets.start();
+            server.start();
+            verifyRequestHeaderCapTookEffect();
+        } catch (RuntimeException failure) {
+            if (interactionWebSockets != null) interactionWebSockets.close();
+            throw failure;
+        }
     }
 
     /**
@@ -943,7 +987,85 @@ public final class RavenrootServer implements AutoCloseable {
             throw new IllegalStateException("managed ingress must be installed before server start");
         }
         managedIngress = java.util.Objects.requireNonNull(registry, "registry");
-        registry.bind(server, handler -> publicContext(exchange -> protectedRequest(handler).handle(exchange)));
+        registry.bindContextual(server, handler -> publicContext(protectedRequest(handler)));
+    }
+
+    /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
+    synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals) {
+        installToolApprovals(approvals, ignored -> { });
+    }
+
+    synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals,
+                                           java.util.function.Consumer<String> sweep) {
+        if (started.get()) throw new IllegalStateException("tool approvals must be installed before start");
+        if (toolApprovals != null) throw new IllegalStateException("tool approvals are already installed");
+        toolApprovals = java.util.Objects.requireNonNull(approvals, "approvals");
+        toolApprovalSweep = java.util.Objects.requireNonNull(sweep, "sweep");
+    }
+
+    /** Installs the transport-neutral human-task authority before listener start. */
+    synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
+                                        java.util.function.Consumer<String> sweep) {
+        installHumanTasks(tasks, sweep, HumanTaskPolicy.DEFAULTS);
+    }
+
+    synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
+                                        java.util.function.Consumer<String> sweep,
+                                        HumanTaskPolicy policy) {
+        if (started.get()) throw new IllegalStateException("human tasks must be installed before start");
+        if (humanTasks != null) throw new IllegalStateException("human tasks are already installed");
+        humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
+        humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
+        humanTaskPolicy = java.util.Objects.requireNonNull(policy, "policy");
+    }
+
+    /** Installs the independently bound durable interaction listener before either listener starts. */
+    synchronized void installInteractionWebSockets(
+            ai.ravenroot.server.interaction.InteractionWebSocketConfiguration configuration) {
+        if (started.get()) throw new IllegalStateException("interaction WebSocket must be installed before start");
+        if (interactionWebSockets != null) throw new IllegalStateException("interaction WebSocket is already installed");
+        if (humanTasks == null) throw new IllegalStateException("interaction WebSocket requires durable human tasks");
+        if (!authorizedApplication.durableEventJournalAvailable()) {
+            throw new IllegalStateException("interaction WebSocket requires a durable event journal");
+        }
+        interactionWebSockets = new ai.ravenroot.server.interaction.InteractionWebSocketServer(
+                java.util.Objects.requireNonNull(configuration, "configuration"), authorizedApplication,
+                authenticator, httpSecurity.browserOrigins(), httpSecurity.sseAuthenticationRevalidation(),
+                rateLimiter, humanTasks, humanTaskSweep, clock);
+    }
+
+    /**
+     * Installs the execution-manifest projection before listener start.
+     *
+     * <p>Installed rather than constructed, for the reason the tool-approval and human-task
+     * authorities are: a host that composes no manifest store must not have to name one, and every
+     * existing constructor must keep working unchanged.</p>
+     */
+    synchronized void installExecutionManifests(
+            ai.ravenroot.core.manifest.ExecutionManifestService manifests) {
+        if (started.get()) throw new IllegalStateException("execution manifests must be installed before start");
+        if (executionManifests != null) {
+            throw new IllegalStateException("execution manifests are already installed");
+        }
+        executionManifests = java.util.Objects.requireNonNull(manifests, "manifests");
+    }
+
+    /** Installs the authenticated store-global agent-authority control before listener start. */
+    synchronized void installAgentAuthorityControl(
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService control) {
+        if (started.get()) throw new IllegalStateException("agent authority control must be installed before start");
+        if (agentAuthorityControl != null) {
+            throw new IllegalStateException("agent authority control is already installed");
+        }
+        agentAuthorityControl = java.util.Objects.requireNonNull(control, "control");
+    }
+
+    /** Test seam that observes the same sanitized control events as the production audit trail. */
+    synchronized void installAgentAuthorityControl(
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService control,
+            ai.ravenroot.api.application.ExecutionControlAuditSink audit) {
+        installAgentAuthorityControl(control);
+        agentAuthorityControlAudit = java.util.Objects.requireNonNull(audit, "audit");
     }
 
     public int port() {
@@ -1199,29 +1321,29 @@ public final class RavenrootServer implements AutoCloseable {
                 + String.valueOf(cause).replace("\"", "'").replace("\n", " ") + "\"}");
     }
 
-    private com.sun.net.httpserver.HttpHandler protectedRequest(com.sun.net.httpserver.HttpHandler handler) {
-        return exchange -> {
+    private HttpRequestContext.Handler protectedRequest(HttpRequestContext.Handler handler) {
+        return (exchange, httpContext) -> {
+            AuthenticatedPrincipal principal;
             try {
-                var principal = authenticator.authenticate(exchange.getRequestHeaders());
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME, principal);
+                principal = authenticator.authenticate(exchange.getRequestHeaders());
             } catch (AuthenticationException denied) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
-                fail(exchange, ErrorCode.AUTHENTICATION_REQUIRED);
+                fail(exchange, httpContext, ErrorCode.AUTHENTICATION_REQUIRED);
                 return;
             }
+            var authenticatedContext = httpContext.withPrincipal(principal);
             // Tenant first, then principal within it. The tenant budget is what stops one tenant
             // starving the others; the principal budget is what stops one user draining its own tenant.
             // Either alone leaves a starvation path open, so both are charged.
-            var principal = AuthenticatedPrincipalAttribute.require(exchange);
-            var identityBudget = rateLimiter.checkIdentity(principal.tenantId(), principal.subject());
-            if (!identityBudget.isAllowed()) {
-                refuse(exchange, identityBudget);
-                return;
-            }
             try {
-                handler.handle(exchange);
+                var identityBudget = rateLimiter.checkIdentity(principal.tenantId(), principal.subject());
+                if (!identityBudget.isAllowed()) {
+                    refuse(exchange, authenticatedContext, identityBudget);
+                    return;
+                }
+                handler.handle(exchange, authenticatedContext);
             } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
-                fail(exchange, ErrorCode.ACCESS_DENIED);
+                fail(exchange, authenticatedContext, ErrorCode.ACCESS_DENIED);
             }
         };
     }
@@ -1234,8 +1356,8 @@ public final class RavenrootServer implements AutoCloseable {
      * response Kubernetes' readiness probe (and any conforming health-check client) already
      * interprets as "not ready", with no probe-specific contract to invent.
      */
-    private void ready(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void ready(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
         var report = readinessGate.evaluate();
@@ -1247,15 +1369,25 @@ public final class RavenrootServer implements AutoCloseable {
                 + report.state() + "\",\"dependencies\":{" + dependencies + "}}");
     }
 
-    private void status(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void status(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
-        var status = authorizedApplication.status(AuthenticatedPrincipalAttribute.requestContext(exchange));
+        var status = authorizedApplication.status(httpContext.applicationContext());
         json(exchange, 200, "{\"state\":\"" + escape(status.state()) + "\",\"executionEngine\":\""
                 + escape(status.executionEngine()) + "\",\"capabilities\":["
                 + status.capabilities().stream().sorted().map(value -> "\"" + escape(value) + "\"")
                 .collect(java.util.stream.Collectors.joining(",")) + "]}");
+    }
+
+    private void configuration(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
+            return;
+        }
+        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+        String tenantId = httpContext.requirePrincipal().tenantId();
+        json(exchange, 200, humanTasks != null && humanTasks.supportsConfirmations()
+                ? servedConfiguration.json(humanTaskPolicy, tenantId) : servedConfiguration.json(tenantId));
     }
 
     /**
@@ -1272,15 +1404,15 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code AssistantCredential}. {@code AssistantRouteTest#theProviderCredentialNeverReachesTheClientOrTheLog} plants a
      * distinctive value and greps this response — headers and body — for it.</p>
      */
-    private void assistantStatus(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void assistantStatus(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
         if (!assistant.offered()) {
             // The operator switched the service off. 404 rather than a 200 saying "off", because
             // `assistant-client.js` already maps 404 to `service-unavailable` -- the same answer it
             // gives for a build with no route at all, which is the same fact from the panel's side.
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         // Per author, not per deployment: in OAuth mode the credential belongs to an author, so "is
@@ -1288,7 +1420,7 @@ public final class RavenrootServer implements AutoCloseable {
         // principal, which is why this route being authenticated is load-bearing rather than
         // conventional.
         json(exchange, 200, assistant
-                .availability(AuthenticatedPrincipalAttribute.requestContext(exchange).subject())
+                .availability(httpContext.applicationContext().subject())
                 .toJson());
     }
 
@@ -1324,7 +1456,7 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code AssistantService#availability} report the operator's gap, so no Connect control is
      * offered. This is the guard for the client that asks anyway.</p>
      */
-    private void assistantConnection(HttpExchange exchange) throws IOException {
+    private void assistantConnection(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         if ("OPTIONS".equals(exchange.getRequestMethod())) {
             exchange.getResponseHeaders().set("Allow", "POST, GET, DELETE, OPTIONS");
             exchange.sendResponseHeaders(204, -1);
@@ -1332,17 +1464,17 @@ public final class RavenrootServer implements AutoCloseable {
             return;
         }
         if (!assistant.offered()) {
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         var connection = assistant.connection();
         if (connection == null) {
-            fail(exchange, ErrorCode.CONFLICT);
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
             return;
         }
-        String subject = AuthenticatedPrincipalAttribute.requestContext(exchange).subject();
+        String subject = httpContext.applicationContext().subject();
         switch (exchange.getRequestMethod()) {
-            case "POST" -> beginAssistantConnection(exchange, connection, subject);
+            case "POST" -> beginAssistantConnection(exchange, httpContext, connection, subject);
             case "GET" -> reportAssistantConnection(exchange, connection, subject);
             case "DELETE" -> {
                 connection.abandon(subject);
@@ -1351,12 +1483,12 @@ public final class RavenrootServer implements AutoCloseable {
             }
             default -> {
                 exchange.getResponseHeaders().set("Allow", "POST, GET, DELETE");
-                fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+                fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
             }
         }
     }
 
-    private void beginAssistantConnection(HttpExchange exchange,
+    private void beginAssistantConnection(HttpExchange exchange, HttpRequestContext httpContext,
             ai.ravenroot.server.assistant.oauth.AssistantConnection connection, String subject)
             throws IOException {
         ai.ravenroot.server.assistant.oauth.AssistantConnection.Prompt prompt;
@@ -1370,8 +1502,8 @@ public final class RavenrootServer implements AutoCloseable {
             // assistant failure.
             System.out.println("{\"event\":\"assistant.connection.failed\",\"failure\":\""
                     + refused.failure() + "\",\"correlationId\":\""
-                    + escape(AuthenticatedPrincipalAttribute.requestId(exchange)) + "\"}");
-            fail(exchange, ErrorCode.CONFLICT);
+                    + escape(httpContext.requestId()) + "\"}");
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
             return;
         }
         json(exchange, 200, "{\"userCode\":\"" + escape(prompt.userCode())
@@ -1421,23 +1553,23 @@ public final class RavenrootServer implements AutoCloseable {
      *       bounded reader, so neither a huge body nor a deeply nested one is materialised first.</li>
      * </ul>
      */
-    private void assistantMessages(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "POST")) {
+    private void assistantMessages(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "POST")) {
             return;
         }
         if (!assistant.offered()) {
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         if (!assistant.availability(
-                AuthenticatedPrincipalAttribute.requestContext(exchange).subject()).ready()) {
+                httpContext.applicationContext().subject()).ready()) {
             // Defensive: the panel disables its composer in every inert state, so reaching here means a
             // client sent anyway. Refused rather than composed -- nothing is sent to a provider.
             //
             // Per author for the same reason as the status route. Asking the deployment-level
             // question here refused every turn in an OAuth deployment, connected author or not,
             // because the deployment has no credential of its own to report on.
-            fail(exchange, ErrorCode.CONFLICT);
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
             return;
         }
         byte[] body;
@@ -1445,7 +1577,7 @@ public final class RavenrootServer implements AutoCloseable {
             body = input.readNBytes(MAX_ASSISTANT_TURN_BYTES + 1);
         }
         if (body.length > MAX_ASSISTANT_TURN_BYTES) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
         ai.ravenroot.server.assistant.AssistantTurn turn;
@@ -1457,10 +1589,10 @@ public final class RavenrootServer implements AutoCloseable {
             // The classified payload reason is deliberately collapsed to one wire code: an author
             // cannot act differently on DEPTH_LIMIT_EXCEEDED than on MALFORMED, and the classified
             // detail belongs in a server-side record rather than on the panel.
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
-        var outcome = assistant.send(AuthenticatedPrincipalAttribute.requestContext(exchange),
+        var outcome = assistant.send(httpContext.applicationContext(),
                 authorizedApplication, turn);
         switch (outcome) {
             case ai.ravenroot.server.assistant.AssistantOutcome.Reply reply ->
@@ -1468,7 +1600,7 @@ public final class RavenrootServer implements AutoCloseable {
             case ai.ravenroot.server.assistant.AssistantOutcome.Proposal proposal ->
                     json(exchange, 200, proposal.toJson());
             case ai.ravenroot.server.assistant.AssistantOutcome.Failure failure -> {
-                recordAssistantFailure(exchange, failure);
+                recordAssistantFailure(httpContext, failure);
                 // The reason travels on the response, not only in the log. `code` is coarse by design
                 // -- status-bearing, declared per route, rendered into the checked-in spec -- so seven
                 // reasons mapped onto four codes collapsed three distinctions, and the panel could not
@@ -1476,7 +1608,7 @@ public final class RavenrootServer implements AutoCloseable {
                 // vocabulary beside it, injectively.
                 ErrorCode code = assistantFailureCode(failure.reason());
                 fail(exchange, code.status(),
-                        ErrorEnvelope.of(code, AuthenticatedPrincipalAttribute.requestId(exchange))
+                        ErrorEnvelope.of(code, httpContext.requestId())
                                 .withAssistantReason(failure.reason().wireToken()));
             }
         }
@@ -1499,11 +1631,11 @@ public final class RavenrootServer implements AutoCloseable {
      * the reason name and the correlation id and <b>nothing derived from the provider's own
      * response</b>.</p>
      */
-    private void recordAssistantFailure(HttpExchange exchange,
+    private void recordAssistantFailure(HttpRequestContext httpContext,
                                         ai.ravenroot.server.assistant.AssistantOutcome.Failure failure) {
         System.out.println("{\"event\":\"assistant.turn.failed\",\"reason\":\""
                 + failure.reason().name() + "\",\"requestId\":\""
-                + escape(AuthenticatedPrincipalAttribute.requestId(exchange)) + "\"}");
+                + escape(httpContext.requestId()) + "\"}");
     }
 
     /**
@@ -1524,11 +1656,11 @@ public final class RavenrootServer implements AutoCloseable {
         };
     }
 
-    private void runtime(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void runtime(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
-        var snapshot = authorizedApplication.runtimeSnapshot(AuthenticatedPrincipalAttribute.requestContext(exchange));
+        var snapshot = authorizedApplication.runtimeSnapshot(httpContext.applicationContext());
         // activeNodeInstances counts arrivals in flight per node, not instances -- see
         // RuntimeSnapshot's own Javadoc. Kept under this wire name for compatibility.
         String nodes = snapshot.activeNodeInstances().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey())
@@ -1538,11 +1670,56 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"activeNodeInstances\":{" + nodes + "}}");
     }
 
-    private void nodeTypes(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void agentAuthorityControl(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "POST")) return;
+        String suffix = exchange.getRequestURI().getPath().substring("/v1/agent-authority".length());
+        if (agentAuthorityControl == null
+                || !("/trip".equals(suffix) || "/reset".equals(suffix))) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
-        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var context = httpContext.applicationContext();
+        authorizedApplication.authorizeAgentAuthorityControl(context);
+        boolean trip = "/trip".equals(suffix);
+        String action = trip ? "agent-authority-trip" : "agent-authority-reset";
+        auditAgentAuthorityControl(context, action,
+                ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition.ATTEMPT, "", true);
+        long epoch;
+        String state = trip ? "KILLED" : "ACTIVE";
+        try {
+            epoch = trip ? agentAuthorityControl.trip(context) : agentAuthorityControl.reset(context);
+        } catch (RuntimeException failure) {
+            auditAgentAuthorityControl(context, action,
+                    ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition.FAILED, "", false);
+            throw failure;
+        }
+        auditAgentAuthorityControl(context, action,
+                ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition.SUCCEEDED, state, false);
+        json(exchange, 200, "{\"state\":\"" + state + "\",\"epoch\":" + epoch + "}");
+    }
+
+    private void auditAgentAuthorityControl(
+            ai.ravenroot.api.security.RequestContext context, String action,
+            ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition disposition,
+            String detail, boolean required) {
+        var event = new ai.ravenroot.api.application.ExecutionControlAuditEvent(
+                clock.instant(), context.requestId(), context.subject(), context.tenantId(), action,
+                "agent-authority", "global", disposition, detail);
+        try {
+            agentAuthorityControlAudit.record(event);
+        } catch (RuntimeException unavailable) {
+            if (required) {
+                throw new ai.ravenroot.api.security.AuthorizationDeniedException(
+                        "agent authority control audit unavailable");
+            }
+        }
+    }
+
+    private void nodeTypes(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
+            return;
+        }
+        var context = httpContext.applicationContext();
         var sources = authorizedApplication.nodeTypeSources(context);
         String body = authorizedApplication.nodeTypes(context)
                 .stream().map(type -> nodeTypeJson(type, sources.get(type.behavior())))
@@ -1557,18 +1734,18 @@ public final class RavenrootServer implements AutoCloseable {
      * not implemented {@code ProgramRuntime#supportedLanguages()} -- and the client must render "no
      * languages available" rather than assume one.
      */
-    private void programLanguages(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void programLanguages(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
-        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var context = httpContext.applicationContext();
         String body = authorizedApplication.supportedProgramLanguages(context).stream()
                 .map(RavenrootServer::programLanguageJson)
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
         json(exchange, 200, body);
     }
 
-    private void programArtifacts(HttpExchange exchange) throws IOException {
+    private void programArtifacts(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         if ("OPTIONS".equals(exchange.getRequestMethod())) {
             exchange.getResponseHeaders().set("Allow", "GET, POST, OPTIONS");
             exchange.sendResponseHeaders(204, -1);
@@ -1578,7 +1755,7 @@ public final class RavenrootServer implements AutoCloseable {
         String path = exchange.getRequestURI().getPath();
         String suffix = path.substring("/v1/program-artifacts".length());
         if ((suffix.isEmpty() || suffix.equals("/")) && "GET".equals(exchange.getRequestMethod())) {
-            String body = authorizedApplication.programArtifacts(AuthenticatedPrincipalAttribute.requestContext(exchange))
+            String body = authorizedApplication.programArtifacts(httpContext.applicationContext())
                     .stream().map(RavenrootServer::artifactJson)
                     .collect(java.util.stream.Collectors.joining(",", "[", "]"));
             json(exchange, 200, body);
@@ -1587,41 +1764,41 @@ public final class RavenrootServer implements AutoCloseable {
         if (suffix.startsWith("/builds/") && "GET".equals(exchange.getRequestMethod())) {
             String buildId = suffix.substring("/builds/".length());
             if (buildId.isBlank() || buildId.contains("/")) {
-                fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                 return;
             }
-            observeProgramBuild(exchange, buildId);
+            observeProgramBuild(exchange, httpContext, buildId);
             return;
         }
         if (!"POST".equals(exchange.getRequestMethod())) {
-            fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+            fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
             return;
         }
         try {
             if (suffix.isEmpty() || suffix.equals("/")) {
-                createProgramArtifact(exchange);
+                createProgramArtifact(exchange, httpContext);
                 return;
             }
             if ("/build".equals(suffix)) {
-                buildProgramArtifacts(exchange);
+                buildProgramArtifacts(exchange, httpContext);
                 return;
             }
             if ("/approve-batch".equals(suffix)) {
-                approveProgramArtifacts(exchange);
+                approveProgramArtifacts(exchange, httpContext);
                 return;
             }
             String[] segments = suffix.split("/");
             if (segments.length != 3 || segments[1].isBlank() || segments[2].isBlank()) {
-                fail(exchange, ErrorCode.UNKNOWN_ARTIFACT_OPERATION);
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_ARTIFACT_OPERATION);
                 return;
             }
-            applyArtifactOperation(exchange, segments[1], segments[2]);
+            applyArtifactOperation(exchange, httpContext, segments[1], segments[2]);
         } catch (PayloadException rejection) {
-            failPayload(exchange, rejection);
+            failPayload(exchange, httpContext, rejection);
         } catch (IllegalArgumentException error) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException error) {
-            fail(exchange, ErrorCode.CONFLICT);
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
         } catch (java.util.concurrent.ExecutionException error) {
             Throwable cause = error.getCause() == null ? error : error.getCause();
             // Asynchronous artifact failures require classification beyond IllegalStateException. A
@@ -1629,10 +1806,10 @@ public final class RavenrootServer implements AutoCloseable {
             // compile is a validation outcome answered in validateProgramArtifact and never reaches
             // here. The deployment error therefore gets a status and code that identify it as such;
             // all other failures retain their existing meaning.
-            fail(exchange, artifactFailureCode(cause));
+            fail(exchange, httpContext, artifactFailureCode(cause));
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
         }
     }
 
@@ -1648,7 +1825,7 @@ public final class RavenrootServer implements AutoCloseable {
      * see that it exists; the tenant is carried too so that two deployments sharing a directory
      * service cannot see across each other even where a subject id repeats.</p>
      */
-    private void credentials(HttpExchange exchange) throws IOException {
+    private void credentials(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         if ("OPTIONS".equals(exchange.getRequestMethod())) {
             exchange.getResponseHeaders().set("Allow", "GET, POST, OPTIONS");
             exchange.sendResponseHeaders(204, -1);
@@ -1658,7 +1835,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (credentials == null || !"/v1/credentials".equals(exchange.getRequestURI().getPath())) {
             // No store composed: the same answer a client gets for a path this build does not serve.
             // See the registration site for why the condition lives here rather than there.
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         // Never cached, and said here rather than relied upon: the list carries the labels an author
@@ -1666,25 +1843,25 @@ public final class RavenrootServer implements AutoCloseable {
         // either. The same two headers the embed routes set, for the same reason.
         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
         exchange.getResponseHeaders().set("Pragma", "no-cache");
-        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var context = httpContext.applicationContext();
         try {
             switch (exchange.getRequestMethod()) {
                 case "GET" -> json(exchange, 200,
                         ai.ravenroot.server.credential.UserCredentialWire.writeCredentials(
                                 credentials.listFor(context.tenantId(), context.subject())));
-                case "POST" -> createCredential(exchange, context);
+                case "POST" -> createCredential(exchange, httpContext, context);
                 default -> {
                     exchange.getResponseHeaders().set("Allow", "GET, POST");
-                    fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+                    fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
                 }
             }
         } catch (PayloadException rejection) {
-            failPayload(exchange, rejection);
+            failPayload(exchange, httpContext, rejection);
         } catch (IllegalArgumentException error) {
             // The message is deliberately not echoed: one of the messages this reader can raise
             // names a field the caller sent, and the request body it was reading contained a
             // credential. This class has no signature that puts error text in a body -- see fail(..).
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
     }
 
@@ -1695,7 +1872,7 @@ public final class RavenrootServer implements AutoCloseable {
      * the structural reason the value cannot come back: {@code StoredCredential} has no component for
      * it, so there is no expression in this method that evaluates to the secret.</p>
      */
-    private void createCredential(HttpExchange exchange,
+    private void createCredential(HttpExchange exchange, HttpRequestContext httpContext,
                                   ai.ravenroot.api.security.RequestContext context)
             throws IOException, PayloadException {
         byte[] body;
@@ -1706,7 +1883,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (body.length
                 > ai.ravenroot.server.credential.UserCredentialWire.CREATE_LIMITS.maxEncodedBytes()) {
             // Bounded before parsing, as every other body on this server is.
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
         var request = ai.ravenroot.server.credential.UserCredentialWire.readCreate(body);
@@ -1725,37 +1902,37 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
-    private void createProgramArtifact(HttpExchange exchange) throws IOException {
+    private void createProgramArtifact(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         byte[] source;
         try (var input = exchange.getRequestBody()) {
-            source = input.readNBytes(MAX_PROGRAM_BYTES + 1);
+            source = input.readNBytes(programAuthoringLimits.maxSourceBytes() + 1);
         }
-        if (source.length > MAX_PROGRAM_BYTES) {
-            fail(exchange, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
+        if (source.length > programAuthoringLimits.maxSourceBytes()) {
+            fail(exchange, httpContext, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
             return;
         }
         var parameters = query(exchange);
         var metadata = new LinkedHashMap<String, String>();
         if (!parameters.getOrDefault("name", "").isBlank()) metadata.put("name", parameters.get("name"));
         var artifact = authorizedApplication.createProgramArtifact(
-                AuthenticatedPrincipalAttribute.requestContext(exchange),
+                httpContext.applicationContext(),
                 parameters.getOrDefault("language", "javascript"), new String(source, StandardCharsets.UTF_8),
                 metadata);
         json(exchange, 201, artifactJson(artifact));
     }
 
-    private void buildProgramArtifacts(HttpExchange exchange)
+    private void buildProgramArtifacts(HttpExchange exchange, HttpRequestContext httpContext)
             throws IOException, java.util.concurrent.ExecutionException, InterruptedException {
         byte[] body;
         try (var input = exchange.getRequestBody()) {
-            body = input.readNBytes(MAX_GRAPH_BYTES + 1);
+            body = input.readNBytes(programAuthoringLimits.maxBuildRequestBytes() + 1);
         }
-        if (body.length > MAX_GRAPH_BYTES) {
-            fail(exchange, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
+        if (body.length > programAuthoringLimits.maxBuildRequestBytes()) {
+            fail(exchange, httpContext, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
             return;
         }
-        var submission = ProgramBuildSubmission.read(body, payloadLimits);
-        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var submission = ProgramBuildSubmission.read(body, payloadLimits, programAuthoringLimits);
+        var context = httpContext.applicationContext();
         var programs = submission.programs().stream()
                 .map(program -> new ai.ravenroot.api.programming.ProgramBuildRequest(
                         program.nodeId(), program.language(), program.source(), program.testPayload()))
@@ -1766,45 +1943,45 @@ public final class RavenrootServer implements AutoCloseable {
                 programBuildSnapshotJson(build));
     }
 
-    private void observeProgramBuild(HttpExchange exchange, String buildId) throws IOException {
+    private void observeProgramBuild(HttpExchange exchange, HttpRequestContext httpContext, String buildId) throws IOException {
         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
         exchange.getResponseHeaders().set("Pragma", "no-cache");
         var build = authorizedApplication.observeProgramBuild(
-                AuthenticatedPrincipalAttribute.requestContext(exchange), buildId);
+                httpContext.applicationContext(), buildId);
         if (build.isEmpty()) {
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         var snapshot = build.orElseThrow();
         json(exchange, snapshot.terminal() ? 200 : 202, programBuildSnapshotJson(snapshot));
     }
 
-    private void approveProgramArtifacts(HttpExchange exchange) throws IOException {
+    private void approveProgramArtifacts(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         byte[] body;
         try (var input = exchange.getRequestBody()) {
             body = input.readNBytes(payloadLimits.maxEncodedBytes() + 1);
         }
         if (body.length > payloadLimits.maxEncodedBytes()) {
-            failPayload(exchange, PayloadException.tooLarge(body.length, payloadLimits.maxEncodedBytes()));
+            failPayload(exchange, httpContext, PayloadException.tooLarge(body.length, payloadLimits.maxEncodedBytes()));
             return;
         }
-        var approval = ProgramBuildSubmission.readApproval(body, payloadLimits);
+        var approval = ProgramBuildSubmission.readApproval(body, payloadLimits, programAuthoringLimits);
         var approved = authorizedApplication.approveProgramArtifacts(
-                AuthenticatedPrincipalAttribute.requestContext(exchange), approval.artifactIds(), approval.reason());
+                httpContext.applicationContext(), approval.artifactIds(), approval.reason());
         String response = approved.stream().map(RavenrootServer::artifactJson)
                 .collect(java.util.stream.Collectors.joining(",", "{\"artifacts\":[", "]}"));
         json(exchange, 200, response);
     }
 
-    private void applyArtifactOperation(HttpExchange exchange, String id, String operation)
+    private void applyArtifactOperation(HttpExchange exchange, HttpRequestContext httpContext, String id, String operation)
             throws java.util.concurrent.ExecutionException, InterruptedException, IOException {
         switch (operation) {
-            case "validate" -> validateProgramArtifact(exchange, id);
+            case "validate" -> validateProgramArtifact(exchange, httpContext, id);
             case "test" -> {
-                Object payload = readArtifactTestPayload(exchange);
+                Object payload = readArtifactTestPayload(exchange, httpContext);
                 if (payload == null) return;
                 var tested = authorizedApplication.testProgramArtifact(
-                        AuthenticatedPrincipalAttribute.requestContext(exchange), id, payload)
+                        httpContext.applicationContext(), id, payload)
                         .toCompletableFuture().get();
                 // API-01 on the output side. The artifact under test is untrusted code, so what it
                 // returns is untrusted structure: routing it through the payload model bounds its
@@ -1817,14 +1994,14 @@ public final class RavenrootServer implements AutoCloseable {
                         + ",\"output\":" + PayloadJson.write(output) + "}");
             }
             case "approve" -> json(exchange, 200, artifactJson(authorizedApplication.approveProgramArtifact(
-                    AuthenticatedPrincipalAttribute.requestContext(exchange), id,
+                    httpContext.applicationContext(), id,
                     query(exchange).getOrDefault("reason", ""))));
             case "activate" -> json(exchange, 200, artifactJson(authorizedApplication.activateProgramArtifact(
-                    AuthenticatedPrincipalAttribute.requestContext(exchange), id)));
+                    httpContext.applicationContext(), id)));
             case "retire" -> json(exchange, 200, artifactJson(authorizedApplication.retireProgramArtifact(
-                    AuthenticatedPrincipalAttribute.requestContext(exchange), id,
+                    httpContext.applicationContext(), id,
                     query(exchange).getOrDefault("reason", ""))));
-            default -> fail(exchange, ErrorCode.UNKNOWN_ARTIFACT_OPERATION);
+            default -> fail(exchange, httpContext, ErrorCode.UNKNOWN_ARTIFACT_OPERATION);
         }
     }
 
@@ -1834,10 +2011,10 @@ public final class RavenrootServer implements AutoCloseable {
      * old {@code ?payload=} spelling remains only for an empty, untyped body so existing clients
      * retain their exact text semantics while every new body is bounded and explicit.
      */
-    private Object readArtifactTestPayload(HttpExchange exchange) throws IOException {
+    private Object readArtifactTestPayload(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (!ArtifactTestSubmission.supports(contentType)) {
-            fail(exchange, ErrorCode.UNSUPPORTED_MEDIA_TYPE);
+            fail(exchange, httpContext, ErrorCode.UNSUPPORTED_MEDIA_TYPE);
             return null;
         }
         byte[] body;
@@ -1845,7 +2022,7 @@ public final class RavenrootServer implements AutoCloseable {
             body = input.readNBytes(payloadLimits.maxEncodedBytes() + 1);
         }
         if (body.length > payloadLimits.maxEncodedBytes()) {
-            failPayload(exchange, PayloadException.tooLarge(body.length, payloadLimits.maxEncodedBytes()));
+            failPayload(exchange, httpContext, PayloadException.tooLarge(body.length, payloadLimits.maxEncodedBytes()));
             return null;
         }
         if (body.length == 0 && contentType == null) {
@@ -1960,12 +2137,12 @@ public final class RavenrootServer implements AutoCloseable {
      * Telling an author their source does not compile when the sandbox never started is a false cause,
      * and a false cause is worse than a generic one.</p>
      */
-    private void validateProgramArtifact(HttpExchange exchange, String id)
+    private void validateProgramArtifact(HttpExchange exchange, HttpRequestContext httpContext, String id)
             throws java.util.concurrent.ExecutionException, InterruptedException, IOException {
         GeneratedArtifact validated;
         try {
             validated = authorizedApplication.validateProgramArtifact(
-                    AuthenticatedPrincipalAttribute.requestContext(exchange), id).toCompletableFuture().get();
+                    httpContext.applicationContext(), id).toCompletableFuture().get();
         } catch (java.util.concurrent.ExecutionException error) {
             if (!(error.getCause() instanceof ProgramSourceRejectedException rejected)) throw error;
             json(exchange, 200, "{\"outcome\":\"rejected\""
@@ -2149,6 +2326,11 @@ public final class RavenrootServer implements AutoCloseable {
                 // block saving or submitting a graph that leaves it blank.
                 + ",\"adapterBinding\":" + property.adapterBinding()
                 + ",\"allowedValues\":" + values
+                + ",\"minimumValue\":\"" + escape(property.minimumValue()) + "\""
+                + ",\"maximumValue\":\"" + escape(property.maximumValue()) + "\""
+                + ",\"maximumUtf8Bytes\":" + property.maximumUtf8Bytes()
+                + ",\"maximumItems\":" + property.maximumItems()
+                + ",\"maximumItemUtf8Bytes\":" + property.maximumItemUtf8Bytes()
                 // Absent conditions are emitted as null, never as an always-true condition.
                 // A consumer must be able to tell "no condition declared" from "a condition that
                 // happens to hold", because only the first means the field is unconditional.
@@ -2174,17 +2356,17 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"values\":" + operands + "}";
     }
 
-    private void inspectGraph(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "POST")) {
+    private void inspectGraph(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "POST")) {
             return;
         }
         try (var input = exchange.getRequestBody()) {
-            byte[] graph = readGraphMlRequest(exchange, input);
+            byte[] graph = readGraphMlRequest(exchange, httpContext, input);
             if (graph == null) {
                 return;
             }
             var summary = authorizedApplication.inspectGraphMl(
-                    AuthenticatedPrincipalAttribute.requestContext(exchange),
+                    httpContext.applicationContext(),
                     new java.io.ByteArrayInputStream(graph));
             // "valid" and "violations" distinguish validity on this exact endpoint;
             // POST /v1/graphs/inspect otherwise reports the same four counts whether
@@ -2193,14 +2375,16 @@ public final class RavenrootServer implements AutoCloseable {
                     + ",\"startNodes\":" + summary.startNodes() + ",\"endNodes\":" + summary.endNodes()
                     + ",\"valid\":" + summary.valid() + ",\"violations\":" + stringArrayJson(summary.violations())
                     + "}");
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, httpContext, rejection);
         } catch (GraphMlParseException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
         } catch (GraphMlCompatibilityException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
         } catch (PayloadException rejection) {
-            failPayload(exchange, rejection);
+            failPayload(exchange, httpContext, rejection);
         } catch (IllegalArgumentException error) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
     }
 
@@ -2244,7 +2428,7 @@ public final class RavenrootServer implements AutoCloseable {
      * result read. The gate therefore belongs to each branch: {@link #readExecution} requires GET
      * itself, cancel requires POST here, and submission requires POST below.</p>
      */
-    private void startExecution(HttpExchange exchange) throws IOException {
+    private void startExecution(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         String suffix = exchange.getRequestURI().getPath().substring("/v1/executions".length());
         if (!suffix.isEmpty() && !suffix.equals("/")) {
             // suffix always starts with '/', so segments[0] is the empty string.
@@ -2253,45 +2437,83 @@ public final class RavenrootServer implements AutoCloseable {
                 // "live" is a reserved collection-level segment, never a valid traversal id
                 // (ids are UUIDs), so no legitimate /v1/executions/{id} read is ever shadowed by it --
                 // the same style of reservation "cancel" already uses one segment further in.
-                if (!method(exchange, "GET")) {
+                if (!method(exchange, httpContext, "GET")) {
                     return;
                 }
-                listLiveExecutions(exchange);
+                listLiveExecutions(exchange, httpContext);
+                return;
+            }
+            if (segments.length == 2 && "inventory".equals(segments[1])) {
+                // "inventory" is reserved the same way "live" is -- never a valid traversal id, so
+                // no legitimate /v1/executions/{id} read is ever shadowed by it.
+                if (!method(exchange, httpContext, "GET")) {
+                    return;
+                }
+                listProcessInventory(exchange, httpContext);
                 return;
             }
             if (segments.length == 2 && !segments[1].isBlank()) {
-                readExecution(exchange, segments[1]);
+                readExecution(exchange, httpContext, segments[1]);
                 return;
             }
             if (segments.length == 3 && !segments[1].isBlank()
                     && ("cancel".equals(segments[2]) || "pause".equals(segments[2])
                         || "resume".equals(segments[2]))) {
-                if (!method(exchange, "POST")) {
+                if (!method(exchange, httpContext, "POST")) {
                     return;
                 }
-                controlExecution(exchange, segments[1], segments[2]);
+                controlExecution(exchange, httpContext, segments[1], segments[2]);
                 return;
             }
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            if (segments.length == 3 && !segments[1].isBlank() && "manifest".equals(segments[2])) {
+                // {id} names a process instance here, exactly as it does for "traversals" and for the
+                // same reason: a manifest is pinned per process instance, which is the granularity at
+                // which the graph version pin is already write-once.
+                if (!method(exchange, httpContext, "GET")) {
+                    return;
+                }
+                readExecutionManifest(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 3 && !segments[1].isBlank() && "traversals".equals(segments[2])) {
+                // Unlike every other sub-route under /v1/executions, {id} here names a durable
+                // process instance id, not a traversal/execution id -- see
+                // #readProcessInstanceTraversals's own Javadoc for why that is deliberate rather than
+                // an inconsistency.
+                if (!method(exchange, httpContext, "GET")) {
+                    return;
+                }
+                readProcessInstanceTraversals(exchange, httpContext, segments[1]);
+                return;
+            }
+            if (segments.length == 5 && !segments[1].isBlank()
+                    && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
+                    && ("approve".equals(segments[4]) || "deny".equals(segments[4])
+                        || "cancel".equals(segments[4]))) {
+                if (!method(exchange, httpContext, "POST")) return;
+                decideToolApproval(exchange, httpContext, segments[1], segments[3], segments[4]);
+                return;
+            }
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
-        if (!method(exchange, "POST")) {
+        if (!method(exchange, httpContext, "POST")) {
             return;
         }
-        var principal = AuthenticatedPrincipalAttribute.require(exchange);
+        var principal = httpContext.requirePrincipal();
         var submissionBudget = rateLimiter.checkSubmissionRate(principal.tenantId());
         if (!submissionBudget.isAllowed()) {
-            refuse(exchange, submissionBudget);
+            refuse(exchange, httpContext, submissionBudget);
             return;
         }
         var admission = rateLimiter.activeExecutions().checkAdmission(principal.tenantId());
         if (!admission.isAllowed()) {
-            refuse(exchange, admission);
+            refuse(exchange, httpContext, admission);
             return;
         }
         try (var slot = rateLimiter.acquireSubmissionSlot(principal.tenantId())) {
             if (!slot.granted()) {
-                refuse(exchange, slot.refusal());
+                refuse(exchange, httpContext, slot.refusal());
                 return;
             }
             String mode = query(exchange).getOrDefault("mode", "test");
@@ -2301,11 +2523,402 @@ public final class RavenrootServer implements AutoCloseable {
                 default -> null;
             };
             if (policy == null) {
-                fail(exchange, ErrorCode.INVALID_REQUEST);
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                 return;
             }
-            submitExecution(exchange, policy);
+            submitExecution(exchange, httpContext, policy);
         }
+    }
+
+    /** Authenticated, tenant-derived decision path; no stored content is serialized. */
+    private void decideToolApproval(HttpExchange exchange, HttpRequestContext httpContext, String processText, String approvalText,
+                                    String decision) throws IOException {
+        ai.ravenroot.core.approval.ToolApprovalService service = toolApprovals;
+        if (service == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        java.util.UUID processId;
+        java.util.UUID approvalId;
+        try {
+            processId = java.util.UUID.fromString(processText);
+            approvalId = java.util.UUID.fromString(approvalText);
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        var context = httpContext.applicationContext();
+        ai.ravenroot.core.approval.ToolApprovalResult result;
+        try {
+            result = switch (decision) {
+                case "approve" -> service.approve(context, processId, approvalId);
+                case "deny" -> service.deny(context, processId, approvalId);
+                case "cancel" -> service.cancel(context, processId, approvalId);
+                default -> throw new IllegalStateException("unreachable tool approval decision");
+            };
+            if (result.accepted()) toolApprovalSweep.accept(context.tenantId());
+        } catch (RuntimeException failure) {
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        switch (result.code()) {
+            case NOT_FOUND -> fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            case UNAUTHORIZED -> fail(exchange, httpContext, ErrorCode.ACCESS_DENIED);
+            case SCOPE_MISMATCH, UNAVAILABLE -> fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            default -> {
+                String resume = result.resumeTraversalId() == null ? ""
+                        : ",\"resumeTraversalId\":\"" + result.resumeTraversalId() + "\"";
+                json(exchange, 200, "{\"outcome\":\""
+                        + result.code().name().toLowerCase(java.util.Locale.ROOT)
+                        + "\",\"approvalId\":\"" + approvalId + "\"" + resume + "}");
+            }
+        }
+    }
+
+    /** Bounded tenant inbox and generation-fenced decision adapter for durable human tasks. */
+    private void humanTasks(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        ai.ravenroot.core.humantask.HumanTaskService service = humanTasks;
+        if (service == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        String suffix = exchange.getRequestURI().getPath().substring("/v1/human-tasks".length());
+        var context = httpContext.applicationContext();
+        if ("/attention".equals(suffix)) {
+            humanTaskAttention(exchange, httpContext, context, service);
+            return;
+        }
+        if (suffix.isEmpty() || "/".equals(suffix)) {
+            if (!method(exchange, httpContext, "GET")) return;
+            var parameters = query(exchange);
+            int limit;
+            boolean includeTerminal;
+            java.util.Optional<java.util.UUID> cursor;
+            java.util.Set<ai.ravenroot.api.persistence.HumanTaskStatus> statuses;
+            try {
+                limit = Integer.parseInt(parameters.getOrDefault("limit",
+                        Integer.toString(humanTaskPolicy.inboxDefaultPageSize())));
+                includeTerminal = Boolean.parseBoolean(parameters.getOrDefault("includeTerminal", "false"));
+                cursor = parameters.containsKey("cursor")
+                        ? java.util.Optional.of(java.util.UUID.fromString(parameters.get("cursor")))
+                        : java.util.Optional.empty();
+                statuses = parameters.containsKey("status")
+                        ? java.util.Arrays.stream(parameters.get("status").split(",", -1))
+                                .map(value -> ai.ravenroot.api.persistence.HumanTaskStatus.valueOf(
+                                        value.toUpperCase(java.util.Locale.ROOT)))
+                                .collect(java.util.stream.Collectors.toUnmodifiableSet())
+                        : java.util.Set.of();
+            } catch (IllegalArgumentException invalid) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            try {
+                var page = service.inbox(context, new ai.ravenroot.api.persistence.HumanTaskQuery(
+                        statuses, includeTerminal, cursor, limit));
+                json(exchange, 200, humanTaskPageJson(page));
+            } catch (IllegalArgumentException invalid) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            } catch (RuntimeException failure) {
+                fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+            }
+            return;
+        }
+        String[] segments = suffix.substring(1).split("/", -1);
+        boolean confirmation = segments.length == 3 && "confirmation".equals(segments[1]);
+        String decision = confirmation ? segments[2] : segments.length == 2 ? segments[1] : "";
+        if ((segments.length != 2 && !confirmation) || segments[0].isBlank()
+                || !("resolve".equals(decision) || "deny".equals(decision)
+                || "cancel".equals(decision))) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        if (!method(exchange, httpContext, "POST")) return;
+        java.util.UUID taskId;
+        long generation;
+        try {
+            taskId = java.util.UUID.fromString(segments[0]);
+            generation = Long.parseLong(query(exchange).get("generation"));
+            if (generation < 1) throw new IllegalArgumentException("generation");
+        } catch (RuntimeException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        if (confirmation) {
+            humanTaskConfirmation(exchange, httpContext, context, service, taskId, generation, decision);
+            return;
+        }
+        ai.ravenroot.core.humantask.HumanTaskResult result;
+        try {
+            result = switch (decision) {
+                case "resolve" -> service.resolve(context, taskId, generation,
+                        humanTaskResponse(exchange, context, taskId, service));
+                case "deny" -> service.deny(context, taskId, generation);
+                case "cancel" -> service.cancel(context, taskId, generation);
+                default -> throw new IllegalStateException("unreachable human-task operation");
+            };
+            if (result.resumeTraversalId() != null) humanTaskSweep.accept(context.tenantId());
+        } catch (HumanTaskBodyTooLarge tooLarge) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        } catch (RuntimeException failure) {
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        switch (result.code()) {
+            case NOT_FOUND, UNAVAILABLE -> fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            case UNAUTHORIZED -> fail(exchange, httpContext, ErrorCode.ACCESS_DENIED);
+            case PAYLOAD_REFUSED, STALE_GENERATION -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            default -> {
+                String resume = result.resumeTraversalId() == null ? ""
+                        : ",\"resumeTraversalId\":\"" + result.resumeTraversalId() + "\"";
+                json(exchange, 200, "{\"outcome\":\""
+                        + result.code().name().toLowerCase(java.util.Locale.ROOT)
+                        + "\",\"taskId\":\"" + taskId + "\",\"generation\":"
+                        + result.task().generation() + resume + "}");
+            }
+        }
+    }
+
+    private ai.ravenroot.api.persistence.OpaquePayload humanTaskResponse(
+            HttpExchange exchange, ai.ravenroot.api.security.RequestContext context,
+            java.util.UUID taskId, ai.ravenroot.core.humantask.HumanTaskService service)
+            throws IOException {
+        int limit = service.authorizedResponseBodyLimit(context, taskId)
+                .orElse(humanTaskPolicy.decisionBodyMaxBytes());
+        byte[] body;
+        try (var input = exchange.getRequestBody()) {
+            body = input.readNBytes(limit + 1);
+        }
+        if (body.length > limit) throw new HumanTaskBodyTooLarge();
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || contentType.isBlank()) contentType = "application/octet-stream";
+        return ai.ravenroot.api.persistence.OpaquePayload.of(body, contentType);
+    }
+
+    private void humanTaskAttention(
+            HttpExchange exchange, HttpRequestContext httpContext, ai.ravenroot.api.security.RequestContext context,
+            ai.ravenroot.core.humantask.HumanTaskService service) throws IOException {
+        if (!method(exchange, httpContext, "GET")) return;
+        Map<String, String> parameters = query(exchange);
+        if (!java.util.Set.of("graphVersion", "deploymentId", "processInstanceId", "traversalId",
+                "nodeId", "taskId", "generation", "limit", "cursor").containsAll(parameters.keySet())) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            int limit = Integer.parseInt(parameters.getOrDefault("limit",
+                    Integer.toString(humanTaskPolicy.confirmation().attentionDefaultPageSize())));
+            if (limit < 1 || limit > humanTaskPolicy.confirmation().attentionMaxPageSize()) {
+                throw new IllegalArgumentException("invalid attention page limit");
+            }
+            String taskText = parameters.get("taskId");
+            String generationText = parameters.get("generation");
+            boolean exact = taskText != null || generationText != null;
+            boolean hasContext = parameters.keySet().stream().anyMatch(java.util.Set.of(
+                    "graphVersion", "deploymentId", "processInstanceId", "traversalId", "nodeId")::contains);
+            if (exact && !hasContext) {
+                if (taskText == null || generationText == null || parameters.containsKey("cursor")) {
+                    throw new IllegalArgumentException("partial human-task locator");
+                }
+                var locator = new ai.ravenroot.api.persistence.HumanTaskAttentionLocator(
+                        java.util.UUID.fromString(taskText), Long.parseLong(generationText));
+                var item = service.attention(context, locator);
+                var counts = item.isEmpty()
+                        ? new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(0, 0)
+                        : new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(1,
+                        item.orElseThrow().status() == ai.ravenroot.api.persistence.HumanTaskStatus.ESCALATED
+                                ? 1 : 0);
+                json(exchange, 200, humanTaskAttentionPageJson(
+                        new ai.ravenroot.api.persistence.HumanTaskAttentionPage(item.stream().toList(),
+                                java.util.Optional.empty(), counts, java.util.List.of())));
+                return;
+            }
+            String graphVersion = parameters.get("graphVersion");
+            String deploymentId = parameters.get("deploymentId");
+            String processId = parameters.get("processInstanceId");
+            if (graphVersion == null || graphVersion.isBlank()
+                    || (deploymentId == null) == (processId == null)) {
+                throw new IllegalArgumentException("incomplete attention context");
+            }
+            var attentionQuery = new ai.ravenroot.api.persistence.HumanTaskAttentionQuery(
+                    graphVersion, java.util.Optional.ofNullable(deploymentId),
+                    processId == null ? java.util.Optional.empty()
+                            : java.util.Optional.of(java.util.UUID.fromString(processId)),
+                    optionalUuid(parameters.get("traversalId")),
+                    java.util.Optional.ofNullable(parameters.get("nodeId")),
+                    optionalUuid(taskText), generationText == null ? java.util.Optional.empty()
+                    : java.util.Optional.of(Long.parseLong(generationText)),
+                    parameters.containsKey("cursor")
+                            ? java.util.Optional.of(new ai.ravenroot.api.persistence.HumanTaskAttentionCursor(
+                            parameters.get("cursor"))) : java.util.Optional.empty(), limit);
+            json(exchange, 200, humanTaskAttentionPageJson(service.attention(context, attentionQuery)));
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        } catch (RuntimeException failure) {
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    private void humanTaskConfirmation(
+            HttpExchange exchange, HttpRequestContext httpContext, ai.ravenroot.api.security.RequestContext context,
+            ai.ravenroot.core.humantask.HumanTaskService service, java.util.UUID taskId,
+            long generation, String decision) throws IOException {
+        ai.ravenroot.api.persistence.HumanTaskConfirmationAction action =
+                ai.ravenroot.api.persistence.HumanTaskConfirmationAction.valueOf(
+                        decision.toUpperCase(java.util.Locale.ROOT));
+        var authority = service.confirmationAuthority(context, taskId, action);
+        if (authority.isEmpty()) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || !(contentType.equalsIgnoreCase("application/json")
+                || contentType.equalsIgnoreCase("application/json; charset=utf-8"))) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        String comment;
+        try {
+            var limits = authority.orElseThrow();
+            byte[] body;
+            try (var input = exchange.getRequestBody()) {
+                body = input.readNBytes(limits.decisionBodyMaxBytes() + 1);
+            }
+            if (body.length > limits.decisionBodyMaxBytes()) throw new IllegalArgumentException("body too large");
+            java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(body));
+            var parsed = ai.ravenroot.api.payload.PayloadJson.read(body,
+                    new ai.ravenroot.api.payload.PayloadLimits(limits.decisionBodyMaxBytes(),
+                            2, 2, 3, limits.commentMaxUtf8Bytes(), 13));
+            if (!(parsed instanceof ai.ravenroot.api.payload.PayloadValue.MapValue map)
+                    || !map.entries().keySet().equals(java.util.Set.of("schemaVersion", "comment"))
+                    || !(map.entries().get("schemaVersion")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.IntegerValue version)
+                    || version.value() != 1
+                    || !(map.entries().get("comment")
+                    instanceof ai.ravenroot.api.payload.PayloadValue.TextValue text)) {
+                throw new IllegalArgumentException("invalid confirmation document");
+            }
+            comment = text.value();
+        } catch (RuntimeException | java.nio.charset.CharacterCodingException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        ai.ravenroot.core.humantask.HumanTaskResult result;
+        try {
+            result = switch (action) {
+                case RESOLVE -> service.resolve(context, taskId, generation,
+                        ai.ravenroot.core.humantask.HumanTaskService.confirmationResponse(), comment);
+                case DENY -> service.deny(context, taskId, generation, comment);
+                case CANCEL -> service.cancel(context, taskId, generation, comment);
+            };
+        } catch (RuntimeException failure) {
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        switch (result.code()) {
+            case NOT_FOUND, UNAVAILABLE, UNAUTHORIZED -> fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            case PAYLOAD_REFUSED -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            case STALE_GENERATION, ALREADY_SETTLED -> fail(exchange, httpContext, ErrorCode.CONFLICT);
+            case RESOLVED, DENIED, CANCELLED, ALREADY_APPLIED -> {
+                var task = service.confirmationProjection(context, result, action);
+                if (task.isEmpty()) {
+                    fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+                    return;
+                }
+                if (result.resumeTraversalId() != null) humanTaskSweep.accept(context.tenantId());
+                String outcome = result.code() == ai.ravenroot.core.humantask.HumanTaskResult.Code.ALREADY_APPLIED
+                        ? "ALREADY_APPLIED" : "APPLIED";
+                json(exchange, 200, "{\"schemaVersion\":1,\"outcome\":\"" + outcome
+                        + "\",\"task\":" + humanTaskAttentionItemJson(task.orElseThrow()) + "}");
+            }
+            default -> fail(exchange, httpContext, ErrorCode.CONFLICT);
+        }
+    }
+
+    private static java.util.Optional<java.util.UUID> optionalUuid(String value) {
+        return value == null ? java.util.Optional.empty()
+                : java.util.Optional.of(java.util.UUID.fromString(value));
+    }
+
+    private static String humanTaskAttentionPageJson(
+            ai.ravenroot.api.persistence.HumanTaskAttentionPage page) {
+        return "{\"schemaVersion\":1,\"items\":["
+                + page.items().stream().map(RavenrootServer::humanTaskAttentionItemJson)
+                .collect(java.util.stream.Collectors.joining(","))
+                + "],\"nextCursor\":" + page.nextCursor()
+                .map(cursor -> "\"" + escape(cursor.value()) + "\"").orElse("null")
+                + ",\"counts\":{\"pending\":" + page.counts().pending()
+                + ",\"escalated\":" + page.counts().escalated() + "},\"nodeCounts\":["
+                + page.nodeCounts().stream().map(count -> "{\"nodeId\":\"" + escape(count.nodeId())
+                + "\",\"pending\":" + count.pending() + ",\"escalated\":" + count.escalated() + "}")
+                .collect(java.util.stream.Collectors.joining(",")) + "]}";
+    }
+
+    private static String humanTaskAttentionItemJson(
+            ai.ravenroot.api.persistence.HumanTaskAttentionItem item) {
+        var presentation = item.presentation();
+        String actions = presentation.actions().stream().map(action -> "\"" + action.name() + "\"")
+                .collect(java.util.stream.Collectors.joining(","));
+        String available = item.availableActions().stream().map(action -> "\"" + action.name() + "\"")
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"taskId\":\"" + item.taskId() + "\",\"generation\":" + item.generation()
+                + ",\"status\":\"" + item.status().name() + "\",\"graphVersion\":\""
+                + escape(item.graphVersion()) + "\",\"deploymentId\":"
+                + item.deploymentId().map(value -> "\"" + escape(value) + "\"").orElse("null")
+                + ",\"processInstanceId\":\"" + item.processInstanceId()
+                + "\",\"traversalId\":\"" + item.traversalId() + "\",\"nodeId\":\""
+                + escape(item.nodeId()) + "\",\"createdAt\":\"" + item.createdAt()
+                + "\",\"expiresAt\":\"" + item.expiresAt() + "\",\"escalateAt\":"
+                + item.escalateAt().map(value -> "\"" + value + "\"").orElse("null")
+                + ",\"promptMaxUtf8Bytes\":" + item.promptMaxUtf8Bytes()
+                + ",\"actionLabelMaxUtf8Bytes\":" + item.actionLabelMaxUtf8Bytes()
+                + ",\"commentMaxUtf8Bytes\":" + item.commentMaxUtf8Bytes()
+                + ",\"presentation\":{\"version\":" + presentation.version()
+                + ",\"prompt\":\"" + escape(presentation.prompt())
+                + "\",\"commentRequirement\":\"" + presentation.commentRequirement().name()
+                + "\",\"actions\":[" + actions + "],\"resolveLabel\":\""
+                + escape(presentation.resolveLabel()) + "\",\"denyLabel\":\""
+                + escape(presentation.denyLabel()) + "\",\"cancelLabel\":\""
+                + escape(presentation.cancelLabel()) + "\"},\"availableActions\":[" + available + "]}";
+    }
+
+    private static String humanTaskPageJson(ai.ravenroot.api.persistence.HumanTaskPage page) {
+        var out = new StringBuilder("{\"items\":[");
+        boolean first = true;
+        for (var task : page.items()) {
+            if (!first) out.append(',');
+            first = false;
+            var request = task.request();
+            out.append("{\"taskId\":\"").append(task.request().taskId())
+                    .append("\",\"processInstanceId\":\"").append(task.key().processInstanceId())
+                    .append("\",\"nodeId\":\"").append(escape(request.nodeId()))
+                    .append("\",\"title\":\"").append(escape(request.metadata().title()))
+                    .append("\",\"description\":\"").append(escape(request.metadata().description()))
+                    .append("\",\"status\":\"").append(task.status().name())
+                    .append("\",\"generation\":").append(task.generation())
+                    .append(",\"responseContentType\":\"")
+                    .append(escape(request.responseSchema().contentType()))
+                    .append("\",\"responseSchema\":\"").append(escape(request.responseSchema().schema()))
+                    .append("\",\"responseSchemaVersion\":\"")
+                    .append(escape(request.responseSchema().schemaVersion()))
+                    .append("\",\"responseKind\":\"").append(request.responseSchema().kind())
+                    .append("\",\"maxResponseBytes\":").append(request.responseSchema().maxBytes())
+                    .append(",\"expiresAt\":\"").append(request.expiresAt()).append("\"");
+            request.escalateAt().ifPresent(value -> out.append(",\"escalateAt\":\"")
+                    .append(value).append("\""));
+            out.append('}');
+        }
+        out.append("],\"nextCursor\":");
+        if (page.nextCursor().isPresent()) out.append('"').append(page.nextCursor().orElseThrow()).append('"');
+        else out.append("null");
+        return out.append('}').toString();
+    }
+
+    private static final class HumanTaskBodyTooLarge extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     /**
@@ -2316,22 +2929,22 @@ public final class RavenrootServer implements AutoCloseable {
      * process-local record and {@code DELETE} stops exactly that deployment domain. There is no list
      * route: this MVP is not an authoritative inventory and must not look like one.</p>
      */
-    private void sourceSessions(HttpExchange exchange) throws IOException {
+    private void sourceSessions(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         String suffix = exchange.getRequestURI().getPath().substring("/v1/source-sessions".length());
         try {
             if (suffix.isEmpty() || suffix.equals("/")) {
-                if (!method(exchange, "POST")) return;
+                if (!method(exchange, httpContext, "POST")) return;
                 String sessionId = query(exchange).get("id");
                 if (sessionId == null) {
-                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                     return;
                 }
                 byte[] graph;
                 try (var input = exchange.getRequestBody()) {
-                    graph = readGraphMlRequest(exchange, input);
+                    graph = readGraphMlRequest(exchange, httpContext, input);
                 }
                 if (graph == null) return;
-                var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+                var context = httpContext.applicationContext();
                 credentialAdmission.require(context, graph);
                 var status = authorizedApplication.startSourceSession(context, sessionId,
                         new java.io.ByteArrayInputStream(graph));
@@ -2341,15 +2954,15 @@ public final class RavenrootServer implements AutoCloseable {
 
             String[] segments = suffix.split("/");
             if (segments.length != 2 || segments[1].isBlank()) {
-                fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                 return;
             }
             String sessionId = java.net.URLDecoder.decode(segments[1], java.nio.charset.StandardCharsets.UTF_8);
-            var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+            var context = httpContext.applicationContext();
             if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                 var status = authorizedApplication.sourceSession(context, sessionId);
                 if (status.isEmpty()) {
-                    fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                    fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                     return;
                 }
                 exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
@@ -2360,36 +2973,40 @@ public final class RavenrootServer implements AutoCloseable {
                 var stopped = authorizedApplication.stopSourceSession(context, sessionId)
                         .toCompletableFuture().get(35, java.util.concurrent.TimeUnit.SECONDS);
                 if (stopped.isEmpty()) {
-                    fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                    fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                     return;
                 }
                 sourceSessionJson(exchange, 200, stopped.orElseThrow());
                 return;
             }
             exchange.getResponseHeaders().set("Allow", "GET, DELETE");
-            fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+            fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
         } catch (GraphMlParseException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
         } catch (GraphMlCompatibilityException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, httpContext, rejection);
         } catch (ai.ravenroot.api.application.SourceSessionException refusal) {
-            fail(exchange, refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
+            fail(exchange, httpContext, refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
                     ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST);
         } catch (ai.ravenroot.api.deployment.DeploymentAdmissionException overCap) {
-            fail(exchange, ErrorCode.REQUEST_LIMIT_EXCEEDED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_LIMIT_EXCEEDED);
         } catch (UnsupportedOperationException unsupported) {
-            fail(exchange, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
+            fail(exchange, httpContext, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
         } catch (java.util.concurrent.TimeoutException timeout) {
-            fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
         } catch (java.util.concurrent.ExecutionException failed) {
-            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            ai.ravenroot.core.runtime.GraphExecutionLimitException limited = graphExecutionLimitIn(failed);
+            if (limited != null) failGraphExecutionLimit(exchange, httpContext, limited);
+            else fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
         } catch (IllegalArgumentException invalid) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException conflict) {
-            fail(exchange, ErrorCode.CONFLICT);
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
         }
     }
 
@@ -2414,7 +3031,7 @@ public final class RavenrootServer implements AutoCloseable {
      * ends the whole server's intake. Neither is a deployment stop, and neither is reachable from
      * here.</p>
      */
-    private void deployments(HttpExchange exchange) throws IOException {
+    private void deployments(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         String suffix = exchange.getRequestURI().getPath().substring("/v1/deployments".length());
         try {
             var query = query(exchange);
@@ -2430,10 +3047,10 @@ public final class RavenrootServer implements AutoCloseable {
             String requestedScope = query.get("scope");
             if (requestedScope != null
                     && !ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE.equals(requestedScope)) {
-                fail(exchange, ErrorCode.INVALID_REQUEST);
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                 return;
             }
-            var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+            var context = httpContext.applicationContext();
 
             if (suffix.isEmpty() || suffix.equals("/")) {
                 if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -2443,17 +3060,17 @@ public final class RavenrootServer implements AutoCloseable {
                 }
                 if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
                     exchange.getResponseHeaders().set("Allow", "GET, POST");
-                    fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+                    fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
                     return;
                 }
                 String deploymentId = query.get("id");
                 if (deploymentId == null) {
-                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                     return;
                 }
                 byte[] graph;
                 try (var input = exchange.getRequestBody()) {
-                    graph = readGraphMlRequest(exchange, input);
+                    graph = readGraphMlRequest(exchange, httpContext, input);
                 }
                 if (graph == null) return;
                 credentialAdmission.require(context, graph);
@@ -2470,7 +3087,7 @@ public final class RavenrootServer implements AutoCloseable {
 
             String[] segments = suffix.split("/");
             if (segments.length < 2 || segments.length > 3 || segments[1].isBlank()) {
-                fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                 return;
             }
             String deploymentId = java.net.URLDecoder.decode(segments[1], java.nio.charset.StandardCharsets.UTF_8);
@@ -2479,7 +3096,7 @@ public final class RavenrootServer implements AutoCloseable {
                 if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                     var status = authorizedApplication.localDeployment(context, deploymentId);
                     if (status.isEmpty()) {
-                        fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                        fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                         return;
                     }
                     exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
@@ -2487,16 +3104,16 @@ public final class RavenrootServer implements AutoCloseable {
                     return;
                 }
                 if ("DELETE".equalsIgnoreCase(exchange.getRequestMethod())) {
-                    awaitDeploymentCommand(exchange,
+                    awaitDeploymentCommand(exchange, httpContext,
                             authorizedApplication.undeployLocalDeployment(context, deploymentId));
                     return;
                 }
                 exchange.getResponseHeaders().set("Allow", "GET, DELETE");
-                fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+                fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
                 return;
             }
 
-            if (!method(exchange, "POST")) return;
+            if (!method(exchange, httpContext, "POST")) return;
             java.util.concurrent.CompletionStage<java.util.Optional<
                     ai.ravenroot.api.application.LocalDeploymentStatus>> command =
                     switch (segments[2]) {
@@ -2506,33 +3123,37 @@ public final class RavenrootServer implements AutoCloseable {
                         default -> null;
                     };
             if (command == null) {
-                fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                 return;
             }
-            awaitDeploymentCommand(exchange, command);
+            awaitDeploymentCommand(exchange, httpContext, command);
         } catch (GraphMlParseException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
         } catch (GraphMlCompatibilityException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, httpContext, rejection);
         } catch (ai.ravenroot.api.application.LocalDeploymentException refusal) {
-            fail(exchange, refusal.reason()
+            fail(exchange, httpContext, refusal.reason()
                     == ai.ravenroot.api.application.LocalDeploymentException.Reason.GRAPH_CONFLICT
                     ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST);
         } catch (ai.ravenroot.api.deployment.DeploymentAdmissionException overCap) {
-            fail(exchange, ErrorCode.REQUEST_LIMIT_EXCEEDED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_LIMIT_EXCEEDED);
         } catch (UnsupportedOperationException unsupported) {
-            fail(exchange, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
+            fail(exchange, httpContext, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
         } catch (java.util.concurrent.TimeoutException timeout) {
-            fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
         } catch (java.util.concurrent.ExecutionException failed) {
-            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            ai.ravenroot.core.runtime.GraphExecutionLimitException limited = graphExecutionLimitIn(failed);
+            if (limited != null) failGraphExecutionLimit(exchange, httpContext, limited);
+            else fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
+            fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
         } catch (IllegalArgumentException invalid) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException conflict) {
-            fail(exchange, ErrorCode.CONFLICT);
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
         }
     }
 
@@ -2545,14 +3166,14 @@ public final class RavenrootServer implements AutoCloseable {
      * at readiness rather than immediately, which is what makes "Stop reaches authoritative local
      * STOPPED" and its counterpart for start checkable by the caller instead of pollable.</p>
      */
-    private void awaitDeploymentCommand(HttpExchange exchange,
+    private void awaitDeploymentCommand(HttpExchange exchange, HttpRequestContext httpContext,
                                         java.util.concurrent.CompletionStage<java.util.Optional<
                                                 ai.ravenroot.api.application.LocalDeploymentStatus>> command)
             throws IOException, InterruptedException, java.util.concurrent.ExecutionException,
             java.util.concurrent.TimeoutException {
         var settled = command.toCompletableFuture().get(35, java.util.concurrent.TimeUnit.SECONDS);
         if (settled.isEmpty()) {
-            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         deploymentJson(exchange, 200, settled.orElseThrow());
@@ -2571,9 +3192,12 @@ public final class RavenrootServer implements AutoCloseable {
 
     private static String deploymentObject(ai.ravenroot.api.application.LocalDeploymentStatus status) {
         String diagnostic = status.diagnostic().map(value -> "\"" + escape(value) + "\"").orElse("null");
+        String graphVersion = status.graphVersion().map(value -> "\"" + escape(value) + "\"")
+                .orElse("null");
         return "{\"deploymentId\":\"" + escape(status.deploymentId())
                 + "\",\"state\":\"" + status.state().name()
                 + "\",\"sourceCount\":" + status.sourceCount()
+                + ",\"graphVersion\":" + graphVersion
                 + ",\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
                 + "\",\"diagnostic\":" + diagnostic + "}";
     }
@@ -2582,6 +3206,7 @@ public final class RavenrootServer implements AutoCloseable {
                                    ai.ravenroot.api.application.SourceSessionStatus status) throws IOException {
         String diagnostic = status.diagnostic().map(value -> "\"" + escape(value) + "\"").orElse("null");
         json(exchange, statusCode, "{\"sessionId\":\"" + escape(status.sessionId())
+                + "\",\"deploymentId\":\"" + escape(status.deploymentId())
                 + "\",\"state\":\"" + status.state().name()
                 + "\",\"sourceCount\":" + status.sourceCount()
                 + ",\"scope\":\"" + ai.ravenroot.api.application.SourceSessionStatus.SCOPE
@@ -2601,13 +3226,13 @@ public final class RavenrootServer implements AutoCloseable {
      * the reference monitor, the audit record and the engine see one contract, and the difference
      * between a pre-API-01 client and a current one stops at this method.</p>
      */
-    private void submitExecution(HttpExchange exchange,
+    private void submitExecution(HttpExchange exchange, HttpRequestContext httpContext,
                                  ai.ravenroot.api.application.ExecutionPolicy policy) throws IOException {
         try {
             PayloadEnvelope payload;
             byte[] graph;
             if (StructuredSubmission.selects(exchange.getRequestHeaders().getFirst("Content-Type"))) {
-                var structured = readStructuredSubmission(exchange);
+                var structured = readStructuredSubmission(exchange, httpContext);
                 if (structured == null) {
                     return;
                 }
@@ -2615,14 +3240,14 @@ public final class RavenrootServer implements AutoCloseable {
                 payload = structured.payload();
             } else {
                 try (var input = exchange.getRequestBody()) {
-                    graph = readGraphMlRequest(exchange, input);
+                    graph = readGraphMlRequest(exchange, httpContext, input);
                 }
                 if (graph == null) {
                     return;
                 }
                 payload = PayloadEnvelope.legacyText(query(exchange).getOrDefault("payload", ""));
             }
-            var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+            var context = httpContext.applicationContext();
             // Before an execution id is minted and before the engine sees the
             // document: a graph naming a stored credential this caller does not own is refused here,
             // because this is the last point at which the caller's identity and the document are in
@@ -2646,20 +3271,40 @@ public final class RavenrootServer implements AutoCloseable {
             // concerned -- it is the submission that is not permitted. Deliberately the same answer
             // whether the reference belongs to somebody else or to nobody, so the pair cannot be used
             // to enumerate which references exist.
-            fail(exchange, ErrorCode.ACCESS_DENIED);
+            fail(exchange, httpContext, ErrorCode.ACCESS_DENIED);
         } catch (GraphMlParseException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
         } catch (GraphMlCompatibilityException error) {
-            graphMlError(exchange, error);
+            graphMlError(exchange, httpContext, error);
         } catch (PayloadException rejection) {
-            failPayload(exchange, rejection);
+            failPayload(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, httpContext, rejection);
         } catch (UnsupportedOperationException unsupportedPolicy) {
-            fail(exchange, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
+            fail(exchange, httpContext, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
         } catch (IllegalArgumentException error) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException error) {
-            fail(exchange, ErrorCode.CONFLICT);
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
         }
+    }
+
+    private void failGraphExecutionLimit(HttpExchange exchange, HttpRequestContext httpContext,
+                                         ai.ravenroot.core.runtime.GraphExecutionLimitException rejection)
+            throws IOException {
+        fail(exchange, ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT.status(),
+                ErrorEnvelope.ofServerCode(rejection.reason().publicCode(),
+                        ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT,
+                        httpContext.requestId()));
+    }
+
+    private static ai.ravenroot.core.runtime.GraphExecutionLimitException graphExecutionLimitIn(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ai.ravenroot.core.runtime.GraphExecutionLimitException limited) return limited;
+            current = current.getCause();
+        }
+        return null;
     }
 
     /**
@@ -2668,13 +3313,20 @@ public final class RavenrootServer implements AutoCloseable {
      * <p>Submission answers 202 with identifiers, while this endpoint exposes the result that the
      * process computes and indexes by execution id.</p>
      *
-     * <h2>Three answers, none of them an empty body</h2>
-     * <p>The switch is exhaustive over a sealed type, so a fourth case cannot be added upstream
+     * <h2>Four answers, none of them an empty body</h2>
+     * <p>The switch is exhaustive over a sealed type, so a fifth case cannot be added upstream
      * without this method failing to compile — which is the point. {@code Found} is 200 and always
      * carries {@code defaultedNodes}, including when it is empty, so a client can tell "no nodes
-     * defaulted" from "this server does not report defaulting". {@code Expired} is 410 rather than
-     * 404 because the execution provably ran and its terminal status is still known; answering 404
-     * there would tell a caller its run never happened. {@code Unknown} is 404 and covers a
+     * defaulted" from "this server does not report defaulting". {@code Expired} is 410
+     * {@code EXECUTION_RESULT_EXPIRED} rather than 404 because the execution provably ran and its
+     * terminal status is still known; answering 404 there would tell a caller its run never happened.
+     * {@code Redacted} is a distinct 410, {@code EXECUTION_RESULT_REDACTED}: the execution provably
+     * ran, but its payload was never retained in the first place, rather than having aged out after
+     * being retained. The two are different facts calling for different operator responses — an
+     * expired result is a retention policy working as configured, a redacted one is either a size cap
+     * an operator can raise or a node returning a value no remote adapter could ever persist — so
+     * they carry different {@code code}s and {@code redactedExecutionJson}'s body adds
+     * {@code payloadState} to say which of the two. {@code Unknown} is 404 and covers a
      * nonexistent id, another tenant's id and a fully evicted one alike — see
      * {@code ExecutionLookup.Unknown} for why those three must not be distinguishable.</p>
      *
@@ -2683,8 +3335,8 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code RequestContext}, and the registry is keyed by tenant and id together — so this handler
      * has no way to express a cross-tenant read even incorrectly.</p>
      */
-    private void readExecution(HttpExchange exchange, String rawId) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void readExecution(HttpExchange exchange, HttpRequestContext httpContext, String rawId) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
         java.util.UUID executionId;
@@ -2693,19 +3345,30 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (IllegalArgumentException malformed) {
             // Not UNKNOWN_EXECUTION: the caller's request is malformed, and answering 404 would
             // claim this server looked for the id and did not find it.
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
-        var lookup = authorizedApplication.executionResult(
-                AuthenticatedPrincipalAttribute.requestContext(exchange), executionId);
         try {
+            var lookup = authorizedApplication.executionResult(
+                    httpContext.applicationContext(), executionId);
             switch (lookup) {
                 case ai.ravenroot.api.application.ExecutionLookup.Found found ->
                         json(exchange, 200, executionOutcomeJson(found.outcome()));
                 case ai.ravenroot.api.application.ExecutionLookup.Expired expired ->
-                        fail(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED);
+                        json(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED.status(),
+                                expiredExecutionJson(expired,
+                                        httpContext.requestId()));
+                // Its own wire code and its own body field, distinct from Expired above: this
+                // execution's payload was refused at write time -- for size, or because it does not
+                // project onto the closed payload model -- rather than having aged out after being
+                // retained. See ErrorCode#EXECUTION_RESULT_REDACTED and redactedExecutionJson's own
+                // Javadoc for why the two are told apart rather than collapsed.
+                case ai.ravenroot.api.application.ExecutionLookup.Redacted redacted ->
+                        json(exchange, ErrorCode.EXECUTION_RESULT_REDACTED.status(),
+                                redactedExecutionJson(redacted,
+                                        httpContext.requestId()));
                 case ai.ravenroot.api.application.ExecutionLookup.Unknown unknown ->
-                        fail(exchange, ErrorCode.UNKNOWN_EXECUTION);
+                        fail(exchange, httpContext, ErrorCode.UNKNOWN_EXECUTION);
             }
         } catch (PayloadException rejection) {
             // A terminal payload is engine output, but it is still untrusted structure. In particular,
@@ -2713,7 +3376,7 @@ public final class RavenrootServer implements AutoCloseable {
             // another node and never crossed an HTTP boundary. Refuse it through the existing typed,
             // non-reflective payload envelope: never let rendering abort the exchange or fall back to
             // an arbitrary object's toString().
-            failPayload(exchange, rejection);
+            failPayload(exchange, httpContext, rejection);
         }
     }
 
@@ -2728,20 +3391,379 @@ public final class RavenrootServer implements AutoCloseable {
      * the same shape a tenant with something running under different authorization would get if
      * denied -- so the response cannot be used to learn that another tenant has work in flight.</p>
      */
-    private void listLiveExecutions(HttpExchange exchange) throws IOException {
+    private void listLiveExecutions(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
         var executions = authorizedApplication.liveExecutions(
-                AuthenticatedPrincipalAttribute.requestContext(exchange));
+                httpContext.applicationContext());
         String body = executions.stream().map(RavenrootServer::liveExecutionJson)
                 .collect(java.util.stream.Collectors.joining(",", "{\"executions\":[", "]}"));
         json(exchange, 200, body);
     }
 
+    /**
+     * {@code paused} is emitted on every row, including when it is {@code false}, for the reason
+     * {@code defaultedNodes} is always emitted on a result: a field that appears only when it is true
+     * cannot distinguish "this execution is not holding" from "this server does not report holds",
+     * and a client that cannot tell those apart has to assume the worse of the two on every row.
+     */
     private static String liveExecutionJson(ai.ravenroot.api.application.LiveExecution execution) {
         return "{\"processInstanceId\":\"" + execution.processInstanceId()
                 + "\",\"traversalId\":\"" + execution.traversalId()
                 + "\",\"executionId\":\"" + execution.executionId()
                 + "\",\"graphVersion\":\"" + escape(execution.graphVersion())
-                + "\",\"startedAt\":\"" + execution.startedAt() + "\"}";
+                + "\",\"startedAt\":\"" + execution.startedAt()
+                + "\",\"paused\":" + execution.paused() + "}";
+    }
+
+    /** Query parameters {@link #listProcessInventory} recognises; anything else is refused rather
+     * than silently ignored -- see that method's own Javadoc for why. Names match the response's own
+     * field names ({@code ownerWorkerId}, {@code deploymentId}) exactly, on purpose: an operator who
+     * writes the parameter name the response just showed them must filter by it, never fall through
+     * to an unfiltered page that reads as "all this work belongs to that value". */
+    private static final Set<String> INVENTORY_QUERY_PARAMETERS =
+            Set.of("status", "ownerWorkerId", "deploymentId", "includeTerminal", "limit", "cursor");
+
+    /**
+     * {@code GET /v1/executions/inventory}: one page of this tenant's durable, authoritative
+     * process inventory -- what API, CLI, UI, audit and recovery callers are meant to share instead of
+     * each maintaining an incompatible idea of what exists (acceptance criterion 7). Distinct from
+     * {@link #listLiveExecutions}: this reads the store's own persisted record, not runtime bookkeeping,
+     * and it survives a restart -- see {@link ai.ravenroot.api.application.RavenrootApplication#processInventoryAvailable()}
+     * for the full distinction between the two.
+     *
+     * <p>Query parameters, every one optional, and named exactly like the fields the response itself
+     * carries: {@code status} (comma-separated {@link ai.ravenroot.api.application.ProcessInstanceStatus}
+     * names), {@code ownerWorkerId} (lease holder worker id), {@code deploymentId} (hosting deployment
+     * id), {@code includeTerminal} ({@code true} to include {@code COMPLETED}/{@code FAILED} rows,
+     * which are excluded by default), {@code limit} and {@code cursor} (opaque, from a previous page's
+     * {@code nextCursor}). A parameter outside this set is refused as 400 rather than dropped: a typo
+     * or a stale name silently answering with an unfiltered page would read as "everything belongs to
+     * what I asked for", the wrong direction for a filter to fail in. A <em>recognised</em> name
+     * carrying a blank value is refused on the same ground and is the likelier accident of the two:
+     * {@code ?ownerWorkerId=} is what a script emits from a variable it never set, and dropping it
+     * would answer that same unfiltered page. The response body always carries
+     * {@code retainedFrom}, the tenant's inventory retention floor, so a caller can tell an instance
+     * that never existed from one that expired by policy without a second request, and
+     * {@code maxPageSize}, this deployment's declared page-size bound
+     * ({@link ai.ravenroot.api.application.RavenrootApplication#processInventoryMaxPageSize()}), so a
+     * caller paginating its own loop can read the bound instead of discovering it by bisection.</p>
+     *
+     * <p>501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when this deployment has no
+     * inventory-capable store composed at all -- a fact about the deployment, not the request, so it
+     * is checked before the request is otherwise parsed. Malformed query input (an unknown parameter
+     * name, an unrecognised status name, a non-numeric limit, a limit or cursor the store itself
+     * rejects) answers 400 {@link ErrorCode#INVALID_REQUEST} -- the store's own {@code InvalidRequest}
+     * classification is translated here rather than surfaced as 500, since it is a fact about the
+     * caller's request.</p>
+     */
+    private void listProcessInventory(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        var requestContext = httpContext.applicationContext();
+        if (!authorizedApplication.processInventoryAvailable()) {
+            fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        var parameters = query(exchange);
+        if (!INVENTORY_QUERY_PARAMETERS.containsAll(parameters.keySet())) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        var builder = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder();
+        // A recognised name carrying a blank value is refused for the same reason an unrecognised name
+        // is, and it is the likelier accident of the two: `?ownerWorkerId=` is what a script emits from
+        // a variable it never set. Dropping it would answer with an unfiltered page, which a caller
+        // reads as "everything matches what I asked for" -- the wrong direction for a filter to fail
+        // in, and the one this handler's own contract says must not happen.
+        for (var parameter : parameters.entrySet()) {
+            if (parameter.getValue() == null || parameter.getValue().isBlank()) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+        }
+        String rawStatus = parameters.get("status");
+        if (rawStatus != null) {
+            for (String token : rawStatus.split(",", -1)) {
+                if (token.isBlank()) {
+                    // `status=RUNNING,,FAILED` is a malformed list, not a two-element one.
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                    return;
+                }
+                try {
+                    builder.status(ai.ravenroot.api.application.ProcessInstanceStatus.valueOf(token.trim()));
+                } catch (IllegalArgumentException unknownStatus) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                    return;
+                }
+            }
+        }
+        String owner = parameters.get("ownerWorkerId");
+        if (owner != null) {
+            builder.ownedBy(owner);
+        }
+        String deployment = parameters.get("deploymentId");
+        if (deployment != null) {
+            builder.hostedBy(deployment);
+        }
+        String rawIncludeTerminal = parameters.get("includeTerminal");
+        if (rawIncludeTerminal != null) {
+            if (!"true".equalsIgnoreCase(rawIncludeTerminal) && !"false".equalsIgnoreCase(rawIncludeTerminal)) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            builder.includeTerminal(Boolean.parseBoolean(rawIncludeTerminal));
+        }
+        String rawCursor = parameters.get("cursor");
+        if (rawCursor != null) {
+            builder.cursor(rawCursor);
+        }
+        String rawLimit = parameters.get("limit");
+        if (rawLimit != null) {
+            try {
+                builder.limit(Integer.parseInt(rawLimit.trim()));
+            } catch (NumberFormatException notANumber) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+        }
+        try {
+            var page = authorizedApplication.processInventory(requestContext, builder.build());
+            json(exchange, 200, processInventoryPageJson(page, authorizedApplication.processInventoryMaxPageSize()));
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.InvalidRequest) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private static String processInventoryPageJson(ai.ravenroot.api.persistence.ProcessInventoryPage page,
+                                                    int maxPageSize) {
+        var body = new StringBuilder(256);
+        body.append("{\"items\":[");
+        var items = page.items();
+        for (int index = 0; index < items.size(); index++) {
+            if (index > 0) {
+                body.append(',');
+            }
+            body.append(processInventoryEntryJson(items.get(index)));
+        }
+        body.append("],\"nextCursor\":")
+                .append(page.nextCursor().map(cursor -> "\"" + escape(cursor) + "\"").orElse("null"))
+                .append(",\"retainedFrom\":\"").append(page.retainedFrom()).append('"')
+                .append(",\"maxPageSize\":").append(maxPageSize).append('}');
+        return body.toString();
+    }
+
+    /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */
+    private static String processInventoryEntryJson(ai.ravenroot.api.persistence.ProcessInventoryEntry entry) {
+        return "{\"tenantId\":\"" + escape(entry.key().tenantId())
+                + "\",\"processInstanceId\":\"" + entry.key().processInstanceId()
+                + "\",\"status\":\"" + entry.status() + "\""
+                // Beside status, following the same rule as executionOutcomeJson's own
+                // terminationReason: always present, including as JSON null, so the durable inventory
+                // does not misreport a cancellation as an ordinary failure after a restart, once live
+                // in-memory state is gone and this row is the only place left to ask.
+                + ",\"terminationReason\":" + (entry.terminationReason() == null ? "null"
+                        : "\"" + entry.terminationReason() + "\"")
+                + ",\"cancelled\":" + entry.cancelled()
+                + ",\"disposition\":\"" + entry.disposition()
+                + "\",\"revision\":" + entry.revision()
+                + ",\"lifecycleGeneration\":" + entry.lifecycleGeneration()
+                + ",\"graphVersion\":\"" + escape(entry.graphVersionPin().reference())
+                + "\",\"deploymentId\":" + optionalStringJson(entry.deploymentId())
+                + ",\"workloadId\":" + optionalStringJson(entry.workloadId())
+                + ",\"correlationId\":" + optionalStringJson(entry.correlationId())
+                + ",\"ownerWorkerId\":" + optionalStringJson(entry.ownerWorkerId())
+                + ",\"fencingToken\":" + entry.fencingToken()
+                + ",\"leaseExpiresAt\":" + entry.leaseExpiresAt().map(instant -> "\"" + instant + "\"").orElse("null")
+                + ",\"traversalCount\":" + entry.traversalCount()
+                + ",\"createdAt\":\"" + entry.createdAt()
+                + "\",\"updatedAt\":\"" + entry.updatedAt() + "\""
+                + ",\"retainedUntil\":" + entry.retainedUntil().map(instant -> "\"" + instant + "\"").orElse("null")
+                + "}";
+    }
+
+    private static String optionalStringJson(java.util.Optional<String> value) {
+        return value.map(present -> "\"" + escape(present) + "\"").orElse("null");
+    }
+
+    /**
+     * {@code GET /v1/executions/{id}/manifest}: the identity of the dependency set one process
+     * instance was accepted against, and whether this runtime still resolves it.
+     *
+     * <p><strong>Identity and state, never the pinned configuration and never a value from it.</strong>
+     * The response carries the manifest's format version, its digest, the graph content address it
+     * pins, when it was pinned, and a compatibility verdict whose differences are reported as
+     * dimension names alone. It carries no capability set, no execution limit, no package identity
+     * and no package count: all of those describe the deployment rather than the caller's execution,
+     * an authenticated tenant has no claim on them, and none of them is needed to act on the verdict.
+     * The comparison's own values remain available to an operator through the server-side diagnostic
+     * a refusal raises; see {@link ai.ravenroot.api.persistence.ExecutionManifestDifference}.</p>
+     *
+     * <p>Every value in the response is a digest, a closed enum name or a bounded token, because that
+     * is all a manifest can hold; there is no field a credential could have reached, so no redaction
+     * pass stands between this projection and the record it renders.</p>
+     *
+     * <p>404 {@link ErrorCode#UNKNOWN_PROCESS_INSTANCE} when no manifest is pinned for the instance,
+     * when it belongs to another tenant, and when it was accepted before manifests were recorded —
+     * all three indistinguishable by design, exactly as the traversal listing already is for its own
+     * id space. 501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when this host composes no
+     * manifest store at all, so an absent route is never mistaken for an absent manifest.</p>
+     */
+    private void readExecutionManifest(HttpExchange exchange, HttpRequestContext httpContext, String rawId) throws IOException {
+        var principal = httpContext.requirePrincipal();
+        if (executionManifests == null) {
+            fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        // The tenant comes from the authenticated principal and participates in the key, so a read
+        // scoped to another tenant's instance reports absence rather than a denial. That is the whole
+        // authorization check for this route: the store cannot be used as a cross-tenant oracle
+        // because the address it is asked for is one this caller could only have guessed.
+        var key = new ai.ravenroot.api.persistence.ExecutionKey(principal.tenantId(), processInstanceId);
+        try {
+            var stored = executionManifests.store().load(key).toCompletableFuture().join();
+            var report = executionManifests.describe(stored,
+                    ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+            json(exchange, 200, executionManifestJson(stored, report));
+        } catch (java.util.concurrent.CompletionException wrapped) {
+            var failure = ai.ravenroot.api.persistence.ExecutionManifestStoreException.unwrap(wrapped);
+            if (failure == null) {
+                throw wrapped;
+            }
+            failExecutionManifest(exchange, httpContext, failure.failure());
+        } catch (ai.ravenroot.api.persistence.ExecutionManifestStoreException failure) {
+            failExecutionManifest(exchange, httpContext, failure.failure());
+        }
+    }
+
+    /**
+     * Maps a manifest-store failure onto the two outcomes this route distinguishes.
+     *
+     * <p>An absent manifest and one that no longer verifies are deliberately <em>not</em> the same
+     * answer: the first is an execution this deployment never recorded, the second is a stored record
+     * an operator has to investigate. Collapsing them would hide a corrupted row behind a 404.</p>
+     */
+    private void failExecutionManifest(HttpExchange exchange, HttpRequestContext httpContext,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStoreFailure failure)
+            throws IOException {
+        if (failure instanceof ai.ravenroot.api.persistence.ExecutionManifestStoreFailure.NotFound) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+            return;
+        }
+        fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+    }
+
+    /**
+     * The caller's own execution identity and a verdict, and nothing about this deployment.
+     *
+     * <p><strong>Dimension names only.</strong> A difference also carries the two values that
+     * disagree, and those describe the deployment rather than the execution: a node-package
+     * difference's values are an installed package's identity, and the engine, store and limits
+     * dimensions compare digests of operator configuration. Rendering them here would answer "what is
+     * installed on your servers" to any authenticated tenant that submitted one graph. The dimension
+     * alone answers the question this route exists for — can my execution still be reproduced, and
+     * along which axis has it stopped being reproducible — and the dimension vocabulary already
+     * distinguishes a package that is missing from one that changed.</p>
+     *
+     * <p>The count of pinned node packages is left out for the same reason: how many packages a
+     * deployment has installed is an inventory fact, and a number is still an answer.</p>
+     *
+     * <p>What remains is the caller's: the format version and digest of its own manifest, the graph
+     * address it already submitted or was handed back, when it was pinned, and the verdict.</p>
+     */
+    private static String executionManifestJson(
+            ai.ravenroot.api.persistence.StoredExecutionManifest stored,
+            ai.ravenroot.api.persistence.ExecutionManifestCompatibility report) {
+        var manifest = stored.manifest();
+        var differences = report.dimensions().stream()
+                .map(dimension -> "\"" + dimension + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return "{\"manifestFormatVersion\":" + manifest.formatVersion()
+                + ",\"manifestDigest\":\"" + stored.digest().value()
+                + "\",\"graphVersion\":\"" + manifest.graphContentId().value()
+                + "\",\"graphId\":\"" + escape(manifest.graphIdentity().graphId())
+                + "\",\"graphVersionId\":\"" + escape(manifest.graphIdentity().versionId())
+                + "\",\"pinnedAt\":\"" + manifest.pinnedAt()
+                + "\",\"compatible\":" + report.compatible()
+                + ",\"incompatibleDimensions\":" + differences
+                + ",\"dimensionsTruncated\":" + report.truncated()
+                + "}";
+    }
+
+    /**
+     * {@code GET /v1/executions/{id}/traversals}: the durable inventory's traversal rows for
+     * one process instance.
+     *
+     * <p><strong>{@code id} names a process instance, not a traversal/execution id.</strong> Every
+     * other sub-route under {@code /v1/executions} addresses a traversal ({@code GET
+     * /v1/executions/{id}} and the cancel/pause/resume trio, where {@code id == executionId ==
+     * traversalId}). This route is keyed differently on purpose: the durable inventory's traversal
+     * listing is {@link ai.ravenroot.api.persistence.ExecutionStore#listTraversals} scoped by
+     * {@link ai.ravenroot.api.persistence.ExecutionKey}, whose second component is
+     * {@code processInstanceId} -- the durable aggregate's own identity -- and a process instance can
+     * contain more than one traversal, so a traversal id could not address "this instance's
+     * traversals" at all. The two id spaces are both UUIDs and are not interchangeable; a client that
+     * passes a traversal id here receives 404, indistinguishable from an id that never existed.</p>
+     *
+     * <p>404 {@link ErrorCode#UNKNOWN_PROCESS_INSTANCE} when the instance is absent, belongs to
+     * another tenant, or was purged past its terminal retention window -- all three
+     * indistinguishable by design, exactly as {@code GET /v1/executions/{id}} already is for its own
+     * id space. 501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when no inventory-capable store
+     * is composed at all.</p>
+     *
+     * <p>The response also carries {@code retainedFrom}, this tenant's inventory retention floor,
+     * exactly like {@code GET /v1/executions/inventory} does -- an operator diagnosing an absence
+     * needs it on whichever of the two listings they happen to be holding, not only on one of them.</p>
+     */
+    private void readProcessInstanceTraversals(HttpExchange exchange, HttpRequestContext httpContext, String rawId) throws IOException {
+        var requestContext = httpContext.applicationContext();
+        if (!authorizedApplication.processInventoryAvailable()) {
+            fail(exchange, httpContext, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var traversals = authorizedApplication.processInstanceTraversals(requestContext, processInstanceId);
+            var retainedFrom = authorizedApplication.processInventoryRetainedFrom(requestContext);
+            var body = traversals.stream().map(RavenrootServer::traversalInventoryEntryJson)
+                    .collect(java.util.stream.Collectors.joining(",", "{\"traversals\":[", "],\"retainedFrom\":\""
+                            + retainedFrom + "\"}"));
+            json(exchange, 200, body);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, httpContext, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */
+    private static String traversalInventoryEntryJson(ai.ravenroot.api.persistence.TraversalInventoryEntry entry) {
+        return "{\"traversalId\":\"" + entry.traversalId()
+                + "\",\"position\":" + entry.position()
+                + ",\"ingressNodeId\":\"" + escape(entry.ingressNodeId())
+                + "\",\"status\":\"" + entry.status() + "\""
+                + ",\"terminationReason\":" + (entry.terminationReason() == null ? "null"
+                        : "\"" + entry.terminationReason() + "\"")
+                + ",\"cancelled\":" + entry.cancelled()
+                + ",\"disposition\":\"" + entry.disposition()
+                + "\",\"invocationCount\":" + entry.invocationCount()
+                + ",\"parkedAttemptCount\":" + entry.parkedAttemptCount()
+                + "}";
     }
 
     /**
@@ -2782,8 +3804,20 @@ public final class RavenrootServer implements AutoCloseable {
         var body = new StringBuilder("{\"processInstanceId\":\"").append(outcome.processInstanceId())
                 .append("\",\"traversalId\":\"").append(outcome.traversalId())
                 .append("\",\"executionId\":\"").append(outcome.executionId())
-                .append("\",\"status\":\"").append(outcome.status())
-                .append("\",\"degraded\":").append(outcome.degraded())
+                .append("\",\"status\":\"").append(outcome.status()).append('"')
+                // Beside status rather than inside it: status stays the durable lifecycle value a
+                // consumer already switches over, and this qualifies it. Always present -- including
+                // as JSON null when absent -- for the same reason degraded and handledFailure are
+                // always present: a field a client can see is always missing must never be
+                // indistinguishable from a field this server does not report at all. A cancelled
+                // execution reports status FAILED here; read terminationReason beside it, never
+                // status alone -- see ExecutionOutcome's own Javadoc.
+                .append(",\"terminationReason\":")
+                .append(outcome.terminationReason() == null ? "null"
+                        : "\"" + outcome.terminationReason() + "\"")
+                .append(",\"cancelled\":").append(outcome.cancelled())
+                .append(",\"paused\":").append(outcome.paused())
+                .append(",\"degraded\":").append(outcome.degraded())
                 .append(",\"handledFailure\":").append(outcome.handledFailure())
                 .append(",\"visitedNodes\":").append(stringArrayJson(outcome.visitedNodes()))
                 .append(",\"defaultedNodes\":").append(stringArrayJson(outcome.defaultedNodes()))
@@ -2795,6 +3829,77 @@ public final class RavenrootServer implements AutoCloseable {
             body.append(",\"payload\":").append(PayloadJson.write(value))
                     .append(",\"payloadEnvelope\":").append(PayloadEnvelope.of(value).toJson());
         }
+        return body.append('}').toString();
+    }
+
+    /**
+     * The 410 body for {@link ai.ravenroot.api.application.ExecutionLookup.Expired}.
+     *
+     * <p>{@link ErrorEnvelope} is deliberately closed -- five fixed fields, no public constructor that
+     * accepts arbitrary structure -- because widening it would let some future caller smuggle
+     * unbounded text through every error response this server sends. This response is not that: it is
+     * one specific, additive endpoint answer, built directly rather than by asking the closed envelope
+     * to carry fields it was never meant to. Its first five members reproduce {@link ErrorEnvelope}'s
+     * own {@code toJson()} shape byte for byte, so an existing client reading only those fields sees no
+     * difference; {@code status} and {@code terminationReason} are new members appended after them.</p>
+     *
+     * <p>{@code status} and {@code terminationReason} must be read together, exactly as
+     * {@link ai.ravenroot.api.application.ExecutionLookup.Expired}'s own Javadoc says: a tombstone
+     * reporting {@code FAILED} with no reason is an ordinary failure, and the same {@code FAILED} with
+     * {@code terminationReason == "CANCELLED"} is a deliberate stop. Dropping the reason here --
+     * exactly what the pre-existing code did by discarding {@code Expired} entirely in favour of a bare
+     * {@link ErrorCode#EXECUTION_RESULT_EXPIRED} -- would make "visible after eviction" false at this
+     * boundary even though the tombstone carries the answer.</p>
+     */
+    private static String expiredExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Expired expired,
+                                               String correlationId) {
+        ErrorEnvelope envelope = ErrorEnvelope.of(ErrorCode.EXECUTION_RESULT_EXPIRED, correlationId);
+        var body = new StringBuilder("{\"contract\":\"").append(escape(envelope.contract())).append('"')
+                .append(",\"code\":\"").append(escape(envelope.code())).append('"')
+                .append(",\"message\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"error\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"correlationId\":\"").append(escape(envelope.correlationId())).append('"')
+                .append(",\"status\":\"").append(expired.status()).append('"')
+                .append(",\"terminationReason\":")
+                .append(expired.terminationReason() == null ? "null" : "\"" + expired.terminationReason() + "\"")
+                .append(",\"cancelled\":").append(expired.cancelled());
+        return body.append('}').toString();
+    }
+
+    /**
+     * The 410 body for {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}.
+     *
+     * <p>The same additive shape {@link #expiredExecutionJson} uses, and for the same reason: the
+     * first five members reproduce {@link ErrorEnvelope}'s own {@code toJson()} byte for byte, and
+     * {@code status}, {@code terminationReason} and {@code cancelled} carry the identical meaning
+     * {@code expiredExecutionJson} gives them -- read {@code status} and {@code terminationReason}
+     * together, never {@code status} alone, or a cancelled execution reads as an incident.</p>
+     *
+     * <p>{@code payloadState} is the member this body adds and {@code expiredExecutionJson} does not:
+     * one of {@code WITHHELD} (a configured budget refused the payload: either an encoded projection
+     * larger than the store's byte cap, or a value the runtime's payload limits rejected before any
+     * encoding of it existed, which terminates the traversal on that rejection) or
+     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all) --
+     * {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}'s canonical constructor refuses
+     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only two
+     * this method ever renders. A caller reading it can tell "raise the configured cap" from "this
+     * node returns something no remote adapter could ever persist", which is exactly the distinction
+     * {@code EXECUTION_RESULT_EXPIRED} alone could not make -- see
+     * {@link ErrorCode#EXECUTION_RESULT_REDACTED}'s own Javadoc.</p>
+     */
+    private static String redactedExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Redacted redacted,
+                                                String correlationId) {
+        ErrorEnvelope envelope = ErrorEnvelope.of(ErrorCode.EXECUTION_RESULT_REDACTED, correlationId);
+        var body = new StringBuilder("{\"contract\":\"").append(escape(envelope.contract())).append('"')
+                .append(",\"code\":\"").append(escape(envelope.code())).append('"')
+                .append(",\"message\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"error\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"correlationId\":\"").append(escape(envelope.correlationId())).append('"')
+                .append(",\"status\":\"").append(redacted.status()).append('"')
+                .append(",\"terminationReason\":")
+                .append(redacted.terminationReason() == null ? "null" : "\"" + redacted.terminationReason() + "\"")
+                .append(",\"cancelled\":").append(redacted.cancelled())
+                .append(",\"payloadState\":\"").append(redacted.payloadState()).append('"');
         return body.append('}').toString();
     }
 
@@ -2837,15 +3942,15 @@ public final class RavenrootServer implements AutoCloseable {
      * handler was never given is answered by {@link ErrorCode#UNKNOWN_RESOURCE} at the routing site,
      * before it reaches here.</p>
      */
-    private void controlExecution(HttpExchange exchange, String rawId, String operation) throws IOException {
+    private void controlExecution(HttpExchange exchange, HttpRequestContext httpContext, String rawId, String operation) throws IOException {
         java.util.UUID traversalId;
         try {
             traversalId = java.util.UUID.fromString(rawId);
         } catch (IllegalArgumentException malformed) {
-            fail(exchange, ErrorCode.INVALID_REQUEST);
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
-        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var context = httpContext.applicationContext();
         // One body shape for all three, because all three answer the same question -- what happened
         // to this traversal, and what a reader must not conclude from it. The outcome vocabulary
         // differs per operation and comes from each result type's own enum, never from this switch.
@@ -2879,13 +3984,13 @@ public final class RavenrootServer implements AutoCloseable {
      * engine is genuinely draining) even though the bound elapsed before it finished, which is a
      * materially different situation from any 4xx/5xx in this adapter's vocabulary.
      */
-    private void drainServer(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "POST")) {
+    private void drainServer(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "POST")) {
             return;
         }
         try {
             var result = authorizedApplication.drain(
-                    AuthenticatedPrincipalAttribute.requestContext(exchange), drainBound);
+                    httpContext.applicationContext(), drainBound);
             int status = result.outcome() == ai.ravenroot.api.application.DrainResult.Outcome.DRAINED ? 200 : 202;
             json(exchange, status, "{\"outcome\":\"" + result.outcome() + "\"}");
         } catch (IllegalStateException engineFailure) {
@@ -2893,30 +3998,30 @@ public final class RavenrootServer implements AutoCloseable {
             // itself threw, or the wait was interrupted) as IllegalStateException -- a platform fault,
             // not a request defect, so this is the one case in this handler that is INTERNAL_ERROR
             // rather than ACCESS_DENIED (already handled by protectedRequest) or a 4xx.
-            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
         }
     }
 
     /** Reads a structured submission body, answering 413 itself when the document is over budget. */
-    private StructuredSubmission readStructuredSubmission(HttpExchange exchange) throws IOException {
-        int budget = StructuredSubmission.envelopeLimits(payloadLimits, MAX_GRAPH_BYTES).maxEncodedBytes();
+    private StructuredSubmission readStructuredSubmission(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        int budget = StructuredSubmission.envelopeLimits(payloadLimits, graphDocumentMaxBytes).maxEncodedBytes();
         byte[] body;
         try (var input = exchange.getRequestBody()) {
             body = input.readNBytes(budget + 1);
         }
         if (body.length > budget) {
-            fail(exchange, ErrorCode.SUBMISSION_DOCUMENT_TOO_LARGE);
+            fail(exchange, httpContext, ErrorCode.SUBMISSION_DOCUMENT_TOO_LARGE);
             return null;
         }
-        return StructuredSubmission.read(body, payloadLimits, MAX_GRAPH_BYTES);
+        return StructuredSubmission.read(body, payloadLimits, graphDocumentMaxBytes);
     }
 
-    private static byte[] readGraphMlRequest(HttpExchange exchange, java.io.InputStream input) throws IOException {
-        byte[] graph = input.readNBytes(MAX_GRAPH_BYTES + 1);
-        if (graph.length <= MAX_GRAPH_BYTES) {
+    private byte[] readGraphMlRequest(HttpExchange exchange, HttpRequestContext httpContext, java.io.InputStream input) throws IOException {
+        byte[] graph = input.readNBytes(graphDocumentMaxBytes + 1);
+        if (graph.length <= graphDocumentMaxBytes) {
             return graph;
         }
-        fail(exchange, ErrorCode.GRAPHML_DOCUMENT_TOO_LARGE);
+        fail(exchange, httpContext, ErrorCode.GRAPHML_DOCUMENT_TOO_LARGE);
         return null;
     }
 
@@ -2933,13 +4038,13 @@ public final class RavenrootServer implements AutoCloseable {
      * only thing that can build it. The document-derived detail is recorded through
      * {@link #graphMlRejections} (the durable audit
      * trail in production, stdout only for embedders that never configured one), keyed by the same
-     * {@code incidentId} that goes back in the response. {@code requestId} is always minted here
-     * ({@link AuthenticatedPrincipalAttribute#requestId}, never the authentication-dependent overload)
-     * so the audit record's correlation id is never absent -- {@code AuditEnvelope} requires one.</p>
+     * {@code incidentId} that goes back in the response. The {@code requestId} is minted once before
+     * route dispatch, so the audit record's correlation id is never absent --
+     * {@code AuditEnvelope} requires one.</p>
      */
-    private void graphMlError(HttpExchange exchange, GraphMlRejectionDetail error) throws IOException {
-        String requestId = AuthenticatedPrincipalAttribute.requestId(exchange);
-        AuthenticatedPrincipal caller = callerOrNull(exchange);
+    private void graphMlError(HttpExchange exchange, HttpRequestContext httpContext, GraphMlRejectionDetail error) throws IOException {
+        String requestId = httpContext.requestId();
+        AuthenticatedPrincipal caller = callerOrNull(httpContext);
         graphMlRejections.record(new GraphMlRejectionAuditEvent(clock.instant(), requestId,
                 caller == null ? GraphMlRejectionAuditEvent.UNKNOWN : caller.tenantId(),
                 caller == null ? GraphMlRejectionAuditEvent.UNKNOWN : caller.subject(), error));
@@ -2956,9 +4061,9 @@ public final class RavenrootServer implements AutoCloseable {
      * turn a {@code null} here into their own {@code UNKNOWN} placeholder, the same honest "the server
      * genuinely does not know who is calling" answer {@link RateLimitAuditEvent} already establishes.
      */
-    private static AuthenticatedPrincipal callerOrNull(HttpExchange exchange) {
+    private static AuthenticatedPrincipal callerOrNull(HttpRequestContext httpContext) {
         try {
-            return AuthenticatedPrincipalAttribute.require(exchange);
+            return httpContext.requirePrincipal();
         } catch (RuntimeException absent) {
             return null;
         }
@@ -3101,11 +4206,11 @@ public final class RavenrootServer implements AutoCloseable {
      * <em>echoed</em> in {@code after}, so what would otherwise be an invisible default becomes a value
      * the caller can see and resume from.</p>
      */
-    private void recentExecutionEvents(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    private void recentExecutionEvents(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
-        var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var requestContext = httpContext.applicationContext();
         var parameters = query(exchange);
 
         int limit = RECENT_EVENTS_DEFAULT_LIMIT;
@@ -3114,17 +4219,17 @@ public final class RavenrootServer implements AutoCloseable {
             try {
                 limit = Integer.parseInt(rawLimit.trim());
             } catch (NumberFormatException notANumber) {
-                fail(exchange, ErrorCode.INVALID_REQUEST);
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                 return;
             }
             if (limit < 1) {
-                fail(exchange, ErrorCode.INVALID_REQUEST);
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                 return;
             }
             if (limit > RECENT_EVENTS_MAX_LIMIT) {
                 // Named, not clamped: the caller must be able to learn the cap it exceeded, which is
                 // why this has its own code carrying the bound rather than a generic invalid-request.
-                fail(exchange, ErrorCode.EVENT_LIMIT_ABOVE_MAXIMUM);
+                fail(exchange, httpContext, ErrorCode.EVENT_LIMIT_ABOVE_MAXIMUM);
                 return;
             }
         }
@@ -3135,11 +4240,11 @@ public final class RavenrootServer implements AutoCloseable {
             try {
                 requestedAfter = Long.parseLong(rawAfter.trim());
             } catch (NumberFormatException notANumber) {
-                fail(exchange, ErrorCode.INVALID_REQUEST);
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                 return;
             }
             if (requestedAfter < 0) {
-                fail(exchange, ErrorCode.INVALID_REQUEST);
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                 return;
             }
         }
@@ -3153,7 +4258,7 @@ public final class RavenrootServer implements AutoCloseable {
                     // An unrecognised content selector is refused rather than ignored: silently
                     // dropping it would answer a narrower question than the caller asked, which is the
                     // same failure as clamping a limit.
-                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                     return;
                 }
             }
@@ -3177,7 +4282,7 @@ public final class RavenrootServer implements AutoCloseable {
             System.err.println("{\"event\":\"recent-events-journal-read-failed\",\"failure\":\""
                     + escape(storeFailure.failure().getClass().getSimpleName())
                     + "\",\"retryability\":\"" + escape(String.valueOf(storeFailure.retryability())) + "\"}");
-            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
         }
     }
 
@@ -3285,28 +4390,46 @@ public final class RavenrootServer implements AutoCloseable {
             if (index > 0) {
                 body.append(',');
             }
-            var event = page.get(index);
-            String description = PublicExecutionDescription.forEventType(event.eventType());
-            body.append("{\"journalOffset\":").append(event.journalOffset())
-                    .append(",\"streamSequence\":").append(event.streamSequence())
-                    .append(",\"occurredAt\":\"").append(event.occurredAt()).append('"')
-                    .append(",\"type\":\"").append(escape(event.eventType())).append('"')
-                    .append(",\"description\":\"").append(escape(description)).append('"')
-                    .append(",\"processInstanceId\":\"").append(event.processInstanceId()).append('"')
-                    .append(",\"traversalId\":\"").append(event.traversalId()).append('"')
-                    .append("}");
+            body.append(durableRecentEventJson(page.get(index)));
         }
         return body.append("]}").toString();
     }
 
-    private void executionEvents(HttpExchange exchange) throws IOException {
-        if (!method(exchange, "GET")) {
+    /**
+     * One durable row of {@code /v1/events/recent}, exposed package-locally so its field set can be
+     * asserted directly.
+     *
+     * <p>Deliberately narrower than {@link #durableExecutionEventFrame}: this is the polling
+     * counterpart, and it has always carried the coarse position and identity rather than the full
+     * causal chain. {@code handlerId} is here for the same reason it is on the stream — a poller that
+     * saw {@code HANDLER_RESOLVED} and could not tell <em>which</em> handler resolved would have to go
+     * and ask, which is the question this projection exists to answer — and it is null on every other
+     * event type and on rows written before PERS-05.</p>
+     * @param event durable event to serialize.
+     * @return one JSON object, with no surrounding array or separator.
+     */
+    static String durableRecentEventJson(ai.ravenroot.api.application.DurableExecutionEvent event) {
+        String description = PublicExecutionDescription.forEventType(event.eventType());
+        return "{\"journalOffset\":" + event.journalOffset()
+                + ",\"streamSequence\":" + event.streamSequence()
+                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
+                + ",\"type\":\"" + escape(event.eventType()) + "\""
+                + ",\"description\":\"" + escape(description) + "\""
+                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
+                + ",\"traversalId\":\"" + event.traversalId() + "\""
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
+                + "}";
+    }
+
+    private void executionEvents(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "GET")) {
             return;
         }
-        var initialPrincipal = AuthenticatedPrincipalAttribute.require(exchange);
+        var initialPrincipal = httpContext.requirePrincipal();
         if (!clock.instant().isBefore(initialPrincipal.expiresAt())) {
             exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
-            fail(exchange, ErrorCode.AUTHENTICATION_REQUIRED);
+            fail(exchange, httpContext, ErrorCode.AUTHENTICATION_REQUIRED);
             return;
         }
         boolean diagnostics = false;
@@ -3316,7 +4439,7 @@ public final class RavenrootServer implements AutoCloseable {
                 if (INCLUDE_DIAGNOSTICS.equals(requested.trim())) {
                     diagnostics = true;
                 } else {
-                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
                     return;
                 }
             }
@@ -3326,10 +4449,10 @@ public final class RavenrootServer implements AutoCloseable {
         // released together by closing the lease, on every exit path including an abrupt disconnect.
         try (var slot = rateLimiter.acquireStreamSlot(initialPrincipal.tenantId(), initialPrincipal.subject())) {
             if (!slot.granted()) {
-                refuse(exchange, slot.refusal());
+                refuse(exchange, httpContext, slot.refusal());
                 return;
             }
-            streamExecutionEvents(exchange, initialPrincipal, diagnostics);
+            streamExecutionEvents(exchange, httpContext, initialPrincipal, diagnostics);
         }
     }
 
@@ -3345,14 +4468,14 @@ public final class RavenrootServer implements AutoCloseable {
      * here, once, is what lets {@link #streamDurableExecutionEvents} not have to re-litigate that
      * choice on every wakeup.</p>
      */
-    private void streamExecutionEvents(HttpExchange exchange, AuthenticatedPrincipal initialPrincipal,
+    private void streamExecutionEvents(HttpExchange exchange, HttpRequestContext httpContext, AuthenticatedPrincipal initialPrincipal,
                                        boolean diagnostics)
             throws IOException {
-        var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        var requestContext = httpContext.applicationContext();
         if (!diagnostics && authorizedApplication.durableEventJournalAvailable()) {
-            streamDurableExecutionEvents(exchange, initialPrincipal, requestContext);
+            streamDurableExecutionEvents(exchange, httpContext, initialPrincipal, requestContext);
         } else {
-            streamInMemoryExecutionEvents(exchange, initialPrincipal, requestContext);
+            streamInMemoryExecutionEvents(exchange, httpContext, initialPrincipal, requestContext);
         }
     }
 
@@ -3364,7 +4487,7 @@ public final class RavenrootServer implements AutoCloseable {
      * still what every existing test of this shape exercises. It is also the only stream that can
      * carry bounded author diagnostics; the durable journal deliberately never stores them.
      */
-    private void streamInMemoryExecutionEvents(HttpExchange exchange, AuthenticatedPrincipal initialPrincipal,
+    private void streamInMemoryExecutionEvents(HttpExchange exchange, HttpRequestContext httpContext, AuthenticatedPrincipal initialPrincipal,
                                                ai.ravenroot.api.security.RequestContext requestContext)
             throws IOException {
         long requestedSequence = parseSequence(exchange.getRequestHeaders().getFirst("Last-Event-ID"));
@@ -3374,14 +4497,16 @@ public final class RavenrootServer implements AutoCloseable {
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-cache, no-transform");
             exchange.getResponseHeaders().set("Connection", "keep-alive");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Source", "RING");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Continuity", "PROCESS_LOCAL");
+            exchange.getResponseHeaders().set(EVENT_SOURCE_HEADER, ExecutionEventWireJson.RING_SOURCE);
+            exchange.getResponseHeaders().set(EVENT_CONTINUITY_HEADER, "PROCESS_LOCAL");
+            exchange.getResponseHeaders().set(EVENT_SCHEMA_VERSION_HEADER,
+                    Integer.toString(ExecutionEventWireJson.SCHEMA_VERSION));
             exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
                 long sentSequence = requestedSequence;
                 Instant revalidateAt = nextRevalidation(initialPrincipal);
                 for (var event : authorizedApplication.executionEventsAfter(requestContext, requestedSequence)) {
-                    revalidateAt = revalidateEventStreamLease(exchange, initialPrincipal, revalidateAt);
+                    revalidateAt = revalidateEventStreamLease(exchange, httpContext, initialPrincipal, revalidateAt);
                     writeEvent(output, event);
                     sentSequence = Math.max(sentSequence, event.sequence());
                 }
@@ -3397,7 +4522,7 @@ public final class RavenrootServer implements AutoCloseable {
                     long waitMillis = Math.max(1, Math.min(1_000,
                             Duration.between(clock.instant(), revalidateAt).toMillis()));
                     var event = queue.poll(waitMillis);
-                    revalidateAt = revalidateEventStreamLease(exchange, initialPrincipal, revalidateAt);
+                    revalidateAt = revalidateEventStreamLease(exchange, httpContext, initialPrincipal, revalidateAt);
                     if (event == null) {
                         output.write(": keepalive\n\n".getBytes(StandardCharsets.UTF_8));
                         output.flush();
@@ -3508,7 +4633,7 @@ public final class RavenrootServer implements AutoCloseable {
      * offset, which is the same cursor corruption as above, and would trade a gap a client can be
      * told about for one it could not detect.</p>
      */
-    private void streamDurableExecutionEvents(HttpExchange exchange, AuthenticatedPrincipal initialPrincipal,
+    private void streamDurableExecutionEvents(HttpExchange exchange, HttpRequestContext httpContext, AuthenticatedPrincipal initialPrincipal,
                                               ai.ravenroot.api.security.RequestContext requestContext)
             throws IOException {
         long requestedOffset = parseSequence(exchange.getRequestHeaders().getFirst("Last-Event-ID"));
@@ -3519,8 +4644,10 @@ public final class RavenrootServer implements AutoCloseable {
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-cache, no-transform");
             exchange.getResponseHeaders().set("Connection", "keep-alive");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Source", "DURABLE");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Continuity", "DURABLE");
+            exchange.getResponseHeaders().set(EVENT_SOURCE_HEADER, ExecutionEventWireJson.DURABLE_SOURCE);
+            exchange.getResponseHeaders().set(EVENT_CONTINUITY_HEADER, ExecutionEventWireJson.DURABLE_SOURCE);
+            exchange.getResponseHeaders().set(EVENT_SCHEMA_VERSION_HEADER,
+                    Integer.toString(ExecutionEventWireJson.SCHEMA_VERSION));
             exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
                 long sentOffset = requestedOffset;
@@ -3538,7 +4665,7 @@ public final class RavenrootServer implements AutoCloseable {
                         // leave such a stream permanently silent while looking perfectly healthy --
                         // emitting keepalives forever over a journal it never re-read.
                         wakeup.await(waitMillis);
-                        revalidateAt = revalidateEventStreamLease(exchange, initialPrincipal, revalidateAt);
+                        revalidateAt = revalidateEventStreamLease(exchange, httpContext, initialPrincipal, revalidateAt);
                         long beforeOffset = sentOffset;
                         sentOffset = drainJournalPages(output, requestContext, sentOffset, pageSize);
                         if (sentOffset == beforeOffset) {
@@ -3717,22 +4844,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Complete UTF-8 durable frame, exposed package-locally for the shared transport-size proof. */
     static byte[] durableExecutionEventFrame(ai.ravenroot.api.application.DurableExecutionEvent event) {
-        String description = PublicExecutionDescription.forEventType(event.eventType());
-        String body = "{\"journalOffset\":" + event.journalOffset()
-                + ",\"streamSequence\":" + event.streamSequence()
-                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
-                + ",\"eventType\":\"" + escape(event.eventType()) + "\""
-                + ",\"description\":\"" + escape(description) + "\""
-                + ",\"graphVersion\":\"" + escape(event.graphVersion()) + "\""
-                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
-                + ",\"traversalId\":\"" + event.traversalId() + "\""
-                + ",\"invocationId\":" + (event.invocationId() == null ? "null" : "\"" + event.invocationId() + "\"")
-                + ",\"attemptId\":" + (event.attemptId() == null ? "null" : "\"" + event.attemptId() + "\"")
-                + ",\"causationId\":" + (event.causationId() == null ? "null" : "\"" + event.causationId() + "\"")
-                + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
-                + ",\"edgeId\":" + (event.edgeId() == null ? "null"
-                        : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
-                + "}";
+        String body = ExecutionEventWireJson.durable(event);
         String frame = "id: " + event.journalOffset() + "\nevent: execution\ndata: " + body + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);
     }
@@ -3745,18 +4857,21 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Complete UTF-8 live frame, exposed package-locally so the client-size contract is tested exactly. */
     static byte[] executionEventFrame(ai.ravenroot.api.application.ExecutionEvent event) {
-        String frame = "id: " + event.sequence() + "\nevent: execution\ndata: " + executionEventJson(event) + "\n\n";
+        String frame = "id: " + event.sequence() + "\nevent: execution\ndata: "
+                + ExecutionEventWireJson.live(event) + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);
     }
 
     /**
-     * The single serialization of an {@link ai.ravenroot.api.application.ExecutionEvent} for the wire,
-     * shared by the SSE stream and by {@code /v1/events/recent}.
+     * The legacy serialization of an {@link ai.ravenroot.api.application.ExecutionEvent} for
+     * {@code /v1/events/recent}. The SSE stream layers its versioned envelope around this exact
+     * projection through {@link ExecutionEventWireJson#live(ExecutionEvent)}.
      *
      * <p>Shared deliberately. {@code description} is a source-authored sentence;
      * {@link ExecutionEvent#detail()} is never serialized because it can contain a raw exception
      * message or graph-authored value. Two serializers would let either safety rule silently miss the
-     * polling path.</p>
+     * polling path. Keeping this projection as one helper also gives the stream an exact legacy
+     * suffix instead of a second spelling of those fields.</p>
      *
      * <h2>The sentence depends on the classifier, and the {@code detail} alias is absent</h2>
      * <p>{@code description} is selected from {@link ExecutionEvent#publicReason()} as well as the
@@ -3773,47 +4888,10 @@ public final class RavenrootServer implements AutoCloseable {
      * in this repository reads {@code description} and ignores it.</p>
      */
     static String executionEventJson(ai.ravenroot.api.application.ExecutionEvent event) {
-        String description = PublicExecutionDescription.forType(event.type(), event.publicReason());
-        RuntimeActivityData.TextProjection message = event.authorMessage();
-        return "{\"sequence\":" + event.sequence()
-                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
-                + ",\"engineId\":\"" + escape(event.engineId()) + "\""
-                + ",\"graphVersion\":\"" + escape(event.graphVersion()) + "\""
-                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
-                + ",\"traversalId\":\"" + event.traversalId() + "\""
-                + ",\"executionId\":\"" + event.executionId() + "\""
-                + ",\"invocationId\":" + (event.invocationId() == null ? "null" : "\"" + event.invocationId() + "\"")
-                + ",\"attemptId\":" + (event.attemptId() == null ? "null" : "\"" + event.attemptId() + "\"")
-                + ",\"type\":\"" + event.type() + "\""
-                + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
-                + ",\"edgeId\":" + (event.edgeId() == null ? "null"
-                        : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
-                + ",\"activeInstances\":" + event.activeInstances()
-                // The second number, under a name that cannot be mistaken for the first. Both are
-                // emitted because they answer different questions -- how much work this node's role is
-                // carrying, and how deep the queue at it is -- and a client given only one of them
-                // cannot derive the other.
-                + ",\"inFlightArrivals\":" + event.inFlightArrivals()
-                + ",\"fallback\":" + event.fallback()
-                + ",\"description\":\"" + escape(description) + "\""
-                // The bare classifier beside the sentence built from it, so a client branches on
-                // a token instead of matching prose. Null stays null: absent means this event type
-                // carries no classifier, and "" would be a token no reader could look up.
-                + ",\"publicReason\":" + (event.publicReason() == null ? "null"
-                        : "\"" + escape(event.publicReason()) + "\"")
-                + ",\"message\":" + (message == null ? "null" : "\"" + escape(message.value()) + "\"")
-                + ",\"messageRedacted\":" + (message != null && message.redacted())
-                + ",\"messageTruncated\":" + (message != null && message.truncated())
-                + (event.authorOutput() == null ? ""
-                        : ",\"output\":" + PayloadJson.write(event.authorOutput().value())
-                                + ",\"outputRedacted\":" + event.authorOutput().redacted()
-                                + ",\"outputTruncated\":" + event.authorOutput().truncated())
-                + ",\"processingDuration\":" + (event.processingDuration() == null ? "null"
-                        : event.processingDuration().toNanos() / 1_000_000_000.0)
-                + "}";
+        return ExecutionEventWireJson.legacyLive(event);
     }
 
-    private static boolean method(HttpExchange exchange, String expected) throws IOException {
+    private static boolean method(HttpExchange exchange, HttpRequestContext httpContext, String expected) throws IOException {
         if ("OPTIONS".equals(exchange.getRequestMethod())) {
             exchange.getResponseHeaders().set("Allow", expected + ", OPTIONS");
             exchange.sendResponseHeaders(204, -1);
@@ -3824,7 +4902,7 @@ public final class RavenrootServer implements AutoCloseable {
             return true;
         }
         exchange.getResponseHeaders().set("Allow", expected);
-        fail(exchange, ErrorCode.METHOD_NOT_ALLOWED);
+        fail(exchange, httpContext, ErrorCode.METHOD_NOT_ALLOWED);
         return false;
     }
 
@@ -3834,8 +4912,8 @@ public final class RavenrootServer implements AutoCloseable {
      * <p>No signature on this class accepts error text: a call site picks an {@link ErrorCode} and
      * the message is the code's. What can no longer be expressed cannot be forgotten.</p>
      */
-    private static void fail(HttpExchange exchange, ErrorCode code) throws IOException {
-        fail(exchange, code.status(), ErrorEnvelope.of(code, AuthenticatedPrincipalAttribute.requestId(exchange)));
+    private static void fail(HttpExchange exchange, HttpRequestContext httpContext, ErrorCode code) throws IOException {
+        fail(exchange, code.status(), ErrorEnvelope.of(code, httpContext.requestId()));
     }
 
     private static void fail(HttpExchange exchange, int status, ErrorEnvelope envelope) throws IOException {
@@ -3843,9 +4921,9 @@ public final class RavenrootServer implements AutoCloseable {
     }
 
     /** Answers a classified payload rejection and records its payload-derived detail server-side. */
-    private void failPayload(HttpExchange exchange, PayloadException rejection) throws IOException {
-        String correlationId = AuthenticatedPrincipalAttribute.requestId(exchange);
-        AuthenticatedPrincipal caller = callerOrNull(exchange);
+    private void failPayload(HttpExchange exchange, HttpRequestContext httpContext, PayloadException rejection) throws IOException {
+        String correlationId = httpContext.requestId();
+        AuthenticatedPrincipal caller = callerOrNull(httpContext);
         payloadRejections.record(new PayloadRejectionAuditEvent(clock.instant(), correlationId,
                 caller == null ? PayloadRejectionAuditEvent.UNKNOWN : caller.tenantId(),
                 caller == null ? PayloadRejectionAuditEvent.UNKNOWN : caller.subject(), rejection));
@@ -3889,7 +4967,7 @@ public final class RavenrootServer implements AutoCloseable {
     }
 
     private Instant revalidateEventStreamLease(
-            HttpExchange exchange,
+            HttpExchange exchange, HttpRequestContext httpContext,
             ai.ravenroot.server.security.AuthenticatedPrincipal initialPrincipal,
             Instant revalidateAt) throws AuthenticationException {
         Instant now = clock.instant();
@@ -3908,7 +4986,7 @@ public final class RavenrootServer implements AutoCloseable {
         // continuing, not a new one. Minting a fresh id here made every SSE connection's audit records
         // mutually unjoinable (SEC-07).
         authorizedApplication.authorizeExecutionEvents(
-                AuthenticatedPrincipalAttribute.requestContext(exchange, currentPrincipal));
+                httpContext.applicationContext(currentPrincipal));
         return nextRevalidation(currentPrincipal);
     }
 
@@ -3967,6 +5045,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (managedIngress != null) {
             managedIngress.close();
         }
+        if (interactionWebSockets != null) interactionWebSockets.close();
         server.stop((int) httpStopDelay.toSeconds());
         executor.close();
         try {

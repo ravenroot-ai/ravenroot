@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -83,6 +84,7 @@ final class JoinCoordinator {
     private final UUID processInstanceId;
     private final UUID traversalId;
     private final String tenantId;
+    private final Runnable timeoutRelinquishedObserver;
 
     /**
      * In-memory state for the joins this traversal has actually reached.
@@ -95,6 +97,17 @@ final class JoinCoordinator {
     private final ConcurrentHashMap<String, LocalJoin> locals = new ConcurrentHashMap<>();
 
     private final AtomicInteger liveTimeouts = new AtomicInteger();
+
+    /**
+     * Whether this traversal is currently held by an operator, so that no join of it may run a
+     * deadline.
+     *
+     * <p>Read and written under {@code gate}, the same monitor {@link #local(String)} creates joins
+     * under, so that "held" and "the set of joins that exist" are one observation rather than two.
+     * It seeds {@link LocalJoin#held}, which is where the decision is actually taken; this field is
+     * only what a join reached <em>during</em> a hold is born from.</p>
+     */
+    private boolean joinTimeoutsHeld;
 
     /**
      * The verdict of the first join that was still holding a parked branch when the traversal ended.
@@ -225,6 +238,12 @@ final class JoinCoordinator {
 
     JoinCoordinator(JoinStore store, Scheduler scheduler, ExecutionMonitor monitor,
                     ExecutionMonitor.ExecutionIdentity identity, Map<String, JoinSpec> specs, Clock clock) {
+        this(store, scheduler, monitor, identity, specs, clock, () -> { });
+    }
+
+    JoinCoordinator(JoinStore store, Scheduler scheduler, ExecutionMonitor monitor,
+                    ExecutionMonitor.ExecutionIdentity identity, Map<String, JoinSpec> specs, Clock clock,
+                    Runnable timeoutRelinquishedObserver) {
         this.store = store;
         this.scheduler = scheduler;
         this.monitor = monitor;
@@ -234,6 +253,8 @@ final class JoinCoordinator {
         this.processInstanceId = identity.processInstanceId();
         this.traversalId = identity.traversalId();
         this.tenantId = identity.security().tenantId();
+        this.timeoutRelinquishedObserver = java.util.Objects.requireNonNull(timeoutRelinquishedObserver,
+                "timeoutRelinquishedObserver");
     }
 
     boolean isJoin(String nodeId) {
@@ -243,6 +264,71 @@ final class JoinCoordinator {
     /** Scheduled timeouts that have neither fired nor been cancelled. Must return to zero. */
     int liveTimeoutCount() {
         return liveTimeouts.get();
+    }
+
+    /**
+     * Joins whose deadline is suspended: a budget is recorded and nothing is scheduled for it.
+     *
+     * <p>Distinct from {@link #liveTimeoutCount()} rather than folded into it, because they answer
+     * different questions and a held join answers them differently. Nothing is scheduled for a held
+     * join, so it is correctly absent from the live count — which is what makes "no scheduled task
+     * remains" hold during a hold as well as at a terminal state.</p>
+     *
+     * <p>It exists as a separate reading for the reason the manual scheduler's cancellation mutant
+     * exists: without it, "the pause suspended this deadline", "this join never had one" and "this
+     * deadline was cancelled for good" are three states behind one zero, and a test could not tell a
+     * working suspension from a suspension that quietly did nothing.</p>
+     */
+    int suspendedTimeoutCount() {
+        return (int) locals.values().stream().filter(LocalJoin::isDeadlineHeld).count();
+    }
+
+    /**
+     * Stops every deadline this traversal's joins are running, keeping what is left of each budget.
+     *
+     * <p>Called when an operator's hold is installed. The flag and the snapshot are taken under the
+     * same monitor {@link #local(String)} creates joins under, which is what makes the sweep total:
+     * a join already reached is in {@code reached} and is suspended below, and a join first reached
+     * afterwards is born held. There is no third case, and in particular no window in which a join
+     * is created between the flag being set and the snapshot being taken.</p>
+     *
+     * <p>The suspension itself happens outside that monitor. It cancels at the scheduler, and the
+     * whole reason {@link LocalJoin#armTimeoutFor(int)} does not hold a lock across a scheduler call
+     * applies here word for word.</p>
+     *
+     * <p>Idempotent: a second hold over an already-held traversal — which
+     * {@code GraphRunner.pauseTraversal} refuses anyway — suspends budgets that are already
+     * suspended and changes none of them.</p>
+     */
+    void suspendTimeouts() {
+        List<LocalJoin> reached;
+        synchronized (gate) {
+            joinTimeoutsHeld = true;
+            reached = List.copyOf(locals.values());
+        }
+        for (LocalJoin local : reached) {
+            local.holdDeadline();
+        }
+    }
+
+    /**
+     * Re-arms every suspended deadline with exactly the budget it had left when the hold was taken.
+     *
+     * <p>The mirror of {@link #suspendTimeouts()}, and it clears the flag under the same monitor for
+     * the same reason: a join reached after this point arms normally with a full budget, and one
+     * reached before it is in the snapshot and is re-armed with what it had left. A join that
+     * settled or failed during the hold has already discarded its budget and is re-armed with
+     * nothing.</p>
+     */
+    void resumeTimeouts() {
+        List<LocalJoin> reached;
+        synchronized (gate) {
+            joinTimeoutsHeld = false;
+            reached = List.copyOf(locals.values());
+        }
+        for (LocalJoin local : reached) {
+            local.releaseDeadline();
+        }
     }
 
     /**
@@ -258,6 +344,27 @@ final class JoinCoordinator {
      */
     int liveParkedBranchCount() {
         return locals.values().stream().mapToInt(LocalJoin::liveWaiterCount).sum();
+    }
+
+    /**
+     * A join node this traversal currently has a branch parked at, or {@code null} when none has.
+     *
+     * <p>Exists so that a traversal ended from outside the graph can name a node rather than end
+     * anonymously. A cancellation reports "the first hop that did not run", and for a traversal
+     * stranded at a fan-in the honest answer is the join itself: the hop past it is what the parked
+     * branch was waiting to reach and never will.</p>
+     *
+     * <p>"A" rather than "the", deliberately. A traversal may be parked at more than one join, and
+     * this returns the first in the order joins were reached rather than pretending to rank them.
+     * A verdict naming one real join is more useful than one naming none, and any ranking this
+     * method invented would be a claim about causality it has no evidence for.</p>
+     */
+    String anyParkedJoinNodeId() {
+        return locals.values().stream()
+                .filter(local -> local.liveWaiterCount() > 0)
+                .map(local -> local.key.joinNodeId())
+                .findFirst()
+                .orElse(null);
     }
 
     /**
@@ -362,6 +469,35 @@ final class JoinCoordinator {
      * exact shape of leak that only appears once the system is under real fault load.</p>
      */
     CompletionStage<Void> terminate() {
+        return terminate(null);
+    }
+
+    /**
+     * The same release, with a verdict attached to the branches it strands.
+     *
+     * <p>Reconciliation of an unreachable traversal ends it through exactly this method rather than
+     * through a mechanism of its own, because the release a traversal already performs on every
+     * completion path is precisely what a stuck traversal needs and never reaches: it completes the
+     * parked branches, cancels the timers and does both <em>without waiting for the store</em> —
+     * which matters here more than anywhere, since a store that stopped answering is one of the ways
+     * a traversal becomes unreachable in the first place.</p>
+     *
+     * <p>The verdict rides as the {@linkplain Throwable#initCause cause} of the join failure the
+     * stranded branches receive, so it reaches the traversal's terminal handler through the failure
+     * that is already propagating rather than through a second channel that could disagree with it.
+     * {@link ExecutionTermination} is then the one place that decides what the termination was, for
+     * this path exactly as for every other.</p>
+     *
+     * <p>Exactly-once is this method's existing contract, not a new one: the second caller is handed
+     * the first caller's stage and completes nothing again. So a reconciliation racing a cancellation,
+     * a shutdown or a late completion cannot strand the branches twice, cannot release the traversal's
+     * capacity twice, and cannot overwrite a result the winner already recorded — whichever call
+     * arrives first supplies the verdict, and a later one supplies nothing at all.</p>
+     *
+     * @param verdict why this traversal is being released, or {@code null} for the ordinary
+     *                completion paths, where the release is teardown and carries no verdict of its own
+     */
+    CompletionStage<Void> terminate(Throwable verdict) {
         boolean alreadyIdle;
         List<LocalJoin> reached;
         CompletableFuture<Void> released;
@@ -397,8 +533,28 @@ final class JoinCoordinator {
             // A consumer that BLOCKS on this stage from inside a parked branch's continuation would
             // deadlock itself; consumers must compose continuations instead.
             released = new CompletableFuture<>();
-            termination = released.thenCompose(ignored -> drained)
+            CompletionStage<Void> discarded = released.thenCompose(ignored -> drained)
                     .thenCompose(ignored -> discardRecords(reached));
+            // A reconciled traversal does not wait for its records to be discarded, and this is the
+            // one place where that is not a shortcut but the consequence of the verdict.
+            //
+            // `drained` completes when this coordinator's last store operation returns. For an
+            // unreachable traversal, an operation that will never return is precisely what the
+            // criterion found: no node is running, no deadline is armed, and a branch is parked
+            // because the arrival that would settle it went into a call that never came back.
+            // Sequencing the traversal's own ending behind that call therefore makes recovery
+            // conditional on the exact dependency whose failure created the condition -- the
+            // traversal stays open, its result never settles, and reconciliation achieves nothing
+            // it could not have achieved by doing nothing. This is the same correction that already
+            // moved the in-memory release out from behind the drain, applied one level up.
+            //
+            // The discard is not abandoned, only detached: the chain above stays armed, so a store
+            // that answers later still discards these records. What is given up is the guarantee
+            // that a caller seeing this stage complete may assert the records are gone -- given up
+            // only for a traversal reconciled by verdict, and given up in favour of the traversal
+            // reaching a terminal state at all. A record left behind by a store that never answers
+            // is recovery's to reclaim; a traversal that can never end is nobody's.
+            termination = verdict == null ? discarded : released;
             mine = termination;
         }
         // Process memory is released here, unconditionally, and NOT behind the drain. Everything
@@ -407,7 +563,7 @@ final class JoinCoordinator {
         // control — a store that never answers left the timeout armed and the parked branches
         // pending, and the runner's bounded wait then walked away from both. The store record is
         // the only thing that genuinely needs the drain, so it is the only thing still behind it.
-        releaseInMemory(reached);
+        releaseInMemory(reached, verdict);
         // Set between the call above and completing `released`, and nowhere else: this is the one
         // instant at which every LocalJoin#releaseWaiters() this coordinator will ever run has
         // returned, so `abandonedBranch` cannot change again. See its own Javadoc for why this is a
@@ -427,12 +583,13 @@ final class JoinCoordinator {
      * <p><strong>Why an early release cannot strand a branch.</strong> The race to worry about is a
      * settle that has not yet decided {@link JoinDecision.Wait}: it could park on a waiter list that
      * has already been drained and wait for a completion that will never come. It cannot.
-     * {@link LocalJoin#completeAllWaiters} sets {@code releasedEveryBucket} while holding
+     * {@link LocalJoin#releaseAllWaiters} sets {@code releasedEveryBucket} while holding
      * {@code waitersLock}, and {@link LocalJoin#waiter(int)} re-reads that same field while holding the
      * same monitor. So a branch that reaches {@code waiter(lap)} after this method has run observes
-     * {@code releasedEveryBucket} and returns {@code Discarded(LATE)} immediately instead of adding
-     * itself to the list — including on a bucket that did not exist when the release ran, which is the
-     * interleaving the flag exists for and that a per-bucket flag alone would miss. Either
+     * {@code releasedEveryBucket} and returns immediately instead of adding itself to the list: an
+     * actual retained join failure is delivered as that failure, while traversal teardown remains
+     * {@code Discarded(LATE)}. This includes a bucket that did not exist when the release ran, which
+     * is the interleaving the flag exists for and that a per-bucket flag alone would miss. Either
      * the branch parked before the release and was completed by it, or it parks never and is
      * answered inline; there is no third interleaving. This is the same guard that already protects
      * a branch racing an ordinary settle, so no new ordering is being relied on.
@@ -443,10 +600,10 @@ final class JoinCoordinator {
      * cancellation, so a timer created after this method has run is cancelled by the thread that
      * created it rather than left armed.
      */
-    private void releaseInMemory(List<LocalJoin> reached) {
+    private void releaseInMemory(List<LocalJoin> reached, Throwable verdict) {
         for (LocalJoin local : reached) {
             local.cancelTimeout();
-            local.releaseWaiters();
+            local.releaseWaiters(verdict);
         }
     }
 
@@ -480,8 +637,14 @@ final class JoinCoordinator {
             if (terminated) {
                 return null;
             }
+            // Born held when the traversal is held, and seeded here rather than pushed afterwards
+            // because a join first reached during a hold has no arming for the pause sweep to have
+            // found. Reading the flag inside this monitor is what pairs it with the sweep's own
+            // write: a join created before the flag was set is in the snapshot the sweep took, and
+            // one created after it reads the value the sweep wrote.
             local = locals.computeIfAbsent(joinNodeId, ignored -> new LocalJoin(spec,
-                    new JoinKey(tenantId, processInstanceId, traversalId, joinNodeId)));
+                    new JoinKey(tenantId, processInstanceId, traversalId, joinNodeId),
+                    joinTimeoutsHeld));
         }
         // NO DEADLINE IS ARMED HERE, and that is a correction rather than an omission. This method is
         // reached by every report — including a straggler of an iteration that
@@ -527,29 +690,44 @@ final class JoinCoordinator {
         }
         return attemptSettle(local, branchId, lap, outcome, 1)
                 .whenComplete((ignored, error) -> leaveOperation())
-                .thenCompose(decision -> switch (decision) {
-            case JoinDecision.Wait waiting -> parkWhileWaiting
-                    ? local.waiter(lap)
-                    : CompletableFuture.<JoinDecision>completedFuture(waiting);
-            case JoinDecision.Proceed proceed -> {
-                // Per bucket, both of them. The deadline is re-armed for the bucket now being filled
-                // rather than cancelled for good, and only the branches parked on THIS lap are
-                // released — a branch parked on lap k+1 (which cannot exist yet) or a branch that
-                // parks on lap k+1 a moment from now is not answered by lap k's firing.
-                local.releaseTimeoutFor(lap);
-                local.completeWaiters(lap, null);
-                yield CompletableFuture.completedFuture(proceed);
-            }
-            case JoinDecision.Failed failed -> {
-                // A failure is terminal for the whole join, not for one lap: the record is FAILED and
-                // no further bucket can ever fire, so every parked branch on every bucket is owed the
-                // verdict.
-                local.cancelTimeout();
-                local.completeAllWaiters(failed.failure());
-                yield CompletableFuture.completedFuture(failed);
-            }
-            case JoinDecision.Discarded discarded -> CompletableFuture.completedFuture(discarded);
-        });
+                .<CompletionStage<JoinDecision>>handle((decision, error) -> {
+                    JoinDecision released = local.releasedDecision(branchId);
+                    if (released != null) {
+                        // A timeout may have settled while this report's store operation was still
+                        // completing. Its verdict wins over both a stale Wait decision and a late
+                        // store error; otherwise the report can park after the timeout released the
+                        // waiter set, or surface the operation error instead of the terminal join.
+                        // Termination uses the same handshake without retaining a settlement, and
+                        // therefore preserves its existing late-discard answer.
+                        return CompletableFuture.completedFuture(released);
+                    }
+                    if (error != null) {
+                        return CompletableFuture.<JoinDecision>failedFuture(error);
+                    }
+                    return switch (decision) {
+                        case JoinDecision.Wait waiting -> parkWhileWaiting
+                                ? local.waiter(lap)
+                                : CompletableFuture.<JoinDecision>completedFuture(waiting);
+                        case JoinDecision.Proceed proceed -> {
+                            // Per bucket, both of them. The deadline is re-armed for the bucket now
+                            // being filled rather than cancelled for good, and only the branches
+                            // parked on THIS lap are released.
+                            local.releaseTimeoutFor(lap);
+                            local.completeWaiters(lap, null);
+                            yield CompletableFuture.completedFuture(proceed);
+                        }
+                        case JoinDecision.Failed failed -> {
+                            // A failure is terminal for the whole join, not for one lap: the record is
+                            // FAILED and no further bucket can ever fire, so every parked branch on
+                            // every bucket is owed the verdict.
+                            local.cancelTimeout();
+                            local.completeAllWaiters(failed.failure());
+                            yield CompletableFuture.completedFuture(failed);
+                        }
+                        case JoinDecision.Discarded discarded -> CompletableFuture.completedFuture(discarded);
+                    };
+                })
+                .thenCompose(stage -> stage);
     }
 
     private CompletionStage<JoinDecision> attemptSettle(LocalJoin local, String branchId, int lap,
@@ -1015,53 +1193,144 @@ final class JoinCoordinator {
         if (!enterOperation()) {
             return;
         }
-        attemptTimeout(local, armedFor, 1).whenComplete((ignored, error) -> leaveOperation());
+        attemptTimeout(local, armedFor, generation, 1).whenComplete((ignored, error) -> leaveOperation());
     }
 
-    private CompletionStage<Void> attemptTimeout(LocalJoin local, int armedFor, int attempt) {
-        if (attempt > MAX_CAS_ATTEMPTS) {
+    private CompletionStage<Void> attemptTimeout(LocalJoin local, int armedFor, int generation, int attempt) {
+        CompletionStage<Optional<JoinRecord>> loaded;
+        try {
+            loaded = store.load(local.key);
+        } catch (RuntimeException error) {
+            if (local.isCurrentTimeoutGeneration(generation)) {
+                failExpiredTimeoutLocally(local, armedFor, Map.of(), error);
+            }
             return CompletableFuture.completedFuture(null);
         }
-        return store.load(local.key).thenCompose(found -> {
+        return loaded.<CompletionStage<Void>>handle((found, error) -> {
+            if (error != null) {
+                if (local.isCurrentTimeoutGeneration(generation)) {
+                    failExpiredTimeoutLocally(local, armedFor, Map.of(), error);
+                }
+                return CompletableFuture.<Void>completedFuture(null);
+            }
+            // The load was asynchronous. A pause, re-arm or termination that completed while it was
+            // outstanding owns the generation and prevents this callback from starting a fresh write.
+            if (!local.isCurrentTimeoutGeneration(generation)) {
+                return CompletableFuture.<Void>completedFuture(null);
+            }
             JoinRecord current = found.orElse(null);
-            if (current == null || current.phase().terminal()) {
+            if (current != null && current.phase().terminal()) {
                 // Genuinely settled by someone else. The join has an outcome and the timeout has
                 // nothing left to report.
                 return CompletableFuture.<Void>completedFuture(null);
             }
-            if (firedThrough(current) >= armedFor) {
+            if (current == null && armedFor != 0) {
+                // A later iteration can only exist after an earlier one fired, which leaves its
+                // durable record OPEN with firedThrough advanced. Inventing an empty first-iteration
+                // history here would make the timeout durable by making the history false.
+                failExpiredTimeoutLocally(local, armedFor, Map.of(), new JoinStoreException(
+                        JoinStoreException.Reason.UNAVAILABLE, local.key,
+                        "join " + local.key.joinNodeId() + " lost its durable history before timeout"));
+                return CompletableFuture.<Void>completedFuture(null);
+            }
+            if (current != null && firedThrough(current) >= armedFor) {
                 // The iteration this deadline guarded has fired. The record is still OPEN because the
                 // join re-armed, so the phase check above cannot see this and the marker has to.
                 return CompletableFuture.<Void>completedFuture(null);
             }
-            var bucket = bucketOf(current.branches(), armedFor);
-            var arrived = new ArrayList<String>();
-            var failed = new ArrayList<String>();
-            var notTaken = new ArrayList<String>();
-            bucket.forEach((branch, outcome) -> {
-                switch (outcome) {
-                    case ARRIVED -> arrived.add(branch);
-                    case FAILED -> failed.add(branch);
-                    case NOT_TAKEN -> notTaken.add(branch);
+            Map<String, JoinBranchOutcome> branches = current == null ? Map.of() : current.branches();
+            JoinFailureException failure = timeoutFailure(local, armedFor, branches);
+            java.time.Instant openedAt = current == null ? local.bucketOpenedAt(armedFor) : null;
+            if (current == null && openedAt == null) {
+                failExpiredTimeoutLocally(local, armedFor, branches, new JoinStoreException(
+                        JoinStoreException.Reason.UNAVAILABLE, local.key,
+                        "join " + local.key.joinNodeId() + " has no opening time for its expired bucket"));
+                return CompletableFuture.<Void>completedFuture(null);
+            }
+            JoinRecord base = current == null
+                    ? JoinRecord.opening(local.key, openedAt)
+                    : current;
+            JoinRecord desired = base.next(branches, JoinPhase.FAILED, clock.instant(),
+                    persisted(failure.reason()));
+
+            // A fresh store write starts only while this callback still owns the arming. Once the
+            // write has been submitted its result is allowed to drain; a later pause or termination
+            // cannot revoke an operation already accepted by the persistence port.
+            if (!local.isCurrentTimeoutGeneration(generation)) {
+                return CompletableFuture.<Void>completedFuture(null);
+            }
+            CompletionStage<JoinRecord> written;
+            try {
+                written = store.compareAndSet(desired);
+            } catch (RuntimeException writeError) {
+                failExpiredTimeoutLocally(local, armedFor, branches, writeError);
+                return CompletableFuture.<Void>completedFuture(null);
+            }
+            return written.<CompletionStage<Void>>handle((stored, writeError) -> {
+                if (writeError == null) {
+                    monitor.joinFailed(identity, local.key.joinNodeId(), failure, joinWait(stored));
+                    local.cancelTimeout();
+                    // Every bucket, not only the one that expired: the record is FAILED, so no later
+                    // bucket can ever fire either and a branch parked on one would otherwise wait
+                    // forever for an answer that is already decided.
+                    local.completeAllWaiters(failure);
+                    return CompletableFuture.<Void>completedFuture(null);
                 }
-            });
-            var failure = new JoinFailureException(JoinFailureException.Reason.TIMEOUT,
-                    local.key.joinNodeId(), local.spec.quorum(), arrived, failed,
-                    outstandingBranches(local.spec, bucket), notTaken);
-            return store.compareAndSet(current.next(current.branches(), JoinPhase.FAILED, clock.instant(),
-                            persisted(failure.reason())))
-                    .<Void>thenApply(stored -> {
-                        monitor.joinFailed(identity, local.key.joinNodeId(), failure, joinWait(stored));
-                        // Every bucket, not only the one that expired: the record is FAILED, so no
-                        // later bucket can ever fire either and a branch parked on one would wait
-                        // forever for an answer that is already decided.
-                        local.completeAllWaiters(failure);
-                        return null;
-                    })
-                    .exceptionallyCompose(error -> isConflict(error)
-                            ? attemptTimeout(local, armedFor, attempt + 1)
-                            : CompletableFuture.<Void>completedFuture(null));
-        }).exceptionally(ignored -> null);
+                Throwable terminalError = writeError;
+                if (isConflict(writeError)) {
+                    if (!local.isCurrentTimeoutGeneration(generation)) {
+                        return CompletableFuture.<Void>completedFuture(null);
+                    }
+                    if (attempt < MAX_CAS_ATTEMPTS) {
+                        return attemptTimeout(local, armedFor, generation, attempt + 1);
+                    }
+                    terminalError = new JoinStoreException(JoinStoreException.Reason.UNAVAILABLE, local.key,
+                            "join " + local.key.joinNodeId() + " timeout did not converge after "
+                                    + MAX_CAS_ATTEMPTS + " compare-and-set attempts", storeCause(writeError));
+                }
+                // The port accepted this write before any later pause or termination could change
+                // the generation. Its non-conflict failure therefore still settles the consumed
+                // deadline locally; the drain barrier owns the accepted operation to completion.
+                failExpiredTimeoutLocally(local, armedFor, branches, terminalError);
+                return CompletableFuture.<Void>completedFuture(null);
+            }).thenCompose(stage -> stage);
+        }).thenCompose(stage -> stage);
+    }
+
+    private JoinFailureException timeoutFailure(LocalJoin local, int armedFor,
+                                                Map<String, JoinBranchOutcome> branches) {
+        var bucket = bucketOf(branches, armedFor);
+        var arrived = new ArrayList<String>();
+        var failed = new ArrayList<String>();
+        var notTaken = new ArrayList<String>();
+        bucket.forEach((branch, outcome) -> {
+            switch (outcome) {
+                case ARRIVED -> arrived.add(branch);
+                case FAILED -> failed.add(branch);
+                case NOT_TAKEN -> notTaken.add(branch);
+            }
+        });
+        return new JoinFailureException(JoinFailureException.Reason.TIMEOUT,
+                local.key.joinNodeId(), local.spec.quorum(), arrived, failed,
+                outstandingBranches(local.spec, bucket), notTaken);
+    }
+
+    private void failExpiredTimeoutLocally(LocalJoin local, int armedFor,
+                                           Map<String, JoinBranchOutcome> branches, Throwable storeFailure) {
+        JoinFailureException failure = timeoutFailure(local, armedFor, branches);
+        failure.initCause(storeCause(storeFailure));
+        local.cancelTimeout();
+        // This verdict is local because persistence did not succeed. It deliberately emits no
+        // durable JOIN_FAILED monitor event; traversal teardown drains and discards any late write.
+        local.completeAllWaiters(failure);
+    }
+
+    private static Throwable storeCause(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && !(current instanceof JoinStoreException)) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /** Per-join state for this traversal. One instance per fan-in node the traversal reaches. */
@@ -1078,7 +1347,7 @@ final class JoinCoordinator {
          * <p>The latch used to be one-shot for the whole join, which is right while a join fires once
          * and wrong the moment it re-arms: the second lap's branches would find it already tripped and
          * be answered {@code LATE} inline instead of parking, and a bucket left incomplete at the end
-         * of the traversal would then have nothing parked for {@link #releaseWaiters()} to find — so
+         * of the traversal would then have nothing parked for {@link #releaseWaiters(Throwable)} to find — so
          * the traversal would report success with an iteration silently dropped, which is exactly the
          * same lost-terminal defect, moved one layer down.</p>
          *
@@ -1089,7 +1358,7 @@ final class JoinCoordinator {
         /** Guards {@link #waiters} and {@link #releasedEveryBucket}. */
         private final Object waitersLock = new Object();
         /**
-         * Set by {@link #releaseWaiters()} so that a branch arriving at {@link #waiter(int)} after the
+         * Set by {@link #releaseWaiters(Throwable)} so that a branch arriving at {@link #waiter(int)} after the
          * traversal ended is answered inline rather than parking on a bucket created after the sweep.
          *
          * <p>With one shared latch this was implicit: a bucket that does not exist could not be
@@ -1099,6 +1368,11 @@ final class JoinCoordinator {
          * ordering {@link JoinCoordinator#releaseInMemory} already documents.</p>
          */
         private boolean releasedEveryBucket;
+        /**
+         * A real join failure that settled before an in-flight report could register its waiter.
+         * Guarded by {@link #waitersLock}; termination release deliberately leaves it null.
+         */
+        private JoinFailureException retainedSettlementFailure;
         /** When each bucket's first report was seen, for the per-lap PLAT-01 duration. */
         private final ConcurrentHashMap<Integer, java.time.Instant> bucketOpenedAt = new ConcurrentHashMap<>();
         /** In-memory mirror of {@link JoinRecord#firedThrough()}; {@code -1} until this join fires. */
@@ -1107,7 +1381,18 @@ final class JoinCoordinator {
         private final AtomicBoolean backlogReported = new AtomicBoolean();
         /**
          * Guards the {@link #timeout} handle, {@link #timeoutRelinquished},
-         * {@link #timeoutArmedFor} and {@link #timeoutGeneration}, and nothing else.
+         * {@link #timeoutArmedFor}, {@link #timeoutGeneration} and the three budget fields
+         * {@link #held}, {@link #armedBudget}, {@link #armedAt} and {@link #suspendedBudget}, and
+         * nothing else.
+         *
+         * <p>Everything a pause needs to decide about one join's deadline lives under this one
+         * monitor — deliberately, and it is the reason the hold flag is mirrored here rather than
+         * read from the coordinator. A flag on the coordinator and a budget on the join are two
+         * locks, and "is this join held?" and "how much budget does it have left?" would then be
+         * answerable only as two observations that a pause landing between them can separate: the
+         * arming thread reads "not held", the pause records nothing because no handle is published
+         * yet, and the handle is published a moment later against a traversal that is holding. One
+         * monitor makes that one decision instead.</p>
          */
         private final Object timeoutLock = new Object();
         private ScheduledTask timeout;
@@ -1130,10 +1415,49 @@ final class JoinCoordinator {
          * replaced by a firing is distinguishable from a deadline the join has given up on.</p>
          */
         private int timeoutGeneration;
+        /**
+         * Whether this join's traversal is currently held by an operator, so that its deadline must
+         * not be live.
+         *
+         * <p>Mirrored from {@link JoinCoordinator#joinTimeoutsHeld} rather than read from it, for the
+         * reason given on {@link #timeoutLock}. It is seeded at construction, under the coordinator's
+         * {@code gate}, so a join first reached <em>during</em> a hold is born held and arms nothing;
+         * it is pushed thereafter by {@link JoinCoordinator#suspendTimeouts()} and
+         * {@link JoinCoordinator#resumeTimeouts()}.</p>
+         */
+        private boolean held;
+        /**
+         * The budget the currently-armed (or currently-suspended) deadline was given, or
+         * {@code null} when this join has no deadline at all.
+         *
+         * <p>Not the same as {@link JoinSpec#timeout()} once a pause has happened: after the first
+         * resume it is what was left at the pause boundary, which is the whole point.</p>
+         */
+        private Duration armedBudget;
+        /**
+         * When {@link #armedBudget} started being consumed, or {@code null} while this join is
+         * suspended and its budget is therefore not being consumed by anything.
+         *
+         * <p>That {@code null} is the representation of "paused time is excluded": there is no
+         * separate accumulator of held intervals to keep in step, because a held join simply has no
+         * instant from which time is running.</p>
+         */
+        private java.time.Instant armedAt;
+        /**
+         * The budget a suspended deadline will be re-armed with, or {@code null} when this join has
+         * nothing suspended.
+         *
+         * <p>Cleared by every path that ends this deadline — a firing, a failure, and termination —
+         * because a budget that outlived the deadline it belonged to would be re-armed by the next
+         * resume over a join that has already settled, which is the "settle a join twice" and the
+         * "leak a timer" failure in one field.</p>
+         */
+        private Duration suspendedBudget;
 
-        private LocalJoin(JoinSpec spec, JoinKey key) {
+        private LocalJoin(JoinSpec spec, JoinKey key, boolean held) {
             this.spec = spec;
             this.key = key;
+            this.held = held;
         }
 
         /** Records that this join has fired through {@code bucket}, mirroring the persisted marker. */
@@ -1155,10 +1479,106 @@ final class JoinCoordinator {
             return Duration.between(opened == null ? firedAt : opened, firedAt);
         }
 
+        /** The first instant this bucket was reported, or {@code null} if its local history was lost. */
+        private java.time.Instant bucketOpenedAt(int bucket) {
+            return bucketOpenedAt.get(bucket);
+        }
+
+        private JoinDecision releasedDecision(String branchId) {
+            synchronized (waitersLock) {
+                if (retainedSettlementFailure != null) {
+                    return new JoinDecision.Failed(retainedSettlementFailure);
+                }
+                return releasedEveryBucket
+                        ? new JoinDecision.Discarded(JoinDecision.Discarded.Reason.LATE, branchId)
+                        : null;
+            }
+        }
+
         private boolean isCurrentTimeoutGeneration(int generation) {
             synchronized (timeoutLock) {
                 return !timeoutRelinquished && timeoutGeneration == generation;
             }
+        }
+
+        /**
+         * How much of this deadline's budget has not been consumed yet.
+         *
+         * <p><b>The one place a remaining budget is ever computed</b>, called by every path that
+         * needs one — the pause sweep, the publish step of an arming that a pause overtook, and the
+         * assertion that reads it. A second spelling of this arithmetic somewhere else is how a
+         * clamp gets applied on one path and not the other.</p>
+         *
+         * <p>Both clamps are load bearing and neither is defensive tidying:</p>
+         * <ul>
+         *   <li><b>Never negative.</b> A pause can land after the budget has run out but before the
+         *       scheduler has fired, so the honest remainder is below zero.
+         *       {@link Scheduler#schedule} takes a non-negative delay by contract, and a join whose
+         *       budget was already spent at the pause boundary is owed exactly no more of it — so it
+         *       times out immediately on resume rather than during the hold.</li>
+         *   <li><b>Never more than this deadline already had.</b> The measurement is a wall clock's,
+         *       so a backwards adjustment would otherwise hand the join budget it had already spent.
+         *       Forwards it can only take budget away, which the clamp above floors.
+         *       <p>The ceiling is {@link #armedBudget} rather than {@link JoinSpec#timeout()}, and
+         *       the difference shows up only after the first hold. Clamping to the configured
+         *       timeout bounds a <em>single</em> interval correctly but not a sequence of them: a
+         *       join resumed with eighteen seconds, whose clock then steps back twenty before the
+         *       next hold, would be handed the full thirty again — budget it had provably already
+         *       spent, restored by an adjustment rather than by any decision. A budget is monotone
+         *       over a deadline's life, so its own previous value is the tight bound and the
+         *       configured timeout is merely the first one.</p></li>
+         * </ul>
+         *
+         * @return the remaining budget, or {@code null} when this join has no deadline
+         */
+        private Duration remainingLocked() {
+            if (armedBudget == null) {
+                return null;
+            }
+            if (armedAt == null) {
+                // Already suspended: no time is running, so nothing has been consumed since.
+                return armedBudget;
+            }
+            Duration left = armedBudget.minus(Duration.between(armedAt, clock.instant()));
+            if (left.isNegative()) {
+                left = Duration.ZERO;
+            }
+            if (left.compareTo(armedBudget) > 0) {
+                left = armedBudget;
+            }
+            return left;
+        }
+
+        /**
+         * Stops this join's budget from being consumed and records what is left of it.
+         *
+         * <p>Idempotent, and deliberately so: it is reached both by the pause sweep and by the
+         * publish step of an arming the pause overtook, and which of the two runs second is a race
+         * neither can win. Running it twice records the same budget the second time, because the
+         * first call cleared {@link #armedAt} and {@link #remainingLocked()} then returns the stored
+         * value unchanged.</p>
+         *
+         * <p>The generation bump is what makes a firing that is already in flight harmless: it is
+         * the same counter {@link #isCurrentTimeoutGeneration(int)} consults, so a timeout that
+         * cannot be cancelled because it is already running is refused instead of failing work an
+         * operator has just frozen.</p>
+         */
+        private void suspendBudgetLocked() {
+            if (timeoutRelinquished || armedBudget == null) {
+                return;
+            }
+            Duration left = remainingLocked();
+            armedBudget = left;
+            armedAt = null;
+            suspendedBudget = left;
+            timeoutGeneration++;
+        }
+
+        /** Forgets this deadline's budget entirely, so no resume can re-arm it. */
+        private void clearBudgetLocked() {
+            armedBudget = null;
+            armedAt = null;
+            suspendedBudget = null;
         }
 
         /**
@@ -1229,6 +1649,7 @@ final class JoinCoordinator {
             try {
                 int generation;
                 ScheduledTask superseded;
+                boolean heldNow;
                 synchronized (timeoutLock) {
                     if (timeoutRelinquished || timeoutArmedFor >= lap) {
                         return;
@@ -1241,30 +1662,145 @@ final class JoinCoordinator {
                     // bucket before the record corrected it.
                     superseded = timeout;
                     timeout = null;
+                    armedBudget = spec.timeout();
+                    armedAt = clock.instant();
+                    suspendedBudget = null;
+                    // A join first reached while the traversal is held gets its full budget recorded
+                    // and nothing scheduled. This is not the same case as a pause overtaking an
+                    // arming — that one is handled by the generation check at the publish step below,
+                    // and needs no clause of its own — but a bucket that opens during a hold has no
+                    // arming for a pause to overtake, so it has to decide here.
+                    heldNow = held;
+                    if (heldNow) {
+                        armedAt = null;
+                        suspendedBudget = armedBudget;
+                    }
                 }
                 if (superseded != null && superseded.cancel()) {
                     liveTimeouts.decrementAndGet();
                 }
-                ScheduledTask scheduled;
-                liveTimeouts.incrementAndGet();
-                try {
-                    scheduled = scheduler.schedule(spec.timeout(), () -> onTimeout(this, lap, generation));
-                } catch (RuntimeException error) {
-                    liveTimeouts.decrementAndGet();
-                    throw error;
+                if (heldNow) {
+                    return;
                 }
-                boolean cancelItNow;
-                synchronized (timeoutLock) {
-                    cancelItNow = timeoutRelinquished || timeoutGeneration != generation;
-                    if (!cancelItNow) {
-                        timeout = scheduled;
-                    }
-                }
-                if (cancelItNow && scheduled.cancel()) {
-                    liveTimeouts.decrementAndGet();
-                }
+                scheduleDeadline(lap, spec.timeout(), generation);
             } finally {
                 leaveOperation();
+            }
+        }
+
+        /**
+         * Asks the scheduler for a deadline and completes the handoff that publishes its handle.
+         *
+         * <p><b>The only call to {@link Scheduler#schedule} this class makes.</b> Both arming paths
+         * — a bucket receiving its first report, and a resume re-arming what a hold suspended — claim
+         * a generation under {@link #timeoutLock} and then come here, so the window between asking
+         * for a timer and being able to cancel it exists once and is closed once. A resume that
+         * scheduled through a second copy of this handoff would be a second place for that window to
+         * be got wrong, and the losing side of it is what stops a timer from outliving the join.</p>
+         *
+         * <p>The caller holds a drain slot, so {@link #terminate()} waits for a scheduler call that
+         * is already running rather than discarding the record behind it.</p>
+         *
+         * @param lap        the bucket this deadline guards
+         * @param budget     the delay to give the scheduler: the full configured timeout for a fresh
+         *                   arming, and exactly what was left at the pause boundary for a resume
+         * @param generation the arming this deadline belongs to; a handle whose generation has moved
+         *                   on by the time it is published is cancelled instead of published
+         */
+        private void scheduleDeadline(int lap, Duration budget, int generation) {
+            ScheduledTask scheduled;
+            liveTimeouts.incrementAndGet();
+            try {
+                scheduled = scheduler.schedule(budget, () -> onTimeout(this, lap, generation));
+            } catch (RuntimeException error) {
+                liveTimeouts.decrementAndGet();
+                throw error;
+            }
+            boolean cancelItNow;
+            synchronized (timeoutLock) {
+                // A pause that landed while this call was in flight has already bumped the
+                // generation, so it is refused here by the check that was already here. That is why
+                // suspension needs no clause of its own at this step: it supersedes an arming in
+                // exactly the way a later bucket does, and the budget it recorded is the one a
+                // resume will re-arm with.
+                cancelItNow = timeoutRelinquished || timeoutGeneration != generation;
+                if (!cancelItNow) {
+                    timeout = scheduled;
+                }
+            }
+            if (cancelItNow && scheduled.cancel()) {
+                liveTimeouts.decrementAndGet();
+            }
+        }
+
+        /**
+         * Stops this join's deadline consuming its budget, because the traversal has been held.
+         *
+         * <p>Idempotent and safe against every other path: a join with no deadline records nothing,
+         * one that has relinquished its deadline for good records nothing, and one whose arming is
+         * still in flight is covered by the generation bump inside
+         * {@link #suspendBudgetLocked()}.</p>
+         */
+        private void holdDeadline() {
+            if (!spec.hasTimeout()) {
+                // Guarded exactly as releaseDeadline is, and the asymmetry was the whole defect:
+                // without it a join that has no deadline to suspend was still marked held, and
+                // nothing ever cleared the mark, because the resume returns before reaching it. Inert
+                // -- armTimeoutFor leaves on the same condition -- but a flag that is true forever on
+                // a join the flag has no meaning for is a fact waiting to be read by the next rule
+                // added here.
+                return;
+            }
+            ScheduledTask task;
+            synchronized (timeoutLock) {
+                held = true;
+                suspendBudgetLocked();
+                task = timeout;
+                timeout = null;
+            }
+            if (task != null && task.cancel()) {
+                liveTimeouts.decrementAndGet();
+            }
+        }
+
+        /**
+         * Re-arms this join's deadline with exactly the budget that was left when the hold was taken.
+         *
+         * <p>Nothing is re-armed for a join that had no deadline when the hold landed, nor for one
+         * that settled or was given up on during the hold: {@link #suspendedBudget} is cleared by
+         * every one of those paths, so "resume everything that was suspended" cannot resurrect a
+         * deadline for a bucket that has already fired.</p>
+         */
+        private void releaseDeadline() {
+            if (!spec.hasTimeout() || !enterOperation()) {
+                return;
+            }
+            try {
+                int generation;
+                Duration budget;
+                int lap;
+                synchronized (timeoutLock) {
+                    held = false;
+                    if (timeoutRelinquished || suspendedBudget == null) {
+                        return;
+                    }
+                    budget = suspendedBudget;
+                    suspendedBudget = null;
+                    armedBudget = budget;
+                    armedAt = clock.instant();
+                    generation = ++timeoutGeneration;
+                    lap = timeoutArmedFor;
+                }
+                scheduleDeadline(lap, budget, generation);
+            } finally {
+                leaveOperation();
+            }
+        }
+
+        /** Whether this join is holding a budget it has not been asked to consume. Diagnostics. */
+        private boolean isDeadlineHeld() {
+            synchronized (timeoutLock) {
+                return suspendedBudget != null;
             }
         }
 
@@ -1293,6 +1829,12 @@ final class JoinCoordinator {
                 timeoutArmedFor = firedBucket;
                 task = timeout;
                 timeout = null;
+                // The budget belonged to the bucket that just fired and dies with it. Left behind, a
+                // resume arriving after this firing would re-arm a deadline for a bucket that has
+                // already continued downstream — and that deadline could only ever fail a join that
+                // had already succeeded. The next bucket gets its own full budget when it actually
+                // receives something, exactly as it does when no hold is involved.
+                clearBudgetLocked();
             }
             if (task != null && task.cancel()) {
                 liveTimeouts.decrementAndGet();
@@ -1312,10 +1854,20 @@ final class JoinCoordinator {
         private void cancelTimeout() {
             ScheduledTask task;
             synchronized (timeoutLock) {
+                if (timeoutRelinquished) {
+                    return;
+                }
                 timeoutRelinquished = true;
                 timeoutGeneration++;
                 task = timeout;
                 timeout = null;
+                // A suspended budget is a deadline this join is still owed, so giving the deadline up
+                // for good has to give the budget up with it. Otherwise a resume racing the failure
+                // or the teardown that reached this line would re-arm a task against a join that is
+                // already terminal, and terminate() would have completed with one live at the
+                // scheduler.
+                clearBudgetLocked();
+                timeoutRelinquishedObserver.run();
             }
             if (task != null && task.cancel()) {
                 liveTimeouts.decrementAndGet();
@@ -1341,6 +1893,7 @@ final class JoinCoordinator {
         private CompletionStage<JoinDecision> waiter(int lap) {
             var pending = new CompletableFuture<JoinDecision>();
             boolean parked;
+            JoinFailureException failure;
             synchronized (waitersLock) {
                 // Re-checked under the same lock completeWaiters holds. Without it a branch that
                 // decided Wait just as the join settled would park on a future nobody will ever
@@ -1351,8 +1904,12 @@ final class JoinCoordinator {
                 if (parked) {
                     bucket.parked.add(pending);
                 }
+                failure = retainedSettlementFailure;
             }
             if (!parked) {
+                if (failure != null) {
+                    return CompletableFuture.failedFuture(failure);
+                }
                 return CompletableFuture.completedFuture(
                         new JoinDecision.Discarded(JoinDecision.Discarded.Reason.LATE, key.joinNodeId()));
             }
@@ -1392,7 +1949,7 @@ final class JoinCoordinator {
          *
          * <p>Dependents therefore run synchronously on the completing thread, inside this method. A
          * caller that must be sure of what a waiter observes at the instant of delivery has to have
-         * finished preparing the verdict before calling — see {@link #releaseWaiters()}.
+         * finished preparing the verdict before calling — see {@link #releaseWaiters(Throwable)}.
          *
          * @param lap which iteration is being answered; only branches parked on it are completed,
          *            because a firing of bucket k tells a branch parked on bucket k+1 nothing
@@ -1414,9 +1971,21 @@ final class JoinCoordinator {
          * whole join — a failure verdict or a timeout — where {@link #completeWaiters(int, Throwable)}
          * would leave later buckets parked on a join that can never fire again.
          */
-        private int completeAllWaiters(Throwable failure) {
+        private int completeAllWaiters(JoinFailureException failure) {
+            return releaseAllWaiters(failure, true);
+        }
+
+        /** Releases for traversal teardown without turning its synthetic verdict into join settlement. */
+        private int abandonAllWaiters(JoinFailureException failure) {
+            return releaseAllWaiters(failure, false);
+        }
+
+        private int releaseAllWaiters(JoinFailureException failure, boolean retainSettlement) {
             List<CompletableFuture<JoinDecision>> parked;
             synchronized (waitersLock) {
+                if (retainSettlement && !releasedEveryBucket) {
+                    retainedSettlementFailure = failure;
+                }
                 releasedEveryBucket = true;
                 parked = new ArrayList<>();
                 waiters.values().forEach(bucket -> {
@@ -1453,7 +2022,7 @@ final class JoinCoordinator {
          * {@link #abandonedBranchFailure()} lets the runner refuse to call that traversal a success.
          * </p>
          */
-        private void releaseWaiters() {
+        private void releaseWaiters(Throwable verdict) {
             // The iteration that was still being filled when the traversal ended. Its branches are the
             // ones that are outstanding; earlier laps completed and later ones cannot exist, because a
             // lap only begins when its predecessor fires. Reporting the whole of `payloads` and
@@ -1487,12 +2056,22 @@ final class JoinCoordinator {
                     .map(branch -> branchFailures.get(BranchId.atLap(branch, lap)))
                     .filter(java.util.Objects::nonNull)
                     .forEach(failure::addSuppressed);
+            // The cause, not a suppressed: ExecutionTermination classifies a termination by walking
+            // the cause chain, and a verdict hung off the suppressed array would be invisible to it.
+            // Set before completeAllWaiters for the same reason the suppressed causes above are —
+            // the waiters are handed this very instance, and a consumer that classifies it on
+            // completion must not see it half-built. Only ever set here, and only when a caller
+            // supplied one: the ordinary completion paths release with no verdict, and a join
+            // failure that reports a quorum it could not reach is exactly what they should carry.
+            if (verdict != null) {
+                failure.initCause(verdict);
+            }
             // Every bucket, because the traversal is over for all of them, and because a branch parked
             // on the incomplete lap is precisely what must stop this traversal reporting success.
             // The latch is per bucket because a shared latch would already be open after the first
             // lap: the second lap's branches would not park, this loop would find nothing, and the
             // traversal could report success after dropping the incomplete lap.
-            if (completeAllWaiters(failure) > 0) {
+            if (abandonAllWaiters(failure) > 0) {
                 abandonedBranch.compareAndSet(null, failure);
             }
         }

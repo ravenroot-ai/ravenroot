@@ -1,0 +1,22 @@
+name: Authorize Dependabot routing
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, edited]
+
+permissions: {}
+
+jobs:
+  authorize:
+    name: authorize-dependabot-routing
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Confirm trusted routing metadata
+        run: echo "Authorized Dependabot routing metadata."

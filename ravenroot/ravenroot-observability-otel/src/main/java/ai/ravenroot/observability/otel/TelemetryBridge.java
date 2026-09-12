@@ -88,7 +88,8 @@ import java.util.function.Consumer;
  * without any additional instrumentation); and a join-wait histogram
  * ({@code ravenroot.join.wait}) for latency-style alerting on fan-in joins specifically.</p>
  */
-final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
+final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
+        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry {
 
     static final String INSTRUMENTATION_NAME = "ai.ravenroot.observability.otel";
 
@@ -145,11 +146,33 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
      */
     static final AttributeKey<String> METRIC_ATTR_NODE_TYPE = AttributeKey.stringKey("ravenroot.node_type");
 
+    /**
+     * How a retried attempt's failure was classified &mdash; the {@code Retryability} vocabulary,
+     * lower-cased and hyphenated as the event already carries it.
+     *
+     * <p>Admissible for the same reason {@link #METRIC_ATTR_NODE_TYPE} is: the value domain is a
+     * four-member enum fixed in source, so it does not grow with traffic, with a deployment's
+     * installed packages, or with anything a graph author writes. It is the label that makes the
+     * retry counter answer the question an operator actually has &mdash; "are we retrying because
+     * calls are timing out, or because a store keeps telling us to re-read" &mdash; which a bare
+     * count cannot.</p>
+     */
+    static final AttributeKey<String> METRIC_ATTR_RETRY_CLASSIFICATION =
+            AttributeKey.stringKey("ravenroot.retry_classification");
+    static final AttributeKey<String> METRIC_ATTR_AGENT_DIMENSION =
+            AttributeKey.stringKey("ravenroot.agent_budget.dimension");
+    static final AttributeKey<String> METRIC_ATTR_AGENT_OUTCOME =
+            AttributeKey.stringKey("ravenroot.agent_budget.outcome");
+
     static final Set<AttributeKey<?>> METRIC_LABEL_ALLOWLIST =
-            Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE);
+            Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE, METRIC_ATTR_RETRY_CLASSIFICATION,
+                    METRIC_ATTR_AGENT_DIMENSION, METRIC_ATTR_AGENT_OUTCOME);
 
     private final Tracer tracer;
     private final LongCounter eventCounter;
+    private final LongCounter orchestrationRetries;
+    private final LongCounter connectorRetries;
+    private final LongCounter agentBudget;
     private final DoubleHistogram nodeDuration;
     private final DoubleHistogram executionDuration;
     private final DoubleHistogram joinWait;
@@ -163,6 +186,23 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         this.eventCounter = meter.counterBuilder("ravenroot.execution.events")
                 .setDescription("Count of ExecutionEvents by type. Bounded: labeled only by "
                         + "ravenroot.event_type, a fixed enum.")
+                .build();
+        this.orchestrationRetries = meter.counterBuilder("ravenroot.node.retries")
+                .setDescription("Count of orchestration-level node retries: one per further durable "
+                        + "attempt the retry policy committed. Bounded: labeled by "
+                        + "ravenroot.node_type and ravenroot.retry_classification, both fixed value "
+                        + "domains. This counts retries the ORCHESTRATOR made -- retries a connector "
+                        + "performed inside one attempt are ravenroot.node.connector_retries.")
+                .build();
+        this.connectorRetries = meter.counterBuilder("ravenroot.node.connector_retries")
+                .setDescription("Count of retries a connector performed INSIDE one orchestration "
+                        + "attempt, as reported by the node itself. Never inferred: a node that "
+                        + "reports nothing contributes nothing, which is distinct from reporting a "
+                        + "single attempt. Bounded: labeled only by ravenroot.node_type.")
+                .build();
+        this.agentBudget = meter.counterBuilder("ravenroot.agent_budget.total")
+                .setDescription("Identifier-free agent authority and budget aggregates. Bounded: "
+                        + "labeled only by fixed dimension and outcome enums.")
                 .build();
         this.nodeDuration = meter.histogramBuilder("ravenroot.node.duration")
                 .setDescription("Node invocation duration, start to terminal outcome (completed or "
@@ -193,23 +233,80 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
                 .buildWithCallback(measurement -> measurement.record(traversalSpans.size()));
     }
 
+    /**
+     * Dispatches one event to its span/metric handling.
+     *
+     * <h2>Exhaustive by construction, and why that is the point</h2>
+     * <p>This used to be a plain {@code switch} <em>statement</em> with no {@code default} arm --
+     * which compiles, and silently does nothing for any case it does not list. That shape is exactly
+     * what let {@link ExecutionEventType#EXECUTION_CANCELLED} fall through unhandled when it was
+     * added: the traversal span was never ended, leaking an entry in {@link #traversalSpans} and a
+     * trace that never terminates, and nothing here failed to compile to say so.
+     * {@link ExecutionEventType#EDGE_TRAVERSED} has the identical gap today, undetected for the same
+     * reason -- see its own arm below, which is the first time that omission has been stated rather
+     * than merely true.</p>
+     *
+     * <p>Assigning the {@code switch} to a {@link Runnable} rather than invoking each handler
+     * directly from a statement switch is what makes this exhaustive: a switch <em>expression</em>
+     * over an enum with no {@code default} must cover every constant to compile, so a future member
+     * added to {@link ExecutionEventType} without an arm here is a compile error in this one method,
+     * not a silent gap in whichever handler it would otherwise have skipped.</p>
+     */
     @Override
     public void accept(ExecutionEvent event) {
         eventCounter.add(1, Attributes.of(METRIC_ATTR_EVENT_TYPE, event.type().name()));
-        switch (event.type()) {
-            case EXECUTION_STARTED -> startTraversal(event);
-            case EXECUTION_COMPLETED, EXECUTION_FAILED -> endTraversal(event);
-            case NODE_STARTED -> startNode(event);
-            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> endNode(event);
-            case NODE_DEFAULTED -> annotateNode(event, "ravenroot.node.defaulted");
-            case JOIN_SATISFIED -> annotateJoin(event, "ravenroot.join.satisfied", StatusCode.UNSET);
-            case JOIN_FAILED -> annotateJoin(event, "ravenroot.join.failed", StatusCode.ERROR);
-            case JOIN_ARRIVAL_DISCARDED -> annotateJoin(event, "ravenroot.join.arrival_discarded", StatusCode.UNSET);
+        Runnable handler = switch (event.type()) {
+            case EXECUTION_STARTED -> () -> startTraversal(event);
+            case EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED -> () -> endTraversal(event);
+            case NODE_STARTED -> () -> startNode(event);
+            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> () -> {
+                endNode(event);
+                recordConnectorRetries(event);
+            };
+            // Ends the failed attempt's span, and it must: the retry runs under a NEW attempt id and
+            // opens a span of its own, so leaving this one open would leak an entry in nodeSpans for
+            // every retry and never close a trace an operator is reading. The retry's own span then
+            // hangs off the same traversal, which is what makes a retry chain visible as a chain.
+            case NODE_RETRY_SCHEDULED -> () -> {
+                endNode(event);
+                recordConnectorRetries(event);
+                orchestrationRetries.add(1, retryAttributes(event));
+            };
+            case NODE_DEFAULTED -> () -> annotateNode(event, "ravenroot.node.defaulted");
+            // Annotations on the traversal span rather than a start/end pair of their own. A hold is
+            // not a unit of work with a duration this bridge can close: it lasts until an operator
+            // ends it, which may be never, and a span left open for an unbounded human interval is
+            // one the exporter eventually drops or reports as an error. The traversal span already
+            // spans the hold, so marking its start and its release on that span is what makes a gap
+            // in the node timeline explainable -- which is the whole reason a reader looks.
+            case EXECUTION_PAUSED -> () -> annotateTraversal(event, "ravenroot.execution.paused");
+            case EXECUTION_RESUMED -> () -> annotateTraversal(event, "ravenroot.execution.resumed");
+            case JOIN_SATISFIED -> () -> annotateJoin(event, "ravenroot.join.satisfied", StatusCode.UNSET);
+            case JOIN_FAILED -> () -> annotateJoin(event, "ravenroot.join.failed", StatusCode.ERROR);
+            case JOIN_ARRIVAL_DISCARDED ->
+                    () -> annotateJoin(event, "ravenroot.join.arrival_discarded", StatusCode.UNSET);
             // UNSET, like the other two non-failures: an iteration backlog is a fact about how fast a
             // cycle is producing relative to how fast its join is satisfied, not an error with which
             // the span should be marked.
-            case JOIN_ITERATION_BACKLOG -> annotateJoin(event, "ravenroot.join.iteration_backlog", StatusCode.UNSET);
-        }
+            case JOIN_ITERATION_BACKLOG ->
+                    () -> annotateJoin(event, "ravenroot.join.iteration_backlog", StatusCode.UNSET);
+            // Explicit no-op, not an omission: an edge has no span or annotation of its own here --
+            // the traversal span already carries the node timeline through NODE_STARTED/NODE_COMPLETED,
+            // and EDGE_TRAVERSED's routing decision is exactly what event.detail() on those events (and
+            // GET /v1/events directly) already exists to show. Recorded on eventCounter above like
+            // every other type; nothing further to attach to a span or a metric.
+            case EDGE_TRAVERSED -> () -> { };
+        };
+        handler.run();
+    }
+
+    @Override
+    public void record(ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Dimension dimension,
+                       ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Outcome outcome,
+                       long amount) {
+        if (amount <= 0) return;
+        agentBudget.add(amount, Attributes.of(METRIC_ATTR_AGENT_DIMENSION, dimension.name(),
+                METRIC_ATTR_AGENT_OUTCOME, outcome.name()));
     }
 
     private void startTraversal(ExecutionEvent event) {
@@ -229,7 +326,18 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         }
         Span span = pending.span();
         span.setAttribute(ATTR_DETAIL, event.detail());
-        span.setStatus(event.type() == ExecutionEventType.EXECUTION_FAILED ? StatusCode.ERROR : StatusCode.OK);
+        // A cancellation is neither: it is not the error EXECUTION_FAILED reports (nothing in the
+        // traversal broke; an operator asked it to stop), and it is not the success EXECUTION_COMPLETED
+        // reports either (the graph never reached its own result). UNSET is the status this bridge
+        // already uses for every other traversal-scoped transition that is a fact rather than a
+        // failure -- see annotateJoin's non-failure branches -- and it keeps a cancelled traversal out
+        // of any dashboard that reads span ERROR status as an incident count, which is exactly what
+        // EXECUTION_CANCELLED exists to stop happening.
+        span.setStatus(switch (event.type()) {
+            case EXECUTION_FAILED -> StatusCode.ERROR;
+            case EXECUTION_CANCELLED -> StatusCode.UNSET;
+            default -> StatusCode.OK;
+        });
         span.end(event.occurredAt());
         executionDuration.record(secondsBetween(pending.startedAt(), event.occurredAt()),
                 Attributes.of(METRIC_ATTR_EVENT_TYPE, event.type().name()));
@@ -252,7 +360,13 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         Span span = pending.span();
         span.setAttribute(ATTR_DETAIL, event.detail());
         span.setAttribute(ATTR_FALLBACK, event.fallback());
-        span.setStatus(event.type() == ExecutionEventType.NODE_FAILED ? StatusCode.ERROR : StatusCode.OK);
+        // A retried attempt's span is ERROR alongside a terminal failure, because the attempt did
+        // fail -- what the retry changes is what happens next, not what happened. A trace showing the
+        // first two attempts as OK because they were eventually recovered from would hide precisely
+        // the latency and the failure an operator opened the trace to find.
+        span.setStatus(event.type() == ExecutionEventType.NODE_FAILED
+                || event.type() == ExecutionEventType.NODE_RETRY_SCHEDULED
+                ? StatusCode.ERROR : StatusCode.OK);
         span.end(event.occurredAt());
         // The node-type dimension. Absent stays absent -- a structural node or an
         // unregistered behavior records without the label rather than under a placeholder, so the
@@ -264,6 +378,44 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
                                 METRIC_ATTR_NODE_TYPE, event.nodeCatalogKey()));
     }
 
+    /**
+     * The label set for one orchestration retry: its classification always, its node type when the
+     * catalog resolved one.
+     *
+     * <p>Absent stays absent, exactly as {@link #endNode} treats it: a structural node or an
+     * unregistered behavior records without the node-type label rather than under a placeholder, so
+     * the series set stays the installed catalog and nothing that merely looks like it.</p>
+     */
+    private static Attributes retryAttributes(ExecutionEvent event) {
+        String classification = event.publicReason() == null ? "unclassified" : event.publicReason();
+        return event.nodeCatalogKey() == null
+                ? Attributes.of(METRIC_ATTR_RETRY_CLASSIFICATION, classification)
+                : Attributes.of(METRIC_ATTR_RETRY_CLASSIFICATION, classification,
+                        METRIC_ATTR_NODE_TYPE, event.nodeCatalogKey());
+    }
+
+    /**
+     * Records the retries a connector performed inside this one attempt, when it reported any.
+     *
+     * <p>Counts {@code connectorAttempts - 1}, which is retries rather than attempts, because that is
+     * what the counter's name promises and what adds meaningfully across attempts. Nothing is recorded
+     * for a report of one, and nothing for
+     * {@link ai.ravenroot.api.execution.ConnectorRetryReport#NOT_REPORTED} &mdash; and those two must
+     * not be conflated into a zero: a connector that attempted once and a node that said nothing both
+     * add zero to a counter, but only the first is a measurement, and a deployment reading this
+     * metric has to be able to tell whether its connectors are instrumented at all. The distinction it
+     * needs for that lives on the event, not here.</p>
+     */
+    private void recordConnectorRetries(ExecutionEvent event) {
+        int attempts = event.connectorAttempts();
+        if (attempts <= 1) {
+            return;
+        }
+        connectorRetries.add(attempts - 1L, event.nodeCatalogKey() == null
+                ? Attributes.empty()
+                : Attributes.of(METRIC_ATTR_NODE_TYPE, event.nodeCatalogKey()));
+    }
+
     /** NODE_DEFAULTED always precedes NODE_COMPLETED for the same attempt (ExecutionMonitor's own
      * contract) -- it augments the still-open node span rather than closing anything. */
     private void annotateNode(ExecutionEvent event, String eventName) {
@@ -272,6 +424,26 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
             return;
         }
         pending.span().addEvent(eventName, Attributes.of(ATTR_DETAIL, event.detail()), event.occurredAt());
+    }
+
+    /**
+     * Records a traversal-level transition on the traversal's own span, if one is open.
+     *
+     * <p>No node id and no status write: the events this serves carry neither a node nor a failure,
+     * and a pause is not an error condition — it is somebody deliberately holding their own work.
+     * Marking the span {@code ERROR} for it would put every paused execution into an error dashboard
+     * and teach its readers to ignore the signal.</p>
+     *
+     * <p>A missing traversal span is silently tolerated, exactly as it is for joins: the bridge may
+     * have been attached mid-run, and a pause on a traversal whose start it never saw is not a
+     * defect in either.</p>
+     */
+    private void annotateTraversal(ExecutionEvent event, String eventName) {
+        PendingSpan traversal = traversalSpans.get(event.traversalId());
+        if (traversal != null) {
+            traversal.span().addEvent(eventName, Attributes.of(ATTR_DETAIL, event.detail()),
+                    event.occurredAt());
+        }
     }
 
     /** Joins have no invocation of their own (CORE-03): recorded as an event on the traversal span,

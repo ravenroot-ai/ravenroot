@@ -132,10 +132,13 @@ class BackupRestoreDrillTest {
             var store = new SqliteExecutionStore(liveConfiguration.executionStoreLocation(), Clock.systemUTC());
             var enteredHeldApply = new CountDownLatch(1);
             var releaseHeldApply = new CountDownLatch(1);
+            var releaseAuditRaceWriter = new CountDownLatch(1);
+            var enteredAuditRaceApply = new CountDownLatch(1);
+            var releaseAuditRaceApply = new CountDownLatch(1);
             var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
-                    holdingStore(store, enteredHeldApply, releaseHeldApply));
+                    holdingStore(store));
             // Equivalent to ravenroot-server's AuditTrailAuthorizationSink (ravenroot-cli does not,
             // and should not, depend on ravenroot-server): same field mapping -- event.requestId()
             // becomes the audit record's correlationId, which is the link this drill's falsifier
@@ -186,7 +189,7 @@ class BackupRestoreDrillTest {
             // certain for at least this one write, rather than hoped for.
             var heldFailure = new AtomicReference<Throwable>();
             var heldWriter = new Thread(() -> {
-                HOLD_ON_APPLY.set(true);
+                HOLD_ON_APPLY.set(new HeldApply(enteredHeldApply, releaseHeldApply));
                 try {
                     var context = requestContext(HELD_INDEX);
                     var submission = authorized.startGraphMl(context,
@@ -207,19 +210,79 @@ class BackupRestoreDrillTest {
             assertTrue(heldFailure.get() == null, () -> "the held write failed before reaching apply(): "
                     + heldFailure.get());
 
+            // This second held write is released only after the backup has copied the source log.
+            // Its real authorization path advances the source head before the observer returns, which
+            // makes the former log-then-head capture order deterministically reproduce the invalid
+            // stale-log/fresh-head generation reported by CI.
+            var auditRaceFailure = new AtomicReference<Throwable>();
+            var auditRaceWriter = new Thread(() -> {
+                try {
+                    if (!releaseAuditRaceWriter.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("audit copy never reached its log capture point");
+                    }
+                    HOLD_ON_APPLY.set(new HeldApply(enteredAuditRaceApply, releaseAuditRaceApply));
+                    var context = requestContext(-2);
+                    var submission = authorized.startGraphMl(context,
+                            new ByteArrayInputStream(GRAPH.getBytes(StandardCharsets.UTF_8)), Map.of());
+                    minted.put(-2, submission.processInstanceId());
+                } catch (Throwable failure) {
+                    auditRaceFailure.set(failure);
+                    enteredAuditRaceApply.countDown();
+                } finally {
+                    HOLD_ON_APPLY.remove();
+                }
+            }, "drill-audit-race-writer");
+            auditRaceWriter.start();
+
             var out = capturing();
             var err = capturing();
             var command = new BackupRestoreCommand(out.stream(), err.stream());
             long backupStartNanos = System.nanoTime();
-            int backupExit = command.backup(liveConfiguration, backupDir);
+            int backupExit;
+            boolean backupSucceeded = false;
+            try {
+                backupExit = command.backup(liveConfiguration, backupDir, fileName -> {
+                    if (!fileName.endsWith(".audit.jsonl")) {
+                        return;
+                    }
+                    releaseAuditRaceWriter.countDown();
+                    boolean reached;
+                    try {
+                        reached = enteredAuditRaceApply.await(10, TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new java.io.IOException("interrupted while awaiting audit race writer", interrupted);
+                    }
+                    if (!reached) {
+                        throw new java.io.IOException("audit race writer did not reach its held apply");
+                    }
+                    if (auditRaceFailure.get() != null) {
+                        throw new java.io.IOException("audit race writer failed", auditRaceFailure.get());
+                    }
+                });
+                backupSucceeded = backupExit == 0;
+            } finally {
+                releaseAuditRaceWriter.countDown();
+                releaseHeldApply.countDown();
+                releaseAuditRaceApply.countDown();
+                heldWriter.join(TimeUnit.SECONDS.toMillis(10));
+                auditRaceWriter.join(TimeUnit.SECONDS.toMillis(10));
+                if (!backupSucceeded) {
+                    keepWriting.set(false);
+                    for (Thread writer : writers) {
+                        writer.join(TimeUnit.SECONDS.toMillis(10));
+                    }
+                }
+            }
             long backupElapsedMillis = (System.nanoTime() - backupStartNanos) / 1_000_000;
             assertEquals(0, backupExit, () -> "backup failed: " + err.text());
 
-            // Only now release the held write -- the backup has already captured its audit record
-            // without its store row, which is the whole point.
-            releaseHeldApply.countDown();
-            heldWriter.join(TimeUnit.SECONDS.toMillis(10));
+            // The original held write was released only after the backup captured its audit record
+            // without its store row. The race writer instead overlaps the backup by advancing the
+            // live head after the copied log, which is the deterministic audit-snapshot interleaving.
             assertTrue(heldFailure.get() == null, () -> "the held write failed after release: " + heldFailure.get());
+            assertTrue(auditRaceFailure.get() == null,
+                    () -> "the audit race writer failed after release: " + auditRaceFailure.get());
             assertTrue(minted.containsKey(HELD_INDEX), "the held write never completed and minted no "
                     + "process instance id -- its own presence check below would be meaningless");
 
@@ -233,7 +296,7 @@ class BackupRestoreDrillTest {
             assertTrue(writerFailures.isEmpty(), () -> "writer thread(s) saw failures: " + writerFailures);
 
             int totalWrites = minted.size();
-            System.out.println("[PLAT-05 drill] writes issued: " + totalWrites + " (including 1 held write "
+            System.out.println("[PLAT-05 drill] writes issued: " + totalWrites + " (including held writes "
                     + "deliberately paused mid-flight across the backup), backup took " + backupElapsedMillis
                     + "ms, writer pool ran concurrently with it: true");
             assertTrue(totalWrites >= 20, () -> "drill produced too few writes (" + totalWrites
@@ -321,7 +384,7 @@ class BackupRestoreDrillTest {
     }
 
     /** Set on a writer thread that wants its next {@code apply()} call paused; see {@link #holdingStore}. */
-    private static final ThreadLocal<Boolean> HOLD_ON_APPLY = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<HeldApply> HOLD_ON_APPLY = new ThreadLocal<>();
 
     /**
      * Wraps {@code delegate} so that the <em>first</em> {@link ExecutionStore#apply} call made by a
@@ -336,15 +399,15 @@ class BackupRestoreDrillTest {
      * stored" state a backup taken during the pause is certain to capture. Threads without the
      * ThreadLocal set -- the ordinary writer pool -- pass straight through, undelayed.
      */
-    private static ExecutionStore holdingStore(ExecutionStore delegate, CountDownLatch entered,
-            CountDownLatch release) {
+    private static ExecutionStore holdingStore(ExecutionStore delegate) {
         return (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
                 new Class<?>[] {ExecutionStore.class}, (proxy, method, args) -> {
-                    if (Boolean.TRUE.equals(HOLD_ON_APPLY.get()) && method.getName().equals("apply")
+                    HeldApply hold = HOLD_ON_APPLY.get();
+                    if (hold != null && method.getName().equals("apply")
                             && method.getParameterCount() == 1) {
-                        HOLD_ON_APPLY.set(false); // only this thread's first apply() call is held
-                        entered.countDown();
-                        if (!release.await(10, TimeUnit.SECONDS)) {
+                        HOLD_ON_APPLY.remove(); // only this thread's first apply() call is held
+                        hold.entered().countDown();
+                        if (!hold.release().await(10, TimeUnit.SECONDS)) {
                             throw new IllegalStateException("held write was never released -- the "
                                     + "backup did not complete within the wait window");
                         }
@@ -355,6 +418,9 @@ class BackupRestoreDrillTest {
                         throw wrapped.getCause();
                     }
                 });
+    }
+
+    private record HeldApply(CountDownLatch entered, CountDownLatch release) {
     }
 
     private static boolean isPresent(SqliteExecutionStore store, ExecutionKey key) {

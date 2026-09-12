@@ -1,3 +1,30 @@
+import { readVisualGroups, reconcileVisualGroupState } from './visual-groups.js';
+
+export function normalizedCanvasState(value, graph) {
+  if (!value || typeof value !== 'object') return null;
+  const ids = new Set((graph?.nodes || []).map(node => node.id));
+  const positions = Object.fromEntries(Object.entries(value.positions || {}).filter(([id, p]) => ids.has(id)
+    && Number.isFinite(p?.x) && Number.isFinite(p?.y)).map(([id, p]) => [id, { x: p.x, y: p.y }]));
+  return {
+    zoom: Number.isFinite(value.zoom) && value.zoom > 0 ? value.zoom : null,
+    pan: Number.isFinite(value.pan?.x) && Number.isFinite(value.pan?.y) ? { x: value.pan.x, y: value.pan.y } : null,
+    selectedIds: Array.isArray(value.selectedIds) ? value.selectedIds.filter(id => ids.has(id)) : [],
+    focusNodeId: ids.has(value.focusNodeId) ? value.focusNodeId : null,
+    selectedGroupId: typeof value.selectedGroupId === 'string' ? value.selectedGroupId : null,
+    focusGroupId: typeof value.focusGroupId === 'string' ? value.focusGroupId : null,
+    positions,
+  };
+}
+
+export function visualGroupPresentation(document_) {
+  const groups = readVisualGroups(document_?.graph).groups;
+  return {
+    visualGroupState: reconcileVisualGroupState(groups, document_?.visualGroupState ?? document_?.presentation?.visualGroupState),
+    visualGroupPresentationDirty: Boolean(document_?.visualGroupPresentationDirty ?? document_?.presentation?.visualGroupPresentationDirty),
+    canvasState: normalizedCanvasState(document_?.canvasState ?? document_?.presentation?.canvasState, document_?.graph),
+  };
+}
+
 export function graphHasPersistedLayout(graph) {
   return Boolean(graph?.nodes?.length
     && graph.nodes.every(node => node._positionIsCenter
@@ -15,6 +42,11 @@ export const DESIGN_RENDER_MODE = 'design';
 export const MONITORING_RENDER_MODE = 'monitoring';
 export const DEFAULT_RENDER_MODE = DESIGN_RENDER_MODE;
 export const RENDER_MODES = Object.freeze(new Set([DESIGN_RENDER_MODE, MONITORING_RENDER_MODE]));
+export const DESIGN_LAYOUT_MODES = Object.freeze(new Set([
+  'preset', 'dagre', 'cose', 'elk', 'hierarchical',
+  'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto',
+  'hierarchical-new', 'layered-down',
+]));
 
 // Render mode is the product contract. Algorithm names remain internal implementation details and
 // every historical finite layout/style value converges on Design; the old separate renderer value
@@ -49,6 +81,16 @@ export function layoutFromLegacyMode(layoutMode) {
 }
 
 export function documentPresentationState(document_) {
+  const explicitDesign = document_?.renderMode === DESIGN_RENDER_MODE
+    && Object.hasOwn(document_, 'layoutMode') && DESIGN_LAYOUT_MODES.has(document_.layoutMode)
+    && Object.hasOwn(document_, 'visualStyle') && VISUAL_STYLES.has(document_.visualStyle);
+  if (explicitDesign) {
+    return {
+      renderMode: DESIGN_RENDER_MODE,
+      layoutMode: document_.layoutMode,
+      visualStyle: document_.visualStyle,
+    };
+  }
   const storedMode = document_ && Object.hasOwn(document_, 'renderMode')
     ? document_.renderMode : document_?.layoutMode;
   return renderModePresentation(storedMode);

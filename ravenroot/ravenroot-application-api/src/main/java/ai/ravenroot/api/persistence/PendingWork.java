@@ -60,7 +60,7 @@ public sealed interface PendingWork {
  * @param attemptOrdinal the attempt ordinal constraint applied while processing the request.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
  * @param command command awaiting delivery.
  */
     record AttemptDispatch(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
@@ -82,7 +82,7 @@ public sealed interface PendingWork {
  * @param attemptOrdinal the attempt ordinal constraint applied while processing the request.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
  */
         public AttemptDispatch(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
                                UUID attemptId, int attemptOrdinal, long fencingToken,
@@ -104,7 +104,7 @@ public sealed interface PendingWork {
  * @param payload bounded payload carried by the pending work.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
      */
     record TimerDue(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
                     Instant dueAt, OpaquePayload payload, long fencingToken,
@@ -114,18 +114,41 @@ public sealed interface PendingWork {
     /**
      * An authorized external trigger correlated to a waiting invocation.
      *
-     * <p>PERS-02 defines this kind but produces none: there is no handler registration surface until
-     * It is declared now so PERS-05 is additive rather than a breaking change to a sealed
-     * type that adapters have already switched over exhaustively.</p>
+     * <p>PERS-02 declared this kind and produced none, because there was no handler registration
+     * surface yet; declaring it early kept PERS-05 additive rather than a breaking change to a sealed
+     * type that adapters had already switched over exhaustively. PERS-05 is that surface, and this is
+     * now produced: a {@link DurableHandler} that reaches a state reporting
+     * {@link HandlerStatus#resumesProcess()} becomes claimable exactly once, and its
+     * {@link #workItemId()} is the handler's own identity.</p>
+     *
+     * <p>{@code traversalId} is the <strong>re-entry</strong> traversal the terminal handler
+     * transition committed, never the traversal that was waiting. That is the whole of "an authorized
+     * trigger starts a new traversal of the existing process without reviving stale actor state": the
+     * claimant is handed durable identities and a payload, and there is nothing here for it to resume
+     * <em>into</em> — no continuation, no actor reference, nothing that could have survived only in a
+     * process that is no longer running.</p>
+     *
+     * <p>{@code payload} is the outcome body the resolving principal supplied, already validated
+     * against the handler's {@link HandlerPayloadSchema} at resolution time. An expiry carries an
+     * empty payload, because nobody supplied one.</p>
+     *
+     * <p>{@code invocationId} is <strong>always absent</strong> on this kind, unlike on every other,
+     * and that is a statement rather than an omission. A re-entry traversal holds no invocation when
+     * it is committed: the claimant creates the first one. Naming the invocation that <em>waited</em>
+     * would pair a new traversal with an invocation living under the old one — a pair no lookup
+     * resolves, since asking the re-entry traversal for it yields nothing — and it is the invocation
+     * whose wait is over, so it would also read as work still outstanding. The waiting invocation
+     * stays reachable through {@link ExecutionStore#loadHandler(ExecutionKey, java.util.UUID)},
+     * keyed by this item's own {@link #workItemId()}, which is the handler id.</p>
  * @param key the stable key used to identify the requested resource.
  * @param workItemId the stable work item id used to identify the requested resource.
- * @param traversalId the stable traversal id used to identify the requested resource.
- * @param invocationId the stable invocation id used to identify the requested resource.
+ * @param traversalId the re-entry traversal committed with the handler's terminal transition.
+ * @param invocationId always {@code null} for this kind; see above.
  * @param handlerName handler selected to process the pending work.
  * @param payload bounded payload carried by the pending work.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
      */
     record HandlerTrigger(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
                           String handlerName, OpaquePayload payload, long fencingToken,

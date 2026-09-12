@@ -58,6 +58,9 @@ public enum AuthorizationAction {
      */
     EXECUTION_CONTROL("ravenroot.execution.control", true),
 
+    /** Trip or reset the store-global first-party agent authority epoch. */
+    AGENT_AUTHORITY_CONTROL("ravenroot.agent.authority.control", true),
+
     /** Reserved categories whose use cases are not exposed by the current application API. */
     /** Reserved graph-mutation permission, not exposed by this API version. */
     GRAPH_WRITE("ravenroot.graph.write", false),

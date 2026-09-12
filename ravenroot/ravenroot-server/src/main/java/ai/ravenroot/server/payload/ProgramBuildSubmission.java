@@ -11,6 +11,7 @@ import java.util.List;
 
 /** Bounded transport for one graph-level program readiness/build operation. */
 public record ProgramBuildSubmission(List<Item> programs) {
+    /** Compatibility ceiling; operator policy may narrow it. */
     public static final int MAX_PROGRAMS = 256;
 
     public ProgramBuildSubmission {
@@ -21,12 +22,19 @@ public record ProgramBuildSubmission(List<Item> programs) {
     }
 
     public static ProgramBuildSubmission read(byte[] body, PayloadLimits limits) {
-        PayloadValue root = PayloadJson.read(body, limits);
+        return read(body, limits, ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS);
+    }
+
+    public static ProgramBuildSubmission read(byte[] body, PayloadLimits limits,
+                                              ai.ravenroot.api.programming.ProgramAuthoringLimits authoring) {
+        PayloadValue root = PayloadJson.read(body, buildEnvelopeLimits(limits, authoring));
+        enforceGenericTextLimitsOutsideProgramSource(root, limits);
         if (!(root instanceof PayloadValue.MapValue object)
                 || !(object.entries().get("programs") instanceof PayloadValue.ListValue programs)) {
             throw new IllegalArgumentException("programs array is required");
         }
         var result = new java.util.ArrayList<Item>();
+        authoring.requireProgramCount(programs.values().size());
         for (PayloadValue value : programs.values()) {
             if (!(value instanceof PayloadValue.MapValue item)) {
                 throw new IllegalArgumentException("each program must be an object");
@@ -34,6 +42,7 @@ public record ProgramBuildSubmission(List<Item> programs) {
             String nodeId = requiredText(item, "nodeId");
             String language = requiredText(item, "language");
             String source = requiredTextPreservingWhitespace(item, "source");
+            authoring.requireSource(source);
             String testPayload = optionalText(item, "testPayload", ProgramTestPayload.DEFAULT_TEXT);
             ProgramArtifactIdentity.sha256(language, source);
             result.add(new Item(nodeId, language, source, testPayload,
@@ -42,15 +51,73 @@ public record ProgramBuildSubmission(List<Item> programs) {
         return new ProgramBuildSubmission(result);
     }
 
+    /**
+     * Preserves the server's structural JSON limits while making the selected authoring byte
+     * ceilings reachable by the build route. The source byte limit is still enforced after parsing,
+     * because JSON text length counts UTF-16 code units rather than encoded UTF-8 bytes.
+     */
+    static PayloadLimits buildEnvelopeLimits(
+            PayloadLimits structural,
+            ai.ravenroot.api.programming.ProgramAuthoringLimits authoring) {
+        java.util.Objects.requireNonNull(structural, "structural");
+        java.util.Objects.requireNonNull(authoring, "authoring");
+        return new PayloadLimits(
+                authoring.maxBuildRequestBytes(),
+                structural.maxDepth(),
+                structural.maxCollectionSize(),
+                structural.maxValueCount(),
+                Math.max(structural.maxTextLength(), authoring.maxSourceBytes()),
+                structural.maxKeyLength());
+    }
+
+    private static void enforceGenericTextLimitsOutsideProgramSource(
+            PayloadValue root, PayloadLimits structural) {
+        if (!(root instanceof PayloadValue.MapValue object)) {
+            enforceGenericTextLimits(root, structural);
+            return;
+        }
+        for (var entry : object.entries().entrySet()) {
+            if (!"programs".equals(entry.getKey()) || !(entry.getValue() instanceof PayloadValue.ListValue programs)) {
+                enforceGenericTextLimits(entry.getValue(), structural);
+                continue;
+            }
+            for (PayloadValue program : programs.values()) {
+                if (!(program instanceof PayloadValue.MapValue item)) {
+                    enforceGenericTextLimits(program, structural);
+                    continue;
+                }
+                for (var field : item.entries().entrySet()) {
+                    if (!"source".equals(field.getKey())) {
+                        enforceGenericTextLimits(field.getValue(), structural);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void enforceGenericTextLimits(PayloadValue value, PayloadLimits structural) {
+        switch (value) {
+            case PayloadValue.TextValue ignored -> structural.enforce(value);
+            case PayloadValue.ListValue list -> list.values().forEach(item ->
+                    enforceGenericTextLimits(item, structural));
+            case PayloadValue.MapValue map -> map.entries().values().forEach(item ->
+                    enforceGenericTextLimits(item, structural));
+            default -> { }
+        }
+    }
+
     public static Approval readApproval(byte[] body, PayloadLimits limits) {
+        return readApproval(body, limits, ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS);
+    }
+
+    public static Approval readApproval(byte[] body, PayloadLimits limits,
+                                        ai.ravenroot.api.programming.ProgramAuthoringLimits authoring) {
         PayloadValue root = PayloadJson.read(body, limits);
         if (!(root instanceof PayloadValue.MapValue object)
                 || !(object.entries().get("artifactIds") instanceof PayloadValue.ListValue ids)) {
             throw new IllegalArgumentException("artifactIds array is required");
         }
-        if (ids.values().isEmpty() || ids.values().size() > MAX_PROGRAMS) {
-            throw new IllegalArgumentException("one to " + MAX_PROGRAMS + " artifact ids are required");
-        }
+        authoring.requireProgramCount(ids.values().size());
         var result = new java.util.ArrayList<String>();
         for (PayloadValue id : ids.values()) {
             if (!(id instanceof PayloadValue.TextValue text) || text.value().isBlank()) {

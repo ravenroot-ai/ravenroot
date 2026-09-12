@@ -30,7 +30,7 @@ public final class RavenrootCliMain {
         // against rather than for.
         if (args.length >= 1 && ("backup".equals(args[0]) || "restore".equals(args[0])
                 || "verify".equals(args[0]))) {
-            System.exit(runBackupRestore(args));
+            System.exit(runBackupRestore(args, System.getProperties(), System.getenv(), System.out, System.err));
             return;
         }
         // Validate is intercepted for the same reason and at the same
@@ -42,6 +42,14 @@ public final class RavenrootCliMain {
         // token to check a file on disk would be a demand with nothing behind it.
         if (args.length >= 1 && "validate".equals(args[0])) {
             System.exit(GraphMlValidateCommand.run(args, System.out, System.err));
+            return;
+        }
+        // A captured SSE response is local input just like a GraphML document. Decode before the
+        // remote/embedded split so this command never resolves a token, opens a connection or starts
+        // an execution engine, including when global --server options were supplied and stripped.
+        Integer localEventResult = runLocalEventCommand(args, System.in, System.out, System.err);
+        if (localEventResult != null) {
+            System.exit(localEventResult);
             return;
         }
         // Intercepted here for the same reason backup/restore are: provisioning and revoking an
@@ -62,13 +70,13 @@ public final class RavenrootCliMain {
             System.exit(runRemote(parsed, args));
             return;
         }
-        String engineId = System.getenv().getOrDefault("RAVENROOT_ENGINE", "pekko");
-        try (var engine = ExecutionEngines.create(engineId, "ravenroot-cli")) {
+        var embeddedRuntime = embeddedRuntime(System.getenv(), ExecutionEngines::create);
+        try (var engine = embeddedRuntime.engine()) {
             // Same operator-named node packages as the server, same prohibition — the
             // allowlist is deployment configuration, never graph content. Unset means the standard
             // catalog, unchanged.
-            var monitor = new ExecutionMonitor();
-            var application = embeddedApplication(engine, monitor, System.getenv());
+            var monitor = embeddedRuntime.monitor();
+            var application = embeddedRuntime.application();
             // Stated the way the server states it, but on stderr: the CLI's stdout is the command's
             // machine-readable output, and a diagnostic injected there would corrupt it for anyone
             // piping `ravenroot result <id>`. Same line, same spelling, appropriate stream.
@@ -118,6 +126,13 @@ public final class RavenrootCliMain {
         }
     }
 
+    static Integer runLocalEventCommand(String[] args, java.io.InputStream input,
+                                        java.io.PrintStream output, java.io.PrintStream errors) {
+        return args.length >= 1 && "events".equals(args[0])
+                ? EventStreamDecodeCommand.run(args, input, output, errors)
+                : null;
+    }
+
     /**
      * API-05. The embedded path (engine, node packages, {@code DefaultRavenrootApplication},
      * telemetry) is entirely absent from this method -- not merely unused -- so a remote invocation
@@ -138,6 +153,14 @@ public final class RavenrootCliMain {
     static DefaultRavenrootApplication embeddedApplication(
             ai.ravenroot.api.execution.ExecutionEngine engine, ExecutionMonitor monitor,
             java.util.Map<String, String> environmentVariables) {
+        return embeddedApplication(engine, monitor, environmentVariables,
+                ai.ravenroot.core.runtime.GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    static DefaultRavenrootApplication embeddedApplication(
+            ai.ravenroot.api.execution.ExecutionEngine engine, ExecutionMonitor monitor,
+            java.util.Map<String, String> environmentVariables,
+            java.time.Duration runnerShutdownStepBound) {
         // Same operator-named node packages as the server, same prohibition -- the allowlist
         // is deployment configuration, never graph content. Unset means the standard catalog.
         var environment = ai.ravenroot.core.runtime.BehaviorEnvironment.safeDefaults();
@@ -152,7 +175,51 @@ public final class RavenrootCliMain {
         return new DefaultRavenrootApplication(engine, monitor, behaviors, environment.artifacts(),
                 environment.programRuntime(),
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), null, 0,
-                ai.ravenroot.core.runtime.UnknownBehaviorPolicy.fromEnvironment(environmentVariables));
+                ai.ravenroot.core.runtime.UnknownBehaviorPolicy.fromEnvironment(environmentVariables),
+                null, null, null,
+                ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(environmentVariables),
+                null, null, runnerShutdownStepBound);
+    }
+
+    /** Composes the complete local runtime from one immutable engine/runner configuration. */
+    static EmbeddedRuntime embeddedRuntime(
+            java.util.Map<String, String> environmentVariables, EngineFactory engineFactory) {
+        java.util.Objects.requireNonNull(environmentVariables, "environmentVariables");
+        java.util.Objects.requireNonNull(engineFactory, "engineFactory");
+        var configuration = ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration
+                .fromEnvironment(environmentVariables);
+        String engineId = environmentVariables.getOrDefault("RAVENROOT_ENGINE", "pekko");
+        var engine = engineFactory.create(engineId, "ravenroot-cli", configuration.enginePolicy());
+        try {
+            var monitor = new ExecutionMonitor();
+            var application = embeddedApplication(engine, monitor, environmentVariables,
+                    configuration.runnerShutdownStepBound());
+            return new EmbeddedRuntime(engine, monitor, application);
+        } catch (RuntimeException | Error compositionFailure) {
+            try {
+                engine.close();
+            } catch (RuntimeException | Error cleanupFailure) {
+                compositionFailure.addSuppressed(cleanupFailure);
+            }
+            throw compositionFailure;
+        }
+    }
+
+    record EmbeddedRuntime(ai.ravenroot.api.execution.ExecutionEngine engine,
+                           ExecutionMonitor monitor,
+                           DefaultRavenrootApplication application) {
+        EmbeddedRuntime {
+            java.util.Objects.requireNonNull(engine, "engine");
+            java.util.Objects.requireNonNull(monitor, "monitor");
+            java.util.Objects.requireNonNull(application, "application");
+        }
+    }
+
+    @FunctionalInterface
+    interface EngineFactory {
+        ai.ravenroot.api.execution.ExecutionEngine create(
+                String engineId, String systemName,
+                ai.ravenroot.api.execution.ExecutionEnginePolicy policy);
     }
 
     private static int runRemote(GlobalOptions options, String[] commandArgs) {
@@ -169,26 +236,65 @@ public final class RavenrootCliMain {
         }
     }
 
-    private static int runBackupRestore(String[] args) {
+    /**
+     * The bundle verbs, with their environment and streams passed in rather than read from statics.
+     *
+     * <p>Package-private and parameterised for the reason {@link #embeddedRuntime} already is in this
+     * class: a seam that reads the real environment is a seam a test cannot drive, and the refusal
+     * below is a behaviour claim that has to be red when it breaks rather than asserted in prose.</p>
+     *
+     * @param args the command and its one argument.
+     * @param environment the process environment.
+     * @param output where a successful command's machine-readable line goes.
+     * @param errors where a refusal goes.
+     * @return the process exit code.
+     */
+    static int runBackupRestore(String[] args, java.util.Map<String, String> environment,
+                                java.io.PrintStream output, java.io.PrintStream errors) {
+        return runBackupRestore(args, new java.util.Properties(), environment, output, errors);
+    }
+
+    static int runBackupRestore(String[] args, java.util.Properties properties,
+                                java.util.Map<String, String> environment,
+                                java.io.PrintStream output, java.io.PrintStream errors) {
         if (args.length != 2) {
-            System.err.println("Usage: ravenroot " + args[0] + " <directory>");
+            errors.println("Usage: ravenroot " + args[0] + " <directory>");
             return 2;
         }
         try {
-            var command = new BackupRestoreCommand(System.out, System.err);
+            var command = new BackupRestoreCommand(output, errors);
             var directory = java.nio.file.Path.of(args[1]);
             if ("verify".equals(args[0])) {
                 // Verification is bundle-local and must not depend on ambient live-store paths.
                 return command.verify(directory);
             }
-            var configuration = BackupRestoreConfiguration.fromEnvironment(System.getenv());
+            if (BackupRestoreConfiguration.sharedStoreSelected(properties, environment)) {
+                // Not "unimplemented for now". A recovery bundle is a copy of SQLite files taken
+                // under a single-host file lock, and every part of that is adapter-local
+                // administration: there are no files to copy, the lock excludes a process on this
+                // host and none of the deployment's other replicas, and a restore that replaced the
+                // shared database underneath live replicas would be a way to lose the deployment
+                // rather than to recover it. The database's own tooling is the procedure, and it is
+                // documented; porting these two verbs onto it would produce commands that share a
+                // name with these and nothing else.
+                //
+                // 'verify' is deliberately still allowed above: it reads only the bundle handed to
+                // it, never the configured store, so refusing it would stop an operator checking an
+                // old single-host bundle for no benefit at all.
+                errors.println("Error: " + args[0] + " refused: the recovery bundle is "
+                        + "single-host administration and this deployment selected the shared "
+                        + "execution store; use the database's own backup and restore tooling, as "
+                        + "described in the shared PostgreSQL persistence reference");
+                return 2;
+            }
+            var configuration = BackupRestoreConfiguration.fromEnvironment(environment);
             return switch (args[0]) {
                 case "backup" -> command.backup(configuration, directory);
                 default -> command.restore(configuration, directory);
             };
         } catch (RuntimeException invalidConfiguration) {
             // Path parser/provider diagnostics can echo the raw argument or environment value.
-            System.err.println("Error: recovery command refused: INVALID_CONFIGURATION");
+            errors.println("Error: recovery command refused: INVALID_CONFIGURATION");
             return 2;
         }
     }

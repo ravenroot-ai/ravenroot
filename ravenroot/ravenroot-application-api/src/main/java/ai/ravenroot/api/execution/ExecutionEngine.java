@@ -63,6 +63,19 @@ public interface ExecutionEngine extends AutoCloseable {
      */
     Set<EngineCapability> capabilities();
 
+    /**
+     * Identifies the engine policy that affects durable execution compatibility.
+     *
+     * <p>The value is stable for this engine's lifetime. It is either empty, which denotes the
+     * historical engine policy, or a lowercase 64-character hexadecimal SHA-256 fingerprint.
+     * Existing engines inherit the historical empty value.</p>
+     *
+     * @return the stable compatibility fingerprint, or empty for the historical policy
+     */
+    default String compatibilityFingerprint() {
+        return "";
+    }
+
 /**
  * Scheduler with the same lifecycle as this engine.
  * @return the scheduler that is shut down with this engine

@@ -41,7 +41,7 @@ const graph = behavior => `<?xml version="1.0" encoding="UTF-8"?>
   </graph>
 </graphml>`;
 
-async function stubRuntime(page) {
+async function stubRuntime(page, { failStop = false } = {}) {
   const sourceCalls = [];
   const deploymentCalls = [];
   const executionCalls = [];
@@ -61,6 +61,12 @@ async function stubRuntime(page) {
   await page.route('**/v1/source-sessions**', async route => {
     const request = route.request();
     sourceCalls.push({ method: request.method(), url: request.url() });
+    if (request.method() === 'DELETE' && failStop) {
+      await route.fulfill({
+        status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }),
+      });
+      return;
+    }
     const sessionId = new URL(request.url()).searchParams.get('id')
       || decodeURIComponent(new URL(request.url()).pathname.split('/').at(-1));
     const state = request.method() === 'POST' ? 'STARTING'
@@ -164,6 +170,19 @@ test('Cancel leaves the document open and sends nothing', async ({ page }) => {
   await expect(page.locator('#active-deployment-dialog')).toBeHidden();
   expect(await page.evaluate(documentId => Boolean(window.ravenroot.workspace.find(documentId)), id)).toBe(true);
   expect(calls.sourceCalls.filter(call => call.method === 'DELETE')).toHaveLength(0);
+  expect(calls.deploymentCalls).toHaveLength(0);
+});
+
+test('a failed Stop and Close keeps the document open', async ({ page }) => {
+  const calls = await stubRuntime(page, { failStop: true });
+  await page.goto('/');
+  await openGraphAndRun(page, graph('external.consume'), 'failed-stop.graphml');
+  const id = await requestCloseActiveDocument(page);
+
+  await page.locator('[data-active-deployment-action="stop-and-close"]').click();
+
+  await expect.poll(() => calls.sourceCalls.filter(call => call.method === 'DELETE').length).toBe(1);
+  expect(await page.evaluate(documentId => Boolean(window.ravenroot.workspace.find(documentId)), id)).toBe(true);
   expect(calls.deploymentCalls).toHaveLength(0);
 });
 

@@ -1,9 +1,19 @@
 package ai.ravenroot.api.node.service;
 
 import java.util.Set;
+import java.util.Optional;
 
 /** Immutable, package-scoped service view supplied by the trusted runtime composition root. */
 public interface NodePackageServices {
+    /**
+     * Describes the immutable quantitative external-I/O policy enforced by this service view.
+     * Empty means a custom provider has not supplied the v2 contract; it does not imply denial.
+     *
+     * @return quantitative managed external-I/O capacity, when supplied by the provider
+     */
+    default Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+        return Optional.empty();
+    }
     /**
      * Lists exactly the operator-composed capabilities exposed by this view.
      *
@@ -29,14 +39,38 @@ public interface NodePackageServices {
      */
     OutboundWebSocketService outboundWebSocket();
 
-/**
- * Deny-only view used for legacy packages and deployments which composed no grants.
+    /**
+     * Returns the server-owned authorization and audit boundary for model-requested tool calls.
+     *
+     * <p>This is a default method so SDK /2 packages compiled before the service existed remain
+     * binary compatible. The default refuses every call: adding the method cannot turn an older
+     * service view into authority it was never granted.</p>
+     *
+     * @return a fail-closed service unless the operator explicitly granted tool authorization
+     */
+    default ToolCallAuthorizationService toolAuthorization() {
+        return ToolCallAuthorizationService.unavailable();
+    }
+
+    /**
+     * Returns finite agent authority/economic mediation. Kept additive and deny-only for older SDKs.
+     * @return agent authority service, deny-only unless explicitly composed
+     */
+    default AgentResourceService agentResources() {
+        return AgentResourceService.unavailable();
+    }
+
+    /**
+     * Deny-only view used for legacy packages and deployments which composed no grants.
      * @return a reusable deny-only view that advertises no capabilities and fails every operation
- */
+     */
     static NodePackageServices unavailable() {
         NodePackageServiceException unavailable = new NodePackageServiceException(
                 NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
         return new NodePackageServices() {
+            @Override public Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+                return Optional.of(NodePackageEgressCapacityProfile.noManagedEgress());
+            }
             @Override public Set<NodePackageCapability> capabilities() { return Set.of(); }
             @Override public NodeCredentialService credentials() {
                 return (message, reference, deadline) -> OutboundCall.failed(unavailable);

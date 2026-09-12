@@ -68,6 +68,16 @@ class ReservedNetworkClassificationTest {
     }
 
     @Test
+    @DisplayName("low IPv4-compatible addresses are unwrapped without changing native unspecified or loopback")
+    void lowIpv4CompatibleIsUnwrapped() throws Exception {
+        byte[] compatibleReserved = new byte[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2};
+        assertEquals(ReservedNetwork.ANY_LOCAL,
+                ReservedNetwork.of(InetAddress.getByAddress(compatibleReserved)));
+        assertEquals(ReservedNetwork.ANY_LOCAL, ReservedNetwork.of(InetAddress.getByName("::")));
+        assertEquals(ReservedNetwork.LOOPBACK, ReservedNetwork.of(InetAddress.getByName("::1")));
+    }
+
+    @Test
     @DisplayName("an unclassifiable address is reserved, never public")
     void nullIsTreatedAsReserved() {
         assertTrue(ReservedNetwork.of(null).isReserved(),

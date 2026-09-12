@@ -5,6 +5,7 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
 
 import java.util.Set;
+import java.util.Optional;
 
 /**
  * One node type contributed by a {@link NodePackage}.
@@ -89,5 +90,20 @@ public interface NodeBehavior {
      */
     default NodeAction create(NodeConfiguration configuration, NodePackageServices services) {
         return create(configuration);
+    }
+
+    /**
+     * Opt-in durable re-entry for a package-owned, versioned tool-call checkpoint.
+     *
+     * <p>The fail-closed default keeps existing packages source and binary compatible. A package
+     * that opts in owns the complete decoder for its checkpoint; core never interprets package
+     * state and graph content cannot nominate a decoder.</p>
+     * @param configuration validated identity and property snapshot for one graph node
+     * @param services package-scoped operator grants
+     * @return optional trusted continuation action; empty refuses re-entry
+     */
+    default Optional<ToolCallContinuationAction> createToolCallContinuation(
+            NodeConfiguration configuration, NodePackageServices services) {
+        return Optional.empty();
     }
 }

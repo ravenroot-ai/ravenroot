@@ -5,29 +5,73 @@ import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocation;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
+import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
+import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCursor;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
+import ai.ravenroot.api.persistence.InventoryCursor;
+import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryPage;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -65,17 +109,6 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class InMemoryExecutionStore implements ExecutionStore {
 
-    private static final Duration DEFAULT_MAX_LEASE_TTL = Duration.ofMinutes(5);
-    private static final int DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024;
-    private static final Duration DEFAULT_MAX_CLOCK_SKEW = Duration.ofSeconds(5);
-    /**
-     * Journal retention default. Twenty-four hours is an operational default and not a product
-     * promise — ADR 0010 leaves concrete retention values to configuration — but it has to be
-     * <em>some</em> declared number, because {@link #journalRetention()} is what a consumer reads to
-     * learn how long it may be disconnected and still resume.
-     */
-    private static final Duration DEFAULT_JOURNAL_RETENTION = Duration.ofHours(24);
-
     private final Object monitor = new Object();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
     private final Map<IdempotencyKey, IdempotencyRecord> idempotency = new LinkedHashMap<>();
@@ -100,49 +133,130 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<ExecutionKey, Long> streamSequences = new LinkedHashMap<>();
     /** Inbox deduplication records, keyed per tenant, consumer and event, with their expiry. */
     private final Map<InboxKey, Instant> inbox = new LinkedHashMap<>();
+    /**
+     * Per-tenant inventory retention floor. Absent means nothing has been purged, which reads as
+     * {@link Instant#MIN} — the same convention {@link #forgottenBefore} uses, and for the same
+     * reason: writing a floor at store creation would record a forgetting that never happened.
+     */
+    private final Map<String, Instant> inventoryRetainedFrom = new LinkedHashMap<>();
     private final AtomicLong revisionSequence = new AtomicLong();
+    private AgentAuthorityControl agentAuthorityControl = new AgentAuthorityControl(
+            AgentAuthorityControlState.ACTIVE, 0, Instant.EPOCH, 0);
     private final Clock clock;
     private final Duration maxLeaseTtl;
     private final int maxPayloadBytes;
     private final Duration maxClockSkew;
     private final Duration journalRetention;
+    private final int maxInventoryPageSize;
+    private final Duration terminalRetention;
+    private final Duration executionResultRetention;
+    private final HumanTaskPolicy humanTaskPolicy;
+    private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
+    private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
-        this(Clock.systemUTC(), DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
+        this(Clock.systemUTC(), InMemoryExecutionStorePolicy.DEFAULTS);
     }
 
     public InMemoryExecutionStore(Clock clock) {
-        this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
+        this(clock, InMemoryExecutionStorePolicy.DEFAULTS);
+    }
+
+    /** Reference store using the supplied Human Task page policy. */
+    public InMemoryExecutionStore(Clock clock, HumanTaskPolicy humanTaskPolicy) {
+        this(clock, InMemoryExecutionStorePolicy.DEFAULTS, humanTaskPolicy);
+    }
+
+    /** Reference store using one explicit typed store policy. */
+    public InMemoryExecutionStore(Clock clock, InMemoryExecutionStorePolicy policy) {
+        this(clock, policy, HumanTaskPolicy.DEFAULTS);
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes) {
-        this(clock, maxLeaseTtl, maxPayloadBytes, DEFAULT_MAX_CLOCK_SKEW);
+        this(clock, maxLeaseTtl, maxPayloadBytes,
+                InMemoryExecutionStorePolicy.DEFAULTS.maximumClockSkew());
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew) {
-        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, DEFAULT_JOURNAL_RETENTION);
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
+                InMemoryExecutionStorePolicy.DEFAULTS.journalRetention());
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention) {
-        this.journalRetention = Objects.requireNonNull(journalRetention, "journalRetention");
-        if (journalRetention.isZero() || journalRetention.isNegative()) {
-            throw new IllegalArgumentException("journalRetention must be positive");
-        }
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                InMemoryExecutionStorePolicy.DEFAULTS.terminalRetention());
+    }
+
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, terminalRetention,
+                terminalRetention);
+    }
+
+    /**
+     * Composes the store with an independent result retention window.
+     *
+     * <p>Every shorter constructor defaults it to {@code terminalRetention}, which is the same
+     * default {@code SqliteStoreConfig} ships and for the same reason: the two windows answer one
+     * operational question — how long after a run ends can somebody still find out what happened —
+     * and defaulting them apart would silently lose a result for an instance that is still
+     * discoverable.</p>
+     *
+     * @param clock                    the store's own clock authority.
+     * @param maxLeaseTtl              longest lease this store issues.
+     * @param maxPayloadBytes          largest payload this store accepts.
+     * @param maxClockSkew             budget within which a caller's issuance instant is accepted.
+     * @param journalRetention         how long journal records are retained.
+     * @param terminalRetention        how long terminal instances are retained.
+     * @param executionResultRetention how long recorded terminal results are retained.
+     */
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention, Duration executionResultRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                terminalRetention, executionResultRetention, HumanTaskPolicy.DEFAULTS);
+    }
+
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention, Duration executionResultRetention,
+                                  HumanTaskPolicy humanTaskPolicy) {
+        this(clock, new InMemoryExecutionStorePolicy(maxLeaseTtl, maxPayloadBytes, maxClockSkew,
+                journalRetention, InMemoryExecutionStorePolicy.DEFAULTS.maximumInventoryPageSize(),
+                terminalRetention, executionResultRetention), humanTaskPolicy);
+    }
+
+    /** Reference store using explicit store and Human Task policies. */
+    public InMemoryExecutionStore(Clock clock, InMemoryExecutionStorePolicy policy,
+                                  HumanTaskPolicy humanTaskPolicy) {
         this.clock = Objects.requireNonNull(clock, "clock");
-        this.maxLeaseTtl = Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");
-        if (maxLeaseTtl.isZero() || maxLeaseTtl.isNegative()) {
-            throw new IllegalArgumentException("maxLeaseTtl must be positive");
-        }
-        if (maxPayloadBytes < 1) {
-            throw new IllegalArgumentException("maxPayloadBytes must be positive");
-        }
-        this.maxPayloadBytes = maxPayloadBytes;
-        this.maxClockSkew = Objects.requireNonNull(maxClockSkew, "maxClockSkew");
-        if (maxClockSkew.isNegative()) {
-            throw new IllegalArgumentException("maxClockSkew cannot be negative");
-        }
+        policy = Objects.requireNonNull(policy, "policy");
+        this.maxLeaseTtl = policy.maximumLeaseTtl();
+        this.maxPayloadBytes = policy.maximumPayloadBytes();
+        this.maxClockSkew = policy.maximumClockSkew();
+        this.journalRetention = policy.journalRetention();
+        this.maxInventoryPageSize = policy.maximumInventoryPageSize();
+        this.terminalRetention = policy.terminalRetention();
+        this.executionResultRetention = policy.executionResultRetention();
+        this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+    }
+
+    @Override
+    public int maxHumanTaskPageSize() {
+        return humanTaskPolicy.inboxMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionPageSize() {
+        return humanTaskPolicy.confirmation().attentionMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionNodeCounts() {
+        return HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_NODE_COUNTS;
     }
 
     @Override
@@ -154,8 +268,27 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         // into invisibility. Neither capability makes a durability claim, so an in-memory adapter can
         // honour both honestly: they are about atomicity with the batch and about pruning, not about
         // surviving process death, which is what DURABLE says and what this adapter still must not say.
+        // DURABLE_HANDLERS, PROCESS_INVENTORY and INVENTORY_RETENTION join them on the same rule,
+        // and none of the three makes a durability claim either. Handlers are a claim about
+        // transactionality and about the mechanism existing; the inventory is served from the rows
+        // this adapter already holds, with ordering and tenant isolation properties of the query
+        // rather than of the medium; retention is an explicit purge. Declaring all of them here means
+        // every handler and inventory assertion in the conformance suite executes against two
+        // adapters instead of being skipped into invisibility on one of them.
         return Set.of(StoreCapability.TRANSACTIONAL_BATCH, StoreCapability.IDEMPOTENCY_PURGE,
-                StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION);
+                StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
+                StoreCapability.DURABLE_HANDLERS,
+                StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
+                StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
+                StoreCapability.HUMAN_TASK_CONFIRMATIONS,
+                StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
+                // EXECUTION_RESULTS joins them on the same rule and makes no durability
+                // claim: idempotent refusal, tenant scoping, the four read states and
+                // retention are all properties of the mechanism rather than of the
+                // medium, and this adapter honours every one of them exactly. What it
+                // cannot honour is survival of process death, which is what DURABLE
+                // says and what this adapter still does not say.
+                StoreCapability.EXECUTION_RESULTS);
     }
 
     @Override
@@ -166,6 +299,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override
     public int maxPayloadBytes() {
         return maxPayloadBytes;
+    }
+
+    @Override
+    public int maxHumanTaskResponsePayloadBytes() {
+        return ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_ENCODED_BYTES;
     }
 
     @Override
@@ -190,6 +328,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             // Decidable from the request alone, so it happens before the monitor is even entered.
             requireNoFencingTokenUnderNotPresent(batch);
             batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
+            batch.handlerTransitions().forEach(transition -> {
+                if (!isHumanTaskResolution(batch, transition)) {
+                    requireWithinPayloadLimit(transition.outcomePayload());
+                }
+            });
             batch.idempotency().ifPresent(write -> {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
@@ -248,12 +391,86 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     timers.put(schedule.timerId(), schedule);
                 }
 
+                // createdAt is written once and never rewritten. It is half of the inventory's sort
+                // key, and the whole reason that ordering is stable is that neither component of it
+                // can move while a scan is in flight.
+                Instant createdAt = existing == null ? now : existing.createdAt;
+                // One increment per authoritative status transition actually applied, counted from the
+                // batch rather than from a before/after comparison: a batch that moves an instance
+                // RUNNING -> WAITING -> RUNNING has applied two transitions, and a comparison of the
+                // endpoints would see none. Creation is itself the first transition, into the initial
+                // status. A replayed batch never reaches here, so a duplicate delivery cannot inflate
+                // the count -- which is what keeps the generation meaningful under at-least-once work
+                // delivery.
+                long generation = (existing == null ? 0L : existing.lifecycleGeneration)
+                        + (existing == null ? 1L : 0L) + processTransitionCount(batch);
+                ExecutionOrigin origin = (existing == null ? ExecutionOrigin.none() : existing.origin)
+                        .mergedWith(batch.origin());
+                // Retention starts when the instance becomes terminal and never restarts, because a
+                // terminal instance cannot transition again. A non-terminal row has no retainedUntil at
+                // all rather than a far-future one: absent means "retention has not started", and a
+                // sentinel would be a date an operator could read as a real deadline.
+                Instant retainedUntil = folded.status().terminal()
+                        ? (existing != null && existing.retainedUntil != null
+                                ? existing.retainedUntil : plusClamped(now, terminalRetention))
+                        : null;
+
+                var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
+                        : new LinkedHashMap<>(existing.humanTasks);
+                var handlers = existing == null ? new LinkedHashMap<UUID, DurableHandler>()
+                        : new LinkedHashMap<>(existing.handlers);
+                // Handler writes fold after the aggregate, because a registration may name an
+                // invocation the same batch created and a terminal transition must name a traversal
+                // the same batch added. Both are validated against the POST-fold aggregate; folding
+                // them first would force a caller to split one atomic wait, or one atomic re-entry,
+                // across two batches and reopen exactly the crash window PERS-05 exists to close.
+                applyHandlerWrites(key, batch, folded, handlers, humanTasks, revision);
+
+                var approvals = existing == null ? new LinkedHashMap<UUID, DurableToolApproval>()
+                        : new LinkedHashMap<>(existing.approvals);
+                applyToolApprovalWrites(key, batch, folded, pin, approvals, revision, now);
+
+                DurableAgentAuthorityBudget agentBudget = existing == null ? null : existing.agentBudget;
+                for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+                    requireAgentAuthorityControl(operation);
+                    if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                        NodeInvocation invocation = folded.traversals().values().stream()
+                                .flatMap(traversal -> traversal.invocations().values().stream())
+                                .filter(candidate -> candidate.invocationId()
+                                        .equals(register.binding().invocationId()))
+                                .findFirst().orElse(null);
+                        if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                                || !invocation.parentInvocationIds()
+                                        .equals(register.binding().causalParentInvocationIds())) {
+                            throw failure(ExecutionStoreFailure.invalid(
+                                    "agent grant binding does not name the post-fold invocation"));
+                        }
+                    }
+                    try {
+                        agentBudget = AgentAuthorityBudgetFold.apply(key, agentBudget, operation, now);
+                    } catch (IllegalArgumentException | IllegalStateException invalid) {
+                        throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                    }
+                }
+                applyHumanTaskWrites(key, batch, folded, pin, humanTasks, revision, now);
+
+                var executionPauses = existing == null
+                        ? new LinkedHashMap<UUID, DurableExecutionPause>()
+                        : new LinkedHashMap<>(existing.executionPauses);
+                applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
                         timers,
+                        handlers,
+                        approvals,
+                        agentBudget,
+                        humanTasks,
+                        executionPauses,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
-                        existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged));
+                        existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
+                        createdAt, generation, origin, retainedUntil);
                 dropAcknowledgementsForRescheduledWork(next);
 
                 batch.idempotency().ifPresent(write -> idempotency.put(new IdempotencyKey(key.tenantId(), write.key()),
@@ -283,6 +500,80 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return entry.toStoredRevalidated(key);
             }
         });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.agentBudget);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return complete(() -> {
+            synchronized (monitor) {
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return complete(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            synchronized (monitor) {
+                if (agentAuthorityControl.state() != expectedState
+                        || agentAuthorityControl.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                if (targetState == AgentAuthorityControlState.KILLED) {
+                    long releasedTeamActive = 0;
+                    for (Entry entry : instances.values()) {
+                        if (entry.agentBudget != null
+                                && entry.agentBudget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                                && entry.agentBudget.controlEpoch() == expectedEpoch) {
+                            long before = entry.agentBudget.reserved().teamActive();
+                            entry.agentBudget = AgentAuthorityBudgetFold.apply(entry.agentBudget.key(),
+                                    entry.agentBudget, new AgentBudgetOperation.KillRoot(expectedEpoch),
+                                    clock.instant());
+                            releasedTeamActive = Math.addExact(releasedTeamActive,
+                                    before - entry.agentBudget.reserved().teamActive());
+                        }
+                    }
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(), Math.addExact(
+                            agentAuthorityControl.teamActiveReleased(), releasedTeamActive));
+                } else {
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(),
+                            agentAuthorityControl.teamActiveReleased());
+                }
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    private void requireAgentAuthorityControl(AgentBudgetOperation operation) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (agentAuthorityControl.state() != AgentAuthorityControlState.ACTIVE
+                || agentAuthorityControl.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid("agent authority control is not active for this epoch"));
+        }
     }
 
     @Override
@@ -402,7 +693,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     }
                     var dispatchable = scheduledAttempts(entry, now);
                     var dueTimers = dueTimerEntries(entry, now);
-                    if (dispatchable.isEmpty() && dueTimers.isEmpty()) {
+                    var triggers = claimableTriggers(entry, now);
+                    if (dispatchable.isEmpty() && dueTimers.isEmpty() && triggers.isEmpty()) {
                         continue;
                     }
                     LeaseHandle lease = issueLease(key, entry, workerId, leaseTtl, now);
@@ -417,6 +709,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             break;
                         }
                         claimed.add(claimTimer(key, entry, timer, lease, now, leaseTtl));
+                    }
+                    for (DurableHandler handler : triggers) {
+                        if (claimed.size() >= limit) {
+                            break;
+                        }
+                        claimed.add(claimTrigger(key, entry, handler, lease, now, leaseTtl));
                     }
                 }
                 return List.copyOf(claimed);
@@ -570,6 +868,483 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
+    // ---------------------------------------------------------------- durable execution inventory
+
+    @Override
+    public int maxInventoryPageSize() {
+        return maxInventoryPageSize;
+    }
+
+    @Override
+    public Duration terminalRetention() {
+        return terminalRetention;
+    }
+
+    @Override
+    public CompletionStage<ProcessInventoryPage> listProcessInstances(String tenantId,
+                                                                      ProcessInventoryQuery query) {
+        return complete(() -> {
+            requireCapability(StoreCapability.PROCESS_INVENTORY);
+            requireTenantId(tenantId);
+            requireInventoryQuery(query);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                InventoryCursor.Position after = query.cursor()
+                        .map(cursor -> InventoryCursor.decode(tenantId, cursor))
+                        .orElse(null);
+
+                var matching = new ArrayList<Map.Entry<ExecutionKey, Entry>>();
+                for (var instance : instances.entrySet()) {
+                    // One tenant per call. A physically isolated adapter would not see another
+                    // tenant's rows at all; this adapter shares one map, so the filter is what makes
+                    // the two indistinguishable to a caller.
+                    if (!instance.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    if (!admits(instance.getValue(), query, now)) {
+                        continue;
+                    }
+                    matching.add(instance);
+                }
+                matching.sort(INVENTORY_ORDER);
+
+                var page = new ArrayList<ProcessInventoryEntry>(Math.min(query.limit(), matching.size()));
+                Map.Entry<ExecutionKey, Entry> last = null;
+                boolean more = false;
+                for (var instance : matching) {
+                    if (after != null && !after.precedes(instance.getValue().createdAt,
+                            instance.getKey().processInstanceId())) {
+                        continue;
+                    }
+                    if (page.size() == query.limit()) {
+                        more = true;
+                        break;
+                    }
+                    page.add(entryOf(instance.getKey(), instance.getValue(), now));
+                    last = instance;
+                }
+                // A next cursor is minted only when a further row was actually seen. Handing one back
+                // on a page that happens to be exactly `limit` long would cost every caller one empty
+                // round trip, and worse, a caller that treats a present cursor as "there is more" would
+                // report work that does not exist.
+                Optional<String> next = more && last != null
+                        ? Optional.of(InventoryCursor.encode(tenantId, last.getValue().createdAt,
+                                last.getKey().processInstanceId()))
+                        : Optional.empty();
+                return new ProcessInventoryPage(List.copyOf(page), next, inventoryFloorOf(tenantId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key) {
+        return complete(() -> {
+            requireCapability(StoreCapability.PROCESS_INVENTORY);
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                // The map is keyed by tenant AND id together, so a cross-tenant hit is not excluded by
+                // a check that could be forgotten -- it is not a lookup that can be expressed. Absent
+                // and not-yours are therefore the same answer by construction rather than by policy.
+                return entry == null ? Optional.<ProcessInventoryEntry>empty()
+                        : Optional.of(entryOf(key, entry, clock.instant()));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key) {
+        return complete(() -> {
+            requireCapability(StoreCapability.PROCESS_INVENTORY);
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                if (entry == null) {
+                    // NotFound rather than an empty list: an instance with no traversals exists and
+                    // honestly reports none, and collapsing the two would make "you asked about
+                    // nothing" indistinguishable from "it has nothing".
+                    throw failure(new ExecutionStoreFailure.NotFound(key));
+                }
+                boolean leaseLive = leaseLive(entry, clock.instant());
+                var rows = new ArrayList<TraversalInventoryEntry>(entry.state.traversals().size());
+                int position = 0;
+                for (Traversal traversal : entry.state.traversals().values()) {
+                    int invocations = traversal.invocations().size();
+                    int parked = 0;
+                    for (NodeInvocation invocation : traversal.invocations().values()) {
+                        for (NodeAttempt attempt : invocation.attempts()) {
+                            if (attempt.status() == NodeAttemptStatus.PARKED) {
+                                parked++;
+                            }
+                        }
+                    }
+                    rows.add(new TraversalInventoryEntry(key, traversal.traversalId(), position++,
+                            traversal.ingressNodeId(), traversal.status(),
+                            InventoryDisposition.ofTraversal(traversal.status(), leaseLive, parked > 0),
+                            invocations, parked, traversal.terminationReason()));
+                }
+                return List.copyOf(rows);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> inventoryRetainedFrom(String tenantId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                return inventoryFloorOf(tenantId);
+            }
+        });
+    }
+
+    /**
+     * Removes this tenant's terminal instances whose retention window has elapsed and advances its
+     * floor, in that order and only when something was actually removed.
+     *
+     * <p>The zero guard matters in the same way it does for idempotency: a purge that removed nothing
+     * must leave the floor exactly where it was, because the floor is what a caller reads to decide
+     * whether an absent row expired or never existed, and advancing it for a tenant that lost nothing
+     * would report a retention gap that does not exist -- on every tick of a periodic job.</p>
+     */
+    @Override
+    public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.INVENTORY_RETENTION);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                var doomed = new ArrayList<ExecutionKey>();
+                Instant latest = null;
+                for (var instance : instances.entrySet()) {
+                    if (!instance.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    Entry entry = instance.getValue();
+                    // Only terminal rows are eligible, however old a non-terminal one is. Age is not
+                    // evidence that work is finished, and pruning a stuck instance would destroy the
+                    // row an operator needs in order to discover that it is stuck.
+                    //
+                    // The deadline comes from the same resolution a reader is given, not from the raw
+                    // field: a purge that decided eligibility differently from what findProcessInstance
+                    // reports would remove a row whose own deadline said it was safe.
+                    Optional<Instant> deadline = retainedUntilOf(entry);
+                    if (deadline.isEmpty() || deadline.get().isAfter(now)) {
+                        continue;
+                    }
+                    doomed.add(instance.getKey());
+                    if (latest == null || deadline.get().isAfter(latest)) {
+                        latest = deadline.get();
+                    }
+                }
+                if (doomed.isEmpty()) {
+                    return 0L;
+                }
+                doomed.forEach(instances::remove);
+                doomed.forEach(streamSequences::remove);
+                // The floor is the LATEST retention deadline this run actually crossed. It has to be
+                // the latest, because the guarantee runs in the direction "everything past it is still
+                // here": a run removing two rows whose deadlines are further apart than the retention
+                // window would, with the earliest, publish a floor the later row sits after -- and a
+                // caller following the documented rule would conclude a genuinely completed execution
+                // never existed. One row is the degenerate case where earliest and latest coincide,
+                // which is why that mistake survives any test that purges only one.
+                //
+                // Not `now` either: advancing to now would claim a gap covering rows that are still
+                // present, which is safe but uselessly pessimistic. The latest crossed boundary is the
+                // tightest honest answer.
+                Instant floor = latest;
+                inventoryRetainedFrom.merge(tenantId, floor,
+                        (current, candidate) -> candidate.isAfter(current) ? candidate : current);
+                return (long) doomed.size();
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public Duration executionResultRetention() {
+        return executionResultRetention;
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return maxPayloadBytes;
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return recordExecutionResult(result, maxPayloadBytes);
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(
+            DurableExecutionResult result, int resolvedMaximumPayloadBytes) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            Objects.requireNonNull(result, "result");
+            requireResultPayloadWithinLimit(result, resolvedMaximumPayloadBytes);
+            DurableExecutionResult candidate = result.withRetainedUntil(
+                    plusClamped(result.endedAt(), executionResultRetention));
+            var lookup = new ResultKey(result.key().tenantId(), result.traversalId());
+            synchronized (monitor) {
+                DurableExecutionResult stored = executionResults.get(lookup);
+                if (stored != null) {
+                    // Identity is the fingerprint and not record equality, because two writes of the
+                    // same result differ in nothing a producer decided and the collections inside it
+                    // have no defined iteration order at the source. Comparing the digest is what
+                    // makes a duplicate terminal event free rather than a conflict.
+                    if (stored.fingerprint().equals(candidate.fingerprint())) {
+                        return stored;
+                    }
+                    throw new ExecutionStoreException(
+                            new ExecutionStoreFailure.ExecutionResultNotRecordable(result.traversalId(),
+                                    stored.status(), candidate.status(), stored.fingerprint(),
+                                    candidate.fingerprint()));
+                }
+                if (!instances.containsKey(result.key())) {
+                    // Indistinguishable from another tenant's instance, which is the point: the key
+                    // carries the tenant, so a cross-tenant record is refused by the same miss.
+                    throw new ExecutionStoreException(new ExecutionStoreFailure.NotFound(result.key()));
+                }
+                executionResults.put(lookup, candidate);
+                return candidate;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                UUID traversalId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                DurableExecutionResult stored = executionResults.get(new ResultKey(tenantId, traversalId));
+                if (stored == null) {
+                    return Optional.<DurableExecutionResult>empty();
+                }
+                Instant now = clock.instant();
+                // Retained while now < retainedUntil, strictly, so the boundary matches the purge's
+                // exactly: a row eligible for collection is one whose payload this read no longer
+                // offers. The SQLite adapter pairs them the same way, and a disagreement here would
+                // produce an instant at which the two stores answer differently for the same result.
+                return Optional.of(now.isBefore(stored.retainedUntil()) ? stored : stored.expired());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                return executionResultsRetainedFrom.getOrDefault(tenantId, Instant.MIN);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                var doomed = new ArrayList<ResultKey>();
+                Instant latest = null;
+                for (var recorded : executionResults.entrySet()) {
+                    if (!recorded.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    Instant deadline = recorded.getValue().retainedUntil();
+                    if (deadline.isAfter(now)) {
+                        continue;
+                    }
+                    doomed.add(recorded.getKey());
+                    if (latest == null || deadline.isAfter(latest)) {
+                        latest = deadline;
+                    }
+                }
+                if (doomed.isEmpty()) {
+                    // A purge that removed nothing leaves the floor exactly where it was. Advancing it
+                    // would report a retention gap that does not exist, on every tick of a periodic job.
+                    return 0L;
+                }
+                doomed.forEach(executionResults::remove);
+                // The LATEST deadline crossed, for the reason purgeExpiredProcessInstances records:
+                // the guarantee runs in the direction "everything past this is still here", and the
+                // earliest inverts the ambiguity into the unsafe direction.
+                Instant floor = latest;
+                executionResultsRetainedFrom.merge(tenantId, floor,
+                        (current, candidate) -> candidate.isAfter(current) ? candidate : current);
+                return (long) doomed.size();
+            }
+        });
+    }
+
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result, int maximumPayloadBytes) {
+        if (maximumPayloadBytes < 1) throw new IllegalArgumentException("maximumPayloadBytes must be positive");
+        ExecutionResultPayload payload = result.payload();
+        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maximumPayloadBytes) {
+            throw new ExecutionStoreException(
+                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maximumPayloadBytes));
+        }
+        if (payload.state() == ResultPayloadState.EXPIRED) {
+            throw new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                    "EXPIRED describes a record's age and is produced by a read; it cannot be stored"));
+        }
+    }
+
+    // ---------------------------------------------------------------- inventory helpers
+
+    /**
+     * {@code (createdAt DESC, processInstanceId DESC)}. The id is compared as text rather than by
+     * {@link UUID#compareTo}, which orders by signed 64-bit halves and therefore disagrees with the
+     * lexicographic order a SQL adapter gets from a TEXT column. Two adapters that ordered ties
+     * differently would hand out cursors that skip or repeat rows against each other.
+     */
+    private static final Comparator<Map.Entry<ExecutionKey, Entry>> INVENTORY_ORDER =
+            Comparator.<Map.Entry<ExecutionKey, Entry>, Instant>comparing(item -> item.getValue().createdAt)
+                    .thenComparing(item -> item.getKey().processInstanceId().toString())
+                    .reversed();
+
+    private Instant inventoryFloorOf(String tenantId) {
+        return inventoryRetainedFrom.getOrDefault(tenantId, Instant.MIN);
+    }
+
+    private static boolean leaseLive(Entry entry, Instant now) {
+        return entry.lease != null && now.isBefore(entry.lease.expiresAt());
+    }
+
+    private static boolean anyAttemptParked(Entry entry) {
+        for (Traversal traversal : entry.state.traversals().values()) {
+            for (NodeInvocation invocation : traversal.invocations().values()) {
+                for (NodeAttempt attempt : invocation.attempts()) {
+                    if (attempt.status() == NodeAttemptStatus.PARKED) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean admits(Entry entry, ProcessInventoryQuery query, Instant now) {
+        if (!query.admits(entry.state.status())) {
+            return false;
+        }
+        if (query.deploymentId().isPresent()
+                && !query.deploymentId().equals(entry.origin.deploymentId())) {
+            return false;
+        }
+        if (query.ownerWorkerId().isPresent()) {
+            // An owner filter matches only a LIVE lease. A lapsed lease names the worker that is no
+            // longer renewing, and answering "owned by w" with rows w has abandoned is the opposite of
+            // what an operator draining a worker is asking.
+            if (!leaseLive(entry, now)
+                    || !entry.lease.workerId().equals(query.ownerWorkerId().get())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * What a reader is told about retention, and what the purge decides eligibility from — one
+     * resolution, used by both, so the two cannot disagree about the same fact.
+     *
+     * <p>The terminal test is the gate: retention has not started for a non-terminal row, and absent
+     * is how that is said rather than a sentinel date a reader could take for a real deadline. The
+     * fallback to {@code updatedAt + terminalRetention} exists so this adapter states the identical
+     * rule to the SQLite one, where it is reachable through the schema-5 upgrade path. Here it is
+     * unreachable — every terminal entry records its deadline in the transaction that made it terminal
+     * — and it is written anyway, because a rule expressed in only one of two adapters is a rule the
+     * two will eventually differ on.</p>
+     */
+    private Optional<Instant> retainedUntilOf(Entry entry) {
+        if (!entry.state.status().terminal()) {
+            return Optional.empty();
+        }
+        return Optional.of(entry.retainedUntil != null
+                ? entry.retainedUntil
+                : plusClamped(entry.updatedAt, terminalRetention));
+    }
+
+    private ProcessInventoryEntry entryOf(ExecutionKey key, Entry entry, Instant now) {
+        boolean leaseLive = leaseLive(entry, now);
+        return new ProcessInventoryEntry(key, entry.state.status(),
+                InventoryDisposition.ofProcess(entry.state.status(), leaseLive, anyAttemptParked(entry)),
+                entry.revision, entry.lifecycleGeneration, entry.graphVersionPin,
+                entry.origin.deploymentId(), entry.origin.workloadId(), entry.origin.correlationId(),
+                leaseLive ? Optional.of(entry.lease.workerId()) : Optional.empty(),
+                entry.fencingToken,
+                leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
+                entry.state.traversals().size(), entry.createdAt, entry.updatedAt,
+                retainedUntilOf(entry), entry.state.terminationReason());
+    }
+
+    private void requireInventoryQuery(ProcessInventoryQuery query) {
+        if (query == null) {
+            throw failure(ExecutionStoreFailure.invalid("query is mandatory"));
+        }
+        requireInventoryLimit(query.limit(), maxInventoryPageSize());
+        if (query.isSelfContradictory()) {
+            throw failure(ExecutionStoreFailure.invalid("a query that filters only for terminal "
+                    + "statuses while excluding terminal rows can never match; an empty page would be "
+                    + "indistinguishable from there being none"));
+        }
+    }
+
+    /**
+     * Rejects rather than clamps. A silently reduced page is indistinguishable from a last page, and a
+     * caller paginating on "fewer rows than I asked for means I am done" would stop early.
+     */
+    static void requireInventoryLimit(int limit, int maximum) {
+        if (limit < 1) {
+            throw new ExecutionStoreException(
+                    ExecutionStoreFailure.invalid("inventory limit must be positive"));
+        }
+        if (limit > maximum) {
+            throw new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                    "inventory limit " + limit + " exceeds the declared maximum " + maximum));
+        }
+    }
+
+    private static long processTransitionCount(ExecutionBatch batch) {
+        return batch.transitions().stream()
+                .filter(ExecutionTransition.ProcessTransitioned.class::isInstance)
+                .count();
+    }
+
+    /**
+     * Reports which graph definitions this store's instances still pin, so a co-located definition
+     * store can decide retention without keeping a reference count of its own.
+     *
+     * <p>A pin reference and a definition's content address are the same value by construction, so
+     * this comparison needs no translation table. That shared identity does <em>not</em> mean an
+     * execution recorded before definitions were stored has become recoverable: nothing backfills the
+     * document for it, so its address resolves to nothing and it is correctly reported here as
+     * referencing a definition this store does not hold. The consequence for retention is the safe
+     * one -- such a pin keeps a definition alive if one is ever stored at that address, and protects
+     * nothing otherwise.</p>
+     *
+     * @return oracle answering whether any instance of a tenant pins a given definition.
+     */
+    public ai.ravenroot.api.persistence.GraphDefinitionReferences graphDefinitionReferences() {
+        return key -> {
+            synchronized (monitor) {
+                return instances.entrySet().stream().anyMatch(entry ->
+                        entry.getKey().tenantId().equals(key.tenantId())
+                                && entry.getValue().graphVersionPin.reference()
+                                        .equals(key.contentId().value()));
+            }
+        };
+    }
+
     /**
      * Discards everything, which for a <strong>non-durable</strong> adapter is exactly right
      * (ADR 0010 section 13.1): retaining state across close would falsely simulate durability, which
@@ -593,6 +1368,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             instances.clear();
             idempotency.clear();
             forgottenBefore.clear();
+            inventoryRetainedFrom.clear();
+            executionResults.clear();
+            executionResultsRetainedFrom.clear();
         }
     }
 
@@ -823,8 +1601,806 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 traversal.invocations().values().forEach(invocation ->
                         invocation.attempts().forEach(attempt -> live.add(attempt.attemptId()))));
         live.addAll(entry.timers.keySet());
+        // Handler identities are work-item identities too, and a terminal handler is retained rather
+        // than deleted, so its acknowledgement must be retained with it. Omitting them here would
+        // drop the acknowledgement on the next write and redeliver a resolved handler's trigger
+        // forever.
+        live.addAll(entry.handlers.keySet());
         entry.acknowledged.retainAll(live);
         entry.workClaims.keySet().retainAll(live);
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
+    public CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                           UUID approvalId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(approvalId, "approvalId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.approvals.get(approvalId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.approvals.values());
+            }
+        });
+    }
+
+    private void applyToolApprovalWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                         GraphVersionPin pin,
+                                         Map<UUID, DurableToolApproval> approvals, long revision,
+                                         Instant now) {
+        for (ToolApprovalRegistration registration : batch.toolApprovalsToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "tool approval " + registration.approvalId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval identity or graph pin does not match its execution"));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("tool approval expiry must be after store time"));
+            }
+            DurableToolApproval existing = approvals.get(registration.approvalId());
+            if (existing != null) {
+                if (!existing.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("tool approval " + registration.approvalId()
+                            + " is already registered with a different request"));
+                }
+                continue;
+            }
+            approvals.put(registration.approvalId(), DurableToolApproval.pending(key, registration, revision));
+        }
+        for (ToolApprovalTransition transition : batch.toolApprovalTransitions()) {
+            DurableToolApproval current = approvals.get(transition.approvalId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown tool approval "
+                        + transition.approvalId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), transition.next()));
+            }
+            if (transition.next() == ToolApprovalStatus.EXPIRED
+                    && now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            if ((transition.next() == ToolApprovalStatus.APPROVED
+                    || transition.next() == ToolApprovalStatus.DENIED
+                    || transition.next() == ToolApprovalStatus.CONSUMED) && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            approvals.put(transition.approvalId(), current.apply(transition, revision));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty()
+                        : Optional.ofNullable(entry.executionPauses.get(pauseId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.executionPauses.values());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    for (DurableExecutionPause pause : entry.executionPauses.values()) {
+                        if (pause.status() == ExecutionPauseStatus.HELD
+                                && traversalId.equals(pause.request().traversalId())) {
+                            return Optional.of(pause);
+                        }
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    /**
+     * Folds this batch's hold writes after the aggregate, for the reason handler writes fold after
+     * it: a hold names the invocation it sits behind, and that invocation may have been completed by
+     * this same batch.
+     */
+    private void applyExecutionPauseWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                           GraphVersionPin pin,
+                                           Map<UUID, DurableExecutionPause> pauses, long revision) {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            DurableExecutionPause existing = pauses.get(registration.pauseId());
+            if (existing != null) {
+                if (!existing.request().equals(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                            + " is already committed with a different hold"));
+                }
+                continue;
+            }
+            // At most one live hold per traversal, which is what makes findHeldExecutionPause a
+            // deterministic single answer for a resume that presents only a traversal id.
+            for (DurableExecutionPause other : pauses.values()) {
+                if (other.status() == ExecutionPauseStatus.HELD
+                        && other.request().traversalId().equals(registration.traversalId())) {
+                    throw failure(ExecutionStoreFailure.invalid("traversal "
+                            + registration.traversalId() + " is already held by " + other.request().pauseId()));
+                }
+            }
+            pauses.put(registration.pauseId(), DurableExecutionPause.held(key, registration, revision));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = pauses.get(transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            pauses.put(transition.pauseId(), current.apply(transition, revision));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable human tasks
+
+    @Override
+    public CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(taskId, "taskId");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (tenantId.equals(entry.tenantId) && entry.humanTasks.containsKey(taskId)) {
+                        return Optional.of(entry.humanTasks.get(taskId));
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            if (query.limit() < 1 || query.limit() > maxHumanTaskPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskPageSize()));
+            }
+            synchronized (monitor) {
+                List<DurableHumanTask> tenantTasks = instances.values().stream()
+                        .filter(entry -> tenantId.equals(entry.tenantId))
+                        .flatMap(entry -> entry.humanTasks.values().stream())
+                        .toList();
+                UUID cursor = null;
+                if (query.cursor().isPresent()) {
+                    cursor = query.cursor().orElseThrow();
+                    UUID requiredCursor = cursor;
+                    if (tenantTasks.stream().noneMatch(
+                            task -> task.request().taskId().equals(requiredCursor))) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "human-task cursor does not belong to this tenant"));
+                    }
+                }
+                String cursorText = cursor == null ? null : cursor.toString();
+                List<DurableHumanTask> matching = tenantTasks.stream()
+                        .filter(task -> cursorText == null
+                                || task.request().taskId().toString().compareTo(cursorText) > 0)
+                        .filter(task -> query.admits(task.status()))
+                        .sorted(Comparator.comparing(task -> task.request().taskId().toString()))
+                        .limit(query.limit() + 1L).toList();
+                int end = Math.min(query.limit(), matching.size());
+                List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
+                Optional<UUID> next = matching.size() > end
+                        ? Optional.of(page.getLast().request().taskId()) : Optional.empty();
+                return new HumanTaskPage(page, next);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            Objects.requireNonNull(authorization, "authorization");
+            if (query.limit() > maxHumanTaskAttentionPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskAttentionPageSize()));
+            }
+            HumanTaskAttentionCursor.Boundary boundary;
+            try {
+                boundary = query.cursor().map(cursor -> cursor.boundary(
+                        tenantId, query, authorization)).orElse(null);
+            } catch (IllegalArgumentException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+            synchronized (monitor) {
+                var pageWindow = new java.util.PriorityQueue<AuthorizedHumanTask>(
+                        query.limit() + 1, AUTHORIZED_HUMAN_TASK_ORDER.reversed());
+                var perNode = new java.util.TreeMap<String, long[]>();
+                long pending = 0;
+                long escalated = 0;
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)
+                            || !query.graphVersion().equals(entry.graphVersionPin.reference())
+                            || query.processInstanceId().isPresent()
+                            && !query.processInstanceId().orElseThrow()
+                                    .equals(entry.state.processInstanceId())
+                            || query.deploymentId().isPresent()
+                            && !query.deploymentId().equals(entry.origin.deploymentId())) {
+                        continue;
+                    }
+                    for (DurableHumanTask task : entry.humanTasks.values()) {
+                        if ((task.status() != HumanTaskStatus.WAITING
+                                && task.status() != HumanTaskStatus.ESCALATED)
+                                || !query.graphVersion().equals(
+                                        task.request().graphVersionPin().reference())
+                                || query.traversalId().isPresent()
+                                && !query.traversalId().orElseThrow()
+                                        .equals(task.request().traversalId())
+                                || query.nodeId().isPresent()
+                                && !query.nodeId().orElseThrow().equals(task.request().nodeId())
+                                || query.taskId().isPresent()
+                                && !query.taskId().orElseThrow().equals(task.request().taskId())
+                                || query.generation().isPresent()
+                                && query.generation().orElseThrow() != task.generation()) {
+                            continue;
+                        }
+                        List<HumanTaskConfirmationAction> actions = authorization
+                                .permittedActions(task.request());
+                        if (actions.isEmpty()) continue;
+                        pending++;
+                        if (task.status() == HumanTaskStatus.ESCALATED) escalated++;
+                        if (query.nodeId().isEmpty()) {
+                            long[] node = perNode.get(task.request().nodeId());
+                            if (node == null) {
+                                if (perNode.size() == maxHumanTaskAttentionNodeCounts()) {
+                                    throw failure(new ExecutionStoreFailure.HumanTaskAttentionTooLarge(
+                                            (long) perNode.size() + 1,
+                                            maxHumanTaskAttentionNodeCounts()));
+                                }
+                                node = new long[2];
+                                perNode.put(task.request().nodeId(), node);
+                            }
+                            node[0]++;
+                            if (task.status() == HumanTaskStatus.ESCALATED) node[1]++;
+                        }
+                        if (boundary == null || after(task, boundary)) {
+                            pageWindow.add(new AuthorizedHumanTask(
+                                    task, entry.origin.deploymentId(), actions));
+                            if (pageWindow.size() > query.limit() + 1) pageWindow.poll();
+                        }
+                    }
+                }
+                var orderedWindow = new ArrayList<>(pageWindow);
+                orderedWindow.sort(AUTHORIZED_HUMAN_TASK_ORDER);
+                int end = Math.min(query.limit(), orderedWindow.size());
+                List<HumanTaskAttentionItem> page = orderedWindow.subList(0, end).stream()
+                        .map(InMemoryExecutionStore::attentionItem).toList();
+                Optional<HumanTaskAttentionCursor> next = orderedWindow.size() > end
+                        ? Optional.of(HumanTaskAttentionCursor.issue(tenantId, query, authorization,
+                                page.getLast().createdAt(), page.getLast().taskId()))
+                        : Optional.empty();
+                List<HumanTaskNodeAttentionCounts> nodeCounts = perNode.entrySet().stream()
+                        .map(entry -> new HumanTaskNodeAttentionCounts(
+                                entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+                        .toList();
+                return new HumanTaskAttentionPage(page, next,
+                        new HumanTaskAttentionCounts(pending, escalated), nodeCounts);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(locator, "locator");
+            Objects.requireNonNull(authorization, "authorization");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    DurableHumanTask task = entry.humanTasks.get(locator.taskId());
+                    if (task == null || task.generation() != locator.generation()
+                            || task.status() != HumanTaskStatus.WAITING
+                            && task.status() != HumanTaskStatus.ESCALATED) continue;
+                    List<HumanTaskConfirmationAction> actions = authorization
+                            .permittedActions(task.request());
+                    if (actions.isEmpty()) return Optional.empty();
+                    return Optional.of(attentionItem(new AuthorizedHumanTask(
+                            task, entry.origin.deploymentId(), actions)));
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    private static final Comparator<AuthorizedHumanTask> AUTHORIZED_HUMAN_TASK_ORDER =
+            Comparator.comparing((AuthorizedHumanTask row) -> row.task().createdAt())
+                    .thenComparing(row -> row.task().request().taskId().toString());
+
+    private static boolean after(DurableHumanTask task, HumanTaskAttentionCursor.Boundary boundary) {
+        int time = task.createdAt().compareTo(boundary.createdAt());
+        return time > 0 || time == 0
+                && task.request().taskId().toString().compareTo(boundary.taskId().toString()) > 0;
+    }
+
+    private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row) {
+        DurableHumanTask task = row.task();
+        HumanTaskRegistration request = task.request();
+        return new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
+                request.graphVersionPin().reference(), row.deploymentId(),
+                task.key().processInstanceId(), request.traversalId(), request.nodeId(),
+                task.createdAt(), request.expiresAt(), request.escalateAt(),
+                request.confirmationPresentation(), request.confirmationLimits().maxPromptUtf8Bytes(),
+                request.confirmationLimits().maxActionLabelUtf8Bytes(),
+                request.confirmationLimits().maxCommentUtf8Bytes(),
+                row.actions());
+    }
+
+
+    private void applyHumanTaskWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                      GraphVersionPin pin,
+                                      Map<UUID, DurableHumanTask> tasks, long revision, Instant now) {
+        for (HumanTaskRegistration registration : batch.humanTasksToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "human task " + registration.taskId());
+            requireAttemptExists(folded, registration.traversalId(), registration.invocationId(),
+                    registration.attemptId(), "human task " + registration.taskId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task identity or graph pin does not match its execution"));
+            }
+            DurableHumanTask byDeduplication = humanTaskByDeduplicationKey(
+                    key.tenantId(), key, tasks, registration.deduplicationKey());
+            if (byDeduplication != null) {
+                if (!byDeduplication.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                            + registration.deduplicationKey()
+                            + " already registers a different human task"));
+                }
+                continue;
+            }
+            try {
+                humanTaskPolicy.requireNewRegistration(registration, now);
+            } catch (IllegalArgumentException refused) {
+                throw failure(ExecutionStoreFailure.invalid(refused.getMessage()));
+            }
+            if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
+                throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                        registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
+            }
+            if (registration.escalateAt().isPresent()
+                    && !now.isBefore(registration.escalateAt().orElseThrow())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task escalation must be after store time"));
+            }
+            DurableHumanTask byId = humanTaskById(key.tenantId(), key, tasks, registration.taskId());
+            if (byId != null) {
+                throw failure(ExecutionStoreFailure.invalid("human task " + registration.taskId()
+                        + " is already registered under a different deduplication key"));
+            }
+            DurableHumanTask correlation = liveHumanTaskByCorrelationKey(
+                    key.tenantId(), key, tasks, registration.correlationKey());
+            if (correlation != null) {
+                throw failure(ExecutionStoreFailure.invalid("correlation key "
+                        + registration.correlationKey() + " already identifies a live human task"));
+            }
+            tasks.put(registration.taskId(), DurableHumanTask.waiting(key, registration, revision, now));
+        }
+        for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
+            DurableHumanTask current = tasks.get(transition.taskId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown human task " + transition.taskId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (transition.expectedGeneration() != current.generation()
+                    || !current.status().canTransitionTo(transition.next())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.EXPIRED && now.isBefore(current.request().expiresAt())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.ESCALATED
+                    && (current.request().escalateAt().isEmpty()
+                    || now.isBefore(current.request().escalateAt().orElseThrow())
+                    || !now.isBefore(current.request().expiresAt()))) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() != HumanTaskStatus.EXPIRED
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                        current.request().taskId(), current.status(), HumanTaskStatus.EXPIRED,
+                        transition.expectedGeneration(), current.generation()));
+            }
+            tasks.put(transition.taskId(), current.apply(transition, revision));
+        }
+    }
+
+    private ExecutionStoreException humanTaskConflict(DurableHumanTask current,
+                                                       HumanTaskTransition transition) {
+        return failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                current.request().taskId(), current.status(), transition.next(),
+                transition.expectedGeneration(), current.generation()));
+    }
+
+    private DurableHumanTask humanTaskById(String tenantId, ExecutionKey writtenKey,
+                                           Map<UUID, DurableHumanTask> pending, UUID taskId) {
+        return tenantHumanTasks(tenantId, writtenKey, pending).stream()
+                .filter(task -> task.request().taskId().equals(taskId)).findFirst().orElse(null);
+    }
+
+    private DurableHumanTask humanTaskByDeduplicationKey(String tenantId, ExecutionKey writtenKey,
+                                                         Map<UUID, DurableHumanTask> pending,
+                                                         String deduplicationKey) {
+        return tenantHumanTasks(tenantId, writtenKey, pending).stream()
+                .filter(task -> task.request().deduplicationKey().equals(deduplicationKey))
+                .findFirst().orElse(null);
+    }
+
+    private DurableHumanTask liveHumanTaskByCorrelationKey(String tenantId, ExecutionKey writtenKey,
+                                                           Map<UUID, DurableHumanTask> pending,
+                                                           String correlationKey) {
+        return tenantHumanTasks(tenantId, writtenKey, pending).stream()
+                .filter(task -> !task.status().terminal())
+                .filter(task -> task.request().correlationKey().equals(correlationKey))
+                .findFirst().orElse(null);
+    }
+
+    private List<DurableHumanTask> tenantHumanTasks(String tenantId, ExecutionKey writtenKey,
+                                                   Map<UUID, DurableHumanTask> pending) {
+        var result = new ArrayList<DurableHumanTask>();
+        for (Map.Entry<ExecutionKey, Entry> item : instances.entrySet()) {
+            if (!tenantId.equals(item.getKey().tenantId()) || item.getKey().equals(writtenKey)) continue;
+            result.addAll(item.getValue().humanTasks.values());
+        }
+        result.addAll(pending.values());
+        return result;
+    }
+
+    private void requireAttemptExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                      UUID attemptId, String what) {
+        var traversal = folded == null ? null : folded.traversals().get(traversalId);
+        var invocation = traversal == null ? null : traversal.invocations().get(invocationId);
+        if (invocation == null || invocation.attempts().stream()
+                .noneMatch(attempt -> attempt.attemptId().equals(attemptId))) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names attempt " + attemptId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(handlerId, "handlerId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                // Absent instance and absent handler answer the same way. The caller's next step is
+                // identical in both cases, and distinguishing them would let a probe learn that a
+                // process instance exists in a tenant it cannot otherwise read.
+                return entry == null ? Optional.empty()
+                        : Optional.ofNullable(entry.handlers.get(handlerId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> findHandler(String tenantId, String handlerName,
+                                                                 String correlationKey) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            HandlerRegistration.requireBoundedKey(handlerName, "handlerName");
+            HandlerRegistration.requireBoundedKey(correlationKey, "correlationKey");
+            synchronized (monitor) {
+                // No batch in flight on the read path, so committed state is all there is to see.
+                return liveHandler(tenantId, null, Map.of(), handlerName, correlationKey, null);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableHandler>> handlers(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.<DurableHandler>of() : List.copyOf(entry.handlers.values());
+            }
+        });
+    }
+
+    /**
+     * Folds this batch's registrations and handler transitions into {@code handlers}.
+     *
+     * <p>Called with the monitor held and with nothing published yet, so every rejection below leaves
+     * the store exactly as it found it. The map is a copy of the instance's own; it replaces the
+     * committed one only after {@link #apply(ExecutionBatch)} finishes validating.</p>
+     */
+    private void applyHandlerWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                    Map<UUID, DurableHandler> handlers,
+                                    Map<UUID, DurableHumanTask> humanTasks, long revision) {
+        for (HandlerRegistration registration : batch.handlersToRegister()) {
+            registerHandler(key, folded, handlers, registration, revision);
+        }
+        for (HandlerTransition transition : batch.handlerTransitions()) {
+            transitionHandler(batch, folded, handlers, humanTasks, transition, revision);
+        }
+    }
+
+    private void registerHandler(ExecutionKey key, ProcessInstance folded,
+                                 Map<UUID, DurableHandler> handlers, HandlerRegistration registration,
+                                 long revision) {
+        requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                "handler " + registration.handlerId());
+
+        DurableHandler byDeduplication = handlerByDeduplicationKey(key.tenantId(), key, handlers,
+                registration.deduplicationKey());
+        if (byDeduplication != null) {
+            // Registration is exactly-once, and this is what makes a retried wait safe: a crash
+            // between the WAITING transition and this registration is recovered by re-sending the
+            // identical batch. A DIFFERENT registration under the same key is a caller bug rather
+            // than a retry, and answering it as a success would silently discard a handler somebody
+            // asked for.
+            if (!byDeduplication.matches(registration)) {
+                throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                        + registration.deduplicationKey() + " already registers handler "
+                        + byDeduplication.handlerId() + ", which is not the handler being registered"));
+            }
+            return;
+        }
+
+        Optional<DurableHandler> contender = liveHandler(key.tenantId(), key, handlers,
+                registration.name(), registration.correlationKey(), registration.handlerId());
+        if (contender.isPresent()) {
+            throw failure(new ExecutionStoreFailure.HandlerCorrelationTaken(registration.name(),
+                    registration.correlationKey()));
+        }
+        if (handlers.containsKey(registration.handlerId())) {
+            throw failure(ExecutionStoreFailure.invalid("handler " + registration.handlerId()
+                    + " is already registered under a different deduplication key"));
+        }
+        handlers.put(registration.handlerId(), DurableHandler.waiting(key, registration, revision));
+    }
+
+    private void transitionHandler(ExecutionBatch batch, ProcessInstance folded,
+                                   Map<UUID, DurableHandler> handlers,
+                                   Map<UUID, DurableHumanTask> humanTasks, HandlerTransition transition,
+                                   long revision) {
+        DurableHandler current = handlers.get(transition.handlerId());
+        if (current == null) {
+            // InvalidRequest rather than NotFound: NotFound names a process instance, and the
+            // instance is present -- it is the handler inside it that this batch invented.
+            throw failure(ExecutionStoreFailure.invalid("unknown handler " + transition.handlerId()));
+        }
+        // A redelivered escalation timer must not be able to turn an escalation into a failure.
+        // Every other repeat is a duplicate and is refused.
+        if (transition.next() == HandlerStatus.ESCALATED && current.status() == HandlerStatus.ESCALATED) {
+            return;
+        }
+        if (!current.status().canTransitionTo(transition.next())) {
+            throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
+                    current.status(), transition.next()));
+        }
+        requireHandlerOutcomeWithinLimit(batch, humanTasks, transition);
+        if (transition.next().resumesProcess()) {
+            requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+            requireTraversalExists(folded, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+        }
+        if (transition.next() == HandlerStatus.RESOLVED) {
+            // Only a resolution supplies the body the handler was declared to be waiting for. A
+            // denial carries a refusal reason, which is a different shape by nature, and holding it
+            // to the awaited schema would make "no" unrepresentable.
+            current.payloadSchema().rejectionOf(transition.outcomePayload())
+                    .ifPresent(reason -> {
+                        throw failure(ExecutionStoreFailure.invalid("handler " + current.handlerId()
+                                + " payload was refused: " + reason));
+                    });
+        }
+        handlers.put(current.handlerId(), current.apply(transition, revision));
+    }
+
+    /**
+     * The single live handler for one correlation key, ignoring {@code excludedHandlerId}.
+     *
+     * <p>Reads through {@link #tenantHandlers}, so it sees the batch's own registrations as well as
+     * committed ones. The exclusion exists so a re-registration of the same handler does not collide
+     * with itself.</p>
+     */
+    private Optional<DurableHandler> liveHandler(String tenantId, ExecutionKey writtenKey,
+                                                 Map<UUID, DurableHandler> pending, String handlerName,
+                                                 String correlationKey, UUID excludedHandlerId) {
+        for (DurableHandler handler : tenantHandlers(tenantId, writtenKey, pending)) {
+            if (handler.status().terminal()) {
+                continue;
+            }
+            if (!handler.name().equals(handlerName) || !handler.correlationKey().equals(correlationKey)) {
+                continue;
+            }
+            if (handler.handlerId().equals(excludedHandlerId)) {
+                continue;
+            }
+            return Optional.of(handler);
+        }
+        return Optional.empty();
+    }
+
+    private DurableHandler handlerByDeduplicationKey(String tenantId, ExecutionKey writtenKey,
+                                                     Map<UUID, DurableHandler> pending,
+                                                     String deduplicationKey) {
+        for (DurableHandler handler : tenantHandlers(tenantId, writtenKey, pending)) {
+            if (handler.deduplicationKey().equals(deduplicationKey)) {
+                return handler;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Every handler of {@code tenantId} as this batch will leave them, not as they were committed.
+     *
+     * <p>{@code pending} is the in-flight copy of {@code writtenKey}'s handlers, already carrying the
+     * registrations this batch has folded so far, and it therefore <strong>replaces</strong> that
+     * instance's committed map rather than adding to it. Reading committed state here instead would
+     * make both uniqueness rules blind to the batch's own earlier registrations: two handlers sharing
+     * a correlation key, or a deduplication key, would be refused when they arrive in two batches and
+     * accepted when they arrive in one. A physically isolated adapter gets this for free — its
+     * lookups are queries inside the write transaction, so they already see rows the same transaction
+     * inserted — and an in-memory adapter that skipped it would diverge from every real one on a
+     * uniqueness rule that decides which of two concurrent triggers wins.</p>
+     *
+     * <p>Called with the monitor held, and {@code pending} is a batch-local copy, so nothing here can
+     * observe a partially folded batch belonging to another writer.</p>
+     * @param tenantId tenant whose handlers are being enumerated.
+     * @param writtenKey the instance this batch writes, whose committed handlers {@code pending}
+     *                   supersedes, or {@code null} on a read path where no batch is in flight.
+     * @param pending in-flight handler map for {@code writtenKey}; empty on a read path.
+     * @return handlers visible to this batch, in instance then registration order.
+     */
+    private List<DurableHandler> tenantHandlers(String tenantId, ExecutionKey writtenKey,
+                                                Map<UUID, DurableHandler> pending) {
+        var visible = new ArrayList<DurableHandler>(pending.values());
+        for (var instance : instances.entrySet()) {
+            if (!instance.getKey().tenantId().equals(tenantId)) {
+                continue;
+            }
+            // Superseded, not merged: `pending` already contains this instance's committed handlers
+            // plus whatever the batch has folded, so adding the committed map again would return the
+            // pre-batch copy of a handler this batch has just transitioned.
+            if (instance.getKey().equals(writtenKey)) {
+                continue;
+            }
+            visible.addAll(instance.getValue().handlers.values());
+        }
+        return visible;
+    }
+
+    /**
+     * Requires that {@code traversalId} is a traversal <em>this batch created</em>.
+     *
+     * <p>Existence in the post-fold aggregate is not enough. A terminal handler transition naming a
+     * traversal that was already there — the very traversal that was waiting, for instance — would
+     * commit, and the trigger the store then offers would point a claimant at a traversal still in
+     * {@code WAITING} that nothing authorized it to resume. The re-entry point has to be created by
+     * the same batch that authorizes it, which is the whole of "the resolution and the traversal it
+     * authorizes commit together or neither does".</p>
+     */
+    private void requireBatchCreatedTraversal(ExecutionBatch batch, UUID traversalId, String what) {
+        boolean created = batch.transitions().stream()
+                .anyMatch(transition -> transition instanceof ExecutionTransition.TraversalAdded added
+                        && added.traversal().traversalId().equals(traversalId));
+        if (!created) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch did not create"));
+        }
+    }
+
+    private void requireTraversalExists(ProcessInstance folded, UUID traversalId, String what) {
+        if (folded == null || !folded.traversals().containsKey(traversalId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    private void requireInvocationExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                         String what) {
+        requireTraversalExists(folded, traversalId, what);
+        if (!folded.traversals().get(traversalId).invocations().containsKey(invocationId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names invocation " + invocationId
+                    + ", which traversal " + traversalId + " does not contain"));
+        }
+    }
+
+    private List<DurableHandler> claimableTriggers(Entry entry, Instant now) {
+        var ready = new ArrayList<DurableHandler>();
+        for (DurableHandler handler : entry.handlers.values()) {
+            if (!handler.status().resumesProcess()) {
+                continue;
+            }
+            if (entry.acknowledged.contains(handler.handlerId())) {
+                continue;
+            }
+            if (claimVisible(entry, handler.handlerId(), now)) {
+                continue;
+            }
+            ready.add(handler);
+        }
+        return ready;
+    }
+
+    private PendingWork.HandlerTrigger claimTrigger(ExecutionKey key, Entry entry, DurableHandler handler,
+                                                    LeaseHandle lease, Instant now, Duration leaseTtl) {
+        int delivery = registerClaim(entry, handler.handlerId(), now, leaseTtl);
+        // The RE-ENTRY traversal, never the one that was waiting: the claimant runs the traversal the
+        // resolution authorized, and the waiting traversal's own history stays closed.
+        //
+        // The invocation is ABSENT, not the waiting one. Pairing a new traversal with an invocation
+        // that lives under the old one produces a pair no lookup resolves -- a claimant asking the
+        // re-entry traversal for that invocation gets null -- and it is the invocation the wait is
+        // over for, so naming it would also read as work still to do. The claimant creates the
+        // re-entry invocation itself; the waiting one stays reachable through the handler, whose id
+        // is this item's own workItemId.
+        return new PendingWork.HandlerTrigger(key, handler.handlerId(), handler.resumeTraversalId(),
+                null, handler.name(), handler.outcomePayload(),
+                lease.fencingToken(), lease.expiresAt(), delivery);
     }
 
     // ---------------------------------------------------------------- validation helpers
@@ -898,6 +2474,30 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         if (payload.size() > maxPayloadBytes) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), maxPayloadBytes));
         }
+    }
+
+    private void requireHandlerOutcomeWithinLimit(ExecutionBatch batch,
+                                                  Map<UUID, DurableHumanTask> humanTasks,
+                                                  HandlerTransition transition) {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= maxPayloadBytes) return;
+        DurableHumanTask task = isHumanTaskResolution(batch, transition)
+                ? humanTasks.get(transition.handlerId()) : null;
+        if (task == null) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) return false;
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
     }
 
     // ---------------------------------------------------------------- event journal and outbox
@@ -1211,12 +2811,32 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private long fencingToken;
         private LeaseHandle lease;
         private final Map<UUID, TimerSchedule> timers;
+        /** Registration order, which is the order {@code handlers(key)} promises to return. */
+        private final Map<UUID, DurableHandler> handlers;
+        /** Registration order, retained for deterministic operator inspection. */
+        private final Map<UUID, DurableToolApproval> approvals;
+        private DurableAgentAuthorityBudget agentBudget;
+        /** First-class human tasks retained in registration order within this instance. */
+        private final Map<UUID, DurableHumanTask> humanTasks;
+        /** Operator holds retained in commit order within this instance. */
+        private final Map<UUID, DurableExecutionPause> executionPauses;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
+        private final Instant createdAt;
+        private final long lifecycleGeneration;
+        private final ExecutionOrigin origin;
+        /** Null while the instance is non-terminal: retention has not started, rather than started far off. */
+        private final Instant retainedUntil;
 
         private Entry(ProcessInstance state, long revision, GraphVersionPin graphVersionPin, String tenantId,
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
-                      Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged) {
+                      Map<UUID, DurableHandler> handlers,
+                      Map<UUID, DurableToolApproval> approvals,
+                      DurableAgentAuthorityBudget agentBudget,
+                      Map<UUID, DurableHumanTask> humanTasks,
+                      Map<UUID, DurableExecutionPause> executionPauses,
+                      Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
+                      long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
             this.revision = revision;
             this.graphVersionPin = graphVersionPin;
@@ -1225,8 +2845,17 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.fencingToken = fencingToken;
             this.lease = lease;
             this.timers = timers;
+            this.handlers = handlers;
+            this.approvals = approvals;
+            this.agentBudget = agentBudget;
+            this.humanTasks = humanTasks;
+            this.executionPauses = executionPauses;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
+            this.createdAt = createdAt;
+            this.lifecycleGeneration = lifecycleGeneration;
+            this.origin = origin;
+            this.retainedUntil = retainedUntil;
         }
 
         private StoredProcessInstance toStored() {
@@ -1242,8 +2871,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
          */
         private StoredProcessInstance toStoredRevalidated(ExecutionKey key) {
             try {
+                // Every component, including the termination reason. Reconstructing through the
+                // pre-reason shape would revalidate the aggregate and silently strip the one field
+                // that distinguishes a cancelled execution from a failed one -- a defence-in-depth
+                // check that quietly damaged what it was checking.
                 var revalidated = new ProcessInstance(state.processInstanceId(), state.status(),
-                        state.traversals());
+                        state.traversals(), state.terminationReason());
                 return new StoredProcessInstance(revalidated, revision, graphVersionPin, tenantId, updatedAt);
             } catch (IllegalArgumentException | IllegalStateException corrupted) {
                 throw new ExecutionStoreException(
@@ -1255,8 +2888,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private record WorkClaim(int deliveryAttempt, Instant visibleAgainAt) {
     }
 
+    private record AuthorizedHumanTask(DurableHumanTask task, Optional<String> deploymentId,
+                                       List<HumanTaskConfirmationAction> actions) {
+    }
+
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, NodeAttempt attempt,
                                     ai.ravenroot.api.execution.NodeCommand command) {
+    }
+
+    /** A recorded result, addressable only with the tenant that owns it. */
+    private record ResultKey(String tenantId, UUID traversalId) {
     }
 
     private record IdempotencyKey(String tenantId, String key) {

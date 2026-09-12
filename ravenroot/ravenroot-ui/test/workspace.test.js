@@ -5,9 +5,11 @@ import {
   bindExecution,
   createDocumentRecord,
   createWorkspace,
+  documentIsEditable,
   detachExecution,
   documentForRuntimeEvent,
   hasUnsavedWork,
+  forkDocumentRecord,
 } from '../src/workspace.js';
 
 function workspaceOf(...names) {
@@ -22,6 +24,27 @@ function workspaceOf(...names) {
 // statistics all follow it, so an ambiguous answer shows up as a panel describing the wrong graph.
 
 describe('exactly one document is active, and which one is not left to chance', () => {
+  it('keeps durable document identity separate from transient incarnation', () => {
+    const document_ = createDocumentRecord({ id: 'durable-id' });
+    expect(document_.documentId).toBe('durable-id');
+    expect(document_.incarnation).not.toBe(document_.documentId);
+  });
+
+  it('allows edits only on draft GraphML and forks immutable provenance into a fresh draft', () => {
+    const source = createDocumentRecord({ id: 'test-id', tenantId: 'tenant-a', mode: 'test',
+      graph: { format: 'graphml', nodes: [], edges: [] }, provenance: {
+        originMode: 'draft', sourceDocumentId: 'draft-id', sourceGraphVersion: 'version-1',
+      } });
+    expect(documentIsEditable(source)).toBe(false);
+    const fork = forkDocumentRecord(source, { documentId: 'fork-id', graph: structuredClone(source.graph) });
+    expect(fork).toMatchObject({ documentId: 'fork-id', id: 'fork-id', tenantId: 'tenant-a', mode: 'draft',
+      provenance: { originMode: 'test', sourceDocumentId: 'test-id', sourceGraphVersion: 'version-1',
+        deploymentId: null } });
+    expect(documentIsEditable(fork)).toBe(true);
+    fork.graph.nodes.push({ id: 'fork-only' });
+    expect(source.graph.nodes).toHaveLength(0);
+    expect(source.mode).toBe('test');
+  });
   it('gives each open document an opaque incarnation independent of its reusable tab id', () => {
     const first = createDocumentRecord({ id: 'doc-1' });
     const second = createDocumentRecord({ id: 'doc-1' });
@@ -146,6 +169,16 @@ describe('closing a document moves the activation deterministically', () => {
 
     expect(workspace.close('doc-99')).toBeNull();
     expect(workspace.size).toBe(1);
+  });
+
+  it('removes a captured set while preserving a later active document', () => {
+    const workspace = workspaceOf('a', 'b');
+    workspace.add(createDocumentRecord({ id: 'later', name: 'later' }));
+
+    expect(workspace.closeMany(['doc-1', 'doc-2']).map(document_ => document_.id))
+      .toEqual(['doc-1', 'doc-2']);
+    expect(workspace.documents.map(document_ => document_.id)).toEqual(['later']);
+    expect(workspace.active.id).toBe('later');
   });
 });
 
@@ -450,7 +483,7 @@ describe('the per-document runtime event tail', () => {
     expect(Object.keys(record.execution).sort())
       .toEqual([
         'commandFlight', 'events', 'executionId', 'finished', 'generation', 'graphVersion', 'monitoringFlow',
-        'outcomeClaim', 'processInstanceId', 'reconciliationClient', 'reconciliationController',
+        'outcomeClaim', 'paused', 'processInstanceId', 'reconciliationClient', 'reconciliationController',
         'reconciliationState', 'retiredOutcomeClaim',
       ]);
   });

@@ -140,6 +140,15 @@ public final class AuthorizedRavenrootApplication {
         return delegate.runtimeSnapshot();
     }
 
+    /**
+     * Authorizes store-global agent authority control for a platform administrator.
+     * @param context authenticated request context
+     */
+    public void authorizeAgentAuthorityControl(RequestContext context) {
+        require(context, AuthorizationAction.AGENT_AUTHORITY_CONTROL,
+                ProtectedResource.owned("agent-authority-control", "global", DRAIN_RESOURCE_TENANT));
+    }
+
 /**
  * Lists trusted node type descriptors after catalog-read authorization.
  * @param context authenticated request context used for authorization and audit attribution.
@@ -197,6 +206,7 @@ public final class AuthorizedRavenrootApplication {
  */
     public GeneratedArtifact createProgramArtifact(RequestContext context, String language, String source,
                                                    Map<String, String> metadata) {
+        delegate.programAuthoringLimits().requireSource(source);
         require(context, AuthorizationAction.ARTIFACT_CREATE, collection("program-artifacts", context));
         var ownedMetadata = new LinkedHashMap<>(Objects.requireNonNull(metadata, "metadata"));
         if (ownedMetadata.keySet().stream().anyMatch(key -> key.startsWith("ravenroot.security.")
@@ -221,6 +231,7 @@ public final class AuthorizedRavenrootApplication {
  */
     public CompletionStage<ai.ravenroot.api.programming.ProgramBuildResult> buildProgramArtifact(
             RequestContext context, String nodeId, String language, String source, Object testPayload) {
+        delegate.programAuthoringLimits().requireSource(source);
         require(context, AuthorizationAction.ARTIFACT_CREATE, collection("program-artifacts", context));
         var trusted = Map.of(
                 OWNER_TENANT_METADATA, context.tenantId(),
@@ -240,6 +251,10 @@ public final class AuthorizedRavenrootApplication {
  */
     public CompletionStage<ai.ravenroot.api.programming.ProgramBuildSnapshot> startProgramBuild(
             RequestContext context, List<ai.ravenroot.api.programming.ProgramBuildRequest> programs) {
+        if (programs == null) throw new IllegalArgumentException("programs are required");
+        delegate.programAuthoringLimits().requireProgramCount(programs.size());
+        programs.forEach(program -> delegate.programAuthoringLimits().requireSource(
+                Objects.requireNonNull(program, "program").source()));
         require(context, AuthorizationAction.ARTIFACT_CREATE, collection("program-artifacts", context));
         var trusted = Map.of(
                 OWNER_TENANT_METADATA, context.tenantId(),
@@ -272,9 +287,8 @@ public final class AuthorizedRavenrootApplication {
  */
     public List<GeneratedArtifact> approveProgramArtifacts(
             RequestContext context, List<String> artifactIds, String reason) {
-        if (artifactIds == null || artifactIds.isEmpty() || artifactIds.size() > 256) {
-            throw new IllegalArgumentException("one to 256 artifact ids are required");
-        }
+        if (artifactIds == null) throw new IllegalArgumentException("artifact ids are required");
+        delegate.programAuthoringLimits().requireProgramCount(artifactIds.size());
         var approved = new java.util.ArrayList<GeneratedArtifact>(artifactIds.size());
         for (String id : artifactIds.stream().distinct().toList()) {
             GeneratedArtifact artifact = approveProgramArtifact(context, id, reason);
@@ -687,7 +701,7 @@ public final class AuthorizedRavenrootApplication {
         requireControl(context, traversalId);
         auditControl(context, "cancel", "execution", traversalId.toString());
         try {
-            CancelResult result = performCancel(traversalId);
+            CancelResult result = performCancel(context, traversalId);
             auditControlSucceeded(context, "cancel", "execution", traversalId.toString(), result.outcome().name());
             return result;
         } catch (RuntimeException failed) {
@@ -704,11 +718,23 @@ public final class AuthorizedRavenrootApplication {
  * once the traversal has left the delegate's own active-execution tracking -- see
  * {@link ExecutionOwnershipRegistry#markCancelled}'s own Javadoc.
  */
-    private CancelResult performCancel(UUID traversalId) {
+    private CancelResult performCancel(RequestContext context, UUID traversalId) {
         if (executionOwners.isCancelled(traversalId)) {
+            // Answered from this process's own memory, before the delegate is asked anything. So a
+            // second cancellation of a traversal this process already cancelled does not reach the
+            // durable path, and a hold row left behind by a settlement the store refused is
+            // typically cleared only after a restart, when this registry no longer remembers the
+            // cancellation. That is harmless -- the row is inert, reports nothing because a terminal
+            // traversal is never held, and is settled by the next cancellation that does reach the
+            // store -- and it is worth knowing before reading "a later cancellation settles it" as a
+            // promise about the very next call.
             return CancelResult.alreadyCancelled(traversalId);
         }
-        boolean stopped = delegate.cancelTraversal(traversalId);
+        // Tenant-scoped, so a traversal this process is not running but is durably holding is still
+        // cancellable. Without it a hold that outlived its process could never be given up, and the
+        // caller would be told the execution had already completed -- which is exactly the false
+        // report this method's own re-check exists to avoid.
+        boolean stopped = delegate.cancelTraversal(context.tenantId(), traversalId);
         if (stopped) {
             executionOwners.markCancelled(traversalId);
             return CancelResult.cancelled(traversalId);
@@ -731,34 +757,35 @@ public final class AuthorizedRavenrootApplication {
  * else's execution is a control action over their work, and an unknown or evicted ownership fails
  * closed here before any outcome logic runs.</p>
  *
- * <h4>Why {@code ALREADY_PAUSED} is distinguished by a read rather than by a richer delegate</h4>
+ * <h4>{@code ALREADY_PAUSED} is read from the hold itself, not inferred from liveness</h4>
  * <p>{@link RavenrootApplication#pauseTraversal} answers a boolean, so "already paused" and "not
- * running here" arrive identically. They are separated by asking {@link #liveExecutions} whether
- * this traversal is still live — the same bookkeeping {@code pauseTraversal} itself mutates, which
- * is what makes the two answers consistent rather than two projections that can disagree.
- * The window between the two calls is real and is the same one {@link #cancelExecution}'s own
- * re-check narrows without closing: a traversal that finishes inside it is reported as
- * {@code NOT_ACTIVE}, which is what it is by the time the caller reads the answer.</p>
+ * running here" arrive identically and something else has to separate them.
+ * {@link RavenrootApplication#executionPaused} is that something: it reads the very bookkeeping
+ * {@code pauseTraversal} mutates, so the outcome this method words and the {@code paused} qualifier
+ * on {@link LiveExecution} and {@link ExecutionOutcome} are one fact rather than three projections
+ * that can disagree.</p>
  *
- * <p><strong>What that inference rests on, and why it previously did not hold.</strong> Reading
- * {@code false} as "already paused" is only sound if {@code false} means "a hold is already in
- * place". It did not: {@code GraphRunner.pauseTraversal} also answered {@code false} for the whole
- * startup window of a traversal that was on its way, during which the delegate already listed it
- * live — so this line produced {@code ALREADY_PAUSED}, and both halves of its note were false at
- * once. The runner now installs the gate unconditionally, so {@code false} from the delegate
- * now means either that this traversal is not in the delegate's active-execution map at all, in
- * which case {@link #stillLive} reads the same map and answers {@code NOT_ACTIVE} with it, or that
- * a gate for this id already exists — which is what {@code ALREADY_PAUSED} says.</p>
+ * <p><strong>Liveness used to stand in for it, and liveness is not the same question.</strong>
+ * Reading {@code false} as "already paused" is sound only if {@code false} can mean nothing except
+ * "a hold is already in place", and it cannot. It also means the traversal has been asked to stop,
+ * and — since a traversal that has begun to end now refuses a new hold, so that no pause can be
+ * published after its terminal event — it also means the traversal is closing. Both of those are
+ * listed live while they happen, so the old inference answered {@code ALREADY_PAUSED} over
+ * executions that were holding nothing: an operator pausing during a shutdown already in progress
+ * was told their request had changed nothing because a hold was in place, when there was none and
+ * the run was ending. Asking about the hold directly retires that residual rather than narrowing
+ * it, and both cases now answer {@code NOT_ACTIVE}, which is what they are.</p>
  *
- * <p>One residual, stated rather than claimed away, because a negative here is a universal over
- * interleavings and this one has a witness. The runner also answers {@code false} for a traversal
- * already asked to stop, and reaching this line with that {@code false} <em>and</em> a live
- * listing needs a cancellation published while the delegate still lists the traversal. The two
- * ordinary paths do not offer it — {@code DefaultRavenrootApplication.cancelTraversal} removes
- * from the map before publishing anything — but its own {@code close()} closes each active
- * execution before clearing the map, so an operator pausing during a shutdown already in progress
- * can be told {@code ALREADY_PAUSED} where {@code NOT_ACTIVE} would be the truer answer. Narrower
- * than the startup-window ambiguity described above, and against a runtime that is going away either way.</p>
+ * <p>The window between the two delegate calls is real and is the same one
+ * {@link #cancelExecution}'s own re-check narrows without closing: a traversal that finishes inside
+ * it is reported as {@code NOT_ACTIVE}, which is what it is by the time the caller reads the
+ * answer.</p>
+ *
+ * <p>The hold is read without a tenant scope, and that is safe here rather than by omission:
+ * {@link #requireControl} has already resolved this traversal's ownership and required
+ * {@link AuthorizationAction#EXECUTION_CONTROL} over it, failing closed on unknown ownership, so
+ * this line is reached only by a caller already entitled to hold this exact traversal. Learning
+ * whether it is holding is strictly less than the control that was just granted.</p>
  * @param context authenticated request context used for authorization and audit attribution.
  * @param traversalId the stable traversal id used to identify the requested resource.
  * @return a pause outcome that states whether the owned traversal was newly held, already held, or inactive.
@@ -770,7 +797,7 @@ public final class AuthorizedRavenrootApplication {
         try {
             PauseResult result = delegate.pauseTraversal(traversalId)
                     ? PauseResult.paused(traversalId)
-                    : stillLive(context, traversalId)
+                    : delegate.executionPaused(context.tenantId(), traversalId)
                             ? PauseResult.alreadyPaused(traversalId)
                             : PauseResult.notActive(traversalId);
             auditControlSucceeded(context, "pause", "execution", traversalId.toString(),
@@ -783,9 +810,22 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
- * Resumes a traversal paused by {@link #pauseExecution}, under the same authority and the
- * same audit. {@code NOT_PAUSED} and {@code NOT_ACTIVE} are separated by the same live read
- * {@link #pauseExecution} uses, and for the same reason.
+ * Resumes a traversal paused by {@link #pauseExecution}, under the same authority and the same
+ * audit.
+ *
+ * <h4>Why this still separates its outcomes by liveness while {@link #pauseExecution} no longer
+ * does</h4>
+ * <p>The two are not symmetric, and the asymmetry is in what each delegate's {@code false} means.
+ * {@link RavenrootApplication#resumeTraversal} answers {@code false} only when it found no hold to
+ * release, so "is it holding?" is already settled here and the one question left is whether the
+ * traversal exists at all — which is exactly what {@link #stillLive} answers. {@code NOT_PAUSED} is
+ * a live traversal that was not holding; {@code NOT_ACTIVE} is one this process is not running.</p>
+ *
+ * <p>{@link #pauseExecution} had the opposite problem: its delegate's {@code false} conflated
+ * "already holding" with "cannot be held", so liveness could not tell those apart and it asks
+ * {@link RavenrootApplication#executionPaused} instead. Reading that same method here would answer a
+ * question this path has already answered, and would not distinguish the two outcomes it does need
+ * to separate.
  * @param context authenticated request context used for authorization and audit attribution.
  * @param traversalId the stable traversal id used to identify the requested resource.
  * @return a resume outcome that states whether the owned traversal resumed, was not held, or was inactive.
@@ -795,7 +835,7 @@ public final class AuthorizedRavenrootApplication {
         requireControl(context, traversalId);
         auditControl(context, "resume", "execution", traversalId.toString());
         try {
-            ResumeResult result = delegate.resumeTraversal(traversalId)
+            ResumeResult result = delegate.resumeTraversal(context.tenantId(), traversalId)
                     ? ResumeResult.resumed(traversalId)
                     : stillLive(context, traversalId)
                             ? ResumeResult.notPaused(traversalId)
@@ -816,10 +856,44 @@ public final class AuthorizedRavenrootApplication {
  */
     private void requireControl(RequestContext context, UUID traversalId) {
         String owner = executionOwners.owner(traversalId);
+        if (owner == null) {
+            owner = durableHoldOwner(context, traversalId);
+        }
         ProtectedResource resource = owner == null
                 ? ProtectedResource.unknownOwnership("execution", traversalId.toString())
                 : ProtectedResource.owned("execution", traversalId.toString(), owner);
         require(context, AuthorizationAction.EXECUTION_CONTROL, resource);
+    }
+
+    /**
+     * Resolves ownership of a traversal this process never ran but is durably holding.
+     *
+     * <h4>Why this is needed at all</h4>
+     * <p>{@link ExecutionOwnershipRegistry} is process-local and bounded, so after a restart it
+     * knows nothing about a traversal held before the restart, and {@link #requireControl} fails
+     * closed. That is the right default for an unknown traversal and the wrong answer for the one
+     * case a durable hold exists to create: an operator who deliberately stopped a traversal, and
+     * who after a restart could then neither resume nor cancel it — the hold would have made the
+     * work permanently unreachable instead of recoverable.</p>
+     *
+     * <h4>Why it cannot widen anyone's authority</h4>
+     * <p>It resolves ownership to the caller's <em>own</em> tenant and to nothing else, and only when
+     * the store confirms that tenant is holding that traversal. The confirming read is tenant-scoped
+     * at the port, so a caller asking about another tenant's held traversal is told "not held", the
+     * owner stays unknown, and the request fails closed exactly as before. What the caller then
+     * receives is an ordinary {@link AuthorizationAction#EXECUTION_CONTROL} decision over a resource
+     * owned by its own tenant — the same decision it would have received before the restart.</p>
+     *
+     * @return the caller's tenant when it durably holds this traversal, otherwise {@code null}
+     */
+    private String durableHoldOwner(RequestContext context, UUID traversalId) {
+        try {
+            return delegate.executionPaused(context.tenantId(), traversalId) ? context.tenantId() : null;
+        } catch (RuntimeException unavailable) {
+            // An unreadable store is not evidence of ownership. Failing closed here keeps a store
+            // outage from becoming an authorization outcome.
+            return null;
+        }
     }
 
     /**
@@ -889,6 +963,101 @@ public final class AuthorizedRavenrootApplication {
     public List<LiveExecution> liveExecutions(RequestContext context) {
         require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
         return delegate.liveExecutions(context.tenantId());
+    }
+
+/**
+ * Reports whether the durable process inventory is available.
+ * @see RavenrootApplication#processInventoryAvailable()
+ * @return {@code true} when the delegate can answer {@link #processInventory}, {@link #processInstance}
+ * and {@link #processInstanceTraversals} from a real durable store.
+ */
+    public boolean processInventoryAvailable() {
+        return delegate.processInventoryAvailable();
+    }
+
+/**
+ * The largest page {@link #processInventory} will return in one call. Not tenant data and not
+ * gated by authorization for the same reason {@link #processInventoryAvailable()} and
+ * {@link #durableEventJournalAvailable()} are not: it is a fact about this deployment's composed
+ * store, published so an external caller building its own pagination loop can read the bound
+ * instead of discovering it by bisection.
+ * @see RavenrootApplication#processInventoryMaxPageSize()
+ * @return the maximum page size the composed store accepts, or zero when unavailable.
+ */
+    public int processInventoryMaxPageSize() {
+        return delegate.processInventoryMaxPageSize();
+    }
+
+    /**
+ * This caller's own tenant's page of the durable process inventory.
+ *
+ * <h4>Why the tenant scoping is structural here, not a check</h4>
+ * <p>Same shape as {@link #liveExecutions}, {@link #executionResult} and
+ * {@link #durableEventsAfter}: the tenant is read from the authenticated {@link RequestContext} and
+ * passed straight through as the delegate's {@code tenantId}, never accepted as a bare string a
+ * caller could substitute. The store filters by tenant while building the page, so another
+ * tenant's instance is never fetched and then excluded — it is a row the query never asks for.</p>
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @param query the page to return: filters, cursor and limit.
+ * @return one deterministic page of the caller's own tenant's durable process instances.
+ */
+    public ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
+            RequestContext context, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(query, "query");
+        return delegate.processInventory(context.tenantId(), query);
+    }
+
+    /**
+ * Reads one of the caller's own tenant's durable inventory rows directly.
+ *
+ * <h4>Authorization before existence disclosure</h4>
+ * <p>Authorization is checked first and unconditionally, before {@code processInstanceId} is used
+ * for anything — the same ordering {@link #executionResult} uses and for the same reason: a
+ * principal that may not read the inventory must not be able to learn whether an id exists by
+ * comparing how a denial and an absence differ. Once authorized, the tenant is read from the
+ * authenticated {@code RequestContext} and passed straight through as the delegate's
+ * {@code tenantId} — this signature never accepts a tenant scope a caller could substitute — so a
+ * cross-tenant id and one that never existed both come back as an empty {@link java.util.Optional},
+ * indistinguishable by design, exactly as {@link RavenrootApplication#processInstance} documents.</p>
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @param processInstanceId the durable process instance to read.
+ * @return the instance's inventory row, or empty when absent or not visible to the caller's tenant.
+ */
+    public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> processInstance(
+            RequestContext context, UUID processInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        return delegate.processInstance(context.tenantId(), processInstanceId);
+    }
+
+    /**
+ * Lists one of the caller's own tenant's instances' traversals from the durable inventory, under the
+ * same authorization-before-existence-disclosure ordering {@link #processInstance} uses.
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @param processInstanceId the durable process instance whose traversals are listed.
+ * @return the instance's traversals, in insertion order.
+ * @throws ai.ravenroot.api.persistence.ExecutionStoreException wrapping
+ * {@code ExecutionStoreFailure.NotFound} when the instance is absent or not visible to the caller's
+ * tenant — indistinguishable, exactly as {@link RavenrootApplication#processInstanceTraversals} documents.
+ */
+    public List<ai.ravenroot.api.persistence.TraversalInventoryEntry> processInstanceTraversals(
+            RequestContext context, UUID processInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        return delegate.processInstanceTraversals(context.tenantId(), processInstanceId);
+    }
+
+    /**
+ * The caller's own tenant's durable inventory retention floor, under the same read permission
+ * {@link #processInventory} requires — it is what lets a caller tell "never existed" from "expired
+ * by policy" for a row {@link #processInstance} or {@link #processInstanceTraversals} could not find.
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @return the earliest instant from which the caller's own tenant's terminal inventory is complete.
+ */
+    public java.time.Instant processInventoryRetainedFrom(RequestContext context) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        return delegate.processInventoryRetainedFrom(context.tenantId());
     }
 
 /**
@@ -1043,10 +1212,55 @@ public final class AuthorizedRavenrootApplication {
                     ProtectedResource.unknownOwnership("execution", "missing-execution-id")).allowed();
         }
         String owner = executionOwners.owner(event.executionId());
+        if (owner == null) owner = deploymentOwner(context, event);
         ProtectedResource resource = owner == null
                 ? ProtectedResource.unknownOwnership("execution", event.executionId().toString())
                 : ProtectedResource.owned("execution", event.executionId().toString(), owner);
         return authorization.decide(context, AuthorizationAction.EXECUTION_READ, resource).allowed();
+    }
+
+    /**
+     * Resolves ownership of a traversal <em>this facade never submitted</em>, through the deployment
+     * that produced it.
+     *
+     * <h4>Why the execution registry cannot answer for these</h4>
+     * <p>{@link #executionOwners} is populated by {@link #startAuthorized}, which reserves an id
+     * before it starts a traversal. A long-lived inbound source starts traversals nobody submitted:
+     * each admitted message produces its own id, inside the runtime, at a moment no request is being
+     * served. There is no reservation to make and no caller to make it, so every one of those events
+     * resolved to <em>unknown</em> ownership — which {@link ai.ravenroot.api.security.DefaultAuthorizationService}
+     * denies unconditionally, PLATFORM_ADMIN included. The reference monitor was therefore removing
+     * the entire event history of a graph the caller had started themselves, and doing it silently:
+     * an empty page and an empty stream are what a quiet server looks like too.</p>
+     *
+     * <h4>Why this resolves rather than permits</h4>
+     * <p>It does not admit unknown ownership. It asks the delegate's own registry, which is keyed by
+     * {@code (tenantId, deploymentId)} together, whether <b>the caller's own tenant</b> holds the
+     * deployment the event names. A tenant can only ever be told about a deployment it registered, so
+     * a sibling's deployment is not fetched and excluded — it is a row the lookup never asks for, the
+     * same construction {@link #executionResult} relies on. An event whose deployment this tenant does
+     * not hold stays exactly as unknown as it was, and is denied.</p>
+     *
+     * <h4>Why the event's own tenant is also required</h4>
+     * <p>A deployment id is unique <em>within</em> a tenant, not across the installation: two tenants
+     * may each hold one called {@code orders}. The deployment lookup alone would then resolve a
+     * sibling's event to the caller, because the caller does hold a deployment by that name — a
+     * cross-tenant disclosure reachable by choosing a common id. So the event must also state the
+     * caller's own tenant. {@link ExecutionEvent#tenantId()} is documented as evidence rather than a
+     * filtering authority, and it is used here in the only direction that respects that: it can
+     * narrow this resolution, never widen it. An event that names no tenant is not resolved.</p>
+     *
+     * <h4>Bounds and staleness</h4>
+     * <p>No new cache and therefore no second eviction clock to disagree with the first. The answer
+     * comes from the live registry, so a deployment that has been undeployed stops resolving and its
+     * late events fail closed, which is the direction to fail in.</p>
+     */
+    private String deploymentOwner(RequestContext context, ExecutionEvent event) {
+        String deploymentId = event.deploymentId();
+        if (deploymentId == null || deploymentId.isBlank()) return null;
+        if (event.tenantId() == null || !event.tenantId().equals(context.tenantId())) return null;
+        return delegate.localDeployment(context.tenantId(), deploymentId).isPresent()
+                ? context.tenantId() : null;
     }
 
     private ProtectedResource artifact(String id) {

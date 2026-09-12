@@ -10,10 +10,15 @@ import ai.ravenroot.core.graph.ReservedGraphProperties;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Validates a graph's behavior properties against the trusted catalog (SEC-09).
@@ -80,9 +85,17 @@ public final class BehaviorPropertySchema {
 
     /** Validates every behavior node in {@code graph}, throwing on the first violation. */
     public void validate(GraphDefinition graph) {
+        validate(graph, node -> true);
+    }
+
+    /** Validates behavior nodes selected by {@code include}, for pinned continuation recovery. */
+    void validate(GraphDefinition graph, java.util.function.Predicate<GraphNode> include) {
         Objects.requireNonNull(graph, "graph");
+        Objects.requireNonNull(include, "include");
         for (GraphNode node : graph.nodes()) {
-            validateNode(node);
+            if (include.test(node)) {
+                validateNode(node);
+            }
         }
     }
 
@@ -104,9 +117,72 @@ public final class BehaviorPropertySchema {
             return;
         }
         List<NodePropertyDescriptor> declared = catalogued.get().properties();
+        refuseNearMisses(node, declared);
         boolean unconfigured = namesNoAdapter(node, declared);
         for (NodePropertyDescriptor property : declared) {
             validateProperty(node, property, unconfigured, declared);
+        }
+    }
+
+    /**
+     * Refuses a property that differs from one this behavior declares only by case.
+     *
+     * <h2>Why an unknown property is admitted but a near-miss is not</h2>
+     * <p>"Unknown" is not one thing. A third-party editor's {@code viz:} extension, the visual
+     * editor's own {@code layoutX}, and a graph author's {@code pollIntervalMS} are all keys no
+     * descriptor declares, but only the last one is a claim about <em>this node's</em>
+     * configuration that the node will not honour. {@code ReservedGraphProperties} settles the first
+     * two: outside the reserved namespace, provenance is unknowable and unknown keys are preserved
+     * rather than refused, because refusing them would break the lossless round trip that
+     * {@code GraphMlCorpusTest} pins.</p>
+     *
+     * <p>A near-miss is separable without knowing provenance, and that is the whole reason this check
+     * can exist where a denylist of editor and platform keys could not. Nothing but a mistake writes
+     * {@code pollIntervalMS} onto a node whose catalog entry declares {@code pollIntervalMs}: no
+     * editor emits a case variant of a property belonging to a behavior it does not implement, and
+     * the comparison is derived from the descriptor rather than from a list of foreign key names that
+     * would need extending for every annotation any tool learns to write.</p>
+     *
+     * <p>This is where the node-level strict checks used to fail closed, and it is deliberately
+     * <em>earlier</em>: a graph author gets a named property on
+     * {@code POST /v1/graphs/inspect} instead of an opaque source-session failure at start.</p>
+     *
+     * <h2>Case, and nothing looser</h2>
+     * <p>Equality after case folding, not edit distance. {@code kafka.consume} declares
+     * {@code topics}, and a {@code topic} annotation is one edit away from it while being a
+     * perfectly legitimate key that this method must not refuse. Case folding cannot produce that
+     * kind of false positive: it only ever fires on a key some declared name already folds onto.</p>
+     *
+     * <p>It does have one collision of its own. Two declared names differing only by case are not
+     * refused anywhere -- {@code NodeTypeDescriptorValidator} keys its duplicate check on the exact
+     * name -- so a descriptor may declare both, and the loop below must not then mistake either one
+     * for a near-miss of the other. That is what the separate set of exact names is for.</p>
+     */
+    private static void refuseNearMisses(GraphNode node, List<NodePropertyDescriptor> declared) {
+        // Exact names are held separately rather than read back out of the folded map. Two declared
+        // names that fold together would leave only one of them as a value there, and a key spelled
+        // exactly like the shadowed one would then be read as a near-miss of its twin and refused --
+        // a declared property rejected on a correct spelling. No catalog descriptor does this today,
+        // and a descriptor with two identical names is already refused, so the guard is for a
+        // third-party package: the direction of the mistake is what makes it worth the one set.
+        Set<String> exactNames = new HashSet<>();
+        Map<String, String> byFoldedName = new LinkedHashMap<>();
+        for (NodePropertyDescriptor property : declared) {
+            exactNames.add(property.name());
+            byFoldedName.put(property.name().toLowerCase(Locale.ROOT), property.name());
+        }
+        for (String key : node.properties().keySet()) {
+            if (exactNames.contains(key)) {
+                continue;
+            }
+            String intended = byFoldedName.get(key.toLowerCase(Locale.ROOT));
+            if (intended != null) {
+                throw new BehaviorPropertyException(node.id(), key,
+                        "differs only by case from '" + intended + "', which behavior '" + node.behavior()
+                                + "' declares. A property that is not spelled exactly as the catalog declares it "
+                                + "is not applied, so the node would run on the default instead of the "
+                                + "configured value; correct the spelling or remove the property.");
+            }
         }
     }
 
@@ -198,6 +274,7 @@ public final class BehaviorPropertySchema {
 
         requireType(node, property, value);
         requireAllowedValue(node, property, value);
+        requireBounds(node, property, value);
     }
 
     /**
@@ -314,6 +391,44 @@ public final class BehaviorPropertySchema {
         }
         throw new BehaviorPropertyException(node.id(), property.name(),
                 "must be one of " + allowed + " but was '" + value + "'");
+    }
+
+    private static void requireBounds(GraphNode node, NodePropertyDescriptor property, String value) {
+        if (!property.minimumValue().isEmpty() || !property.maximumValue().isEmpty()) {
+            BigDecimal parsed = new BigDecimal(value);
+            if (!property.minimumValue().isEmpty()
+                    && parsed.compareTo(new BigDecimal(property.minimumValue())) < 0) {
+                throw new BehaviorPropertyException(node.id(), property.name(),
+                        "must be at least " + property.minimumValue());
+            }
+            if (!property.maximumValue().isEmpty()
+                    && parsed.compareTo(new BigDecimal(property.maximumValue())) > 0) {
+                throw new BehaviorPropertyException(node.id(), property.name(),
+                        "must be at most " + property.maximumValue());
+            }
+        }
+        if (property.maximumUtf8Bytes() > 0
+                && value.getBytes(StandardCharsets.UTF_8).length > property.maximumUtf8Bytes()) {
+            throw new BehaviorPropertyException(node.id(), property.name(),
+                    "exceeds " + property.maximumUtf8Bytes() + " UTF-8 bytes");
+        }
+        if (property.maximumItems() > 0 || property.maximumItemUtf8Bytes() > 0) {
+            String[] items = value.split(",", -1);
+            if (property.maximumItems() > 0 && items.length > property.maximumItems()) {
+                throw new BehaviorPropertyException(node.id(), property.name(),
+                        "contains more than " + property.maximumItems() + " items");
+            }
+            if (property.maximumItemUtf8Bytes() > 0) {
+                for (String item : items) {
+                    if (item.strip().getBytes(StandardCharsets.UTF_8).length
+                            > property.maximumItemUtf8Bytes()) {
+                        throw new BehaviorPropertyException(node.id(), property.name(),
+                                "contains an item above " + property.maximumItemUtf8Bytes()
+                                        + " UTF-8 bytes");
+                    }
+                }
+            }
+        }
     }
 
     private static BehaviorPropertyException typeFailure(GraphNode node, NodePropertyDescriptor property,

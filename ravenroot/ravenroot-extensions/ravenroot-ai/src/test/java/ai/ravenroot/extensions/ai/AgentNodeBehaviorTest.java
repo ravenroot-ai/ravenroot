@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.ai;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
@@ -12,11 +13,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -47,9 +52,11 @@ class AgentNodeBehaviorTest {
     }
 
     @Test
-    @DisplayName("the behavior requires the managed HTTP grant and never credential resolution")
-    void theBehaviorRequiresOnlyOutboundHttp() {
-        assertEquals(java.util.Set.of(NodePackageCapability.OUTBOUND_HTTP),
+    @DisplayName("the behavior requires managed HTTP and server-side tool authorization")
+    void theBehaviorRequiresManagedBoundaries() {
+        assertEquals(java.util.Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                        NodePackageCapability.TOOL_AUTHORIZATION,
+                        NodePackageCapability.AGENT_RESOURCES),
                 new AgentNodeBehavior().requiredServices());
     }
 
@@ -95,6 +102,98 @@ class AgentNodeBehaviorTest {
     }
 
     @Test
+    @DisplayName("the managed operator output ceiling survives through the agent result")
+    void managedOperatorOutputCeilingCannotBeWidenedByTheAgentProfile() {
+        var http = new AiTestSupport.ScriptedHttp()
+                .thenWithOutputLimit(AiTestSupport.answers("done"), 32);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        AgentException refusal = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.RESPONSE_TOO_LARGE, refusal.code());
+        assertEquals(1, http.calls());
+    }
+
+    @Test
+    @DisplayName("a provider usage breach fails before its generated answer can leave the node")
+    void aProviderUsageBreachNeverReturnsTheOverBudgetAnswer() {
+        var resources = new AiTestSupport.TrackingAgentResources().failingSettlement(
+                new NodePackageServiceException(NodePackageServiceException.Reason.BUDGET_EXHAUSTED));
+        var http = new AiTestSupport.ScriptedHttp().then(
+                AiTestSupport.answersUsing("must-not-escape", 101, 20));
+        http.resources(resources);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        AgentException refusal = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.TOKEN_BUDGET_EXHAUSTED, refusal.code());
+        assertEquals(1, http.calls());
+        assertEquals(0, resources.completes.get());
+        assertEquals(1, resources.failedAttempts.get());
+    }
+
+    @Test
+    @DisplayName("the exposed result waits for durable resource terminalization")
+    void resultCompletionFollowsResourceCompletion() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var resources = new AiTestSupport.TrackingAgentResources().blockingCompletion(entered, release);
+        var http = new AiTestSupport.ScriptedHttp().then(AiTestSupport.answers("done"));
+        http.resources(resources);
+        NodeAction action = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)))
+                .create(configuration(Map.of("provider", "local", "instructions", "be terse",
+                        "objective", "say hi")), http);
+
+        CompletableFuture<NodeResult> observed = CompletableFuture.supplyAsync(
+                        () -> action.handle(AiTestSupport.message("a payload")))
+                .thenCompose(java.util.function.Function.identity()).toCompletableFuture();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        assertFalse(observed.isDone(),
+                "the runner must not observe node completion before durable resources terminate");
+        release.countDown();
+        assertEquals("done", observed.get(5, TimeUnit.SECONDS).payload());
+        assertEquals(1, resources.completes.get());
+    }
+
+    @Test
+    @DisplayName("the durable permit tightens max tokens and HTTP timeout before model egress")
+    void durablePermitBoundsTheActualOutboundRequest() throws Exception {
+        var resources = new AiTestSupport.TrackingAgentResources(7, Duration.ofMillis(123));
+        var http = new AiTestSupport.ScriptedHttp()
+                .resources(resources)
+                .then(AiTestSupport.answers("done"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        resultOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi",
+                "maxTokens", 64L, "timeoutMs", 5_000)), http));
+
+        var request = (PayloadValue.MapValue) PayloadJson.read(http.bodies().getFirst(), PayloadLimits.DEFAULTS);
+        assertEquals(PayloadValue.of(7L), request.entries().get("max_tokens"));
+        assertEquals(Duration.ofMillis(123), http.deadlines().getFirst());
+    }
+
+    @Test
+    @DisplayName("local request preparation failure releases the held permit without model egress")
+    void localPreparationFailureReleasesBeforeDispatch() {
+        var resources = new AiTestSupport.TrackingAgentResources(7, Duration.ZERO);
+        var http = new AiTestSupport.ScriptedHttp()
+                .resources(resources)
+                .then(AiTestSupport.answers("must not be sent"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(0, http.calls());
+        assertEquals(0, resources.modelDispatches.get());
+        assertEquals(1, resources.modelReleases.get());
+        assertEquals(0, resources.modelIndeterminate.get());
+    }
+
+    @Test
     @DisplayName("a tool call is executed and its result comes back as a tool message on the next turn")
     void aToolCallRoundTrips() throws Exception {
         var http = new AiTestSupport.ScriptedHttp()
@@ -110,13 +209,13 @@ class AgentNodeBehaviorTest {
         assertEquals(2, result.attributes().get("agent.turns"));
         assertEquals(1, result.attributes().get("agent.toolCalls"));
 
-        // The second request must carry four messages -- system, user, assistant, tool -- because a
+        // The second request carries policy, author instructions, objective, assistant, and tool.
         // loop that dropped the tool result would still answer, and would answer without ever having
         // shown the model what it asked for.
         List<PayloadValue> messages = messagesOf(http.bodies().get(1));
-        assertEquals(4, messages.size());
-        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)));
-        assertEquals(PayloadValue.of(LoadSkillTool.NO_SKILLS), contentOf(messages.get(3)));
+        assertEquals(5, messages.size());
+        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)));
+        assertEquals(PayloadValue.of(LoadSkillTool.NO_SKILLS), contentOf(messages.get(4)));
         assertEquals(0, behavior.admissionEntries());
     }
 
@@ -133,10 +232,10 @@ class AgentNodeBehaviorTest {
 
         assertEquals("sorry, I made that up", result.payload());
         List<PayloadValue> messages = messagesOf(http.bodies().get(1));
-        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)));
+        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)));
         // Whatever the refusal says, it must not be empty: an empty tool message reads to a model as
         // a call that succeeded and returned nothing.
-        assertFalse(((PayloadValue.TextValue) contentOf(messages.get(3))).value().isEmpty());
+        assertFalse(((PayloadValue.TextValue) contentOf(messages.get(4))).value().isEmpty());
     }
 
     @Test
@@ -253,8 +352,8 @@ class AgentNodeBehaviorTest {
     }
 
     @Test
-    @DisplayName("the operator's preamble opens the system turn and the author's text sits below it")
-    void theOperatorPreambleOpensTheSystemTurn() throws Exception {
+    @DisplayName("operator policy and author instructions are separate protocol turns")
+    void theOperatorPreambleIsStructurallySeparate() throws Exception {
         var http = new AiTestSupport.ScriptedHttp().then(AiTestSupport.answers("done"));
         var profile = new LlmProfile("local", java.net.URI.create(ENDPOINT), "qwen38",
                 Optional.empty(), 5_000, 1024 * 1024, 2, "Operator rules.");
@@ -265,8 +364,11 @@ class AgentNodeBehaviorTest {
 
         String system = ((PayloadValue.TextValue) contentOf(messagesOf(http.bodies().get(0)).get(0)))
                 .value();
-        assertTrue(system.startsWith("Operator rules."));
-        assertTrue(system.endsWith("I am the author"));
+        String author = textOf(contentOf(messagesOf(http.bodies().get(0)).get(1)));
+        assertTrue(system.startsWith(AgentTurn.BASE_POLICY));
+        assertTrue(system.endsWith("Operator rules."));
+        assertFalse(system.contains("I am the author"));
+        assertEquals("I am the author", author);
     }
 
     @Test
@@ -277,14 +379,19 @@ class AgentNodeBehaviorTest {
 
         resultOf(behavior.create(configuration(Map.of("provider", "local",
                 "instructions", "be terse", "objective", "summarise {{payload}}")), http));
-        assertTrue(((PayloadValue.TextValue) contentOf(messagesOf(http.bodies().get(0)).get(1)))
+        assertTrue(((PayloadValue.TextValue) contentOf(messagesOf(http.bodies().get(0)).get(2)))
                 .value().contains("a payload"));
 
         // PromptTemplate is shared with llm-prompt and speaks that node's vocabulary. A reader of an
         // agent failure must never have to know the other node exists, so it is translated.
+        var resources = new AiTestSupport.TrackingAgentResources();
+        http.resources(resources);
         AgentException refusal = failureOf(behavior.create(configuration(Map.of("provider", "local",
                 "instructions", "be terse", "objective", "summarise {{payload.missing}}")), http));
         assertEquals(AgentException.Code.TEMPLATE_UNRENDERABLE, refusal.code());
+        assertEquals(1, resources.admissions.get());
+        assertEquals(1, resources.cancels.get(),
+                "a constructor-time refusal must cancel its already-admitted durable grant");
     }
 
     @Test
@@ -377,12 +484,12 @@ class AgentNodeBehaviorTest {
 
         resultOf(behavior.create(configuration(AgentSkillTest.withSkills(3)), http));
 
-        String systemTurn = textOf(contentOf(messagesOf(http.bodies().get(0)).get(0)));
+        String authorTurn = textOf(contentOf(messagesOf(http.bodies().get(0)).get(1)));
         for (int slot = 1; slot <= 3; slot++) {
-            assertTrue(systemTurn.contains("skill-" + slot), "the name of skill " + slot);
-            assertTrue(systemTurn.contains("what skill " + slot + " is for"), "the description");
+            assertTrue(authorTurn.contains("skill-" + slot), "the name of skill " + slot);
+            assertTrue(authorTurn.contains("what skill " + slot + " is for"), "the description");
             // The body is NOT there until it is asked for.
-            // Asserted against the whole request, not only the system turn, because a body leaking
+            // Asserted against the whole request, not only the author turn, because a body leaking
             // into any other message would cost the same context and be just as wrong.
             assertFalse(new String(http.bodies().get(0), StandardCharsets.UTF_8).contains("body " + slot),
                     "the body of skill " + slot + " must not be sent before it is requested");
@@ -401,8 +508,8 @@ class AgentNodeBehaviorTest {
 
         assertEquals("done", result.payload());
         List<PayloadValue> second = messagesOf(http.bodies().get(1));
-        assertEquals(PayloadValue.of("tool"), roleOf(second.get(3)));
-        assertEquals("body 2", textOf(contentOf(second.get(3))));
+        assertEquals(PayloadValue.of("tool"), roleOf(second.get(4)));
+        assertEquals("body 2", textOf(contentOf(second.get(4))));
         assertEquals(0, behavior.admissionEntries());
     }
 
@@ -419,7 +526,7 @@ class AgentNodeBehaviorTest {
         // A model that misremembers a name must be able to correct itself: the refusal is a tool
         // message, the loop keeps its turn budget, and the node completes.
         assertEquals("I used what I had", result.payload());
-        String refusal = textOf(contentOf(messagesOf(http.bodies().get(1)).get(3)));
+        String refusal = textOf(contentOf(messagesOf(http.bodies().get(1)).get(4)));
         assertTrue(refusal.contains("invented"), "the refusal names what was asked for");
         assertTrue(refusal.contains("skill-1"), "and what could have been asked for instead");
         assertFalse(refusal.contains("body 1"), "naming a skill is not loading it");
@@ -439,7 +546,7 @@ class AgentNodeBehaviorTest {
         // Not merely non-empty: the answer has to be one the model can ACT on, so it names what the
         // node actually has. A bare "that was malformed" would pass an isEmpty check and teach the
         // model nothing about how to succeed on its next turn.
-        String answer = textOf(contentOf(messagesOf(http.bodies().get(1)).get(3)));
+        String answer = textOf(contentOf(messagesOf(http.bodies().get(1)).get(4)));
         assertTrue(answer.contains("skill-1"), "the refusal must name what can be loaded");
         assertFalse(answer.contains("body 1"), "naming a skill is not loading it");
     }
@@ -461,7 +568,7 @@ class AgentNodeBehaviorTest {
         List<PayloadValue> last = messagesOf(http.bodies().get(2));
         long bodies = last.stream().filter(entry -> "body 1".equals(textOf(contentOf(entry)))).count();
         assertEquals(1, bodies, "the body must appear exactly once however often it is asked for");
-        assertTrue(textOf(contentOf(last.get(5))).contains("already loaded"));
+        assertTrue(textOf(contentOf(last.get(6))).contains("already loaded"));
     }
 
     @Test
@@ -521,7 +628,7 @@ class AgentNodeBehaviorTest {
                 "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
 
         assertEquals("done", result.payload());
-        assertEquals(LoadSkillTool.NO_SKILLS, textOf(contentOf(messagesOf(http.bodies().get(1)).get(3))));
+        assertEquals(LoadSkillTool.NO_SKILLS, textOf(contentOf(messagesOf(http.bodies().get(1)).get(4))));
     }
 
     @Test
@@ -542,8 +649,8 @@ class AgentNodeBehaviorTest {
         assertEquals("first", resultOf(action).payload());
         assertEquals("second", resultOf(action).payload());
 
-        assertEquals("body 1", textOf(contentOf(messagesOf(http.bodies().get(1)).get(3))));
-        assertEquals("body 1", textOf(contentOf(messagesOf(http.bodies().get(3)).get(3))),
+        assertEquals("body 1", textOf(contentOf(messagesOf(http.bodies().get(1)).get(4))));
+        assertEquals("body 1", textOf(contentOf(messagesOf(http.bodies().get(3)).get(4))),
                 "the second traversal must receive the body itself, not a pointer to another agent's");
         assertEquals(0, behavior.admissionEntries());
     }
@@ -571,7 +678,7 @@ class AgentNodeBehaviorTest {
 
         assertEquals("recovered", result.payload());
         // The proof is that the SECOND request was written and read back at all.
-        assertEquals(4, messagesOf(http.bodies().get(1)).size());
+        assertEquals(5, messagesOf(http.bodies().get(1)).size());
     }
 
     private static String textOf(PayloadValue value) {

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Admission-ready teams.outgoing-webhook graph. Supply an input payload at execution.
+     Replace any replace-with-operator-profile value with a configured profile before Run.
+     Success reaches end through the documented descriptor outcome; failure reaches error. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="property-teamsProfile" for="node" attr.name="teamsProfile" attr.type="string"/>
+  <graph id="example-teams.outgoing-webhook" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="action">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">teams.outgoing-webhook</data>
+      <data key="property-teamsProfile">replace-with-operator-profile</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="start-action" source="start" target="action"><data key="outcome">continue</data></edge>
+    <edge id="action-end-0" source="action" target="end"><data key="outcome">continue</data></edge>
+    <edge id="action-error" source="action" target="error"/>
+  </graph>
+</graphml>

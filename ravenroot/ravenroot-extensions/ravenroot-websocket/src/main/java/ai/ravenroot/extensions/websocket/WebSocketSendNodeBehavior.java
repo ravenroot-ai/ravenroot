@@ -7,10 +7,12 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.ExecutionIoCapacityCapable;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.NodeExternalIoCapacity;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundWebSocketListener;
 import ai.ravenroot.api.node.service.OutboundWebSocketRequest;
@@ -31,7 +33,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** One non-retryable managed write. The graph never supplies an endpoint or handshake authority. */
-public final class WebSocketSendNodeBehavior implements NodeBehavior {
+public final class WebSocketSendNodeBehavior implements NodeBehavior, ExecutionIoCapacityCapable {
     public static final String BEHAVIOR = "websocket.send";
 
     private final WebSocketProfileResolver profiles;
@@ -80,6 +82,18 @@ public final class WebSocketSendNodeBehavior implements NodeBehavior {
         return message -> send(message, services, settings);
     }
 
+    @Override public NodeExternalIoCapacity resolveExecutionIoCapacity(NodeConfiguration configuration) {
+        WebSocketSettings settings = WebSocketSettings.compile(configuration, profiles);
+        return new NodeExternalIoCapacity(settings.maximumMessageBytes(), settings.maximumFragments(),
+                java.time.Duration.ofMillis(settings.timeoutMs()), settings.maximumConcurrency());
+    }
+
+    @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services,
+                                       NodeExternalIoCapacity capacity) {
+        WebSocketSettings settings = WebSocketSettings.compilePinned(configuration, profiles, capacity);
+        return message -> send(message, services, settings);
+    }
+
     private CompletionStage<NodeResult> send(NodeMessage message, NodePackageServices services,
                                               WebSocketSettings settings) {
         Frame frame;
@@ -91,7 +105,7 @@ public final class WebSocketSendNodeBehavior implements NodeBehavior {
         WebSocketAdmissionRegistry.Lease lease;
         try {
             lease = admission.tryAcquire(message.tenantId(), settings.profile().name(),
-                    settings.profile().maxConcurrency());
+                    settings.maximumConcurrency());
         } catch (RuntimeException invalid) {
             return CompletableFuture.failedFuture(map(invalid, false));
         }
@@ -135,8 +149,10 @@ public final class WebSocketSendNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE -> WebSocketException.Code.REQUEST_TOO_LARGE;
                 case RESPONSE_TOO_LARGE -> WebSocketException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> WebSocketException.Code.DEADLINE_EXCEEDED;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> WebSocketException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> WebSocketException.Code.TRANSPORT_UNAVAILABLE;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED ->
+                        WebSocketException.Code.CAPACITY_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        WebSocketException.Code.TRANSPORT_UNAVAILABLE;
             };
             if (handedOff && (service.reason() == NodePackageServiceException.Reason.TRANSPORT_FAILED
                     || service.reason() == NodePackageServiceException.Reason.CANCELLED

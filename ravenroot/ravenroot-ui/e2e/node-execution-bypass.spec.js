@@ -350,7 +350,7 @@ test.describe('the flag reaches the document through autosave, not only through 
     const on = await canvasNode(page, 'a');
     expect(on.label).not.toContain('bypassed');
     // The colour carrier has to come back too, not just the dash — it is written inline by the
-    // default style and is the half that needs `refreshBypassBorder` rather than the stylesheet.
+    // default style and is the half that needs the in-place visual refresh rather than the stylesheet.
     expect(on.borderColor).not.toBe(off.borderColor);
     expect(on.borderColor).toBe((await canvasNode(page, 'c')).borderColor);
   });
@@ -366,6 +366,26 @@ test.describe('the flag reaches the document through autosave, not only through 
     await expect.poll(async () =>
       Object.hasOwn(await documentProperties(page, 'b'), 'execution.bypass')).toBe(false);
     expect((await canvasNode(page, 'b')).bypassed).toBe(false);
+  });
+
+  test('Autosave OFF Cancel restores a node checkbox draft, selection, and exact focus', async ({ page }) => {
+    await open(page);
+    await loadFixture(page, BASE_FIXTURE);
+    await page.locator('#btn-autosave').click();
+    await selectNode(page, 'a');
+    const bypass = page.locator('#node-bypass-flag');
+
+    await bypass.check();
+    await selectNode(page, 'b');
+    const dialog = page.locator('#inspector-unsaved-dialog');
+    await expect(dialog).toBeVisible();
+    expect(Object.hasOwn(await documentProperties(page, 'a'), 'execution.bypass')).toBe(false);
+    await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
+
+    await expect(bypass).toBeChecked();
+    await expect(bypass).toBeFocused();
+    expect(await page.evaluate(() => window.cy.$(':selected').map(element => element.id()))).toEqual(['a']);
+    expect(Object.hasOwn(await documentProperties(page, 'a'), 'execution.bypass')).toBe(false);
   });
 
   test('opening a switched-off node and touching nothing is not treated as an edit', async ({ page }) => {

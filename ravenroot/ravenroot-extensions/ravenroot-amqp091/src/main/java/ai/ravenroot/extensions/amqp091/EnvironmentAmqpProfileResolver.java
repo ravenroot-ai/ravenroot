@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.amqp091;
 
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.util.Map;
 import java.util.Optional;
@@ -9,6 +10,7 @@ import java.util.Set;
 /** Resolves tenant-scoped operator profiles; graph content cannot supply endpoints or credentials. */
 public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver {
     private final Map<String, String> environment;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public EnvironmentAmqpProfileResolver() {
         this(System.getenv());
@@ -16,6 +18,7 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
 
     EnvironmentAmqpProfileResolver(Map<String, String> environment) {
         this.environment = Map.copyOf(environment);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
     }
 
     @Override
@@ -32,6 +35,7 @@ public final class EnvironmentAmqpProfileResolver implements AmqpProfileResolver
         String[] p = raw.split(";", -1);
         if (p.length != 20) return Optional.empty();
         try {
+            destinationPolicy.requireAllowedLiteral(p[0]);
             return Optional.of(new AmqpProfile(tenant, profile, p[0], integer(p[1]), strictBoolean(p[2]), p[3],
                     p[4], p[5], p[6], csv(p[7]), p[8], csv(p[9]), csv(p[10]), csv(p[11]),
                     strictBoolean(p[12]), integer(p[13]), Long.parseLong(p[14]), integer(p[15]), integer(p[16]),

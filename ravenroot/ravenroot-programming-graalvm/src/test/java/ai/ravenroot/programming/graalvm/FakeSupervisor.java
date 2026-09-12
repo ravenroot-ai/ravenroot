@@ -28,6 +28,10 @@ final class FakeSupervisor implements SandboxSupervisorLauncher {
      */
     volatile int realSubprocessSpawns;
     volatile boolean reaped, block;
+    volatile java.util.concurrent.CountDownLatch launchEntered;
+    volatile java.util.concurrent.CountDownLatch releaseLaunch;
+    /** Signals the first session await, which the runtime can reach only after publishing it. */
+    volatile java.util.concurrent.CountDownLatch awaitEntered;
     /**
      * Opt-in stalls for the adapter's <b>two bounded waits</b> — the request write and the wait on
      * worker diagnostics — which require direct coverage in addition to explicit deadline checks.
@@ -111,6 +115,14 @@ final class FakeSupervisor implements SandboxSupervisorLauncher {
     public SandboxSupervisorSession launch(SandboxPolicy policy) {
         launches++;
         this.policy = policy;
+        if (launchEntered != null) launchEntered.countDown();
+        if (releaseLaunch != null) {
+            try { releaseLaunch.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("test launch barrier interrupted", interrupted);
+            }
+        }
         return new Session();
     }
 
@@ -208,6 +220,7 @@ final class FakeSupervisor implements SandboxSupervisorLauncher {
          */
         @Override
         public synchronized SandboxOutcome await(Duration remaining) throws Exception {
+            if (awaitEntered != null) awaitEntered.countDown();
             // Captured before any early return: writeRequestBounded has already completed by the time
             // GraalVmProgramRuntime#invokeSupervisor awaits, so this is the whole request.
             writtenRequest = input.toByteArray();

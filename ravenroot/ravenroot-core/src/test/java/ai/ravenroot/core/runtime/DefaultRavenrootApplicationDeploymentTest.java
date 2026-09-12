@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -228,6 +229,36 @@ class DefaultRavenrootApplicationDeploymentTest {
 
         assertEquals(DeploymentState.STOPPED, deployment.status().state());
         engine.close();
+    }
+
+    @Test
+    void applicationProjectsItsRunnerShutdownBoundIntoHostedDeployments() throws Exception {
+        var engine = new ShutdownBoundProbeEngine();
+        var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), null, 1,
+                UnknownBehaviorPolicy.passThrough(), null, null, null,
+                GraphExecutionLimits.DEFAULTS, null, null, Duration.ofMillis(50));
+        CompletableFuture<Void> closing = null;
+        try {
+            var id = DeploymentId.of("bounded-shutdown");
+            application.activateDeployment(TestIdentities.TENANT_A, id, graphStream())
+                    .toCompletableFuture().get(2, TimeUnit.SECONDS);
+            assertEquals(IngressDisposition.ACCEPTED, application.deployment(id).orElseThrow()
+                    .ingress().offer(TestIdentities.TENANT_A, IngressTarget.start(), "payload"));
+
+            closing = CompletableFuture.runAsync(application::close);
+            engine.firstCancellation().toCompletableFuture().get(2, TimeUnit.SECONDS);
+            closing.get(5, TimeUnit.SECONDS);
+            assertTrue(engine.cancellationCount() > 0);
+        } finally {
+            engine.close();
+            application.close();
+            if (closing != null) {
+                closing.handle((ignored, failure) -> null).get(5, TimeUnit.SECONDS);
+            }
+        }
     }
 
     private static DefaultRavenrootApplication applicationWith(JoinTestEngine engine, int maxActiveDeployments) {

@@ -2,9 +2,9 @@ package ai.ravenroot.server;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,17 +14,44 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Demonstrates, in a fresh out-of-process JVM, the two claims
- * {@link RavenrootServer}'s static initializer makes about itself -- see its "Set here, verified at
- * {@code start()}" Javadoc -- instead of assuming either one holds inside this module's own Surefire
- * run, which cannot settle either question by construction (it runs every test class in one already-
- * forked, shared JVM; see {@link JdkHeaderCapOrderingHazardBoundary}'s Javadoc for why that makes
- * "first" mean "whichever class Surefire happens to schedule first" rather than the thing under test).
+ * Demonstrates the Maven test-fork invariant and, in fresh out-of-process JVMs, the runtime safety
+ * claims {@link RavenrootServer}'s static initializer makes about itself. The parent test reads the
+ * actual Surefire JVM input arguments; fresh children make "first server" deliberate rather than a
+ * consequence of whichever test class Surefire happens to schedule first.
  *
  * <p>Same child-process pattern as {@code qa03.DeploymentIngressKillTest}: this JVM's own
  * {@code java.class.path}, a plain {@code java} invocation, the boundary class's marker lines on stdout.
  */
 class JdkHeaderCapOrderingHazardTest {
+    private static final String HEADER_CAP_OPTION = "-Dsun.net.httpserver.maxReqHeaderSize=2097152";
+
+    /**
+     * Proves the module property reaches the reused Surefire fork as one exact JVM option, then uses
+     * only that observed option in a fresh process whose first server object is a bare JDK server.
+     * The child brackets the effective cap with real requests instead of trusting the mutable system
+     * property string.
+     */
+    @Test
+    void theSurefireForkConfiguresTheCapBeforeABareServerCanInitializeIt() throws Exception {
+        String prefix = "-Dsun.net.httpserver.maxReqHeaderSize=";
+        List<String> observed = ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+                .filter(argument -> argument.startsWith(prefix))
+                .toList();
+        assertEquals(List.of(HEADER_CAP_OPTION), observed,
+                "the reused Surefire fork must start with exactly one exact header-cap option; mutable "
+                        + "System properties cannot prove command-line initialization: " + observed);
+
+        Result result = run("configured-bare-first", observed);
+
+        assertEquals(0, result.exitCode(), "transcript: " + result.stdout());
+        assertTrue(result.stdout().contains(JdkHeaderCapOrderingHazardBoundary.BARE_SERVER_UP),
+                "the child did not prove its bare zero-context server started first: " + result.stdout());
+        assertTrue(result.stdout().contains(JdkHeaderCapOrderingHazardBoundary.BELOW_CONFIGURED_CAP_ANSWERED),
+                "a request above the JDK default and below the configured cap was not answered: "
+                        + result.stdout());
+        assertTrue(result.stdout().contains(JdkHeaderCapOrderingHazardBoundary.ABOVE_CONFIGURED_CAP_REJECTED),
+                "a request above the configured cap was not rejected: " + result.stdout());
+    }
 
     /**
      * Reproduces the hazard directly, then confirms {@link RavenrootServer#start()} catches it instead
@@ -125,16 +152,42 @@ class JdkHeaderCapOrderingHazardTest {
         command.add(JdkHeaderCapOrderingHazardBoundary.class.getName());
         command.add(scenario);
 
-        Process child = new ProcessBuilder(command).redirectErrorStream(true).start();
-        var lines = new ArrayList<String>();
-        try (var output = new BufferedReader(new InputStreamReader(child.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = output.readLine()) != null) {
-                lines.add(line);
+        Path transcript = Files.createTempFile("ravenroot-header-cap-", ".log");
+        Process child = null;
+        try {
+            child = new ProcessBuilder(command).redirectErrorStream(true)
+                    .redirectOutput(transcript.toFile()).start();
+            if (!child.waitFor(60, TimeUnit.SECONDS)) {
+                child.destroyForcibly();
+                boolean terminated = child.waitFor(10, TimeUnit.SECONDS);
+                List<String> lines = readTranscript(transcript);
+                assertTrue(terminated, "boundary process (" + scenario
+                        + ") remained alive after forced termination; transcript: " + lines);
+                throw new AssertionError("boundary process (" + scenario
+                        + ") never exited within 60 seconds; transcript: " + lines);
             }
+            return new Result(child.exitValue(), readTranscript(transcript));
+        } finally {
+            if (child != null && child.isAlive()) {
+                child.destroyForcibly();
+                assertTrue(child.waitFor(10, TimeUnit.SECONDS),
+                        "owned boundary process remained alive during cleanup: " + scenario);
+            }
+            Files.deleteIfExists(transcript);
         }
-        assertTrue(child.waitFor(60, TimeUnit.SECONDS), "boundary process (" + scenario + ") never exited; "
-                + "transcript so far: " + lines);
-        return new Result(child.exitValue(), lines);
+    }
+
+    private static List<String> readTranscript(Path transcript) throws Exception {
+        int limit = 64 * 1024;
+        long size = Files.size(transcript);
+        byte[] bytes;
+        try (var input = Files.newInputStream(transcript)) {
+            bytes = input.readNBytes(limit);
+        }
+        var lines = new ArrayList<>(new String(bytes, StandardCharsets.UTF_8).lines().toList());
+        if (size > bytes.length) {
+            lines.add("[transcript truncated after " + bytes.length + " bytes]");
+        }
+        return List.copyOf(lines);
     }
 }

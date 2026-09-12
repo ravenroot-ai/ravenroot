@@ -22,6 +22,120 @@ auth:
 
 engine: pekko
 
+# Engine and graph-runner bounds. Blank values select ExecutionRuntimeConfiguration's Java-owned
+# defaults; explicit Helm integers may tighten the deployed limits.
+executionRuntime:
+  maxStashedCommandsPerNode: ""
+  lifecycleStepSeconds: ""
+  terminalHistoryCapacity: ""
+  runnerShutdownStepSeconds: ""
+
+# Graph admission and execution policy. Empty values are intentional: they are rendered into the
+# pod and resolved by GraphExecutionLimits, which owns the numerical defaults and safety ceilings.
+# Use YAML integers for configured values; the template converts them to environment strings.
+graph:
+  graphMl:
+    maxBytes: ""
+    maxNodes: ""
+    maxEdges: ""
+    maxProperties: ""
+    maxDepth: ""
+    maxStringLength: ""
+    maxKeys: ""
+    maxElements: ""
+    maxAttributes: ""
+    maxNamespaceDeclarations: ""
+  payload:
+    maxEncodedBytes: ""
+    maxDepth: ""
+    maxCollectionSize: ""
+    maxValueCount: ""
+    maxTextLength: ""
+    maxKeyLength: ""
+  execution:
+    maxFanOut: ""
+    maxResidentActors: ""
+    maxLiveActorsPerTraversal: ""
+    maxInFlightHopsPerTraversal: ""
+    maxQueuedAdmissionsPerNode: ""
+    maxTraversalSteps: ""
+    maxAmplifiedDeliveries: ""
+    maxCumulativePayloadBytes: ""
+    maxRecoveryDeliveriesPerAttempt: ""
+
+# Human Task operational policy. These values become environment variables in the pod and are read
+# once at startup. The chart intentionally carries no numeric defaults: an empty or whitespace-only
+# string makes the server resolve the documented Java-owned default, while an overlay may set a
+# bounded integer.
+humanTask:
+  defaultResponseBytes: ""
+  maxResponseBytes: ""
+  defaultEscalationSeconds: ""
+  maxEscalationSeconds: ""
+  defaultExpirySeconds: ""
+  maxExpirySeconds: ""
+  maxTitleBytes: ""
+  maxDescriptionBytes: ""
+  maxResponseSchemaBytes: ""
+  maxAuthorizationTokens: ""
+  maxAuthorizationTokenBytes: ""
+  maxDecisionBodyBytes: ""
+  defaultPageSize: ""
+  maxPageSize: ""
+  responseMaxDepth: ""
+  responseMaxCollectionSize: ""
+  responseMaxValueCount: ""
+  responseMaxTextLength: ""
+  responseMaxKeyLength: ""
+  writeAttempts: ""
+  maxConfirmationPromptBytes: ""
+  maxConfirmationActionLabelBytes: ""
+  maxDecisionCommentBytes: ""
+  attentionPollMillis: ""
+  attentionPollBackoffMaxMillis: ""
+  defaultAttentionPageSize: ""
+  maxAttentionPageSize: ""
+
+# Live authoring-assistant limits. Empty values leave the numerical defaults in Java; explicit
+# values may tighten the output or provider-turn ceiling without activating an assistant profile.
+assistant:
+  maxOutputTokens: ""
+  maxToolIterations: ""
+
+# Program authoring admission limits. Blank values select ProgramAuthoringLimits' Java-owned
+# compatibility defaults; explicit integers may only narrow the public source/build ceilings.
+programAuthoring:
+  maxSourceBytes: ""
+  maxBuildRequestBytes: ""
+  maxProgramsPerBuild: ""
+
+# HTTP rate, representation, and retained-limiter policy. Empty values leave every numerical
+# default in RateLimitConfiguration.DEFAULTS; use YAML integers for explicit startup values.
+rateLimit:
+  addressRequestsPerSecond: ""
+  addressBurst: ""
+  tenantRequestsPerSecond: ""
+  tenantBurst: ""
+  principalRequestsPerSecond: ""
+  principalBurst: ""
+  submissionsPerSecond: ""
+  submissionBurst: ""
+  tenantConcurrentSubmissions: ""
+  globalActiveExecutions: ""
+  tenantConcurrentStreams: ""
+  principalConcurrentStreams: ""
+  streamQueueCapacity: ""
+  maxQueryBytes: ""
+  maxQueryParameters: ""
+  maxHeaderCount: ""
+  maxHeaderBytes: ""
+  maxHeaderValueBytes: ""
+  maxTrackedClients: ""
+  maxTrackedTenants: ""
+  maxTrackedPrincipals: ""
+  idleEntryTtlSeconds: ""
+  executionMaxAgeSeconds: ""
+
 # Program execution timeout. RAVENROOT_PROGRAM_TIMEOUT_MS
 # has no chart-level default at all before this: an operator who wires in their own SEC-11 sandbox
 # supervisor (RAVENROOT_GRAAL_SANDBOX_SUPERVISOR is deliberately absent from this chart -- see
@@ -31,7 +145,8 @@ engine: pekko
 # much higher figure -- 8.1s -- under CI-typical load on an older component version. This is F30's
 # option (a), the bridge it names explicitly while the real fix (F30's option (c), a pre-initialized
 # native build) is undecided -- NOT a capacity number chosen for any specific deployment. An operator
-# sizing a real production timeout should read F30 and override this.
+# sizing a real production timeout should read F30 and override this. A blank overlay delegates to
+# the Java-owned 5000ms baseline.
 programTimeoutMs: 15000
 
 resources:

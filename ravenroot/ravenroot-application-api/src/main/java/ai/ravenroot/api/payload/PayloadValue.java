@@ -308,6 +308,16 @@ public sealed interface PayloadValue {
                 }
                 yield new MapValue(entries);
             }
+            case Object[] array -> {
+                if (array.length > limits.maxCollectionSize()) {
+                    throw PayloadRejection.collectionExceeded(limits.maxCollectionSize());
+                }
+                var values = new ArrayList<PayloadValue>(array.length);
+                for (Object element : array) {
+                    values.add(convert(element, depth + 1, counted, limits));
+                }
+                yield new ListValue(values);
+            }
             case Iterable<?> iterable -> {
                 var values = new ArrayList<PayloadValue>();
                 for (Object element : iterable) {

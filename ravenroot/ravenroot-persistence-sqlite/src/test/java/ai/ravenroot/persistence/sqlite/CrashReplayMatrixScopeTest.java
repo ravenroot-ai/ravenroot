@@ -38,13 +38,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>See {@link KillMatrixArtifact}. No cell randomises anything, so no cell carries a seed. The two
  * scanning tests below verify that claim, and the page-cache statement above, by reading source — but
  * only for the kill-cell test classes {@link #harnessSources()} can reach, which is
- * {@code ravenroot-persistence-sqlite} alone. Those are, at the time of writing, five:
+ * {@code ravenroot-persistence-sqlite} alone. Those are, at the time of writing, six:
  * {@link SqliteKillAtCommitBoundaryTest}, {@link SqliteKillAtAttemptBoundaryTest},
- * {@link SqliteCrashBetweenCommitAndPublishTest}, {@link SqliteLeaseAbandonedByKillTest} and
- * {@link SqliteEmbedRegistrationKillAtCommitBoundaryTest} — the last of which kills a
- * process at the commit boundary of an embed <em>revocation</em> rather than of an execution batch,
- * because a revocation lost to a crash is the one durability gap in that store with a security
- * consequence rather than an operational one.
+ * {@link SqliteCrashBetweenCommitAndPublishTest}, {@link SqliteLeaseAbandonedByKillTest},
+ * {@link SqliteEmbedRegistrationKillAtCommitBoundaryTest} and {@link SqliteDeploymentPartitionByKillTest}
+ * — the fifth of which kills a process at the commit boundary of an embed <em>revocation</em> rather
+ * than of an execution batch, because a revocation lost to a crash is the one durability gap in that
+ * store with a security consequence rather than an operational one, and the sixth of which is the
+ * deployment-registry analogue of {@link SqliteLeaseAbandonedByKillTest}: a deployment lease abandoned
+ * by a killed holder rather than an execution lease.
  *
  * <p><b>Two classes are not, and cannot be, reached by this scan:</b>
  * {@code ai.ravenroot.server.qa03.PekkoEngineDispatchKillTest} and
@@ -89,8 +91,8 @@ class CrashReplayMatrixScopeTest {
         // mean something. It cannot see ravenroot-server; NOT_SCANNED_CROSS_MODULE names who vouches
         // for those two instead (their own class Javadoc, read directly).
         List<Path> harnesses = harnessSources();
-        assertEquals(5, harnesses.size(),
-                "expected exactly the five kill-cell test classes this module currently has; found "
+        assertEquals(6, harnesses.size(),
+                "expected exactly the six kill-cell test classes this module currently has; found "
                         + harnesses + " -- if this changed on purpose, the count and the class Javadoc's "
                         + "file list both need updating together, not just one");
         assertTrue(harnesses.stream().anyMatch(p -> p.getFileName().toString()

@@ -101,6 +101,8 @@ final class ImapConsumerTestSupport {
         final CountDownLatch closed = new CountDownLatch(1);
         final CountDownLatch pollEntered = new CountDownLatch(1);
         volatile boolean wakeup;
+        volatile long highWaterUid;
+        final List<Long> requestedPositions = new CopyOnWriteArrayList<>();
         FakeOwner() { this(FOLDER, 42); }
         FakeOwner(String folder, long validity) { this.folder = folder; this.validity = validity; }
         void deliver(long uid, Message message) {
@@ -110,7 +112,9 @@ final class ImapConsumerTestSupport {
         void disconnect() { polls.add(new Failure(false, "imap-transport-disconnected")); }
         @Override public String sourceFolder() { return folder; }
         @Override public long uidValidity() { return validity; }
+        @Override public Poll snapshot() { return new Poll(validity, highWaterUid, List.of()); }
         @Override public Poll pollAfter(long afterUid, int batchSize, int scanWindow) throws Failure {
+            requestedPositions.add(afterUid);
             pollEntered.countDown();
             if (wakeup) throw new Failure(false, "imap-consumer-wakeup");
             try {
@@ -156,14 +160,23 @@ final class ImapConsumerTestSupport {
         final Map<String, JournalCursor> cursors = new ConcurrentHashMap<>();
         final CountDownLatch offered;
         final CountDownLatch checkpointRequested = new CountDownLatch(1);
+        final CompletableFuture<IngressReceipt> receiptAvailable = new CompletableFuture<>();
+        final CompletableFuture<Long> checkpointAdvanceRequested = new CompletableFuture<>();
+        final CompletableFuture<Long> checkpointCompleted = new CompletableFuture<>();
+        volatile String destinationPrefix = "";
         volatile boolean durable = true;
         volatile boolean deduplicate;
         volatile CompletableFuture<JournalCursor> checkpointOverride;
         volatile CountDownLatch offerGate = new CountDownLatch(0);
+        volatile CompletableFuture<Void> checkpointGate = CompletableFuture.completedFuture(null);
+        volatile CompletableFuture<Void> bootstrapGate = CompletableFuture.completedFuture(null);
+        final CompletableFuture<Long> baselineRequested = new CompletableFuture<>();
         Ingress() { this(1); }
         Ingress(int expected) { offered = new CountDownLatch(expected); }
         Ingress gateOffer() { offerGate = new CountDownLatch(1); return this; }
         void releaseOffer() { offerGate.countDown(); }
+        Ingress gateCheckpoint() { checkpointGate = new CompletableFuture<>(); return this; }
+        void releaseCheckpoint() { checkpointGate.complete(null); }
         @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
             return IngressDisposition.ACCEPTED;
         }
@@ -177,27 +190,51 @@ final class ImapConsumerTestSupport {
             sourceIds.add(sourceId);
             offered.countDown();
             await(offerGate);
-            if (!receipts.isEmpty()) return receipts.removeFirst();
-            if (deduplicate && !durableKeys.add(idempotentKey)) return new IngressReceipt.Duplicate(idempotentKey);
-            return new IngressReceipt.DurablyCommitted(idempotentKey);
+            IngressReceipt receipt;
+            if (!receipts.isEmpty()) receipt = receipts.removeFirst();
+            else if (deduplicate && !durableKeys.add(idempotentKey)) {
+                receipt = new IngressReceipt.Duplicate(idempotentKey);
+            } else {
+                receipt = new IngressReceipt.DurablyCommitted(idempotentKey);
+            }
+            receiptAvailable.complete(receipt);
+            return receipt;
         }
         @Override public java.util.concurrent.CompletionStage<JournalCursor> sourceCheckpoint(
                 SecurityContext security, String sourceId) {
             checkpointRequested.countDown();
             if (checkpointOverride != null) return checkpointOverride;
             if (!durable) return CompletableFuture.failedFuture(new UnsupportedOperationException("no store"));
-            return CompletableFuture.completedFuture(cursors.computeIfAbsent(sourceId,
+            return CompletableFuture.completedFuture(cursors.computeIfAbsent(destinationPrefix + sourceId,
                     key -> JournalCursor.start(security.tenantId(), key)));
         }
-        @Override public synchronized java.util.concurrent.CompletionStage<JournalCursor> advanceSourceCheckpoint(
+        @Override public java.util.concurrent.CompletionStage<JournalCursor> advanceSourceCheckpoint(
                 JournalCursor expected, long position) {
+            if (expected.destination().endsWith("/uidvalidity-v2"))
+                return CompletableFuture.completedFuture(completeCheckpoint(expected, position));
+            if (expected.destination().endsWith("/position-v2") && expected.deliveredThrough() == 0) {
+                baselineRequested.complete(position);
+                return bootstrapGate.thenApply(ignored -> completeCheckpoint(expected, position));
+            }
+            long uid = expected.destination().endsWith("/position-v2") ? position - 1 : position;
+            checkpointAdvanceRequested.complete(uid);
+            CompletableFuture<JournalCursor> completion = checkpointGate.thenApply(
+                    ignored -> completeCheckpoint(expected, position));
+            completion.whenComplete((advanced, failure) -> {
+                if (failure != null) checkpointCompleted.completeExceptionally(failure);
+                else checkpointCompleted.complete(uid);
+            });
+            return completion;
+        }
+        private synchronized JournalCursor completeCheckpoint(JournalCursor expected, long position) {
             JournalCursor current = cursors.get(expected.destination());
-            if (!expected.equals(current)) return CompletableFuture.failedFuture(
-                    new IllegalStateException("conflict"));
+            if (!expected.equals(current)) throw new IllegalStateException("conflict");
             JournalCursor advanced = new JournalCursor(expected.tenantId(), expected.destination(), position);
             cursors.put(expected.destination(), advanced);
-            advances.add(position);
-            return CompletableFuture.completedFuture(advanced);
+            if (!expected.destination().endsWith("/uidvalidity-v2")
+                    && !(expected.destination().endsWith("/position-v2") && expected.deliveredThrough() == 0))
+                advances.add(expected.destination().endsWith("/position-v2") ? position - 1 : position);
+            return advanced;
         }
     }
 
@@ -205,6 +242,14 @@ final class ImapConsumerTestSupport {
         try { org.junit.jupiter.api.Assertions.assertTrue(latch.await(3, TimeUnit.SECONDS), "gate timed out"); }
         catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt(); throw new AssertionError(interrupted);
+        }
+    }
+    static <T> T await(CompletableFuture<T> completion) {
+        try { return completion.get(3, TimeUnit.SECONDS); }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); throw new AssertionError(interrupted);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failure) {
+            throw new AssertionError(failure);
         }
     }
 }

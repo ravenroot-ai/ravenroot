@@ -21,13 +21,19 @@ spec:
       labels:
         app.kubernetes.io/name: ravenroot
     spec:
-      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s).
-      # Sizing it is an operator decision from the shutdown-sizing formula in
-      # docs/runbooks/plat-02-readiness-drain-and-alerts.md §2 -- the pre-deployment form, sized by
-      # peak concurrent in-flight executions, and, once CORE-LIFECYCLE long-lived
-      # deployments run on this pod, the Shape 2 form in that same section together with
-      # RAVENROOT_MAX_ACTIVE_DEPLOYMENTS. Neither sizing obligation is resolved by setting a value in
-      # this file; the runbook documents the obligation, it does not pick a number for you.
+      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s), and
+      # sizing it is an operator decision -- but the Kubernetes default is NOT a safe choice once any
+      # long-lived deployments run on this pod: DefaultRavenrootApplication.close() stops them one at
+      # a time, not concurrently, so the pod's own worst-case graceful-shutdown time grows with
+      # RAVENROOT_MAX_ACTIVE_DEPLOYMENTS (M) rather than staying fixed. See
+      # ai.ravenroot.server.deployment.DeploymentCapConfiguration's Javadoc for the exact, cited
+      # formula and its derivation (ravenroot-server/src/main/java/ai/ravenroot/server/deployment/
+      # DeploymentCapConfiguration.java); as of that Javadoc, the worst case is
+      # podShutdownSeconds(M) = 46 + 30*M seconds, which is 286s at this file's implied default cap
+      # of 8 -- nearly ten times the unset Kubernetes default. Also account for peak concurrent
+      # in-flight executions at shutdown, which that formula deliberately does not cover (see
+      # ai.ravenroot.server.GracefulShutdown's own Javadoc). This file does not pick a number for
+      # you; an operator running any long-lived deployments must set one explicitly.
       securityContext:
         runAsNonRoot: true
         # The PVC is mounted empty by Kubernetes (unlike Docker named-volume copy-up), so fsGroup
@@ -54,6 +60,185 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: pekko
+            # Blank execution-runtime carriers select the Java typed defaults.
+            - name: RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE
+              value: ""
+            - name: RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS
+              value: ""
+            - name: RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY
+              value: ""
+            - name: RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS
+              value: ""
+            # Empty graph-limit values select the Java typed defaults. Kustomize overlays may
+            # replace individual values with quoted positive integers within the documented bounds.
+            - name: RAVENROOT_GRAPHML_MAX_BYTES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_NODES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_EDGES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PROPERTIES
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_DEPTH
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_STRING_LENGTH
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_KEYS
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_ELEMENTS
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_ATTRIBUTES
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_FAN_OUT
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT
+              value: ""
+            # Empty Human Task policy values select the Java typed defaults. Kustomize overlays may
+            # replace individual values with quoted integers within the documented bounds.
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE
+              value: ""
+            # Blank assistant limits preserve the Java defaults. Overlays may provide quoted
+            # positive integers that tighten the existing deployed maxima.
+            - name: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS
+              value: ""
+            - name: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS
+              value: ""
+            # Empty rate-limit values select the Java-owned defaults. Overlays provide quoted
+            # integers; sibling relationships are validated together at server startup.
+            - name: RAVENROOT_RATELIMIT_ADDRESS_RPS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_ADDRESS_BURST
+              value: ""
+            - name: RAVENROOT_RATELIMIT_TENANT_RPS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_TENANT_BURST
+              value: ""
+            - name: RAVENROOT_RATELIMIT_PRINCIPAL_RPS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_PRINCIPAL_BURST
+              value: ""
+            - name: RAVENROOT_RATELIMIT_SUBMISSION_RPS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_SUBMISSION_BURST
+              value: ""
+            - name: RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_TENANT_STREAMS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS
+              value: ""
+            - name: RAVENROOT_SSE_QUEUE_CAPACITY
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_QUERY_BYTES
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_HEADER_COUNT
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_HEADER_BYTES
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS
+              value: ""
+            - name: RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS
+              value: ""
+            # Empty values preserve ProgramAuthoringLimits' typed compatibility defaults. A
+            # deployment overlay may narrow these without rebuilding the image.
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES
+              value: ""
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES
+              value: ""
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD
+              value: ""
             # A local SQLite store is a single-pod durability mode. The main database and its WAL
             # sidecars share this RWO PVC with the audit trail; neither may fall back to read-only
             # image layers or the tmpfs below.

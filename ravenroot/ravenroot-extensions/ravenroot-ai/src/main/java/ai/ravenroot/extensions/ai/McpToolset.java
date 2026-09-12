@@ -66,6 +66,7 @@ final class McpToolset {
     private static List<AgentTool> add(List<AgentTool> collected, McpSession session) {
         McpProfile profile = session.profile();
         var byExposedName = new LinkedHashMap<String, AgentTool>();
+        var projected = new ArrayList<Map<String, Object>>();
         for (AgentTool existing : collected) {
             byExposedName.put(existing.name(), existing);
         }
@@ -83,7 +84,14 @@ final class McpToolset {
                 throw new McpRefusal(McpRefusal.Reason.EXPOSED_NAME_COLLISION);
             }
             byExposedName.put(exposed, new McpTool(session, tool, exposed));
+            projected.add(Map.of("name", exposed, "description", tool.description(),
+                    "parameters", tool.schema().toJava()));
         }
+        // tools/list is bounded once as a JSON-RPC response and again here after the projection that
+        // actually reaches agent state. Prefixing the server name and synthesizing a safe schema may
+        // expand a small wire response; neither transformation receives authority to exceed the
+        // managed response ceiling.
+        McpProtocol.requireProjection(projected, session.announcedMaximumOutputBytes());
         return new ArrayList<>(byExposedName.values());
     }
 
@@ -117,13 +125,13 @@ final class McpToolset {
         }
 
         @Override
-        public CompletionStage<String> invoke(String argumentsJson) {
+        public CompletionStage<Result> invoke(String argumentsJson) {
             if (!session.profile().permits(announced.name())) {
                 // Unreachable through this object, which was only created for a permitted tool, and
                 // checked anyway: the allow-list is the one invariant in this class that must not
                 // depend on another method having been correct.
                 return CompletableFuture.completedFuture(
-                        new McpRefusal(McpRefusal.Reason.TOOL_NOT_ALLOWED).forModel());
+                        Result.failed(new McpRefusal(McpRefusal.Reason.TOOL_NOT_ALLOWED).forModel()));
             }
             return session.call(announced.name(), argumentsJson)
                     // A refusal becomes an answer here and not a failure, which is AgentTool's whole
@@ -131,7 +139,7 @@ final class McpToolset {
                     // finish another way. The budget is what stops a model that cannot.
                     .handle((result, failure) -> failure == null
                             ? result
-                            : McpSession.describeForModel(failure));
+                            : Result.failed(McpSession.describeForModel(failure)));
         }
     }
 }

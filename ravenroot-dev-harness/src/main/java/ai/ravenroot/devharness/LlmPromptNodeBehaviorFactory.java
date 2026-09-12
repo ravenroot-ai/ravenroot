@@ -175,8 +175,8 @@ public final class LlmPromptNodeBehaviorFactory implements NodeBehaviorFactory {
             // interpolates {{payload}} and can therefore carry personal data, and this log is
             // structured and persisted outside the runtime. The adapter id is deliberately not
             // interpolated either -- it is graph-supplied GraphML of unbounded length that may
-            // contain newlines, and this is a plain-text logger. It travels on the exception instead,
-            // whose path ExecutionMonitor escapes before it reaches the structured log.
+            // contain newlines, and this is a plain-text logger. It travels on the exception instead;
+            // StructuredExecutionLogger escapes it when rendering the structured execution log.
             LOGGER.log(System.Logger.Level.WARNING,
                     "ravenroot_node_refused node={0} execution={1} behavior={2} reason=no-adapter-configured",
                     node.id(), message.executionId(), "llm-prompt");

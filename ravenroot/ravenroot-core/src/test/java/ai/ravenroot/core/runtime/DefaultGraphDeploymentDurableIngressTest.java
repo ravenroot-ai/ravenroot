@@ -159,6 +159,51 @@ class DefaultGraphDeploymentDurableIngressTest {
 
     // ------------------------------------------------------------------------------- durable commit
 
+    /**
+     * Issue 154's write path, at the deployment-hosted admission point: {@code offerDurably} opens
+     * this deployment's own domain and dispatches under this traversal's own identity, so both
+     * halves of ADR 0021 D5's pair are knowable at admission and must be recorded on the durable
+     * inventory row exactly as {@code GraphRunner.execute} is stamped with them -- the deployment's
+     * own id as {@code deploymentId} and the traversal's own id as {@code workloadId} -- alongside
+     * the caller's correlation identity. This is the counterpart of
+     * {@code DefaultRavenrootApplicationExecutionStoreTest
+     * .recordsTransientOriginWithAbsentDeploymentAndWorkloadButPresentCorrelationId}: a
+     * deployment-hosted execution and a transient one are both discoverable through the identical
+     * {@link ai.ravenroot.api.persistence.ExecutionKey} identity contract, without conflating either
+     * with a deployment or a graph version (acceptance criterion 2).
+     */
+    @Test
+    void deploymentHostedOfferRecordsItsOwnDeploymentAndTraversalAsOrigin() throws Exception {
+        Path file = databaseDirectory.resolve("origin.db");
+        var deploymentId = DeploymentId.of("origin-" + java.util.UUID.randomUUID());
+        try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
+            var completions = countCompletions();
+            var deployment = deployment(deploymentId, engine, store, completions.monitor());
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    "poller-1", "key-origin");
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
+            assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
+
+            var page = store.listProcessInstances(IDENTITY.tenantId(),
+                            ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(10))
+                    .toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(1, page.items().size(), "exactly one instance was admitted by this offer");
+            var entry = page.items().get(0);
+            assertEquals(deploymentId.value(), entry.deploymentId().orElseThrow(),
+                    "a deployment-hosted execution must record its own deployment id");
+            var traversals = store.listTraversals(entry.key()).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(1, traversals.size(), "exactly one traversal was dispatched by this offer");
+            assertEquals(traversals.get(0).traversalId().toString(), entry.workloadId().orElseThrow(),
+                    "ADR 0021 D5's own pair: workloadId is this traversal's own id");
+            assertEquals(IDENTITY.requestId(), entry.correlationId().orElseThrow(),
+                    "the caller's own ingress correlation identity must still be recorded");
+
+            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
     @Test
     void firstOfferIsDurablyCommittedAndDispatchesExactlyOnce() throws Exception {
         Path file = databaseDirectory.resolve("commit.db");
@@ -483,6 +528,50 @@ class DefaultGraphDeploymentDurableIngressTest {
      * retry after the failure is a fresh commit, not a duplicate of a write that never happened.
      */
     private static final class FailingInboxStore implements ExecutionStore {
+        // Durable inventory: pure delegation, so this double differs from the store it
+        // wraps only in the one operation it exists to perturb.
+
+        @Override
+        public int maxInventoryPageSize() {
+            return delegate.maxInventoryPageSize();
+        }
+
+        @Override
+        public Duration terminalRetention() {
+            return delegate.terminalRetention();
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<ai.ravenroot.api.persistence.ProcessInventoryPage>
+                listProcessInstances(String tenantId,
+                        ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            return delegate.listProcessInstances(tenantId, query);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry>>
+                findProcessInstance(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.findProcessInstance(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.List<ai.ravenroot.api.persistence.TraversalInventoryEntry>>
+                listTraversals(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.listTraversals(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId) {
+            return delegate.inventoryRetainedFrom(tenantId);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+            return delegate.purgeExpiredProcessInstances(tenantId);
+        }
+
         private final ExecutionStore delegate;
         private final java.util.function.BooleanSupplier shouldFail;
 
@@ -644,6 +733,50 @@ class DefaultGraphDeploymentDurableIngressTest {
      * {@code ingressEventIdDerivationIsUnchangedByTheNulByteFix} exists to pin.
      */
     private static final class EventIdCapturingStore implements ExecutionStore {
+        // Durable inventory: pure delegation, so this double differs from the store it
+        // wraps only in the one operation it exists to perturb.
+
+        @Override
+        public int maxInventoryPageSize() {
+            return delegate.maxInventoryPageSize();
+        }
+
+        @Override
+        public Duration terminalRetention() {
+            return delegate.terminalRetention();
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<ai.ravenroot.api.persistence.ProcessInventoryPage>
+                listProcessInstances(String tenantId,
+                        ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            return delegate.listProcessInstances(tenantId, query);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry>>
+                findProcessInstance(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.findProcessInstance(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.List<ai.ravenroot.api.persistence.TraversalInventoryEntry>>
+                listTraversals(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.listTraversals(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId) {
+            return delegate.inventoryRetainedFrom(tenantId);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+            return delegate.purgeExpiredProcessInstances(tenantId);
+        }
+
         private final ExecutionStore delegate;
         private final java.util.function.Consumer<UUID> onEventId;
 

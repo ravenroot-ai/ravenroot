@@ -45,13 +45,13 @@ public final class ObjectGetNodeBehavior implements NodeBehavior {
     @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services) {
         StorageSettings settings = StorageSettings.compile(configuration, runtime.profiles, StorageProfile.Operation.GET);
         Semaphore action = new Semaphore(settings.maxConcurrency(), true);
-        return message -> {
+        return StorageRuntime.action((message, cancellation) -> {
             if (!(message.payload() instanceof Map<?, ?> map) || map.size() != 1
                     || !"object.get.v1".equals(map.get("version"))) {
                 return CompletableFuture.failedFuture(StorageException.of(StorageException.Code.INVALID_INPUT));
             }
-            return runtime.execute(message, services, settings, action, new byte[0], Map.of());
-        };
+            return runtime.execute(message, cancellation, services, settings, action, new byte[0], Map.of());
+        });
     }
 
     static NodePropertyDescriptor required(String name, String label, String description) {

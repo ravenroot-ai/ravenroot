@@ -1,7 +1,15 @@
 import cytoscape from 'cytoscape';
+import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
+import { createVisualGroup, editVisualGroups } from './graph-editing.js';
+import { createVisualGroupRenderer } from './visual-group-renderer.js';
+import { normalizedCanvasState, visualGroupPresentation } from './graph-view-state.js';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
+import { isLayeredMode, layeredLabelSide } from './layered-drawing.js';
+import {
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
+} from './layered-layout.js';
 import * as d3 from 'd3';
 import {
   detectAndParse,
@@ -73,6 +81,9 @@ import { createCredentialsWindow } from './credential-panel.js';
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
 // part of `RavenrootRuntimeClient`. The Deployments window owns registration and control.
 import { createDeploymentsWindow } from './deployment-panel.js';
+import { humanTaskContext, humanTaskServiceOrigin } from './human-task-attention.js';
+import { createHumanTaskController } from './human-task-controller.js';
+import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from './human-task-ui.js';
 import {
   rendererEdgePath,
   rendererEdgeRouteToRendered,
@@ -89,8 +100,11 @@ import {
   edgeFlowSnapshot,
   FLOW_PULSE_MS,
   bindMonitoringRuntimeState,
+  bindMonitoringRuntimeStateToDeployment,
   createMonitoringRuntimeState,
+  nodeActivitySnapshot,
   observeEdgeTraversal,
+  observeNodeActivity,
   resetMonitoringRuntimeState,
 } from './monitoring-runtime-state.js';
 import { isPropertyVisible, isPropertyRequiredNow } from './property-condition.js';
@@ -138,6 +152,7 @@ import {
   enforceExecutionOutcomeCapacity,
   executionCommandIsCurrent,
   executionOutcomeFetchSignal,
+  isTerminalExecution,
   preflightBoundExecutionCommand,
   reconcileExecution,
   releaseExecutionCommand,
@@ -180,14 +195,28 @@ import {
   describedById,
 } from './assistant-disclosure.js';
 import {
+  DOCUMENT_MODES,
   PENDING_EXECUTION,
   createDocumentIncarnation,
   createDocumentRecord,
   createWorkspace,
+  documentIsEditable,
   detachExecution,
   documentForRuntimeEvent,
+  forkDocumentRecord,
   hasUnsavedWork,
 } from './workspace.js';
+import {
+  canonicalGraphSnapshot,
+  readWorkspaceSnapshot,
+  workspaceScope,
+  writeWorkspaceSnapshot,
+} from './workspace-persistence.js';
+import {
+  captureDocumentCloseSnapshot,
+  classifyDocumentCloseTargets,
+  resolveDocumentCloseSnapshot,
+} from './document-close-plan.js';
 import {
   PANE_MIN_WIDTH,
   PANE_HEADER_HEIGHT,
@@ -234,12 +263,13 @@ import {
   addConnectedNodeAt,
   addNodeAt,
   canDuplicateNode,
-  canModifyGraph,
+  canModifyGraph as graphCanModify,
   connectNodes,
   deleteElements,
   duplicateNode,
   insertEdgeElement,
   insertNodeElement,
+  isDeleteShortcut,
   migrateJoinSemantics,
   moveNodesTo,
   nextModifyState,
@@ -260,11 +290,13 @@ import {
   edgeGestureSessionOwns,
   finishPointerEdgeGesture,
   nearestEndpoint,
+  pointerNodeGestureIntent,
   updatePointerEdgeGesture,
   validateEdgeConnection,
   validateEdgeId,
 } from './edge-gestures.js';
 import {
+  commandPositionNodeIds,
   commandTargets,
   createCommandHistory,
   discardChangesMessage,
@@ -281,10 +313,11 @@ import {
   syncGraphPositionsFromCy,
 } from './graph-view-state.js';
 import { createCommandRegistry } from './command-registry.js';
-import { requestGraphLifecycle } from './graph-lifecycle.js';
+import { requestExecutionLifecycle, UNAVAILABLE_LIFECYCLE_REASONS } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { uiText } from './ui-text.js';
 import {
+  edgePatchChanged,
   nodePatchChanged,
   readInspectorAutosavePreference,
   writeInspectorAutosavePreference,
@@ -356,6 +389,13 @@ function bypassedNodeName(name, bypassed) {
   return bypassed ? `${name} · bypassed` : name;
 }
 
+function humanTaskNodeLabel(label, attention) {
+  if (!attention?.pending) return label;
+  // Keep the canvas carrier compact enough for the fixed node card. The Inspector and live region
+  // spell the counts out; here the flag and triangle remain legible in screenshots and greyscale.
+  return `${label}\n⚑ ${attention.pending}${attention.escalated ? ` · ▲ ${attention.escalated}` : ''}`;
+}
+
 function buildElements(gd) {
   // Reclassified on EVERY render, not once at parse, because whether an edge is a failure
   // route depends on its target node's kind: making a node an `ERROR` node, or dragging an
@@ -376,6 +416,7 @@ function buildElements(gd) {
   // hardcoded one, which is precisely the case this flag exists for.
   const bypassProperty = bypassPropertyName(null, nodeTypeCatalog);
 
+  const renderOwner = workspace.documents.find(document_ => document_.graph === gd);
   const cyNodes = nodes.map(n => {
     const [w, h] = nodeSize(n);
     const icon = NODE_ICONS[n.nodeType] || '• ';
@@ -391,11 +432,15 @@ function buildElements(gd) {
     // graph the runtime refuses to load, so drawing that node as switched off would announce a
     // behaviour it will never get to have.
     const bypassed = nodeAcceptsBypass(n.kind) && isNodeBypassed(n.properties, bypassProperty);
+    const attention = renderOwner?.humanTasks?.projection?.nodeCounts?.get(n.id);
+    const baseLabel = icon + bypassedNodeName(n.name, bypassed);
     return {
       data: {
-        id: n.id, label: icon + bypassedNodeName(n.name, bypassed),
+        id: n.id, label: humanTaskNodeLabel(baseLabel, attention), baseLabel,
         name: n.name, nodeType: n.nodeType,
         bypassed,
+        humanTaskPending: attention?.pending || 0,
+        humanTaskEscalated: attention?.escalated || 0,
         classname: n.classname,
         description: n.description || '',
         fillColor: n.fillColor,
@@ -511,6 +556,17 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'rectangle',
     'background-color': surface.system,
     'border-color': node.system, 'border-width': 1.5,
+  }},
+  { selector: 'node[humanTaskPending > 0]', style: {
+    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
+    'border-style': 'double', 'border-width': 4,
+  }},
+  { selector: 'node[humanTaskEscalated > 0]', style: {
+    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
+    'border-style': 'double', 'border-width': 5,
+  }},
+  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
+    'underlay-opacity': 0.45, 'underlay-padding': 15,
   }},
   // The node the author switched off. Last of the node-type rules on purpose — it has to beat
   // every `node[nodeType=…]` border above it, because "this does not run" outranks "this is an agent"
@@ -659,6 +715,192 @@ const DEFAULT_FONT_SIZE = 20;
 // therefore means "the document the user is working on", which is what every one of the ~300 call
 // sites already meant when there could only ever be one.
 const workspace = createWorkspace();
+let activeWorkspaceScope = null;
+let workspacePersistenceWritable = false;
+let workspacePersistenceReason = 'Connect to a workspace-aware Ravenroot service to persist documents.';
+let workspacePersistenceGeneration = 0;
+let workspacePersistenceTimer = null;
+let workspaceWriteChain = Promise.resolve();
+let workspaceRestoreInProgress = false;
+let workspacePersistenceSuspended = true;
+let workspacePersistenceRevision = 0;
+let workspacePersistedRevision = 0;
+let workspaceSnapshotReader = readWorkspaceSnapshot;
+let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scope: null, generation: 0 });
+
+function beginWorkspaceAuthority(client, state = 'pending') {
+  workspaceAuthority = Object.freeze({ state, client, scope: null,
+    generation: workspaceAuthority.generation + 1 });
+  workspaceRestoreInProgress = false;
+  workspacePersistenceSuspended = true;
+  workspacePersistenceGeneration += 1;
+  suspendHumanTaskRecovery();
+  humanTaskController?.configure(null, null, workspace.active);
+  void credentialsWindow?.setClient(null);
+  void deploymentsWindow?.setClient(null);
+  refreshCommands();
+  return workspaceAuthority.generation;
+}
+
+function authorizeWorkspaceClient(client, scope, generation) {
+  if (runtimeClient !== client || workspaceAuthority.client !== client
+      || workspaceAuthority.generation !== generation) return false;
+  workspaceAuthority = Object.freeze({ state: 'ready', client, scope,
+    generation: workspaceAuthority.generation });
+  workspacePersistenceSuspended = false;
+  scheduleWorkspacePersistence();
+  refreshCommands();
+  return true;
+}
+
+function failWorkspaceAuthority(client, generation, reason) {
+  if (workspaceAuthority.client !== client || workspaceAuthority.generation !== generation) return;
+  workspaceAuthority = Object.freeze({ state: 'failed', client, scope: null, generation });
+  workspaceRestoreInProgress = false;
+  workspacePersistenceReason = reason;
+  syncActiveDocumentChrome();
+  refreshCommands();
+}
+
+function tenantAuthorityAllows(owner, client = runtimeClient) {
+  if (!owner || workspaceAuthority.state !== 'ready' || workspaceAuthority.client !== client
+      || runtimeClient !== client) return false;
+  if (owner.tenantId === null) return workspaceAuthority.scope === null;
+  return workspaceAuthority.scope?.key === activeWorkspaceScope?.key
+    && owner.tenantId === workspaceAuthority.scope?.tenantId;
+}
+
+function normalizedWorkspaceServiceUrl(client) {
+  return new URL(client?.baseUrl || globalThis.location.origin, globalThis.location.origin).href.replace(/\/$/, '');
+}
+
+function scheduleWorkspacePersistence() {
+  if (!activeWorkspaceScope || !workspacePersistenceWritable || workspaceRestoreInProgress
+      || workspacePersistenceSuspended) return;
+  workspacePersistenceRevision += 1;
+  if (workspacePersistenceTimer !== null) clearTimeout(workspacePersistenceTimer);
+  workspacePersistenceTimer = setTimeout(() => {
+    workspacePersistenceTimer = null;
+    void flushWorkspacePersistence();
+  }, visualGroupTransitionIsAnimating(workspace.active) ? 300 : 40);
+}
+
+function flushWorkspacePersistence({ allowSuspended = false } = {}) {
+  if (!activeWorkspaceScope || !workspacePersistenceWritable
+      || (workspacePersistenceSuspended && !allowSuspended)) return workspaceWriteChain;
+  if (workspacePersistenceTimer !== null) {
+    clearTimeout(workspacePersistenceTimer);
+    workspacePersistenceTimer = null;
+  }
+  workspace.documents.forEach(owner => finishVisualGroups(owner));
+  captureActiveDocument();
+  const scope = activeWorkspaceScope;
+  const generation = workspacePersistenceGeneration;
+  const documents = [...workspace.documents];
+  const activeId = workspace.activeId;
+  const revision = workspacePersistenceRevision;
+  workspaceWriteChain = workspaceWriteChain.then(async () => {
+    if (generation !== workspacePersistenceGeneration || scope !== activeWorkspaceScope
+        || !workspacePersistenceWritable) return;
+    await writeWorkspaceSnapshot(scope, documents, activeId);
+    if (generation === workspacePersistenceGeneration && scope === activeWorkspaceScope) {
+      workspacePersistedRevision = Math.max(workspacePersistedRevision, revision);
+    }
+  }).catch(error => {
+    if (generation === workspacePersistenceGeneration && scope === activeWorkspaceScope) {
+      workspacePersistenceWritable = false;
+      workspacePersistenceReason = `Workspace persistence is unavailable: ${error.message}`;
+      syncPaneHeaders();
+    }
+  });
+  return workspaceWriteChain;
+}
+
+function removeAllWorkspaceDocuments() {
+  captureActiveDocument();
+  const targets = [...workspace.documents];
+  targets.forEach(teardownDocument);
+  workspace.closeMany(targets.map(target => target.id));
+  projectWorkspaceAfterDocumentClose();
+}
+
+async function switchWorkspacePersistence(configuration, client) {
+  const nextScope = configuration?.workspace
+    ? workspaceScope(normalizedWorkspaceServiceUrl(client), configuration.workspace.tenantId) : null;
+  // Every completed authority check invalidates an older asynchronous restore, even when this
+  // check resolves back to the scope already on screen. Otherwise a slow B restore can land after
+  // a newer authentication has reaffirmed A and silently replace A's documents.
+  const transition = ++workspacePersistenceGeneration;
+  if (!activeWorkspaceScope && !nextScope) return null;
+  if (activeWorkspaceScope?.key === nextScope?.key && workspacePersistenceWritable) {
+    scheduleWorkspacePersistence();
+    return nextScope;
+  }
+  if (!activeWorkspaceScope && nextScope && workspace.documents.length
+      && !(workspace.documents.length === 1 && graphName === 'untitled.graphml'
+        && !editHistory.isDirty())) {
+    workspacePersistenceReason = 'Session-only documents remain open and exportable. Close or export them before reconnecting to restore the authenticated workspace.';
+    syncPaneHeaders();
+    return false;
+  }
+  if (activeWorkspaceScope) {
+    if (!workspacePersistenceWritable) {
+      workspacePersistenceReason = 'This workspace could not be saved, so it remains open to prevent data loss.';
+      syncPaneHeaders();
+      return false;
+    }
+    await flushWorkspacePersistence({ allowSuspended: true });
+    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
+  }
+  if (!nextScope) {
+    removeAllWorkspaceDocuments();
+    activeWorkspaceScope = null;
+    workspacePersistenceWritable = false;
+    workspacePersistenceReason = 'Session only: no authenticated workspace scope is available.';
+    openDocument({ tenantId: null });
+    return null;
+  }
+  workspaceRestoreInProgress = true;
+  try {
+    const restored = await workspaceSnapshotReader(nextScope);
+    if (transition !== workspacePersistenceGeneration) return false;
+    if (activeWorkspaceScope) {
+      await flushWorkspacePersistence({ allowSuspended: true });
+      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
+    }
+    removeAllWorkspaceDocuments();
+    activeWorkspaceScope = nextScope;
+    workspacePersistenceReason = 'Stored for this authenticated Ravenroot workspace.';
+    if (restored?.documents.length) {
+      for (const stored of restored.documents) {
+        openDocument({
+          name: stored.name, displayName: stored.displayName, graph: stored.graph,
+          documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
+          provenance: stored.provenance, presentation: stored.presentation,
+        });
+      }
+      if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
+        activateDocument(restored.activeDocumentId);
+      }
+      if (restored.recoveredStaleSelection) workspacePersistenceReason += ' The stale selection was repaired.';
+    } else {
+      openDocument({ tenantId: nextScope.tenantId });
+    }
+    workspacePersistenceWritable = true;
+    return nextScope;
+  } catch (error) {
+    if (transition !== workspacePersistenceGeneration) return;
+    // Keep both the unreadable snapshot and current visible workspace untouched. Writes never open
+    // for the failed scope, so a recovery view cannot overwrite recoverable stored documents.
+    workspacePersistenceReason = `Stored documents could not be restored: ${error.message}`;
+    return false;
+  } finally {
+    if (transition === workspacePersistenceGeneration) {
+      workspaceRestoreInProgress = false;
+      syncActiveDocumentChrome();
+    }
+  }
+}
 const layoutSessions = createLayoutSessions();
 const rendererSessions = createRendererSessions();
 const themePreference = createThemePreferenceController({
@@ -684,15 +926,19 @@ let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
 let runtimeDisconnect = null;
+let runtimeConfigurationRequest = null;
+let runtimeConfiguration = null;
+let runtimeConnectionGeneration = 0;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
-const PROGRAM_BUILD_BATCH_LIMIT = 256;
 const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;
 const PROGRAM_OUTPUT_DISPLAY_LIMIT = 8 * 1024;
 const PROGRAM_WORKSPACE_PROPERTY_NAMES = new Set(['language', 'source', 'testPayload', 'artifactId']);
 let hasRuntimeToken = false;
 let confirmedServiceOrigin = '';
 let activeExecutionId = null;
+let activeExecutionPaused = false;
+let activeExecutionCommandInFlight = false;
 let activeSourceSession = null;
 let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
@@ -704,6 +950,233 @@ let nodeCatalogLoaded = false;
 // True from the moment a catalog request departs until it is answered or fails.
 let nodeCatalogPending = false;
 let finishedExecutions = new Set();
+let humanTaskController = null;
+let humanTaskControllerOwner = null;
+let humanTaskDecisionDialog = null;
+let humanTaskPulseTimer = null;
+let humanTaskRecoveryGeneration = 0;
+const HUMAN_TASK_SELECTION_KEY = 'ravenroot.human-task.selection.v1';
+
+function retireHumanTaskRecovery() {
+  humanTaskRecoveryGeneration += 1;
+}
+
+function suspendHumanTaskRecovery() {
+  retireHumanTaskRecovery();
+  humanTaskDecisionDialog?.suspend();
+}
+
+function clearHumanTaskSelection() {
+  retireHumanTaskRecovery();
+  try { localStorage.removeItem(HUMAN_TASK_SELECTION_KEY); } catch {
+    // Storage is an optional recovery aid. A disabled/quota-failed store must not block decisions.
+  }
+}
+
+function currentHumanTaskServiceOrigin(client = runtimeClient) {
+  return humanTaskServiceOrigin(client?.baseUrl, globalThis.location?.origin);
+}
+
+function rememberHumanTaskSelection(task) {
+  retireHumanTaskRecovery();
+  try {
+    localStorage.setItem(HUMAN_TASK_SELECTION_KEY, JSON.stringify({
+      serviceOrigin: currentHumanTaskServiceOrigin(), taskId: task.taskId, generation: task.generation,
+    }));
+  } catch {
+    // The durable service remains authoritative; this only forfeits browser-reload convenience.
+  }
+}
+
+function readHumanTaskSelection() {
+  try { return JSON.parse(localStorage.getItem(HUMAN_TASK_SELECTION_KEY) || 'null'); } catch {
+    clearHumanTaskSelection();
+    return null;
+  }
+}
+
+function sameHumanTaskSelection(left, right) {
+  return Boolean(left && right && left.serviceOrigin === right.serviceOrigin
+    && left.taskId === right.taskId && left.generation === right.generation);
+}
+
+function restoreHumanTaskServiceOrigin() {
+  const locator = readHumanTaskSelection();
+  if (!locator || typeof locator.serviceOrigin !== 'string' || !locator.serviceOrigin) return;
+  try {
+    const target = new URL(locator.serviceOrigin);
+    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
+    document.getElementById('service-url').value = locator.serviceOrigin;
+  } catch {
+    clearHumanTaskSelection();
+  }
+}
+
+function focusHumanTaskInspector() {
+  const target = document.querySelector('[data-human-task-inspector] [data-human-task-id]')
+    || document.querySelector('[data-human-task-inspector] .human-task-status')
+    || document.getElementById('menu-run');
+  if (!target) return;
+  if (!target.matches('button, input, select, textarea, a[href], [tabindex]')) target.tabIndex = -1;
+  target.focus();
+}
+
+function currentHumanTaskCapability() {
+  return runtimeConfiguration?.configuration?.humanTasks || null;
+}
+
+function stopHumanTaskPulse() {
+  if (humanTaskPulseTimer != null) clearInterval(humanTaskPulseTimer);
+  humanTaskPulseTimer = null;
+  cy?.nodes('.human-task-pulse').removeClass('human-task-pulse');
+  elasticRendererFor(workspace.active)?.nodeSelection?.classed('human-task-pulse', false);
+}
+
+function syncHumanTaskPulse(owner) {
+  stopHumanTaskPulse();
+  if (owner !== workspace.active || !owner?.cy?.nodes('[humanTaskPending > 0]').length
+      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
+  let on = true;
+  owner.cy.nodes('[humanTaskPending > 0]').addClass('human-task-pulse');
+  elasticRendererFor(owner)?.nodeSelection
+    ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+    .classed('human-task-pulse', true);
+  humanTaskPulseTimer = setInterval(() => {
+    if (workspace.active !== owner || owner.cy?.destroyed()) return stopHumanTaskPulse();
+    on = !on;
+    owner.cy.nodes('[humanTaskPending > 0]').toggleClass('human-task-pulse', on);
+    elasticRendererFor(owner)?.nodeSelection
+      ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+      .classed('human-task-pulse', on);
+  }, 900);
+}
+
+function applyHumanTaskProjection(owner) {
+  if (!owner?.cy || owner.cy.destroyed()) return;
+  const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
+  owner.cy.batch(() => owner.cy.nodes().forEach(node => {
+    const attention = counts.get(node.id()) || { pending: 0, escalated: 0 };
+    node.data('humanTaskPending', attention.pending);
+    node.data('humanTaskEscalated', attention.escalated);
+    node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
+    if (isN8nFamilyLayout(owner.visualStyle)) {
+      node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
+        'text-max-width': attention.pending ? '180px' : '240px' });
+    } else if (owner.visualStyle === 'elastic') {
+      node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
+        'text-max-width': attention.pending ? '180px' : '240px' });
+    }
+    if (!attention.pending) node.removeClass('human-task-pulse');
+  }));
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.nodeLabelSelection && rendererSessions.isLive(renderer.token)) {
+    renderer.nodeLabelSelection.text(item => {
+      const node = owner.cy.getElementById(item.id);
+      return node.length ? runtimeNodeLabel(node) : item.label;
+    });
+    renderer.nodeSelection
+      .classed('human-task-attention', item => (counts.get(item.id)?.pending || 0) > 0)
+      .classed('is-escalated', item => (counts.get(item.id)?.escalated || 0) > 0);
+  }
+  syncHumanTaskPulse(owner);
+}
+
+function renderSelectedHumanTasks(owner = workspace.active) {
+  if (owner !== workspace.active || graphData?.format !== 'graphml') return;
+  const selected = cy?.nodes(':selected');
+  if (!selected || selected.length !== 1) return;
+  const nodeId = selected.first().id();
+  const model = graphData?.nodeMap?.[nodeId];
+  if (model?.behavior !== 'human-task') return;
+  const state = owner.humanTasks?.projection?.page || { kind: 'loading', items: [], counts: {
+    pending: 0, escalated: 0 } };
+  renderHumanTaskInspector(document.getElementById('info-body'), state, nodeId, {
+    onSelect: task => {
+      const capability = currentHumanTaskCapability();
+      if (!capability || !tenantAuthorityAllows(owner)) return;
+      rememberHumanTaskSelection(task);
+      humanTaskDecisionDialog.open(task, capability);
+    },
+    onNext: () => humanTaskController?.nextPage(),
+    onPrevious: () => humanTaskController?.previousPage(),
+    onRefresh: () => humanTaskController?.refresh(),
+  });
+}
+
+function humanTaskPageSignature(page) {
+  if (!page) return '';
+  if (page.kind !== 'ready') return `${page.kind}:${page.message || ''}`;
+  return JSON.stringify({ counts: page.counts, nextCursor: page.nextCursor,
+    hasPrevious: page.hasPrevious, pageNumber: page.pageNumber, items: page.items });
+}
+
+function receiveHumanTaskProjection(state) {
+  const owner = humanTaskControllerOwner;
+  if (!owner || !tenantAuthorityAllows(owner)) return;
+  if (state.kind === 'error') {
+    // A failed authoritative refresh retires an exact recovery that may not have opened a dialog
+    // yet, and makes any displayed task detail stale. Keep only the opaque locator; a later
+    // successful poll or authentication starts a new exact lookup under the current lifetime.
+    suspendHumanTaskRecovery();
+  }
+  const signature = state.kind === 'ready' ? [...state.nodeCounts.entries()]
+    .map(([nodeId, count]) => `${nodeId}:${count.pending}:${count.escalated}`).sort().join('|') : state.kind;
+  const changed = owner.humanTasks.attentionSignature !== signature;
+  const pageSignature = humanTaskPageSignature(state.page);
+  const pageChanged = owner.humanTasks.pageSignature !== pageSignature;
+  owner.humanTasks.attentionSignature = signature;
+  owner.humanTasks.pageSignature = pageSignature;
+  owner.humanTasks.projection = state;
+  if (changed) applyHumanTaskProjection(owner);
+  if (pageChanged) renderSelectedHumanTasks(owner);
+  if (changed && owner === workspace.active && state.kind === 'ready') {
+    const total = [...state.nodeCounts.values()].reduce((sum, count) => sum + count.pending, 0);
+    const escalated = [...state.nodeCounts.values()].reduce((sum, count) => sum + count.escalated, 0);
+    announceGraph(total ? `${total} Human Task${total === 1 ? '' : 's'} need attention`
+      + `${escalated ? `; ${escalated} escalated` : ''}.` : 'No Human Tasks need attention.');
+  }
+  if (state.kind === 'ready' && !humanTaskDecisionDialog?.selected()) {
+    void recoverHumanTaskSelection(owner);
+  }
+}
+
+function configureHumanTasks(owner = workspace.active) {
+  humanTaskControllerOwner = owner;
+  const authorized = tenantAuthorityAllows(owner);
+  const configured = humanTaskController?.configure(authorized ? runtimeClient : null,
+    authorized ? currentHumanTaskCapability() : null, owner);
+  void recoverHumanTaskSelection(owner);
+  return configured;
+}
+
+async function recoverHumanTaskSelection(owner) {
+  const recoveryGeneration = ++humanTaskRecoveryGeneration;
+  const client = runtimeClient;
+  const capability = currentHumanTaskCapability();
+  if (!client || !capability || !tenantAuthorityAllows(owner, client)) return;
+  const locator = readHumanTaskSelection();
+  if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
+      || typeof locator.taskId !== 'string'
+      || !Number.isSafeInteger(locator.generation) || locator.generation < 1) return;
+  try {
+    // The locator deliberately carries no graph, deployment, process, presentation, or auth data.
+    // The authenticated exact-task projection reconstructs those durable details after reload,
+    // including when a process-local deployment registration no longer exists.
+    const page = await client.humanTaskAttention({ taskId: locator.taskId,
+      generation: locator.generation }, { capability });
+    if (recoveryGeneration !== humanTaskRecoveryGeneration
+        || runtimeClient !== client || workspace.active !== owner || !tenantAuthorityAllows(owner, client)
+        || !sameHumanTaskSelection(readHumanTaskSelection(), locator)) return;
+    const task = page.items.find(item => item.taskId === locator.taskId
+      && item.generation === locator.generation);
+    if (!task) { clearHumanTaskSelection(); return; }
+    if (!humanTaskDecisionDialog.selected()) humanTaskDecisionDialog.open(task, capability);
+  } catch {
+    // A rejected or unreachable lookup carries no proof that the durable task disappeared. Keep
+    // only the locator and let the next authenticated reconnect try again; never cache the row.
+  }
+}
 
 // ── AUTHORING ASSISTANT STATE (ADR 0025) ───────────────────────────────────────────────────
 // `assistantAvailability` starts UNREACHABLE rather than unknown. A panel that assumed it was ready
@@ -776,6 +1249,11 @@ let connectSourceId = null;
 // document until the gesture is committed through the command model.
 let edgeGestureSession = null;
 let graphCursorId = null;
+
+function canModifyGraph(graph, layout) {
+  const owner = workspace.documents.find(document_ => document_.graph === graph) || workspace.active;
+  return documentIsEditable(owner) && graphCanModify(graph, layout);
+}
 // Cytoscape emits `tap` after `tapend`, so a drag that just committed an edge would otherwise be
 // followed by a tap that reopens or refuses one on the same element.
 const suppressedEdgeTaps = new WeakSet();
@@ -1156,6 +1634,285 @@ function routeNodeActionGesture(event) {
   event.stopImmediatePropagation();
 }
 
+function groupProjection(owner = workspace.active) {
+  return elasticRendererFor(owner)?.elasticMount?.visualGroupProjection || owner?.visualGroupsRenderer?.projection;
+}
+
+function groupForVisibleNode(id, owner = workspace.active) {
+  const projection = groupProjection(owner);
+  if (!projection?.syntheticIds.has(id)) return null;
+  projection.groupByVisibleId ||= new Map(projection.groups.flatMap(group => [[group.summaryId, group], [group.headerId, group]]));
+  return projection.groupByVisibleId.get(id) || null;
+}
+
+function selectedVisualGroup(owner = workspace.active) {
+  const ids = owner?.cy?.nodes(':selected').map(node => node.id()) || [];
+  if (owner?.layoutMode === 'elastic' && owner?.focusedVisualGroupId) {
+    return readVisualGroups(owner.graph).groups.find(group => group.id === owner.focusedVisualGroupId) || null;
+  }
+  return ids.length === 1 ? groupForVisibleNode(ids[0], owner) : null;
+}
+
+function managedVisualGroup(owner = workspace.active) {
+  return selectedVisualGroup(owner) || readVisualGroups(owner?.graph).groups
+    .find(group => group.id === owner?.selectedVisualGroupId) || null;
+}
+
+function groupAuthoringAllowed(owner = workspace.active) {
+  return Boolean(owner === workspace.active && documentIsEditable(owner) && modifyEnabled
+    && canModifyGraph(owner.graph, owner.layoutMode) && !layoutBusy);
+}
+
+function selectedRealNodeIds(owner = workspace.active, captured = null) {
+  return (captured || owner?.cy?.nodes(':selected').map(node => node.id()) || [])
+    .filter(id => Object.hasOwn(owner?.graph?.nodeMap || {}, id));
+}
+
+function finishVisualGroups(owner = workspace.active) {
+  // Finishing an already-settled transition repaints its last projection. That projection owns a
+  // selection snapshot from the last group refresh, not the live selection a user may have made
+  // since then, so an otherwise read-only save could restore a stale (often empty) selection and
+  // clear the Inspector. A settled renderer is already at its target; only an active transition
+  // needs to be forced to its final frame.
+  if (owner?.visualGroupsRenderer?.isAnimating) owner.visualGroupsRenderer.finish();
+  const elastic = elasticRendererFor(owner)?.elasticMount;
+  if (elastic?.visualGroupAnimating) elastic.finishVisualGroupTransition?.();
+}
+
+// Group presentation lives only on its document; it has no module-level working-view mirror.
+function visualGroupTransitionIsAnimating(owner) {
+  return Boolean(owner && workspace.find(owner.id) === owner
+    && (owner.visualGroupsRenderer?.isAnimating || owner.renderer?.elasticMount?.visualGroupAnimating));
+}
+
+function visualGroupPresentationIsDirty(owner) {
+  return Boolean(owner && workspace.find(owner.id) === owner && owner.visualGroupPresentationDirty);
+}
+
+function suspendVisualGroups(owner) {
+  if (!owner || workspace.find(owner.id) !== owner) return;
+  finishVisualGroups(owner);
+  owner.visualGroupsRenderer?.suspend();
+}
+
+function destroyDesignVisualGroups(owner, target) {
+  if (!owner || workspace.find(owner.id) !== owner || owner.cy !== target) return;
+  owner.visualGroupsRenderer?.destroy();
+  owner.visualGroupsRenderer = null;
+}
+
+function refreshVisualGroups(owner = workspace.active, { animate = false, selection, focus } = {}) {
+  if (!owner?.graph || !owner.cy || owner.cy.destroyed()) return;
+  const metadata = readVisualGroups(owner.graph);
+  owner.visualGroupState = reconcileVisualGroupState(metadata.groups, owner.visualGroupState);
+  const target = owner.cy;
+  const selected = selection || target.$(':selected').map(element => element.id());
+  const selectedFocus = focus ?? owner.cursorId;
+  const onSelection = (ids, context = {}) => {
+    if (workspace.find(owner.id) !== owner || owner.cy !== target) return;
+    applyStableSelection(target, ids);
+    if (context.groupId) owner.selectedVisualGroupId = context.groupId;
+    if (context.groupId) owner.focusedVisualGroupId = context.groupId;
+    owner.cursorId = context.focus || ids[0] || null;
+    if (owner === workspace.active) {
+      graphCursorId = owner.cursorId;
+      if (context.groupId) showVisualGroupInfo(readVisualGroups(owner.graph).groups.find(group => group.id === context.groupId));
+      // The renderer reports every final paint, including one that restored exactly the selection
+      // it was handed. Only a projection that moved the selection (a member folded into its summary,
+      // a header expanded to its members) changes what the Inspector describes. Refreshing on an
+      // unchanged selection re-reads it one microtask later and overwrites whatever the caller has
+      // shown since: a node just created from the editor is deliberately left unselected, so the
+      // refresh found nothing selected and closed the editor on the node it had just re-opened.
+      else if (!sameSelectedIds(selected, ids)) scheduleSelectionInspectorRefresh(target);
+    }
+  };
+  const elastic = elasticRendererFor(owner);
+  if (elastic?.elasticMount?.setVisualGroups) {
+    elastic.elasticMount.setVisualGroups({ groups: metadata.groups, state: owner.visualGroupState, animate,
+      selection: selected, focus: selectedFocus, onSelection,
+      selectedGroupId: owner.restoredVisualGroupSelection ?? owner.focusedVisualGroupId ?? null,
+      focusGroupId: owner === workspace.active
+        ? owner.restoredVisualGroupFocus ?? owner.focusedVisualGroupId ?? null : null,
+      onToggle: (id, collapsed) => toggleVisualGroup(id, collapsed, owner),
+      onUpdate: () => scheduleMinimap(owner) });
+    owner.restoredVisualGroupSelection = null;
+    owner.restoredVisualGroupFocus = null;
+  } else {
+    if (!owner.visualGroupsRenderer) owner.visualGroupsRenderer = createVisualGroupRenderer({ cy: target,
+      isCurrent: () => workspace.find(owner.id) === owner && owner.cy === target,
+      onSelection, onUpdate: (_projection, { final } = {}) => {
+        if (final) applyNodeGrabPolicy(target);
+        scheduleMinimap(owner);
+      } });
+    owner.visualGroupsRenderer.setGroups({ graph: owner.graph, groups: metadata.groups,
+      state: owner.visualGroupState, animate, selection: selected, focus: selectedFocus });
+    applyNodeGrabPolicy(target);
+  }
+  if (metadata.warning && owner.visualGroupWarning !== metadata.warning) {
+    owner.visualGroupWarning = metadata.warning;
+    addActivityMessage('editor', metadata.warning, 'failed');
+  }
+  if (owner === workspace.active) { updateStats(); refreshCommands(); }
+}
+
+function toggleVisualGroup(groupId, collapsed, owner = workspace.active) {
+  const incarnation = owner?.incarnation;
+  return runAfterInspectorDraft(() => {
+    if (workspace.find(owner?.id) !== owner || owner.incarnation !== incarnation || !owner.graph) return false;
+    if (workspace.active !== owner) activateDocument(owner.id);
+    const group = readVisualGroups(owner.graph).groups.find(item => item.id === groupId);
+    if (!group) return false;
+    invalidateDocumentLayouts(owner);
+    const previous = reconcileVisualGroupState([group], owner.visualGroupState)[groupId];
+    const next = typeof collapsed === 'boolean' ? collapsed : !previous.collapsed;
+    const memberSelection = selectedRealNodeIds(owner).filter(id => group.memberNodeIds.includes(id));
+    const focused = group.memberNodeIds.includes(graphCursorId) ? graphCursorId : previous.anchorNodeId;
+    owner.visualGroupState = { ...owner.visualGroupState, [groupId]: { ...previous,
+      collapsed: next, anchorNodeId: next ? focused : previous.anchorNodeId,
+      lastSelectedNodeIds: next && memberSelection.length ? memberSelection : previous.lastSelectedNodeIds } };
+    owner.visualGroupPresentationDirty = true;
+    owner.selectedVisualGroupId = groupId;
+    refreshVisualGroups(owner, { animate: true });
+    updateHistoryUi();
+    return true;
+  });
+}
+
+function visualGroupDialog(title, { value = null, detail = '', submit = 'Save', onCommit }) {
+  const origin = document.activeElement;
+  const owner = workspace.active;
+  const incarnation = owner?.incarnation;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'visual-group-dialog';
+  dialog.setAttribute('aria-label', title);
+  const form = document.createElement('form');
+  const heading = document.createElement('h2'); heading.textContent = title;
+  const explanation = document.createElement('p'); explanation.textContent = detail;
+  const input = document.createElement('input'); input.type = 'text'; input.maxLength = 160;
+  input.setAttribute('aria-label', 'Group name'); input.value = value ?? ''; input.required = true;
+  const error = document.createElement('p'); error.setAttribute('role', 'alert');
+  const actions = document.createElement('div'); actions.className = 'visual-group-dialog-actions';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+  const save = document.createElement('button'); save.type = 'submit'; save.textContent = submit;
+  cancel.className = 'btn'; save.className = 'btn primary';
+  actions.append(cancel, save); form.append(heading, explanation);
+  if (value !== null) form.append(input);
+  form.append(error, actions); dialog.append(form); document.body.append(dialog);
+  const close = () => { dialog.close(); dialog.remove(); if (origin?.isConnected) origin.focus({ preventScroll: true }); };
+  cancel.addEventListener('click', close); dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (workspace.active !== owner || owner.incarnation !== incarnation || !groupAuthoringAllowed(owner)) { close(); return; }
+    try { onCommit(input.value.trim()); close(); } catch (failure) { error.textContent = failure.message; }
+  });
+  dialog.showModal(); if (value !== null) { input.focus(); input.select(); } else save.focus();
+  return true;
+}
+
+function createVisualGroupAction(captured = null) {
+  const owner = workspace.active;
+  const incarnation = owner?.incarnation;
+  const selected = selectedRealNodeIds(owner, captured);
+  return runAfterInspectorDraft(() => {
+    if (workspace.active !== owner || owner?.incarnation !== incarnation) return false;
+    if (!groupAuthoringAllowed() || selected.length < 2) return false;
+    return visualGroupDialog('Group selection', { value: `Group ${readVisualGroups(graphData).groups.length + 1}`,
+      detail: `${selected.length} selected nodes. Visual groups do not change execution.`, submit: 'Create group',
+      onCommit: name => {
+        finishVisualGroups(); syncGraphPositions();
+        const anchor = selected.includes(graphCursorId) ? graphCursorId : [...selected].sort()[0];
+        const group = createVisualGroup(graphData, selected, name, anchor, editHistory);
+        owner.selectedVisualGroupId = group.id;
+        refreshVisualGroups(workspace.active, { animate: true, selection: selected, focus: anchor });
+        updateHistoryUi();
+      } });
+  });
+}
+
+function manageVisualGroup(action, suppliedGroup = null) {
+  const owner = workspace.active;
+  const incarnation = owner?.incarnation;
+  suppliedGroup ||= action === 'replace' ? managedVisualGroup(owner) : selectedVisualGroup(owner);
+  const selected = selectedRealNodeIds();
+  return runAfterInspectorDraft(() => {
+    if (workspace.active !== owner || owner?.incarnation !== incarnation) return false;
+    if (!groupAuthoringAllowed()) return false;
+    const metadata = readVisualGroups(graphData);
+    const group = metadata.groups.find(item => item.id === suppliedGroup?.id);
+    if (action !== 'repair' && !group) return false;
+    const commit = name => {
+      finishVisualGroups();
+      let groups = metadata.groups;
+      if (action === 'repair') groups = [];
+      else if (action === 'ungroup') groups = groups.filter(item => item.id !== group.id);
+      else groups = groups.map(item => item.id !== group.id ? item : action === 'rename' ? { ...item, name }
+        : { ...item, memberNodeIds: selected, anchorNodeId: selected.includes(item.anchorNodeId)
+          ? item.anchorNodeId : [...selected].sort()[0] });
+      editVisualGroups(graphData, groups, editHistory, action === 'ungroup' ? `Ungroup ${group.name}` : `${action === 'rename' ? 'Rename' : action === 'replace' ? 'Replace members of' : 'Remove metadata for'} visual group`);
+      refreshVisualGroups(); updateHistoryUi();
+      if (action === 'ungroup' || action === 'repair') { owner.selectedVisualGroupId = null; closeInfo(); }
+      else showVisualGroupInfo(groups.find(item => item.id === group.id));
+    };
+    if (action === 'ungroup') { commit(); return true; }
+    return visualGroupDialog(action === 'rename' ? 'Rename group' : action === 'replace' ? 'Replace members with selection' : 'Remove visual group metadata', {
+      value: action === 'rename' ? group.name : null,
+      detail: action === 'replace' ? `Replace ${group.memberNodeIds.length} members with ${selected.length} selected real nodes? Nodes and edges remain intact.`
+        : action === 'repair' ? 'Remove the unsupported visual group metadata? All real nodes and edges remain intact. This is undoable.' : '',
+      submit: action === 'replace' ? 'Replace members' : action === 'repair' ? 'Remove metadata' : 'Save', onCommit: commit });
+  });
+}
+
+function showVisualGroupInfo(group, owner = workspace.active) {
+  if (!group || !owner || owner !== workspace.active || workspace.find(owner.id) !== owner) return;
+  const incarnation = owner.incarnation;
+  retireInspectorDraft(); humanTaskController?.selectNode(null); revealInspector();
+  owner.selectedVisualGroupId = group.id;
+  document.getElementById('info-title').textContent = group.name;
+  const body = document.createElement('section'); body.className = 'visual-group-inspector';
+  document.getElementById('info-body').replaceChildren(body);
+  const label = document.createElement('p'); label.textContent = `Visual group · ${group.memberNodeIds.length} members`;
+  body.append(label);
+  const actions = document.createElement('div'); actions.className = 'visual-group-actions'; body.append(actions);
+  const action = (text, handler, enabled = true, reason = '') => {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
+    button.className = 'btn'; button.disabled = !enabled; button.title = reason;
+    if (!enabled) button.setAttribute('aria-describedby', 'visual-group-edit-help');
+    button.addEventListener('click', () => {
+      if (workspace.active === owner && owner.incarnation === incarnation) handler();
+    }); actions.append(button);
+  };
+  action(owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse', () => toggleVisualGroup(group.id, undefined, owner));
+  const editable = groupAuthoringAllowed();
+  action('Rename group', () => manageVisualGroup('rename', group), editable, 'Available in editable Design documents');
+  action('Replace members with selection', () => manageVisualGroup('replace', group), editable && selectedRealNodeIds().length >= 2,
+    'Select at least two real nodes in editable Design');
+  action('Ungroup', () => manageVisualGroup('ungroup', group), editable, 'Available in editable Design documents');
+  const help = document.createElement('p'); help.id = 'visual-group-edit-help'; help.className = 'visual-group-help';
+  help.textContent = editable ? 'To replace membership, select at least two real nodes, then choose Edit → Replace members with selection.'
+    : 'Rename, membership changes and ungrouping are available in editable Design documents.';
+  body.append(help);
+  const list = document.createElement('ul'); list.className = 'visual-group-members'; body.append(list);
+  group.memberNodeIds.forEach(id => {
+    const item = document.createElement('li'); const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
+    const node = graphData.nodeMap[id]; button.textContent = `${node?.name || id} (${id})`;
+    button.addEventListener('click', () => {
+      if (workspace.active === owner && owner.incarnation === incarnation) revealVisualGroupMember(id, owner);
+    }); item.append(button); list.append(item);
+  });
+}
+
+function revealVisualGroupMember(id, owner = workspace.active) {
+  const incarnation = owner?.incarnation;
+  return runAfterInspectorDraft(() => {
+    if (!owner || workspace.active !== owner || workspace.find(owner.id) !== owner || owner.incarnation !== incarnation) return false;
+    const group = readVisualGroups(graphData).groups.find(item => item.memberNodeIds.includes(id));
+    if (group && owner.visualGroupState[group.id]?.collapsed) toggleVisualGroup(group.id, false, owner);
+    finishVisualGroups();
+    const node = cy.getElementById(id); if (node.empty()) return false;
+    applyStableSelection(cy, [id]); setGraphCursor(id); showNodeInfo(node); return true;
+  });
+}
+
 function nodeActionCatalog(owner, instance, nodeId) {
   const node = instance?.getElementById(nodeId);
   const owned = Boolean(owner && workspace.find(owner.id) === owner && owner.cy === instance);
@@ -1163,12 +1920,18 @@ function nodeActionCatalog(owner, instance, nodeId) {
   const ownerGraph = active ? graphData : owner?.graph;
   const ownerLayoutMode = active ? layoutMode : owner?.layoutMode;
   const label = node && !node.empty() ? nodeActionLabel(node) : 'node';
-  return createNodeActionCatalog({
+  const group = groupForVisibleNode(nodeId, owner);
+  const metadata = readVisualGroups(ownerGraph);
+  const memberGroup = metadata.groups.find(item => item.memberNodeIds.includes(nodeId));
+  const captured = nodeActionOverlays.get(instance)?.selectionAtPointerDown;
+  const selected = selectedRealNodeIds(owner, captured);
+  const authoring = owned && groupAuthoringAllowed(owner);
+  const actions = createNodeActionCatalog({
     targetLabel: label,
     capabilities: {
       trace: Boolean(owned && node && !node.empty()),
       duplicate: Boolean(owned && modifyEnabled && canDuplicateNode(ownerGraph, nodeId, ownerLayoutMode)),
-      delete: Boolean(owned && modifyEnabled && canModifyGraph(ownerGraph, ownerLayoutMode)),
+      delete: Boolean(owned && !group && modifyEnabled && canModifyGraph(ownerGraph, ownerLayoutMode)),
     },
     handlers: {
       trace: () => {
@@ -1182,6 +1945,17 @@ function nodeActionCatalog(owner, instance, nodeId) {
       delete: () => deleteNodeFromActionOverlay(owner, instance, nodeId),
     },
   });
+  const groups = [
+    { id: 'group', glyph: '▦', label: 'Group selection', enabled: Boolean(authoring && selected.length >= 2
+      && ['none', 'valid'].includes(metadata.status) && !selected.some(id => metadata.groups.some(item => item.memberNodeIds.includes(id)))),
+    run: () => createVisualGroupAction(selected) },
+    { id: 'toggleGroup', glyph: '↔', label: group && owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse group',
+      enabled: Boolean(group || memberGroup), run: () => toggleVisualGroup((group || memberGroup).id, group ? undefined : true, owner) },
+    { id: 'renameGroup', label: 'Rename group', enabled: Boolean(authoring && group), run: () => manageVisualGroup('rename', group) },
+    { id: 'replaceGroup', label: 'Replace members with selection', enabled: Boolean(authoring && group && selected.length >= 2), run: () => manageVisualGroup('replace', group) },
+    { id: 'ungroup', label: 'Ungroup', enabled: Boolean(authoring && group), run: () => manageVisualGroup('ungroup', group) },
+  ];
+  return [...actions, ...groups];
 }
 
 function syncNodeActionOverlay(instance) {
@@ -1287,6 +2061,7 @@ function showNodeActionOverlay(owner, node, { pointer = true, allowSelected = fa
   const actions = nodeActionCatalog(owner, instance, node.id());
   actions.forEach(action => {
     const button = overlay.bar.querySelector(`[data-node-action="${action.id}"]`);
+    if (!button) return;
     button.hidden = !action.enabled;
     button.setAttribute('aria-label', action.label);
     button.dataset.tooltip = action.label;
@@ -1427,7 +2202,7 @@ function installNodeActionOverlay(owner, instance, container) {
   const moreButton = actionButton('more', '…');
   moreButton.setAttribute('aria-label', 'More node actions');
   moreButton.dataset.tooltip = 'More node actions';
-  bar.append(traceButton, deleteButton, duplicateButton, moreButton);
+  bar.append(traceButton, deleteButton, duplicateButton, actionButton('group', '▦'), actionButton('toggleGroup', '↔'), moreButton);
   root.append(bridge, bar, menu);
   container.append(root);
   const schedule = () => scheduleNodeActionOverlay(instance);
@@ -1552,10 +2327,23 @@ function captureActiveDocument() {
   document_.cursorId = graphCursorId;
   document_.fontSize = fontSize;
   document_.execution.executionId = activeExecutionId;
+  document_.execution.paused = activeExecutionPaused;
   document_.execution.graphVersion = activeGraphVersion;
   document_.execution.finished = finishedExecutions;
   document_.execution.events = recentRuntimeEvents;
   document_.execution.reconciliationState = activeExecutionReconciliation;
+  if (cy && !cy.destroyed()) {
+    const elastic = elasticRendererFor(document_);
+    const transform = elastic?.svg ? d3.zoomTransform(elastic.svg) : null;
+    document_.canvasState = normalizedCanvasState({
+      zoom: transform?.k ?? cy.zoom(), pan: transform ? { x: transform.x, y: transform.y } : cy.pan(),
+      selectedIds: selectedRealNodeIds(document_), focusNodeId: graphCursorId,
+      selectedGroupId: selectedVisualGroup(document_)?.id || null,
+      focusGroupId: selectedVisualGroup(document_)?.id || null,
+      positions: Object.fromEntries(elastic?.nodes ? elastic.nodes.map(node => [node.id, { x: node.x, y: node.y }])
+        : cy.nodes().filter(node => Object.hasOwn(graphData?.nodeMap || {}, node.id())).map(node => [node.id(), node.position()])),
+    }, graphData);
+  }
 }
 
 function cancelRetiredLayouts(cancelled = []) {
@@ -1602,6 +2390,9 @@ function invalidateDocumentLayouts(owner) {
 }
 
 function applyActiveDocument() {
+  // A document transition retires an exact Human Task lookup even when the opaque locator is kept
+  // for a later return to its authenticated workspace.
+  suspendHumanTaskRecovery();
   cancelMinimapGesture();
   const document_ = workspace.active;
   cy = document_?.cy ?? null;
@@ -1611,6 +2402,10 @@ function applyActiveDocument() {
   graphName = document_?.name ?? 'untitled.graphml';
   graphDisplayName = document_?.displayName ?? graphName;
   const presentation = documentPresentationState(document_);
+  const retainRouteGeometry = Boolean(document_
+    && document_.renderMode === presentation.renderMode
+    && document_.layoutMode === presentation.layoutMode
+    && document_.visualStyle === presentation.visualStyle);
   renderMode = presentation.renderMode;
   layoutMode = presentation.layoutMode;
   visualStyle = presentation.visualStyle;
@@ -1622,6 +2417,8 @@ function applyActiveDocument() {
   graphCursorId = document_?.cursorId ?? null;
   fontSize = document_?.fontSize ?? DEFAULT_FONT_SIZE;
   activeExecutionId = document_?.execution.executionId ?? null;
+  activeExecutionPaused = document_?.execution.paused ?? false;
+  activeExecutionCommandInFlight = Boolean(document_?.execution.commandFlight);
   activeSourceSession = document_?.sourceSession ?? null;
   activeGraphVersion = document_?.execution.graphVersion ?? null;
   finishedExecutions = document_?.execution.finished ?? new Set();
@@ -1629,7 +2426,13 @@ function applyActiveDocument() {
   activeExecutionReconciliation = document_?.execution.reconciliationState ?? 'known';
   // The inline-handler contract predates the workspace and still points at the visible graph.
   window.cy = cy;
-  if (cy && document_) cy.batch(() => applyVisualStyle(visualStyle, cy, document_));
+  // Activation repaints document-owned node/runtime state but leaves the live renderer's edge
+  // geometry untouched. Recomputing even the same route family here can choose different control
+  // points after a pane resize; the existing inline edge route is the exact arrangement result.
+  // A legacy or invalid record still takes the canonical normalized style as a complete repaint.
+  if (cy && document_) cy.batch(() =>
+    applyVisualStyle(visualStyle, cy, document_, { preserveEdgeGeometry: retainRouteGeometry }));
+  if (humanTaskController) void configureHumanTasks(document_);
 }
 
 function syncSourceSessionChrome(owner = workspace.active) {
@@ -1658,10 +2461,12 @@ function syncSourceSessionChrome(owner = workspace.active) {
 window.ravenroot = {
   workspace,
   openDocument,
+  forkDocument: forkActiveDocument,
   replaceActiveDocumentFromText,
   activateDocument,
   closeDocument,
   requestCloseDocument,
+  requestCloseAllDocuments,
   documents: () => {
     captureActiveDocument();
     return workspace.documents;
@@ -1674,8 +2479,29 @@ window.ravenroot = {
   resetWorkspaceLayout,
   workspaceLayout: () => ({ ...workspaceLayout, plan: workspacePlan }),
   minimapSnapshot: () => minimapLastSnapshot ? JSON.parse(JSON.stringify(minimapLastSnapshot)) : null,
+  // The serializer Save and Export use, bundled with them, so a test compares against the bytes the
+  // editor would actually write rather than against a separately loaded copy of the module.
+  serializeGraphML: graph => serializeGraphML(graph),
+  graphDocumentByteLimit: currentGraphDocumentByteLimit,
+  flushWorkspacePersistence,
+  workspacePersistence: () => ({
+    scope: activeWorkspaceScope ? { serviceUrl: activeWorkspaceScope.serviceUrl,
+      tenantId: activeWorkspaceScope.tenantId } : null,
+    writable: workspacePersistenceWritable,
+    pending: Boolean(activeWorkspaceScope && workspacePersistenceWritable
+      && (workspacePersistenceTimer !== null
+        || workspacePersistedRevision < workspacePersistenceRevision)),
+    reason: workspacePersistenceReason,
+    restoring: workspaceRestoreInProgress,
+    authority: { state: workspaceAuthority.state,
+      tenantId: workspaceAuthority.scope?.tenantId ?? null,
+      generation: workspaceAuthority.generation },
+  }),
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
+  _setWorkspaceSnapshotReaderForTest: reader => {
+    workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
+  },
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -1752,9 +2578,16 @@ function paneDisplayName(document_) {
 }
 
 function paneIsDirty(document_) {
-  return workspace.activeId === document_.id
+  return Boolean(documentIsEditable(document_) && document_.visualGroupPresentationDirty) || (workspace.activeId === document_.id
     ? Boolean(editHistory.state().dirty)
-    : Boolean(document_.history?.isDirty());
+    : Boolean(document_.history?.isDirty()));
+}
+
+function documentModeLabel(document_) {
+  if (!document_) return 'No document';
+  const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
+    : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
+  return document_.tenantId === null ? `${label} · session only` : label;
 }
 
 function documentPane(document_) {
@@ -1853,6 +2686,15 @@ function syncPaneHeaders() {
     label.textContent = name;
     // The name is ellipsised when the pane is tight, so the full one stays reachable.
     label.title = name;
+    let origin = header.querySelector('.doc-pane-origin');
+    if (!origin) {
+      origin = window.document.createElement('span');
+      origin.className = 'doc-pane-origin';
+      label.after(origin);
+    }
+    origin.textContent = documentModeLabel(document_);
+    origin.title = document_.tenantId === null ? workspacePersistenceReason
+      : `${documentModeLabel(document_)} document. ${workspacePersistenceReason}`;
     const close = header.querySelector('.doc-pane-close');
     close.title = `Close ${name}`;
     close.setAttribute('aria-label', `Close ${name}`);
@@ -1870,13 +2712,14 @@ function syncPaneHeaders() {
     }
 
     header.querySelector('.doc-pane-state').textContent =
-      [active ? 'active document' : '', dirty ? 'modified' : '', document_.layoutBusy ? 'layout in progress' : '']
+      [active ? 'active document' : '', documentModeLabel(document_), dirty ? 'modified' : '',
+        document_.layoutBusy ? 'layout in progress' : '']
         .filter(Boolean).join(', ');
 
     pane.classList.toggle('doc-pane--active', active);
     if (active) pane.setAttribute('aria-current', 'true');
     else pane.removeAttribute('aria-current');
-    pane.setAttribute('aria-label', `${name}${dirty ? ', modified' : ''}`
+    pane.setAttribute('aria-label', `${name}, ${documentModeLabel(document_)}${dirty ? ', modified' : ''}`
       + `${document_.layoutBusy ? ', layout in progress' : ''}`);
   });
 }
@@ -2173,6 +3016,9 @@ function syncPaneRenderer(document_) {
   paneRenderedSize.set(document_.id, { width, height });
 
   cy.resize();
+  // Restoring several documents passes through temporary pane sizes. Those intermediate boxes
+  // must not replace each document's saved viewport with an automatic fit or recenter.
+  if (workspaceRestoreInProgress && document_.canvasState) return;
   if (consumePendingRefit) {
     document_.layoutPendingRefit = false;
     cy.scratch('_rrRefitAfterLayout', false);
@@ -2281,7 +3127,7 @@ function onSeparatorPointerDown(event, separator) {
 
 // Adds an empty record and makes it active, without rendering anything. Boot uses it so that a
 // document exists before the first `initCy`, which now needs one to know where to draw.
-function addDocumentRecord(name = defaultDocumentName(), displayName = allocateDocumentDisplayName(name)) {
+function addDocumentRecord(name = defaultDocumentName(), displayName = allocateDocumentDisplayName(name), options = {}) {
   // Guarded like every other call site this function's sibling added: an unconditional call
   // here also fires at boot, before any document or gesture exists, and `cancelEdgeGesture` always
   // stamps `#cy-wrap`'s `data-edge-gesture-state` to `idle` regardless of whether there was anything
@@ -2299,11 +3145,18 @@ function addDocumentRecord(name = defaultDocumentName(), displayName = allocateD
       .concat(1 / (current.length + 1));
   }
   const document_ = workspace.add(createDocumentRecord({
-    id: `doc-${nextDocumentId += 1}`,
+    id: options.documentId || createDocumentIncarnation(),
     name,
     displayName,
     history: createCommandHistory(),
+    tenantId: options.tenantId ?? activeWorkspaceScope?.tenantId ?? null,
+    mode: options.mode || DOCUMENT_MODES.DRAFT,
+    provenance: options.provenance,
   }));
+  nextDocumentId += 1;
+  if (options.presentation) Object.assign(document_, options.presentation);
+  document_.restoredVisualGroupSelection = document_.canvasState?.selectedGroupId || null;
+  document_.restoredVisualGroupFocus = document_.canvasState?.focusGroupId || null;
   applyActiveDocument();
   documentContainer(document_);
   syncPaneLayout();
@@ -2329,8 +3182,11 @@ function initLoadedGraph(graph, currentStyle) {
   });
 }
 
-function openDocument({ name = defaultDocumentName(), graph = null } = {}) {
-  const document_ = addDocumentRecord(name);
+function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null } = {}) {
+  const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
+    documentId, tenantId, mode, provenance, presentation,
+  });
   if (graph) {
     graphName = name;
     graphDisplayName = document_.displayName;
@@ -2346,7 +3202,37 @@ function openDocument({ name = defaultDocumentName(), graph = null } = {}) {
   }
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(document_);
+  if (presentation?.renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
+  scheduleWorkspacePersistence();
   return document_.id;
+}
+
+function forkActiveDocument() {
+  captureActiveDocument();
+  const source = workspace.active;
+  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph) return false;
+  const graph = structuredClone(source.graph);
+  graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
+  const fork = forkDocumentRecord(source, {
+    graph,
+    history: createCommandHistory(),
+    name: source.name,
+    tenantId: source.tenantId,
+  });
+  const id = openDocument({
+    name: fork.name,
+    displayName: allocateDocumentDisplayName(fork.name),
+    graph: fork.graph,
+    documentId: fork.documentId,
+    tenantId: fork.tenantId,
+    mode: fork.mode,
+    provenance: fork.provenance,
+    presentation: { ...visualGroupPresentation(fork), renderMode: fork.renderMode,
+      layoutMode: fork.layoutMode, visualStyle: fork.visualStyle, fontSize: fork.fontSize },
+  });
+  addActivityMessage('editor', `Forked immutable ${source.mode} snapshot as an editable draft`, 'completed');
+  scheduleWorkspacePersistence();
+  return id;
 }
 
 // Installs the semantic projection on both homes of the active view before a renderer observes it.
@@ -2374,6 +3260,9 @@ function completeReplaceActiveDocument(target, graph, name) {
   destroyDocumentRenderer(target, 'replaced');
   detachExecution(target);
   target.incarnation = createDocumentIncarnation();
+  target.visualGroupState = {};
+  target.canvasState = null;
+  target.visualGroupPresentationDirty = false;
   activeDocumentIncarnation = target.incarnation;
   graphName = name;
   graphDisplayName = allocateDocumentDisplayName(name);
@@ -2389,6 +3278,8 @@ function completeReplaceActiveDocument(target, graph, name) {
   graphCursorId = null;
   fontSize = DEFAULT_FONT_SIZE;
   activeExecutionId = null;
+  activeExecutionPaused = false;
+  activeExecutionCommandInFlight = false;
   activeGraphVersion = null;
   activeExecutionReconciliation = 'known';
   finishedExecutions = new Set();
@@ -2409,7 +3300,11 @@ function completeReplaceActiveDocument(target, graph, name) {
 function requestReplaceActiveDocument(graph, name, origin = document.activeElement) {
   captureActiveDocument();
   const target = workspace.active;
-  if (!target || !target.history?.isDirty()) return completeReplaceActiveDocument(target, graph, name);
+  if (target && target.mode !== DOCUMENT_MODES.DRAFT) {
+    showInspectorMessage('Only Draft documents can be replaced. Fork this read-only document first.');
+    return false;
+  }
+  if (!target || !paneIsDirty(target)) return completeReplaceActiveDocument(target, graph, name);
   return openUnsavedDocumentDialog({
     documentId: target.id,
     origin,
@@ -2421,13 +3316,19 @@ function requestReplaceActiveDocument(graph, name, origin = document.activeEleme
 
 // The File command reads a file and hands its text here. Parsing is deliberately complete
 // before a dirty prompt or record mutation, so a malformed replacement is a true no-op.
-function replaceActiveDocumentFromText(text, name, origin = document.activeElement) {
-  const graph = parsePreparedGraph(text, name);
+function replaceActiveDocumentFromText(
+  text, name, origin = document.activeElement, maxBytes = currentGraphDocumentByteLimit(),
+) {
+  const graph = parsePreparedGraph(text, name, { maxBytes });
   return requestReplaceActiveDocument(graph, name, origin);
 }
 
 function activateDocument(id) {
+  finishVisualGroups(workspace.active);
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
+  if (inspectorDraft?.form.isConnected) {
+    return runAfterInspectorDraft(() => activateDocument(id));
+  }
   retireElementSelectionGesture(cy);
   invalidateStableSelection();
   cancelNodeMoveGesture();
@@ -2438,12 +3339,11 @@ function activateDocument(id) {
   syncPaneLayout();
   reconcileActiveRenderModeRenderer();
   syncActiveDocumentChrome();
+  scheduleWorkspacePersistence();
   return workspace.activeId;
 }
 
-function closeDocument(id) {
-  const target = workspace.find(id);
-  if (!target) return false;
+function teardownDocument(target) {
   if (dragSnapshot?.owner === target) cancelNodeMoveGesture();
   if (edgeGestureSession?.owner === target) cancelEdgeGesture({ clearMessage: true });
   retireProgramReadiness(target);
@@ -2452,7 +3352,6 @@ function closeDocument(id) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
-  captureActiveDocument();
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
   destroyDocumentRenderer(target, 'closed');
@@ -2462,26 +3361,53 @@ function closeDocument(id) {
   detachExecution(target);
   if (target.cy) releaseCanvasZoomBridge(target.cy);
   target.cy?.destroy();
-  const targetIndex = workspace.documents.indexOf(target);
-  if (workspaceLayout.mode !== 'grid') {
-    const axis = workspaceLayout.mode === 'horizontal' ? 'columnShares' : 'rowShares';
-    const remaining = workspaceLayout[axis].filter((_, index) => index !== targetIndex);
-    const total = remaining.reduce((sum, value) => sum + value, 0);
-    workspaceLayout[axis] = total > 0 ? remaining.map(value => value / total) : [1];
-  }
-  // The pane goes with the document, and takes its canvas with it. Removing a pane does not move
-  // any other pane, so no surviving canvas is re-parented by a close.
   if (target.container) paneSeedObserver.unobserve(target.container);
   target.programReadiness?.overlay?.remove();
   target.pane?.remove();
   target.container = null;
   target.pane = null;
   paneRenderedSize.delete(target.id);
-  workspace.close(id);
+}
+
+function removeClosedDocumentShares(targets) {
+  if (workspaceLayout.mode !== 'grid') {
+    const axis = workspaceLayout.mode === 'horizontal' ? 'columnShares' : 'rowShares';
+    const closing = new Set(targets);
+    const remaining = workspaceLayout[axis].filter((_, index) =>
+      !closing.has(workspace.documents[index]));
+    const total = remaining.reduce((sum, value) => sum + value, 0);
+    workspaceLayout[axis] = total > 0 ? remaining.map(value => value / total) : [1];
+  }
+}
+
+function projectWorkspaceAfterDocumentClose() {
   applyActiveDocument();
   syncPaneLayout();
   reconcileActiveRenderModeRenderer();
   syncActiveDocumentChrome();
+}
+
+function closeDocument(id) {
+  const target = workspace.find(id);
+  if (!target) return false;
+  captureActiveDocument();
+  removeClosedDocumentShares([target]);
+  teardownDocument(target);
+  workspace.close(id);
+  projectWorkspaceAfterDocumentClose();
+  scheduleWorkspacePersistence();
+  return true;
+}
+
+function closeDocumentSnapshot(snapshot) {
+  captureActiveDocument();
+  const targets = resolveDocumentCloseSnapshot(workspace, snapshot);
+  if (!targets.length) return false;
+  removeClosedDocumentShares(targets);
+  targets.forEach(teardownDocument);
+  workspace.closeMany(targets.map(target => target.id));
+  projectWorkspaceAfterDocumentClose();
+  scheduleWorkspacePersistence();
   return true;
 }
 
@@ -2499,6 +3425,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
   document_.execution.executionId = executionId;
   document_.execution.processInstanceId = processInstanceId;
   document_.execution.graphVersion = graphVersion;
+  document_.execution.paused = false;
   document_.execution.reconciliationState = 'known';
   document_.execution.reconciliationClient = reconciliationClient;
   document_.execution.monitoringFlow ||= createMonitoringRuntimeState();
@@ -2510,8 +3437,11 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
   }
   if (document_ === workspace.active) {
     activeExecutionId = executionId;
+    activeExecutionPaused = false;
+    activeExecutionCommandInFlight = false;
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
+    if (humanTaskController) void configureHumanTasks(document_);
   }
   refreshCommands();
 }
@@ -2520,6 +3450,15 @@ function setExecutionReconciliationState(owner, state) {
   owner.execution.reconciliationState = state;
   if (owner.id === workspace.activeId) activeExecutionReconciliation = state;
   refreshCommands();
+}
+
+function setExecutionPaused(owner, paused) {
+  const next = Boolean(paused);
+  if (owner.execution.paused === next) return false;
+  owner.execution.paused = next;
+  if (owner.id === workspace.activeId) activeExecutionPaused = next;
+  refreshCommands();
+  return true;
 }
 
 // The auxiliary panels are single and follow the active document, so switching document has to
@@ -2531,6 +3470,9 @@ function syncActiveDocumentChrome() {
   const hasDocument = Boolean(workspace.active);
   window.document.getElementById('graph-title').textContent = hasDocument ? graphDisplayName : 'No graph loaded';
   window.document.title = hasDocument ? `${graphDisplayName} — Ravenroot UI` : 'Ravenroot UI';
+  const modeLabel = window.document.getElementById('graph-mode-label');
+  if (modeLabel) modeLabel.textContent = hasDocument
+    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
   // Play is shared chrome and has to describe the document in front of the user: with one button and
   // several documents, a run still in flight in one of them must not lock the others out.
   //
@@ -2739,10 +3681,8 @@ function initCy(elements, gd, options = {}) {
     setModifyMode(false);
     editHistory.reset();
     updateHistoryUi();
-    // A genuinely new document's font is its own, starting from its own default — not whatever the
-    // slider happened to show for the document this one is replacing (UI-12). `rebuildGraph`
-    // is the only same-`gd` caller, so ordinary edits never reach this reset.
-    fontSize = DEFAULT_FONT_SIZE;
+    // Activation has already loaded this document's font into the working view. Replacement
+    // explicitly resets that view before loading; reading the record here could revive its old font.
   }
 
   // Register layout extensions (safe re-registration)
@@ -2751,12 +3691,14 @@ function initCy(elements, gd, options = {}) {
   }
   if (typeof cytoscapeElk !== 'undefined') {
     try { cytoscape.use(cytoscapeElk); } catch(e) { /* already registered */ }
+    try { registerLayeredLayout(cytoscape); } catch(e) { /* already registered */ }
   }
   if (typeof cytoscapeEuler !== 'undefined') {
     try { cytoscape.use(cytoscapeEuler); } catch(e) { /* already registered */ }
   }
 
   if (cy) {
+    destroyDesignVisualGroups(workspace.active, cy);
     releaseCanvasZoomBridge(cy);
     destroySelectionOverlay(cy);
     destroyNodeActionOverlay(cy);
@@ -2791,6 +3733,7 @@ function initCy(elements, gd, options = {}) {
   window.cy = cy;
   if (workspace.active) workspace.active.cy = cy;
   const rendererOwner = workspace.active;
+  if (rendererOwner) rendererOwner.graph = gd;
   if (rendererOwner) registerCytoscapeRenderer(rendererOwner, cy);
 
   // Whether a layout is in flight, tracked per instance so that a pane which changes size mid-layout
@@ -2808,11 +3751,14 @@ function initCy(elements, gd, options = {}) {
     if (e.target === cy) {
       elementSelectionAtPointerStart.delete(e.cy);
     } else {
+      const captured = stageSelectionAtPointerStart.get(e.cy);
+      const capturedMatches = captured?.owner === rendererOwner
+        && captured.rendererToken === (rendererFor(rendererOwner)?.token || null);
       elementSelectionAtPointerStart.set(e.cy, {
         owner: rendererOwner,
         rendererToken: rendererFor(rendererOwner)?.token || null,
         elementId: e.target.id(),
-        selectedIds: e.cy.$(':selected').map(element => element.id()),
+        selectedIds: capturedMatches ? captured.selectedIds : e.cy.$(':selected').map(element => element.id()),
         additive: isAdditiveSelection(e.originalEvent),
       });
     }
@@ -2878,9 +3824,15 @@ function initCy(elements, gd, options = {}) {
   // In Editing, dragging a node draws a new edge; dragging an edge near one of its ends moves that end.
   // Both open the same gesture the keyboard opens, so the rules and the wording cannot diverge.
   cy.on('tapstart', 'node', e => {
-    if (!prepareEdgeGestureOwner(rendererOwner, e.cy)
-        || !modifyEnabled || navigationEnabled || connectArmed || edgeGestureSession
-        || !nodeCanSourceEdge(e.target.selected())) return;
+    const intent = pointerNodeGestureIntent({
+      editing: modifyEnabled,
+      navigating: navigationEnabled,
+      connectArmed,
+      edgeGestureActive: Boolean(edgeGestureSession),
+      selectedAtPointerStart: nodeWasSelectedAtPointerStart(rendererOwner, e.cy, e.target.id()),
+      sourceEligible: nodeCanSourceEdge(e.target.selected()),
+    });
+    if (!prepareEdgeGestureOwner(rendererOwner, e.cy) || intent !== 'connect') return;
     // A press records only a private candidate. Visual authoring starts after the pointer crosses
     // the accessible intent threshold, so a plain click remains selection and never flashes an
     // edge preview or leaves "Connecting…" behind in the live region or inspector.
@@ -3009,12 +3961,19 @@ function initCy(elements, gd, options = {}) {
     // would restore pre-layout coordinates and the nodes would jump somewhere the user never saw.
     syncGraphPositions();
     const grabbed = e.target.selected() ? e.cy.nodes(':selected').union(e.target) : e.target;
+    const groupMoves = grabbed.map(node => {
+      const group = groupForVisibleNode(node.id(), rendererOwner);
+      return group ? { id: node.id(), position: { ...node.position() }, members: group.memberNodeIds.map(id => ({
+        id, position: { ...e.cy.getElementById(id).position() },
+      })) } : null;
+    }).filter(Boolean);
     dragSnapshot = {
       owner: rendererOwner,
       cy: e.cy,
       graph: graphData,
       history: editHistory,
       nodes: grabbed.map(node => ({ id: node.id(), position: { ...node.position() } })),
+      groupMoves,
     };
   });
   cy.on('free', 'node', e => {
@@ -3027,7 +3986,18 @@ function initCy(elements, gd, options = {}) {
       .map(entry => snapshot.cy.getElementById(entry.id))
       .filter(element => element.nonempty())
       .map(element => ({ id: element.id(), ox: element.position('x'), oy: element.position('y') }));
-    if (!moveNodesTo(snapshot.graph, positions, snapshot.history)) return;
+    for (const group of snapshot.groupMoves || []) {
+      const end = snapshot.cy.getElementById(group.id).position();
+      const dx = end.x - group.position.x; const dy = end.y - group.position.y;
+      for (const member of group.members) {
+        const position = { x: member.position.x + dx, y: member.position.y + dy };
+        snapshot.cy.getElementById(member.id).position(position);
+        positions.push({ id: member.id, ox: position.x, oy: position.y });
+      }
+    }
+    if (!moveNodesTo(snapshot.graph, positions, snapshot.history,
+      snapshot.groupMoves?.length ? 'Move visual group' : null)) return;
+    refreshVisualGroups(snapshot.owner);
     updateHistoryUi();
   });
 
@@ -3036,6 +4006,7 @@ function initCy(elements, gd, options = {}) {
   // notifications into one recalculation per animation frame.
   cy.on('position', 'node', event => {
     const owner = rendererOwner;
+    if (groupProjection(owner)?.syntheticIds.has(event.target.id())) return;
     if (!owner || event.cy !== owner.cy || !['n8n4', 'cyto'].includes(owner.visualStyle)) return;
     if (owner.layoutMode === 'hierarchical') {
       if (owner.cytoEdgeGeometryRaf != null) return;
@@ -3043,6 +4014,18 @@ function initCy(elements, gd, options = {}) {
         owner.cytoEdgeGeometryRaf = null;
         if (owner.cy !== event.cy || owner.layoutMode !== 'hierarchical') return;
         applyHierarchicalEdgeRoutes(owner.cy);
+      });
+      return;
+    }
+    if (isLayeredMode(owner.layoutMode)) {
+      // The animated arrangement itself publishes its routes once, after `layoutstop`; only a
+      // later manual move needs edges repainted, and then only the moved node's edges leave the
+      // drawing while every other route stays exactly as drawn.
+      if (owner.layoutBusy || owner.cytoEdgeGeometryRaf != null) return;
+      owner.cytoEdgeGeometryRaf = requestAnimationFrame(() => {
+        owner.cytoEdgeGeometryRaf = null;
+        if (owner.cy !== event.cy || !isLayeredMode(owner.layoutMode)) return;
+        applyLayeredRoutes(owner.cy, owner);
       });
       return;
     }
@@ -3090,6 +4073,23 @@ function initCy(elements, gd, options = {}) {
   const instance = cy;
   const instanceFontSize = fontSize;
   onFontSize(instanceFontSize, instance);
+  if (rendererOwner?.canvasState && documentChanged) {
+    const saved = normalizedCanvasState(rendererOwner.canvasState, gd);
+    instance.batch(() => Object.entries(saved.positions).forEach(([id, position]) => instance.getElementById(id).position(position)));
+    if (saved.zoom && saved.pan) instance.viewport({ zoom: saved.zoom, pan: saved.pan });
+    applyStableSelection(instance, saved.selectedIds);
+    rendererOwner.cursorId = saved.focusNodeId;
+    graphCursorId = saved.focusNodeId;
+    rendererOwner.selectedVisualGroupId = saved.selectedGroupId;
+  }
+  refreshVisualGroups(rendererOwner);
+  if (documentChanged && rendererOwner?.canvasState?.selectedGroupId) {
+    const savedGroup = groupProjection(rendererOwner)?.groups.find(group => group.id === rendererOwner.canvasState.selectedGroupId);
+    if (savedGroup) {
+      const id = savedGroup.collapsed ? savedGroup.summaryId : savedGroup.headerId;
+      applyStableSelection(instance, [id]); setGraphCursor(id);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3251,6 +4251,8 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
+  owner?.visualGroupsRenderer?.destroy();
+  if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
   const renderer = rendererFor(owner);
   if (!renderer) return;
@@ -3400,6 +4402,9 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
       : 130;
     return {
       id: e.id(), source: e.source().id(), target: e.target().id(),
+      edgeType: e.data('edgeType'), parallel: e.data('parallel'), outcome: e.data('outcome'),
+      status: e.data('status'), command: e.data('command'), lineStyle: e.style('line-style'),
+      dashPattern: e.style('line-dash-pattern'),
       baseWidth: 1.8, restLen, color,
       label: e.data('label') || '',
       configuredWeight: Number.isFinite(traffic) ? traffic : null,
@@ -3439,13 +4444,19 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     attraction: initAttr,
     repulsion: initRep,
     initialTransform: designViewport,
-    isLive: () => layoutRequestIsCurrent(token) && rendererSessions.isLive(renderer.token),
+    // Mount eligibility belongs to the layout request; a mounted simulation belongs to the
+    // renderer generation. Presentation toggles may retire pending layouts without retiring it.
+    isLive: () => rendererSessions.isLive(renderer.token) && workspace.find(owner.id) === owner && owner.cy === target,
     onViewportChange: () => {
       if (owner === workspace.active) scheduleMinimap(owner);
     },
   });
   renderer.elasticMount = elasticMount;
   Object.assign(renderer, elasticMount);
+  refreshVisualGroups(owner);
+  // The attention projection belongs to the document, so a renderer switch must paint the already
+  // known counts immediately instead of waiting for the next server poll to change them.
+  applyHumanTaskProjection(owner);
 }
 
 function isN8nFamilyLayout(name = visualStyle) {
@@ -3496,11 +4507,11 @@ function applyElasticVisualStyle() {
       // WIDTH and COLOUR are restated here — the border is normally the canvas colour (a separator,
       // not a signal), so a neutral ring reads as clearly here as elsewhere. `border-style` is
       // deliberately NOT written: the dash belongs to `createStylesheet`'s `node[?bypassed]` rule, and
-      // writing it inline is what made it go stale on the autosave path (see `refreshBypassBorder`).
+      // writing it inline would make the value stale after an in-place Inspector refresh.
       'border-width': node.data('bypassed') ? 2.5 : 1.5,
       'border-color': node.data('bypassed') ? rendererPalette.nodeType.system : rendererPalette.canvas,
       'border-opacity': 0.9,
-      label: bypassedNodeName(node.data('name'), node.data('bypassed')),
+      label: runtimeNodeLabel(node),
       color: rendererPalette.nodeText,
       'font-size': Math.max(10, Math.min(fontPx, 14)) + 'px',
       'font-weight': '500',
@@ -3559,7 +4570,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
       // This family includes the DEFAULT `cyto` style, so this is the border most authors
       // actually see. The neutral ring is restated here because the per-type `bd` written inline
       // would otherwise beat the stylesheet; the per-type icon tile is untouched, so the node stays
-      // identifiable. `border-style` is deliberately absent — see `refreshBypassBorder`.
+      // identifiable. `border-style` is deliberately absent so the data selector remains authoritative.
       'border-color':          n.data('bypassed') ? rendererPalette.nodeType.system : bd,
       'border-opacity':        1,
       'background-image':      makeN8nSVG(ic, t),
@@ -3580,6 +4591,9 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
     });
     applyRuntimeVisual(n);
   });
+  // Restated after the per-node style above, which writes this family's placement inline: a
+  // restyle must not drag the names back under the cards of a top-down drawing.
+  applyLayeredLabelSide(target, layeredLabelSide(owner?.layoutMode), owner);
 }
 
 // ── Snap all nodes to a regular grid ─────────────────────────────────────
@@ -3781,6 +4795,61 @@ function scheduleHierarchicalEdgeRoutes(owner, target, token, complete = null) {
   });
 }
 
+// Where the node name is painted while a layered arrangement is displayed. A top-down drawing
+// routes through the channel under each card — exactly where the n8n family paints the name — so
+// that arrangement carries the name beside the card instead. The drawing measures the labels only
+// after this has run, so the two never disagree.
+const SIDE_LABEL_STYLE = Object.freeze({
+  'text-valign': 'center', 'text-halign': 'right', 'text-margin-x': 10, 'text-margin-y': 0,
+});
+const N8N_LABEL_STYLE = Object.freeze({
+  'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-x': 0, 'text-margin-y': 10,
+});
+const LABEL_PLACEMENT_PROPERTIES = 'text-valign text-halign text-margin-x text-margin-y';
+
+// Any side but `right` hands the name back to whoever paints this render mode: under the card in
+// the n8n family, and centred inside the node by the base stylesheet everywhere else. Restoring by
+// removal rather than by writing one placement is what keeps the non-n8n modes untouched.
+function applyLayeredLabelSide(target = cy, side = 'bottom', owner = workspace.active) {
+  if (!target) return;
+  if (side === 'right') {
+    target.nodes().style(SIDE_LABEL_STYLE);
+    return;
+  }
+  target.nodes().removeStyle(LABEL_PLACEMENT_PROPERTIES);
+  if (isN8nFamilyLayout(owner?.visualStyle ?? visualStyle)) target.nodes().style(N8N_LABEL_STYLE);
+}
+
+// The layered arrangements draw placement and routing as one result. Edges the drawing still
+// describes are painted from it; a self-loop keeps the Cyto loop; an edge the drawing cannot
+// vouch for — authored since, or with an endpoint moved by hand — takes the dynamic Cyto route.
+function applyLayeredRoutes(target = cy, owner = workspace.documents.find(document_ => document_.cy === target)) {
+  if (!target) return;
+  const drawing = layeredDrawingOf(target);
+  if (!drawing) return applyCytoEdgeCurves(target, owner);
+  const stale = applyLayeredEdgeRoutes(target, drawing, { loop: edge => applyCustomLoop(edge, { cytoMode: true }) });
+  if (!stale.length) return;
+  const routes = rendererRouteSet(target, 'cyto', null, owner);
+  stale.forEach(edge => {
+    const route = routes.get(edge.id());
+    if (route) applyViewerUnbundledRoute(edge, route, { lineCap: 'round' });
+  });
+}
+
+function scheduleLayeredEdgeRoutes(owner, target, token, complete = null) {
+  if (!layoutRequestIsCurrent(token)) return;
+  owner.layoutDeferredRaf = requestAnimationFrame(() => {
+    owner.layoutDeferredRaf = null;
+    if (layoutRequestIsCurrent(token)) {
+      if (!layeredDrawingOf(target) && owner === workspace.active) {
+        announceGraph('The layered arrangement could not be computed. Node positions are unchanged.');
+      }
+      applyLayeredRoutes(target, owner);
+    }
+    complete?.();
+  });
+}
+
 function scheduleN8n3EdgeCurves(owner, target, token, complete = null) {
   if (!layoutRequestIsCurrent(token)) return;
   owner.layoutDeferredRaf = requestAnimationFrame(() => {
@@ -3859,29 +4928,29 @@ function scheduleN8n2EdgeCurves(owner, target, token, complete = null) {
   });
 }
 
-function restoreDefaultStyle(target = cy, owner = workspace.active) {
+function restoreDefaultStyle(target = cy, owner = workspace.active, { preserveEdgeGeometry = false } = {}) {
   if (!target) return;
   if (owner) owner.n8nActive = false;
   if (owner === workspace.active) n8nActive = false;
   target.nodes().removeStyle();
-  target.edges().removeStyle();
+  if (!preserveEdgeGeometry) target.edges().removeStyle();
 }
 
-function applyVisualStyle(name, target = cy, owner = workspace.active) {
+function applyVisualStyle(name, target = cy, owner = workspace.active, { preserveEdgeGeometry = false } = {}) {
   if (!target || !owner) return;
   name = normalizeVisualStyle(name);
   if (owner === workspace.active) visualStyle = name;
   owner.visualStyle = name;
-  restoreDefaultStyle(target, owner);
+  restoreDefaultStyle(target, owner, { preserveEdgeGeometry });
   if (isN8nFamilyLayout(name)) {
     owner.n8nActive = true;
     if (owner === workspace.active) n8nActive = true;
     applyN8nNodeStyle(target, owner);
-    if (name === 'n8n4') applyN8n4EdgeCurves(target);
-    else if (name === 'cyto') applyCytoEdgeCurves(target, owner);
-    else if (name === 'n8n2') applyN8n2EdgeCurves(target);
-    else if (name === 'n8n3') applyN8n3EdgeCurves(target);
-    else target.edges().style({
+    if (!preserveEdgeGeometry && name === 'n8n4') applyN8n4EdgeCurves(target);
+    else if (!preserveEdgeGeometry && name === 'cyto') applyCytoEdgeCurves(target, owner);
+    else if (!preserveEdgeGeometry && name === 'n8n2') applyN8n2EdgeCurves(target);
+    else if (!preserveEdgeGeometry && name === 'n8n3') applyN8n3EdgeCurves(target);
+    else if (!preserveEdgeGeometry) target.edges().style({
       'curve-style': name === 'n8n' ? 'taxi' : 'round-taxi',
       'taxi-direction': 'auto',
       'taxi-turn': '50%',
@@ -3947,6 +5016,7 @@ function applyActiveEdgeVisualContract(target = cy, mode = visualStyle) {
   });
   if (route.family === 'taxi' && mode === 'n8n') applyN8nBaseEdgeStyle(target, mode);
   else if (routeMode === 'hierarchical') applyHierarchicalEdgeRoutes(target);
+  else if (isLayeredMode(owner?.layoutMode) && mode === 'cyto') applyLayeredRoutes(target, owner);
   else if (route.family === 'round-taxi') applyN8n2EdgeCurves(target);
   else if (mode === 'n8n3') applyN8n3EdgeCurves(target);
   // N8N4 is deliberately hybrid per edge. Never choose a renderer-wide fallback from the last
@@ -3984,7 +5054,7 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // as ELK-backed modes even though only ELK modes need the per-document serialisation slot. Keeping
 // the two concerns separate prevents an ELK -> native queue hand-off from briefly publishing idle
 // while the replacement layout is already registered and about to start.
-const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', ...ELK_LAYOUT_MODES]);
+const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
 const DESIGN_ARRANGEMENTS = Object.freeze({
@@ -3992,6 +5062,9 @@ const DESIGN_ARRANGEMENTS = Object.freeze({
   flow: Object.freeze({ layout: 'dagre' }),
   organic: Object.freeze({ layout: 'cose' }),
   keep: Object.freeze({ preservePositions: true }),
+  // Additive layered drawings (ADR 0036). The four entries above are untouched by design.
+  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
+  'layered-down': Object.freeze({ layout: 'layered-down' }),
 });
 
 function renderModeLabel(mode) {
@@ -4020,6 +5093,7 @@ function syncOwnedLayoutBusy(owner) {
 
 function completeOwnedLayout(job) {
   const { owner, token } = job;
+  const current = layoutRequestIsCurrent(token);
   if (job.fitAfterLayout && layoutRequestIsCurrent(token)) {
     if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
     else {
@@ -4029,7 +5103,7 @@ function completeOwnedLayout(job) {
     }
   }
   if (job.recordPositions && layoutRequestIsCurrent(token)
-      && owner.graph?.format !== 'graphify' && owner.cy === job.target) {
+      && documentIsEditable(owner) && owner.graph?.format !== 'graphify' && owner.cy === job.target) {
     const positions = job.target.nodes().map(node => ({
       id: node.id(), ox: node.position('x'), oy: node.position('y'),
     }));
@@ -4044,6 +5118,7 @@ function completeOwnedLayout(job) {
   layoutJobs.delete(token.generation);
   const released = token.kind === 'elk' ? layoutSessions.complete(token).start : null;
   syncOwnedLayoutBusy(owner);
+  if (current && !released && owner.layoutMode !== 'elastic') refreshVisualGroups(owner);
   if (released) runOwnedLayout(released);
 }
 
@@ -4063,6 +5138,7 @@ function finishOwnedLayout(token) {
       }
     }
     const deferredRouting = token.mode === 'hierarchical' ? scheduleHierarchicalEdgeRoutes
+      : isLayeredMode(token.mode) ? scheduleLayeredEdgeRoutes
       : owner.visualStyle === 'n8n2' ? scheduleN8n2EdgeCurves
       : owner.visualStyle === 'n8n3' ? scheduleN8n3EdgeCurves
         : owner.visualStyle === 'n8n4' ? scheduleN8n4EdgeCurves
@@ -4196,6 +5272,14 @@ function runOwnedLayout(token) {
     fit: !fitAfterLayout,
     animate,
   }));
+  else if (isLayeredMode(token.mode)) nativeLayout = target.layout({
+    name: LAYERED_LAYOUT_NAME, mode: token.mode,
+    animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
+    fit: !fitAfterLayout, padding: 70,
+    prepareLabels: side => applyLayeredLabelSide(target, side, owner),
+    isCurrent: () => layoutRequestIsCurrent(token),
+    onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
+  });
   else if (token.mode === 'preset') {
     target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
     target.fit(60);
@@ -4253,6 +5337,15 @@ function resumePendingElasticLayout(owner) {
 function setLayout(name, options = {}) {
   const owner = workspace.active;
   const target = cy;
+  if (owner && target) {
+    const selectedGroup = selectedVisualGroup(owner);
+    if (selectedGroup) {
+      owner.restoredVisualGroupSelection = selectedGroup.id;
+      owner.restoredVisualGroupFocus = selectedGroup.id;
+    }
+  }
+  finishVisualGroups(owner);
+  owner?.visualGroupsRenderer?.suspend();
   // Native `stop()` may synchronously publish a final frame, so Keep must capture the canvas before
   // the session request invokes cancellation callbacks for the layout it replaces.
   const retainedPositions = options.keepPositions && target ? target.nodes().map(node => ({
@@ -4265,6 +5358,12 @@ function setLayout(name, options = {}) {
   // Retire only stale dynamic route publications from the previous mode. The layout completion RAF
   // remains independently owned so rapid requests can still cancel/settle their session correctly.
   clearDynamicEdgeGeometry(owner);
+  // A layered drawing describes one arrangement; leaving the layered modes discards it so no
+  // later repaint can attach an old drawing to positions another layout produced.
+  if (!isLayeredMode(name)) clearLayeredDrawing(target);
+  // Node names follow the incoming arrangement: beside the card for the top-down drawing, back to
+  // this render mode's own placement for everything else, including a plain render-mode change.
+  applyLayeredLabelSide(target, layeredLabelSide(name), owner);
   layoutMode = name;
   if (owner) {
     owner.layoutMode = name;
@@ -4283,7 +5382,9 @@ function setLayout(name, options = {}) {
   syncPaneLayout();
 
   let job;
-  const kind = ELK_LAYOUT_MODES.has(name) ? 'elk' : 'native';
+  // Layered drawings share the ELK serialisation contract: one asynchronous engine run per
+  // document at a time, cancelled before it starts and otherwise allowed to settle.
+  const kind = ELK_LAYOUT_MODES.has(name) || isLayeredMode(name) ? 'elk' : 'native';
   const request = layoutSessions.request({
     documentId: owner.id,
     cy: target,
@@ -4332,6 +5433,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const layout = semanticMode === 'design' ? 'cyto' : 'elastic';
   target.batch(() => applyVisualStyle(style, target, owner));
   setLayout(layout);
+  scheduleWorkspacePersistence();
 }
 
 function arrangeDesign(name, { skipDraftGuard = false } = {}) {
@@ -4508,18 +5610,17 @@ function traceDownstream(startNode) {
   // Build a plain adjacency snapshot of the graph and delegate the actual BFS to
   // traceDownstreamIds (graph-trace.js), which is unit-tested independently of Cytoscape.
   // See graph-trace.js for why 'error' does NOT stop the trace.
-  const adjacency = new Map();
-  cy.nodes().forEach(node => {
-    const outEdges = [];
-    node.outgoers('edge').forEach(edge => {
-      outEdges.push({ edgeId: edge.id(), targetId: edge.target().id() });
-    });
-    adjacency.set(node.id(), { nodeType: node.data('nodeType'), outEdges });
-  });
-
-  const { nodeIds, edgeIds } = traceDownstreamIds(adjacency, startNode.id());
-  const visitedNodes = cy.nodes().filter(n => nodeIds.has(n.id()));
-  const visitedEdges = cy.edges().filter(e => edgeIds.has(e.id()));
+  const adjacency = new Map(graphData.nodes.map(node => [node.id, { nodeType: node.nodeType, outEdges: [] }]));
+  graphData.edges.forEach(edge => adjacency.get(edge.source)?.outEdges.push({ edgeId: edge.id, targetId: edge.target }));
+  const group = groupForVisibleNode(startNode.id());
+  const start = group ? Symbol('visual-group-trace') : startNode.id();
+  if (group) adjacency.set(start, { nodeType: '', outEdges: group.memberNodeIds.map(id => ({ edgeId: null, targetId: id })) });
+  const { nodeIds, edgeIds } = traceDownstreamIds(adjacency, start);
+  const projection = groupProjection();
+  const representatives = new Set([...nodeIds].map(id => projection?.representativeByNodeId.get(id) || id));
+  const visitedNodes = cy.nodes(':visible').filter(n => representatives.has(n.id()));
+  const visitedEdges = cy.edges(':visible').filter(e => edgeIds.has(e.id())
+    || projection?.originalEdgeIdsByVisibleId.get(e.id())?.some(id => edgeIds.has(id)));
 
   traceActive = true;
 
@@ -4558,8 +5659,14 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
   const edges = cy.edges(':selected');
   const desiredIds = [...nodes.map(node => node.id()), ...edges.map(edge => edge.id())];
   if (!skipDraftGuard && modifyEnabled && inspectorDraft?.form.isConnected
-      && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.nodeId) return;
+      && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.elementId) return;
   if (!skipDraftGuard && guardInspectorSelectionChange(desiredIds)) return;
+  const visualGroup = nodes.length === 1 && edges.empty() ? groupForVisibleNode(nodes.first().id()) : null;
+  if (visualGroup) { showVisualGroupInfo(visualGroup); return; }
+  if (nodes.some(node => groupProjection()?.syntheticIds.has(node.id()))) {
+    showInspectorMessage('Mixed visual groups and real elements. Select one group to manage it, or real nodes to edit.');
+    return;
+  }
   if (nodes.length > 1 && edges.empty()) {
     showMultiNodeInfo(nodes.map(node => node.id()));
   } else if (nodes.length === 1 && edges.empty()) {
@@ -4582,6 +5689,7 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
 
 function showMultiNodeInfo(nodeIds) {
   contextualHelp.dismiss();
+  humanTaskController?.selectNode(null);
   revealInspector();
   const nodes = nodeIds.map(id => graphData?.nodeMap?.[id]).filter(Boolean);
   if (nodes.length < 2) return;
@@ -4744,6 +5852,8 @@ function showReadOnlyProgramReadiness(model, state) {
 }
 
 function showNodeInfo(node) {
+  const visualGroup = groupForVisibleNode(node.id());
+  if (visualGroup) { showVisualGroupInfo(visualGroup); return; }
   // Selecting or authoring reveals the Inspector: a selection that silently does nothing
   // because a panel is closed is worse than a panel reappearing.
   revealInspector();
@@ -4752,6 +5862,7 @@ function showNodeInfo(node) {
   document.getElementById('info-title').textContent = model.name || model.id;
   if (graphData.format === 'graphify') {
     showReadOnlyElement(model, 'Graphify node');
+    humanTaskController?.selectNode(null);
     return;
   }
   if (!modifyEnabled) {
@@ -4761,12 +5872,19 @@ function showNodeInfo(node) {
       : null;
     if (readiness && (readiness.phase === 'FAILED' || readiness.phase === 'RETIRED')) {
       showReadOnlyProgramReadiness(model, readiness);
+      humanTaskController?.selectNode(null);
       return;
     }
     showReadOnlyElement(model, 'Workflow node');
+    if (model.behavior === 'human-task') {
+      void humanTaskController?.selectNode(model.id);
+    } else humanTaskController?.selectNode(null);
     return;
   }
   renderNodeForm(model, false);
+  if (model.behavior === 'human-task') {
+    void humanTaskController?.selectNode(model.id);
+  } else humanTaskController?.selectNode(null);
 }
 
 function edgeEndpointLabel(edge) {
@@ -4785,6 +5903,20 @@ function selectionBadgeLabel(instance) {
 }
 
 function showEdgeInfo(edge) {
+  const projected = groupProjection();
+  if (projected?.syntheticIds.has(edge.id())) {
+    retireInspectorDraft(); revealInspector();
+    document.getElementById('info-title').textContent = 'Original connections';
+    const body = document.getElementById('info-body'); body.replaceChildren();
+    for (const id of projected.originalEdgeIdsByVisibleId.get(edge.id()) || []) {
+      const real = graphData.edges.find(item => item.id === id);
+      const line = document.createElement('p');
+      line.textContent = `${id}: ${real?.source} → ${real?.target} · ${real?.outcome || ''}`;
+      body.append(line);
+    }
+    return;
+  }
+  humanTaskController?.selectNode(null);
   // Selecting or authoring reveals the Inspector: a selection that silently does nothing
   // because a panel is closed is worse than a panel reappearing.
   revealInspector();
@@ -4809,6 +5941,7 @@ function showEdgeInfo(edge) {
 
 function resetInfoContents() {
   contextualHelp.dismiss();
+  humanTaskController?.selectNode(null);
   document.getElementById('info-title').textContent = 'Inspector';
   document.getElementById('info-body').innerHTML =
     '<div class="info-empty">Select a node or edge, or create a new one.</div>';
@@ -4877,7 +6010,7 @@ function readNodeEditorPatch(form, model) {
 }
 
 function inspectNodeDraft(draft = inspectorDraft) {
-  const model = draft && graphData?.nodeMap?.[draft.nodeId];
+  const model = draft && graphData?.nodeMap?.[draft.elementId];
   if (!draft || !model || draft.documentId !== workspace.activeId || !draft.form.isConnected) {
     return { valid: false, changed: false, patch: null, model: null };
   }
@@ -4895,39 +6028,112 @@ function inspectNodeDraft(draft = inspectorDraft) {
   }
 }
 
-/**
- * Re-applies the one bypass carrier an INLINE style owns after an autosave changes a
- * node's data without re-running a visual-style pass.
- *
- * The dash needs no help: it lives in `createStylesheet`'s `node[?bypassed]` rule, and a Cytoscape
- * selector re-evaluates the moment the data changes. That is exactly why nothing writes
- * `border-style` inline any more — an inline write wins over the stylesheet and then goes stale here,
- * on the ordinary editing path, which is the measured defect this function exists to close: switching
- * a node off through autosave updated its label and left its border drawn as an executing node's.
- *
- * The COLOUR does need help, and only in the n8n family — which includes the default `cyto` style, so
- * it is the border most authors actually see. Those styles write a per-type border colour inline that
- * would otherwise beat the stylesheet.
- *
- * A node the runtime is painting is left alone: `applyRuntimeVisual` owns its border while a run is
- * in flight, and what the run is doing right now outranks what the document says it will do next time.
- */
-function refreshBypassBorder(node) {
-  if (!isN8nFamilyLayout()) return;
-  if ((node.data('runtimeState') || 'idle') !== 'idle') return;
-  const ordinary = N8N_BORDER[node.data('nodeType')] || rendererPalette.nodeBorder;
-  node.style('border-color', node.data('bypassed') ? rendererPalette.nodeType.system : ordinary);
+function inspectEdgeDraft(draft = inspectorDraft) {
+  const model = draft && graphData?.edges?.find(edge => edge.id === draft.elementId);
+  if (!draft || !model || draft.documentId !== workspace.activeId || !draft.form.isConnected) {
+    return { valid: false, changed: false, patch: null, model: null };
+  }
+  if (!draft.form.checkValidity()) return { valid: false, changed: draft.dirty, patch: null, model };
+  const id = String(draft.form.elements.id.value ?? '');
+  const source = String(draft.form.elements.source.value || '');
+  const target = String(draft.form.elements.target.value || '');
+  if (!validateEdgeId(graphData, id, { existingId: model.id }).ok
+      || !validateEdgeConnection(graphData, { source, target, edgeId: model.id }).ok) {
+    return { valid: false, changed: draft.dirty, patch: null, model };
+  }
+  try {
+    const patch = readEdgeEditorPatch(draft.form, model);
+    return {
+      valid: true,
+      changed: draft.baseline ? edgePatchChanged(draft.baseline, patch) : draft.dirty,
+      patch,
+      model,
+    };
+  } catch {
+    return { valid: false, changed: draft.dirty, patch: null, model };
+  }
+}
+
+function inspectInspectorDraft(draft = inspectorDraft) {
+  return draft?.elementType === 'edge' ? inspectEdgeDraft(draft) : inspectNodeDraft(draft);
 }
 
 function syncAutosavedNodeRenderer(nodeId) {
-  const element = cy?.getElementById(nodeId);
+  const owner = workspace.active;
+  const target = cy;
+  const element = target?.getElementById(nodeId);
   if (!element?.nonempty()) return;
-  const rendered = buildElements(graphData).find(candidate =>
-    candidate.data?.id === nodeId && !Object.hasOwn(candidate.data, 'source'));
-  if (rendered) {
-    element.data(rendered.data);
-    refreshBypassBorder(element);
-  }
+  const selectedIds = target.$(':selected').map(candidate => candidate.id());
+  syncGraphRendererInPlace({ nodeIds: [nodeId], refreshDependentEdges: true });
+  if (!owner || workspace.active !== owner || owner.cy !== target || cy !== target || target.destroyed()) return;
+  applyStableSelection(target, selectedIds.filter(id => target.getElementById(id).nonempty()));
+  scheduleSelectionOverlay(target);
+}
+
+function syncAutosavedEdgeRenderer(edgeId) {
+  const element = cy?.getElementById(edgeId);
+  if (!element?.nonempty()) return;
+  syncGraphRendererInPlace({ edgeIds: [edgeId] });
+}
+
+function syncGraphRendererInPlace({
+  nodeIds = [], edgeIds = [], refreshDependentEdges = false, restoreModelPositionIds = null,
+} = {}) {
+  const owner = workspace.active;
+  const target = cy;
+  if (!owner || owner.cy !== target || !target || target.destroyed()) return false;
+  const rendered = buildElements(graphData);
+  const renderedNodes = new Map(rendered
+    .filter(candidate => !Object.hasOwn(candidate.data, 'source'))
+    .map(candidate => [candidate.data.id, candidate]));
+  const renderedEdges = new Map(rendered
+    .filter(candidate => Object.hasOwn(candidate.data, 'source'))
+    .map(candidate => [candidate.data.id, candidate]));
+  const allNodes = nodeIds === null;
+  const allEdges = edgeIds === null || refreshDependentEdges;
+  if (allNodes && (target.nodes().length !== renderedNodes.size
+      || target.nodes().some(node => !renderedNodes.has(node.id())))) return false;
+  if (allEdges && (target.edges().length !== renderedEdges.size
+      || target.edges().some(edge => !renderedEdges.has(edge.id())))) return false;
+  const nodes = allNodes ? [...renderedNodes.keys()] : nodeIds;
+  const edges = allEdges ? [...renderedEdges.keys()] : edgeIds;
+  let routingChanged = false;
+  target.batch(() => {
+    nodes.forEach(id => {
+      const element = target.getElementById(id);
+      const next = renderedNodes.get(id);
+      if (!next || element.empty()) return;
+      const before = {
+        x: element.position('x'), y: element.position('y'),
+        width: element.width(), height: element.height(),
+      };
+      element.data(next.data);
+      if (restoreModelPositionIds?.has(id)) element.position(next.position);
+      if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(element, owner);
+      else applyRuntimeVisual(element);
+      const after = {
+        x: element.position('x'), y: element.position('y'),
+        width: element.width(), height: element.height(),
+      };
+      routingChanged ||= Object.keys(before).some(key => before[key] !== after[key]);
+    });
+    edges.forEach(id => {
+      const element = target.getElementById(id);
+      const next = renderedEdges.get(id);
+      if (!next || element.empty()) return;
+      const endpointChanged = element.source().id() !== next.data.source
+        || element.target().id() !== next.data.target;
+      if (endpointChanged) element.move({ source: next.data.source, target: next.data.target });
+      element.data(next.data);
+      routingChanged ||= endpointChanged;
+    });
+    if (routingChanged) applyActiveEdgeVisualContract(target, owner.visualStyle);
+  });
+  updateStats();
+  buildLegend();
+  scheduleSelectionOverlay(target);
+  scheduleMinimap(owner);
+  return true;
 }
 
 function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
@@ -4938,30 +6144,56 @@ function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
   draft.dirty = assessment.changed;
   if (!assessment.valid) return false;
   if (!assessment.changed) return true;
-  const command = updateNodeFields(graphData, draft.nodeId, assessment.patch, editHistory, { coalesceKey });
+  const command = updateNodeFields(graphData, draft.elementId, assessment.patch, editHistory, { coalesceKey });
   if (!command) return false;
   draft.baseline = structuredClone(assessment.patch);
   draft.dirty = false;
-  syncAutosavedNodeRenderer(draft.nodeId);
+  syncAutosavedNodeRenderer(draft.elementId);
+  refreshJoinStatus(draft.form, graphData, graphData.nodeMap?.[draft.elementId]);
   updateHistoryUi();
   scheduleProgramGraphReadiness(workspace.active);
   return true;
 }
 
-function scheduleNodeDraftCommit(draft, immediate = false) {
+function commitEdgeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
+  if (!draft) return false;
+  clearTimeout(draft.timer);
+  draft.timer = null;
+  const assessment = inspectEdgeDraft(draft);
+  draft.dirty = assessment.changed;
+  if (!assessment.valid) return false;
+  if (!assessment.changed) return true;
+  const command = updateEdgeFields(graphData, draft.elementId, assessment.patch, editHistory,
+    { coalesceKey });
+  if (!command) return false;
+  draft.baseline = structuredClone(assessment.patch);
+  draft.dirty = false;
+  syncAutosavedEdgeRenderer(draft.elementId);
+  updateHistoryUi();
+  return true;
+}
+
+function commitInspectorDraft(draft = inspectorDraft, options = {}) {
+  if (!documentIsEditable(workspace.active)) return false;
+  return draft?.elementType === 'edge'
+    ? commitEdgeDraft(draft, options) : commitNodeDraft(draft, options);
+}
+
+function scheduleInspectorDraftCommit(draft, immediate = false) {
   if (!draft || draft !== inspectorDraft || !inspectorAutosave) return;
   clearTimeout(draft.timer);
-  const commit = () => commitNodeDraft(draft, { coalesceKey: draft.focusKey });
+  const commit = () => commitInspectorDraft(draft, { coalesceKey: draft.focusKey });
   if (immediate) commit();
   else draft.timer = setTimeout(commit, 180);
 }
 
-function bindNodeInspectorDraft(form, model, creating) {
+function bindInspectorDraft(form, model, elementType, creating) {
   if (creating) return;
   clearTimeout(inspectorDraft?.timer);
   const draft = {
     form,
-    nodeId: model.id,
+    elementType,
+    elementId: model.id,
     documentId: workspace.activeId,
     dirty: false,
     baseline: null,
@@ -4971,32 +6203,71 @@ function bindNodeInspectorDraft(form, model, creating) {
     lastFocusControl: null,
   };
   if (form.checkValidity()) {
-    try { draft.baseline = readNodeEditorPatch(form, model); } catch { /* invalid stays untouched */ }
+    try {
+      draft.baseline = elementType === 'edge'
+        ? readEdgeEditorPatch(form, model) : readNodeEditorPatch(form, model);
+    } catch { /* invalid stays untouched */ }
   }
   inspectorDraft = draft;
   form.addEventListener('focusin', event => {
-    if (!event.target.matches('input:not([readonly]), textarea')) return;
+    if (!event.target.matches('input:not([readonly]), textarea, select')) return;
+    draft.lastFocusControl = event.target;
+    if (!event.target.matches('input:not([readonly]):not([type="checkbox"]):not([type="radio"]), textarea')) return;
     if (draft.focusControl !== event.target) {
       draft.focusControl = event.target;
-      draft.lastFocusControl = event.target;
-      draft.focusKey = `node:${model.id}:edit:${++inspectorEditSequence}`;
+      draft.focusKey = `${elementType}:${model.id}:edit:${++inspectorEditSequence}`;
     }
   });
   form.addEventListener('focusout', event => {
     if (event.target !== draft.focusControl) return;
-    if (inspectorAutosave) commitNodeDraft(draft, { coalesceKey: draft.focusKey });
+    if (inspectorAutosave) commitInspectorDraft(draft, { coalesceKey: draft.focusKey });
     draft.focusControl = null;
     draft.focusKey = null;
   });
   form.addEventListener('input', () => {
     draft.dirty = true;
-    draft.dirty = inspectNodeDraft(draft).changed;
-    scheduleNodeDraftCommit(draft, false);
+    draft.dirty = inspectInspectorDraft(draft).changed;
+    scheduleInspectorDraftCommit(draft, false);
   });
   form.addEventListener('change', () => {
     draft.dirty = true;
-    draft.dirty = inspectNodeDraft(draft).changed;
-    scheduleNodeDraftCommit(draft, true);
+    draft.dirty = inspectInspectorDraft(draft).changed;
+    scheduleInspectorDraftCommit(draft, true);
+  });
+}
+
+function preserveNodeInspectorAfterSave({ owner, target, draft, selectedIds }) {
+  if (!owner || !target || workspace.active !== owner || owner.cy !== target || cy !== target
+      || target.destroyed() || draft?.documentId !== owner.id || !draft.form.isConnected) return;
+  const model = owner.graph?.nodeMap?.[draft.elementId];
+  const rendered = target.getElementById(draft.elementId);
+  if (!model || rendered.empty()) return;
+
+  // A node save updates the existing renderer element in place. Keep the same stable-ID selection
+  // authoritative as well: neither a data/style event nor a delayed click repair may turn saving
+  // into a selection change, and IDs from another document are never consulted here.
+  const intendedSelection = selectedIds.includes(draft.elementId) ? selectedIds : [draft.elementId];
+  invalidateStableSelection(target);
+  applyStableSelection(target, intendedSelection.filter(id => target.getElementById(id).nonempty()));
+  scheduleSelectionOverlay(target);
+
+  document.getElementById('info-title').textContent = model.name || model.id;
+  if (model.behavior === 'human-task') void humanTaskController?.selectNode(model.id);
+  else humanTaskController?.selectNode(null);
+
+  // Do not rebuild the form after editing an existing node: its controls already contain the
+  // committed values, while replacing the markup detaches the active edit session. Return focus to
+  // the last surviving editor control after a pointer submission; dynamically replaced controls
+  // fall back to the stable Name field.
+  const focusTarget = draft.lastFocusControl?.isConnected
+    ? draft.lastFocusControl : draft.form.elements.name;
+  queueMicrotask(() => {
+    if (workspace.active !== owner || owner.cy !== target || cy !== target
+        || target.destroyed() || inspectorDraft !== draft || !draft.form.isConnected) return;
+    const current = owner.graph?.nodeMap?.[draft.elementId];
+    if (!current || target.getElementById(draft.elementId).empty()) return;
+    const survivingFocus = focusTarget?.isConnected ? focusTarget : draft.form.elements.name;
+    survivingFocus?.focus?.({ preventScroll: true });
   });
 }
 
@@ -5007,9 +6278,9 @@ function retireInspectorDraft(form = null) {
 }
 
 function restoreDraftSelection(draft) {
-  const node = cy?.getElementById(draft.nodeId);
-  if (!node?.nonempty()) return;
-  applyStableSelection(cy, [draft.nodeId]);
+  const element = cy?.getElementById(draft.elementId);
+  if (!element?.nonempty()) return;
+  applyStableSelection(cy, [draft.elementId]);
 }
 
 function guardInspectorSelectionChange(desiredIds) {
@@ -5018,12 +6289,12 @@ function guardInspectorSelectionChange(desiredIds) {
     if (pendingInspectorTransition) restoreDraftSelection(pendingInspectorTransition.draft);
     return Boolean(pendingInspectorTransition);
   }
-  if (desiredIds.length === 1 && desiredIds[0] === draft.nodeId) return false;
+  if (desiredIds.length === 1 && desiredIds[0] === draft.elementId) return false;
   clearTimeout(draft.timer);
   draft.timer = null;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
-    if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+    if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
       openInspectorUnsavedDialog(draft, desiredIds, false);
       return true;
     }
@@ -5038,12 +6309,13 @@ function guardInspectorSelectionChange(desiredIds) {
   return true;
 }
 
-function openInspectorUnsavedDialog(draft, desiredIds, valid) {
+function openInspectorUnsavedDialog(draft, desiredIds, valid, { preserveDraft = false } = {}) {
   pendingInspectorTransition = {
     draft,
     desiredIds: [...desiredIds],
     origin: document.activeElement,
     complete: null,
+    preserveDraft,
   };
   restoreDraftSelection(draft);
   const dialog = document.getElementById('inspector-unsaved-dialog');
@@ -5062,7 +6334,7 @@ function completeInspectorTransition(action) {
   const pending = pendingInspectorTransition;
   if (!pending) return false;
   const dialog = document.getElementById('inspector-unsaved-dialog');
-  if (action === 'save' && !commitNodeDraft(pending.draft, { coalesceKey: pending.draft.focusKey })) {
+  if (action === 'save' && !commitInspectorDraft(pending.draft, { coalesceKey: pending.draft.focusKey })) {
     document.getElementById('inspector-unsaved-description').textContent =
       uiText('inspector.unsaved.invalidDescription');
     return false;
@@ -5078,8 +6350,18 @@ function completeInspectorTransition(action) {
   }
   pendingInspectorTransition = null;
   dialog.close();
-  retireInspectorDraft(pending.draft.form);
-  if (pending.complete) return Boolean(pending.complete());
+  const retainCommittedDraft = pending.preserveDraft && action === 'save';
+  if (!retainCommittedDraft) retireInspectorDraft(pending.draft.form);
+  if (pending.complete) {
+    const completed = Boolean(pending.complete());
+    // Discard intentionally keeps the document model and drops the form values. Saving GraphML
+    // does not otherwise transition the Inspector, so repaint the selected element after the
+    // download instead of leaving a disconnected invalid draft on screen.
+    if (pending.preserveDraft && action === 'discard') {
+      queueMicrotask(() => showSelectionInfo({ skipDraftGuard: true }));
+    }
+    return completed;
+  }
   applyStableSelection(cy, pending.desiredIds);
   queueMicrotask(() => showSelectionInfo({ skipDraftGuard: true }));
   return true;
@@ -5087,27 +6369,29 @@ function completeInspectorTransition(action) {
 
 // Commands that mutate the graph or replace the Inspector enter here before doing either. The
 // dialog therefore owns a deferred intention, not a rollback of work that already happened.
-function runAfterInspectorDraft(action, { deferredAction = action, deferredResult = true } = {}) {
+function runAfterInspectorDraft(action, {
+  deferredAction = action, deferredResult = true, preserveDraft = false,
+} = {}) {
   if (pendingInspectorTransition) return deferredResult;
   const draft = inspectorDraft;
   if (!draft?.form.isConnected) return Boolean(action());
   clearTimeout(draft.timer);
   draft.timer = null;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
-    if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
-      openInspectorUnsavedDialog(draft, [draft.nodeId], false);
+    if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
+      openInspectorUnsavedDialog(draft, [draft.elementId], false, { preserveDraft });
       pendingInspectorTransition.complete = deferredAction;
       return deferredResult;
     }
-    retireInspectorDraft(draft.form);
+    if (!preserveDraft) retireInspectorDraft(draft.form);
     return Boolean(action());
   }
   if (!assessment.changed) {
-    retireInspectorDraft(draft.form);
+    if (!preserveDraft) retireInspectorDraft(draft.form);
     return Boolean(action());
   }
-  openInspectorUnsavedDialog(draft, [draft.nodeId], assessment.valid);
+  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid, { preserveDraft });
   pendingInspectorTransition.complete = deferredAction;
   return deferredResult;
 }
@@ -5116,6 +6400,7 @@ function renderNodeForm(model, creating) {
   contextualHelp.dismiss();
   const descriptor = catalogDescriptor(model.behavior);
   const catalogEditorDescriptor = programCatalogEditorDescriptor(descriptor);
+  const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
   // behavior property (see NodeRuntimeNatureProperty's javadoc) — it has its own dedicated control
@@ -5165,7 +6450,8 @@ function renderNodeForm(model, creating) {
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
       <div id="node-max-concurrency-section">${maxConcurrencyFieldHtml(descriptor, model)}</div>
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
-      <div id="catalog-properties">${catalogPropertyFieldsHtml(catalogEditorDescriptor, model.properties || {})}</div>
+      <div id="catalog-properties">${catalogPropertyFieldsHtml(
+        catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
@@ -5197,7 +6483,7 @@ function renderNodeForm(model, creating) {
     // the nature control is, and against the CURRENT form state rather than the loaded model.
     renderBypassSection(form, model);
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      programCatalogEditorDescriptor(selected), {});
+      programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
     bindProgramWorkspace(form, model);
   });
@@ -5216,7 +6502,11 @@ function renderNodeForm(model, creating) {
   // handler, which would otherwise have to re-bind itself on every change.
   document.getElementById('catalog-properties')?.addEventListener('change', event => {
     if (!catalogEditorDescriptor || !event.target.closest('[data-catalog-property]')) return;
-    refreshConditionalCatalogProperties(catalogEditorDescriptor);
+    refreshConditionalCatalogProperties(catalogEditorDescriptor, catalogFieldOwner);
+  });
+  document.getElementById('catalog-properties')?.addEventListener('input', event => {
+    const field = event.target.closest('[data-catalog-property]');
+    if (field) validateCatalogEncodedField(field);
   });
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -5224,31 +6514,43 @@ function renderNodeForm(model, creating) {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
     const values = new FormData(form);
     const id = String(values.get('id') || '').trim();
+    const owner = workspace.active;
+    const target = cy;
+    const selectedIds = target?.$(':selected').map(element => element.id()) || [];
     if (creating && graphData.nodeMap[id]) return showFormError(form, `Node ID ${id} already exists`);
     const patch = readNodeEditorPatch(form, model);
     // Creating applies the values to a detached node and inserts it as one command; editing patches
     // the document node. Either way the mutation is a command, never a write from the form.
+    let savedDraft = null;
     if (creating) {
       const created = createNode(id, patch.name, patch.kind);
       Object.assign(created, patch);
       insertNodeElement(graphData, created, editHistory);
     } else {
       const draft = inspectorDraft?.form === form ? inspectorDraft : null;
+      savedDraft = draft;
       if (draft) {
-        const assessment = inspectNodeDraft(draft);
+        const assessment = inspectInspectorDraft(draft);
         if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
-        if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+        if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
           return showFormError(form, 'This node is no longer part of the document');
         }
-      } else if (nodePatchChanged(model, patch)
-          && !updateNodeFields(graphData, model.id, patch, editHistory)) {
-        return showFormError(form, 'This node is no longer part of the document');
+      } else if (nodePatchChanged(model, patch)) {
+        if (!updateNodeFields(graphData, model.id, patch, editHistory)) {
+          return showFormError(form, 'This node is no longer part of the document');
+        }
+        syncAutosavedNodeRenderer(model.id);
       }
     }
-    retireInspectorDraft(form);
-    rebuildGraph();
-    updateHistoryUi();
-    showNodeInfo(cy.getElementById(id));
+    if (creating) {
+      retireInspectorDraft(form);
+      rebuildGraph();
+      updateHistoryUi();
+      showNodeInfo(cy.getElementById(id));
+    } else if (savedDraft) {
+      updateHistoryUi();
+      preserveNodeInspectorAfterSave({ owner, target, draft: savedDraft, selectedIds });
+    }
     scheduleProgramGraphReadiness(workspace.active);
   });
   document.getElementById('delete-node')?.addEventListener('click', () => {
@@ -5262,7 +6564,7 @@ function renderNodeForm(model, creating) {
     });
   });
   bindProgramWorkspace(form, model);
-  bindNodeInspectorDraft(form, model, creating);
+  bindInspectorDraft(form, model, 'node', creating);
 }
 
 function catalogDescriptor(behavior) {
@@ -5328,8 +6630,23 @@ function refreshSecretReferenceChoices() {
   });
 }
 
-function catalogPropertyFieldsHtml(descriptor, values) {
+function catalogPropertyFieldsHtml(descriptor, values, owner) {
   if (!descriptor?.properties?.length) return '';
+  // Code-point tokens and a separator that cannot occur inside one encoded component keep the
+  // document/node/property tuple reversible and collision-free without exposing a document name.
+  const idPart = raw => {
+    const points = Array.from(String(raw ?? ''), character => character.codePointAt(0).toString(16));
+    return points.length ? points.join('-') : 'empty';
+  };
+  const fieldIdsFor = propertyName => {
+    const identity = [owner?.documentId, owner?.nodeId, propertyName].map(idPart).join('--');
+    const base = `catalog-property-${identity}`;
+    return { control: `${base}-control`, hint: `${base}-hint`, state: `${base}-state` };
+  };
+  const describedByAttribute = (...ids) => {
+    const describedBy = [...new Set(ids.flat().filter(Boolean))].join(' ');
+    return describedBy ? ` aria-describedby="${escapeAttribute(describedBy)}"` : '';
+  };
   // Every sibling's CURRENTLY DISPLAYED value, resolved with the exact same fallback each
   // field's own control uses below — so a condition reads the same value the user actually sees in
   // the referenced sibling, never a stale or differently-defaulted one. Computed once, up front,
@@ -5338,6 +6655,8 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
+    const title = property.displayName || property.name;
+    const fieldIds = fieldIdsFor(property.name);
     // `adapterBinding` (always paired with `required` — see
     // NodePropertyDescriptor#adapterBinding) names a property whose EMPTY value does not make the
     // graph invalid, it makes the node UNCONFIGURED: the server admits it and the node refuses only
@@ -5370,8 +6689,6 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     const requiredNow = isPropertyRequiredNow(property, resolvedValues);
     const nativeRequired = requiredNow && visible && !adapterBound;
     const unconfigured = adapterBound && adapterIdOf(value) === '';
-    const stateId = `catalog-state-${escapeAttribute(property.name)}`;
-    const describedBy = unconfigured ? ` aria-describedby="${stateId}"` : '';
     // A closed-choice property whose descriptor declares NO default has three states, not two
     // — each allowed value, plus "the author has not declared this" — and a `<select>` built only
     // from `allowedValues` can represent two of them. HTML then picks the first option as the
@@ -5443,6 +6760,71 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // telling a document that declares nothing at all apart from a document that declares a non-empty
     // value the allowed values do not recognise -- `mismatchedOption` needs exactly that second case.
     const present = values[property.name] != null;
+    // The sentence follows the control. It used to end "never paste a secret" because the
+    // control was a text box that would have taken one; the control now cannot, so the hint says
+    // where the choices come from and what the document actually stores instead.
+    const secretHint = property.type === 'SECRET_REFERENCE'
+      ? ' The list holds the credentials you have stored. The value itself is entered in the'
+        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
+      : '';
+    // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
+    // still be prompted to fill the property in. What changes is only whether the browser blocks
+    // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
+    // state so "not configured yet" cannot be mistaken for "required and missing".
+    const fieldClass = unconfigured ? 'editor-field full catalog-property catalog-property--unconfigured' : 'editor-field full catalog-property';
+    // Scoped to the properties each sentence is about: every other property keeps its exact
+    // pre-existing description text (no inserted punctuation), so properties outside this state are
+    // unchanged. `appendSentence` is the same joining rule used inline.
+    const baseText = (property.description || '') + secretHint;
+    const appendSentence = (text, sentence) =>
+      text.trim().replace(/[.!?]?$/, text.trim() ? '. ' : '') + sentence;
+    let helpText = baseText;
+    let stateText = '';
+    if (unconfigured) {
+      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
+      // For a node that invokes a MODEL provider, the UI also states where the thing it is
+      // waiting for is declared. Without this the sentence above tells an author their node will
+      // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
+      // failed run. This editor has no Model providers panel, so the sentence names
+      // the plugin bundle that supplies the node type; see `PROVIDER_CONFIG_POINTER` for why it is
+      // rewritten rather than dropped.
+      //
+      // Gated on the catalog's declared capabilities, never on the behavior name and never on
+      // `adapterBinding` alone: that flag is a plain boolean meaning "names a deployment-configured
+      // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
+      // and configure a model provider would be a confident instruction to the wrong place. See
+      // `invokesModelProvider`, which reads the same capability set the runtime reads.
+      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
+    }
+    if (property.maximumUtf8Bytes > 0) {
+      helpText = appendSentence(helpText, `Maximum ${property.maximumUtf8Bytes} UTF-8 bytes.`);
+    }
+    if (property.maximumItems > 0) {
+      helpText = appendSentence(helpText,
+        `Maximum ${property.maximumItems} comma-separated items; ${property.maximumItemUtf8Bytes} UTF-8 bytes each.`);
+    }
+    const numericBounds = `${property.minimumValue != null && property.minimumValue !== '' ? ` min="${escapeAttribute(property.minimumValue)}"` : ''}`
+      + `${property.maximumValue != null && property.maximumValue !== '' ? ` max="${escapeAttribute(property.maximumValue)}"` : ''}`;
+    const encodedBounds = `${property.maximumUtf8Bytes > 0 ? ` data-maximum-utf8-bytes="${property.maximumUtf8Bytes}"` : ''}`
+      + `${property.maximumItems > 0 ? ` data-maximum-items="${property.maximumItems}"` : ''}`
+      + `${property.maximumItemUtf8Bytes > 0 ? ` data-maximum-item-utf8-bytes="${property.maximumItemUtf8Bytes}"` : ''}`;
+    // Stated unconditionally for the shape, not only while the value happens to be undeclared.
+    // The hint is rendered once and is not re-rendered on a plain value change (only
+    // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
+    // sentence phrased as "this is currently undeclared" would go stale in the DOM the moment the
+    // author picked a value. Phrased as what the option MEANS, it stays true in every state. It says
+    // nothing about what any particular behavior does with the absence — that belongs to the
+    // property's own `description`, which the catalog owns.
+    if (undeclarable) {
+      helpText = appendSentence(helpText,
+        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+    }
+    const hintText = helpText.trim();
+    const describedBy = describedByAttribute(
+      stateText ? fieldIds.state : null,
+      hintText ? fieldIds.hint : null,
+    );
+    const accessibility = ` id="${fieldIds.control}"${describedBy}`;
     let control;
     if (property.allowedValues?.length) {
       const declared = property.allowedValues.some(option => String(option) === String(value));
@@ -5494,7 +6876,7 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // a GENUINELY absent value (nothing declared, or a declared empty string -- see `present`'s own
       // comment) still renders "Not declared" FIRST with `value=""` and selected, so it is still the
       // HTML placeholder label option and `required` still stops the save until the author decides.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
         `<option value="${escapeAttribute(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
     } else if (property.type === 'SECRET_REFERENCE') {
       // CHOOSE, NEVER TYPE.
@@ -5515,9 +6897,9 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // omission: a control that degrades to an input when the list is empty degrades exactly when
       // an author is most likely to reach for the secret instead. What the two degraded states do
       // instead is PRESERVE, never invent — see the two options below.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
     } else if (property.type === 'TEXT' || property.type === 'CEL_EXPRESSION') {
-      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
+      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${encodedBounds}${accessibility} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
     } else if (property.type === 'BOOLEAN') {
       // Same defect as the closed-choice branch above, muter -- `String(value) !== 'true'` is
       // true for ANY value that is not the exact string "true", so a stored value that merely FAILED
@@ -5539,58 +6921,11 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${describedBy}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
-      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${describedBy} ${nativeRequired ? 'required' : ''}>`;
-    }
-    // The sentence follows the control. It used to end "never paste a secret" because the
-    // control was a text box that would have taken one; the control now cannot, so the hint says
-    // where the choices come from and what the document actually stores instead.
-    const secretHint = property.type === 'SECRET_REFERENCE'
-      ? ' The list holds the credentials you have stored. The value itself is entered in the'
-        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
-      : '';
-    // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
-    // still be prompted to fill the property in. What changes is only whether the browser blocks
-    // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
-    // state so "not configured yet" cannot be mistaken for "required and missing".
-    const fieldClass = unconfigured ? 'editor-field full catalog-property catalog-property--unconfigured' : 'editor-field full catalog-property';
-    // Scoped to the properties each sentence is about: every other property keeps its exact
-    // pre-existing description text (no inserted punctuation), so properties outside this state are
-    // unchanged. `appendSentence` is the same joining rule used inline.
-    const baseText = (property.description || '') + secretHint;
-    const appendSentence = (text, sentence) =>
-      text.trim().replace(/[.!?]?$/, text.trim() ? '. ' : '') + sentence;
-    let helpText = baseText;
-    let stateText = '';
-    if (unconfigured) {
-      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
-      // For a node that invokes a MODEL provider, the UI also states where the thing it is
-      // waiting for is declared. Without this the sentence above tells an author their node will
-      // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
-      // failed run. This editor has no Model providers panel, so the sentence names
-      // the plugin bundle that supplies the node type; see `PROVIDER_CONFIG_POINTER` for why it is
-      // rewritten rather than dropped.
-      //
-      // Gated on the catalog's declared capabilities, never on the behavior name and never on
-      // `adapterBinding` alone: that flag is a plain boolean meaning "names a deployment-configured
-      // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
-      // and configure a model provider would be a confident instruction to the wrong place. See
-      // `invokesModelProvider`, which reads the same capability set the runtime reads.
-      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
-    }
-    // Stated unconditionally for the shape, not only while the value happens to be undeclared.
-    // The hint is rendered once and is not re-rendered on a plain value change (only
-    // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
-    // sentence phrased as "this is currently undeclared" would go stale in the DOM the moment the
-    // author picked a value. Phrased as what the option MEANS, it stays true in every state. It says
-    // nothing about what any particular behavior does with the absence — that belongs to the
-    // property's own `description`, which the catalog owns.
-    if (undeclarable) {
-      helpText = appendSentence(helpText,
-        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step}${numericBounds}${encodedBounds} value="${escapeAttribute(value)}"${accessibility} ${nativeRequired ? 'required' : ''}>`;
     }
     // `hidden`, never omitted from the render. `readCatalogPropertyEditor` collects every
     // `[data-catalog-property]` control that EXISTS in the form regardless of `hidden` — submit
@@ -5600,11 +6935,14 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // accessibility tree and Tab order, and out of native constraint validation — see
     // `.catalog-property[hidden]` in styles.css for why the CSS side of this needs its own rule
     // rather than relying on the attribute alone.
-    const title = property.displayName || property.name;
-    const state = stateText ? `<small id="${stateId}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
+    const hint = hintText
+      ? `<small id="${fieldIds.hint}" class="catalog-property-hint visually-hidden">${escapeHtml(hintText)}</small>` : '';
+    const state = stateText
+      ? `<small id="${fieldIds.state}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
     return `<div class="${fieldClass}" ${visible ? '' : 'hidden'}>
-      <div class="editor-label-row"><label>${escapeHtml(title)}${requiredNow ? ' *' : ''}</label>
-        ${contextualHelpButtonHtml(title, helpText)}</div>${control}${state}</div>`;
+      <div class="editor-label-row"><label for="${fieldIds.control}">${escapeHtml(title)}${requiredNow
+        ? ' <span aria-hidden="true">*</span>' : ''}</label>
+        ${contextualHelpButtonHtml(title, helpText)}</div>${control}${hint}${state}</div>`;
   }).join('');
   return `<div class="editor-section-title"><span>${escapeHtml(descriptor.displayName)} properties</span></div><div class="editor-grid">${fields}</div>`;
 }
@@ -5677,7 +7015,7 @@ function describeConditionalChanges(before, after) {
  * a mode is a status change, not an error, so it must not interrupt (`aria-live="assertive"` would);
  * and a second live region would just be two channels racing to describe one piece of UI.
  */
-function refreshConditionalCatalogProperties(descriptor) {
+function refreshConditionalCatalogProperties(descriptor, owner = {}) {
   const container = document.getElementById('catalog-properties');
   if (!container) return;
   const activeProperty = document.activeElement?.dataset?.catalogProperty;
@@ -5702,7 +7040,7 @@ function refreshConditionalCatalogProperties(descriptor) {
     state.visible !== after[index].visible || state.requiredNow !== after[index].requiredNow);
   if (!changed) return;
   contextualHelp.dismiss();
-  container.innerHTML = catalogPropertyFieldsHtml(descriptor, currentValues);
+  container.innerHTML = catalogPropertyFieldsHtml(descriptor, currentValues, owner);
   if (activeProperty) {
     container.querySelector(`[data-catalog-property="${escapeAttribute(activeProperty)}"]`)?.focus();
   }
@@ -5721,6 +7059,24 @@ function readCatalogPropertyEditor(form) {
     propertyTypes[name] = catalogTypeToGraphMl(field.dataset.catalogType);
   });
   return { properties, propertyTypes };
+}
+
+function validateCatalogEncodedField(field) {
+  const byteLength = value => new TextEncoder().encode(value).length;
+  const value = String(field.value ?? '');
+  const maximum = Number(field.dataset.maximumUtf8Bytes || 0);
+  const maximumItems = Number(field.dataset.maximumItems || 0);
+  const maximumItem = Number(field.dataset.maximumItemUtf8Bytes || 0);
+  let error = maximum > 0 && byteLength(value) > maximum
+    ? `Maximum ${maximum} UTF-8 bytes.` : '';
+  const items = value === '' ? [] : value.split(',');
+  if (!error && maximumItems > 0 && items.length > maximumItems) {
+    error = `Maximum ${maximumItems} comma-separated items.`;
+  }
+  if (!error && maximumItem > 0 && items.some(item => byteLength(item.trim()) > maximumItem)) {
+    error = `Each item is limited to ${maximumItem} UTF-8 bytes.`;
+  }
+  field.setCustomValidity(error);
 }
 
 function catalogTypeToGraphMl(type) {
@@ -5965,6 +7321,10 @@ function maxConcurrencyFieldHtml(descriptor, model) {
   const state = resolved.declared
     ? (resolved.valid ? `Declared (${resolved.value}).` : 'Declared value is invalid and will be refused.')
     : `Inherited default (${resolved.value}).`;
+  // `resolved.value` is the EFFECTIVE limit, which is the declared one when a declaration exists.
+  // The placeholder and the live "Inherited default" label describe what clearing the field falls
+  // back to, so they need the catalog default, never the value about to be cleared.
+  const inheritedDefault = effectiveMaxConcurrency(descriptor, null).value;
   const help = `Positive, per node and per traversal. The trusted catalog ceiling is ${resolved.ceiling}; stricter plugin or profile limits still apply.`;
   return `<div class="editor-section-title"><span>Runtime concurrency</span>
       ${contextualHelpButtonHtml('Runtime concurrency', help)}</div>
@@ -5973,9 +7333,9 @@ function maxConcurrencyFieldHtml(descriptor, model) {
         <span class="nature-state" data-max-concurrency-state>${escapeHtml(state)}</span></label>
       <input id="node-max-concurrency" name="runtimeMaxConcurrency" type="number" inputmode="numeric"
         min="1" max="${resolved.ceiling}" value="${escapeAttribute(inputValue)}"
-        placeholder="Inherit default (${resolved.value})"
+        placeholder="Inherit default (${inheritedDefault})"
         data-max-concurrency-property="${escapeAttribute(property)}"
-        data-default-max-concurrency="${resolved.value}" data-max-concurrency-ceiling="${resolved.ceiling}">
+        data-default-max-concurrency="${inheritedDefault}" data-max-concurrency-ceiling="${resolved.ceiling}">
     </div>`;
 }
 
@@ -6124,6 +7484,25 @@ function bindJoinField() {
   });
 }
 
+/** Brings the join status beside the controls up to date with the committed document. Saving an
+ * existing node keeps its form (see `preserveNodeInspectorAfterSave`), so nothing re-renders
+ * `#node-join-section` -- but the effective-join label and the END fan-in warning describe the
+ * DOCUMENT, not the form: the warning exists because nothing is declared, so it must go once a
+ * declaration is committed. Only those two derived parts are replaced; the controls, their values
+ * and focus stay exactly as the author left them. */
+function refreshJoinStatus(form, graph, model) {
+  const section = form?.querySelector('#node-join-section');
+  if (!section || !graph || !model) return;
+  const fresh = document.createElement('template');
+  fresh.innerHTML = joinFieldHtml(graph, model);
+  const state = fresh.content.querySelector('[data-join-state]');
+  if (state) section.querySelector('[data-join-state]')?.replaceChildren(state.textContent);
+  const warning = fresh.content.querySelector('.join-end-warning');
+  const current = section.querySelector('.join-end-warning');
+  if (!warning) current?.remove();
+  else if (!current) section.querySelector('.node-join')?.append(warning);
+}
+
 /** The three join-only properties `node` currently carries, verbatim -- raw values, no
  * interpretation, no folding. Used to round-trip a declaration this control does not represent
  * instead of erasing it. */
@@ -6218,6 +7597,21 @@ function programReadiness(owner) {
   return owner.programReadiness;
 }
 
+function graphForAuthorizedExecution(owner, graph) {
+  const submission = canonicalGraphSnapshot(graph);
+  const phases = programReadiness(owner).phases;
+  for (const node of programNodes(submission)) {
+    const resolvedArtifactId = phases.get(node.id)?.artifactId;
+    if (!resolvedArtifactId) continue;
+    node.properties ||= {};
+    node.propertyTypes ||= {};
+    node.properties.artifactId = resolvedArtifactId;
+    node.propertyTypes.artifactId = 'string';
+  }
+  submission.nodeMap = Object.fromEntries(submission.nodes.map(node => [node.id, node]));
+  return submission;
+}
+
 function retireProgramReadiness(owner) {
   const state = owner?.programReadiness;
   if (!state) return;
@@ -6256,11 +7650,6 @@ function programPhase(owner, nodeId, result) {
   }
   const snapshot = { ...result, phase, detail, output: result.smokeOutput, history };
   state.phases.set(nodeId, snapshot);
-  const model = programGraph(owner)?.nodeMap?.[nodeId];
-  if (model) {
-    model.programPhase = phase;
-    model.programReadinessState = snapshot;
-  }
   const node = owner.cy?.getElementById(nodeId);
   if (node?.length) {
     node.data('programPhase', phase);
@@ -6419,6 +7808,7 @@ function hideProgramReadinessOverlay(owner) {
 }
 
 function bindProgramArtifact(owner, node, artifactId) {
+  if (!documentIsEditable(owner)) return;
   node.properties ||= {};
   node.propertyTypes ||= {};
   node.properties.artifactId = artifactId;
@@ -6441,16 +7831,16 @@ function programBuildSubmission(node) {
 
 function programBuildPlan(owner) {
   const nodes = programNodes(programGraph(owner));
-  nodes.forEach(node => {
-    node.properties ||= {};
-    node.propertyTypes ||= {};
-    if (node.properties.testPayload == null) {
-      node.properties.testPayload = PROGRAM_TEST_PAYLOAD_DEFAULT;
-      node.propertyTypes.testPayload = 'string';
-    }
-  });
   const programs = nodes.map(programBuildSubmission);
   return { nodes, programs, signature: JSON.stringify(programs) };
+}
+
+function currentProgramAuthoringLimits() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient
+      || !runtimeConfiguration.configuration?.programAuthoring) {
+    throw new Error('Program authoring is unavailable until the connected service returns valid configuration');
+  }
+  return runtimeConfiguration.configuration.programAuthoring;
 }
 
 function resetProgramGeneration(owner, state, plan) {
@@ -6459,8 +7849,6 @@ function resetProgramGeneration(owner, state, plan) {
   state.activeRevision = 0;
   state.settledGeneration = 0;
   plan.nodes.forEach(model => {
-    delete model.programPhase;
-    delete model.programReadinessState;
     const node = owner.cy?.getElementById(model.id);
     if (!node?.length) return;
     node.removeData('programPhase');
@@ -6590,6 +7978,7 @@ function startProgramReadinessFlight(owner, plan, generation, {
   if (automatic) showProgramReadinessOverlay(owner);
   const client = runtimeClient;
   const isCurrent = () => workspace.find(owner.id) === owner && runtimeClient === client
+    && tenantAuthorityAllows(owner, client)
     && state.generation === generation && state.signature === plan.signature;
   const promise = (async () => {
     const initial = await start(client);
@@ -6627,7 +8016,7 @@ function startProgramReadinessFlight(owner, plan, generation, {
 }
 
 async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
-  if (!owner || !runtimeClient) return false;
+  if (!owner || !runtimeClient || !tenantAuthorityAllows(owner)) return false;
   const state = programReadiness(owner);
   const plan = programBuildPlan(owner);
   if (!plan.nodes.length) {
@@ -6643,8 +8032,10 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   if (state.settledGeneration === generation) {
     return plan.nodes.every(node => state.phases.get(node.id)?.phase === 'READY');
   }
-  if (plan.programs.length > PROGRAM_BUILD_BATCH_LIMIT) {
-    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${PROGRAM_BUILD_BATCH_LIMIT}`;
+  const authoringLimits = currentProgramAuthoringLimits();
+  const batchLimit = authoringLimits.maxProgramsPerBuild;
+  if (plan.programs.length > batchLimit) {
+    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${batchLimit}`;
     plan.nodes.forEach(node => programPhase(owner, node.id, {
       phase: '', ready: false, reused: false, transportError: true,
       diagnostic: message, detail: `Readiness request failed · ${message}`,
@@ -6655,12 +8046,13 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   }
   return startProgramReadinessFlight(owner, plan, generation, {
     automatic,
-    start: client => client.buildProgramArtifacts(plan.programs),
+    start: client => client.buildProgramArtifacts(plan.programs, authoringLimits),
   });
 }
 
 function scheduleProgramGraphReadiness(owner) {
-  if (!owner || !runtimeClient || !programNodes(programGraph(owner)).length) return;
+  if (!owner || !runtimeClient || !tenantAuthorityAllows(owner)
+      || !programNodes(programGraph(owner)).length) return;
   void ensureProgramGraphReady(owner, { automatic: true });
 }
 
@@ -6858,7 +8250,8 @@ function bindProgramWorkspace(form, model) {
         propertyTypes: { ...(model?.propertyTypes || {}) },
       };
       const client = runtimeClient;
-      const started = await client.buildProgramArtifacts([programBuildSubmission(draft)]);
+      const started = await client.buildProgramArtifacts(
+        [programBuildSubmission(draft)], currentProgramAuthoringLimits());
       const settled = await observeProgramBuildSnapshots(client, started, {
         current: () => runtimeClient === client && panel.isConnected,
         onSnapshot: snapshot => {
@@ -6895,6 +8288,37 @@ function applyProgramBuildResult(form, panel, result) {
   renderProgramPanelState(panel, panel.programBuildState);
   const build = panel.querySelector('[data-program-operation="build"]');
   if (build && result.artifactId) build.textContent = 'Rebuild';
+}
+
+function readEdgeEditorPatch(form, model) {
+  const values = new FormData(form);
+  const custom = readPropertyEditor(form);
+  const failureRouteControl = form.querySelector('[data-failure-route-control]');
+  const boxGoverns = !failureRouteControl.hidden;
+  const boxTicked = boxGoverns && values.get('failureRoute') === 'on';
+  const outcome = boxTicked
+    ? DEFAULT_EDGE_OUTCOME
+    : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
+  const declaresFailureRoute = boxGoverns
+    ? boxTicked
+    : form.dataset.preserveImplicitFailureDeclaration === 'true'
+      && outcome === DEFAULT_EDGE_OUTCOME;
+  setEdgeFailureRoute(custom, declaresFailureRoute);
+  return {
+    source: String(values.get('source')),
+    target: String(values.get('target')),
+    outcome,
+    command: String(values.get('command') || '').trim().toLowerCase(),
+    label: outcome,
+    edgeType: outcomeToEdgeType(outcome),
+    edgeName: String(values.get('edgeName') || '').trim(),
+    status: Number(values.get('status')) || 0,
+    trafficWeight: values.get('trafficWeight') === '' ? null : Number(values.get('trafficWeight')),
+    parallel: values.get('parallel') === 'on',
+    description: String(values.get('description') || '').trim(),
+    properties: custom.properties,
+    propertyTypes: custom.propertyTypes,
+  };
 }
 
 function renderEdgeForm(model, creating) {
@@ -6938,6 +8362,23 @@ function renderEdgeForm(model, creating) {
   const form = document.getElementById('edge-editor');
   form.elements.source.value = model.source || graphData.nodes[0]?.id || '';
   form.elements.target.value = model.target || graphData.nodes[1]?.id || graphData.nodes[0]?.id || '';
+  form.dataset.preserveImplicitFailureDeclaration = String(
+    declared && graphData.nodeMap?.[model.target]?.kind === 'ERROR',
+  );
+  const forgetOriginalFailureDeclaration = event => {
+    if (event.target.matches('[name="target"], [name="outcome"], [name="failureRoute"]')) {
+      form.dataset.preserveImplicitFailureDeclaration = 'false';
+    }
+    if (event.target.matches('[name="outcome"]')
+        && graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR') {
+      // The checkbox is hidden for an Error target, but an imported explicit declaration can leave
+      // it checked. Naming an outcome removes that declaration; clear its hidden control state too,
+      // so moving the edge to an ordinary target cannot revive the route the author just replaced.
+      form.elements.failureRoute.checked = false;
+    }
+  };
+  form.addEventListener('input', forgetOriginalFailureDeclaration);
+  form.addEventListener('change', forgetOriginalFailureDeclaration);
 
   // There are three states an edge can be in. The Inspector STATES which one rather than leaving it
   // to be inferred from a name, so the panel always carries a sentence naming it.
@@ -6966,24 +8407,30 @@ function renderEdgeForm(model, creating) {
   let restorableOutcome = failureRoute
     ? DEFAULT_EDGE_OUTCOME
     : String(model.outcome || DEFAULT_EDGE_OUTCOME);
+  let coupledTarget = String(form.elements.target.value || '');
   function targetIsErrorNode() {
     return graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR';
   }
   function applyFailureRouteCoupling() {
     const errorTarget = targetIsErrorNode();
-    // The checkbox is meaningless against an ERROR target, and a stale tick left over from before
-    // the target changed would silently re-enter the model on submit.
+    const target = String(form.elements.target.value || '');
+    const targetChanged = target !== coupledTarget;
+    coupledTarget = target;
+    // The checkbox is meaningless against an ERROR target. Clear it when an author moves a declared
+    // route there, which normalizes the route to the target's implicit form. Keep an imported
+    // declaration in the hidden control until the author changes routing intent: if they first move
+    // it to an ordinary target, the visible checkbox must faithfully show the document's declaration.
     controlRow.hidden = errorTarget;
-    const clearedByTarget = errorTarget && failureRouteBox.checked;
-    if (errorTarget) failureRouteBox.checked = false;
+    const clearedByTarget = errorTarget && targetChanged && failureRouteBox.checked;
+    if (clearedByTarget) failureRouteBox.checked = false;
     const explicitOutcome = errorTarget
       && String(outcomeField.value || DEFAULT_EDGE_OUTCOME).trim() !== DEFAULT_EDGE_OUTCOME;
     const isFailureRoute = errorTarget ? !explicitOutcome : failureRouteBox.checked;
 
-    if (failureRouteBox.checked && !outcomeField.readOnly) {
+    if (!errorTarget && failureRouteBox.checked && !outcomeField.readOnly) {
       restorableOutcome = String(outcomeField.value || DEFAULT_EDGE_OUTCOME);
     }
-    if (failureRouteBox.checked) {
+    if (!errorTarget && failureRouteBox.checked) {
       outcomeField.value = DEFAULT_EDGE_OUTCOME;
       outcomeField.readOnly = true;
       outcomeField.setAttribute('aria-describedby', 'edge-kind-state');
@@ -7192,69 +8639,42 @@ function renderEdgeForm(model, creating) {
     // leading/trailing whitespace is significant and validated without normalization.
     const id = String(values.get('id') || '');
     if (creating && graphData.edges.some(edge => edge.id === id)) return showFormError(form, `Edge ID ${id} already exists`);
-    const custom = readPropertyEditor(form);
-    // When the checkbox governs, it is the authority on BOTH halves of the pair, so the
-    // outcome is forced back to the default here as well as held there in the field: a form can be
-    // submitted by Enter from another field, and the two states must not be able to disagree on the
-    // way to the model.
-    //
-    // When it does NOT govern -- an `ERROR` target, where the implicit failure-route default decides -- an explicit
-    // declaration already on the edge has to be re-applied by hand or it is lost:
-    // `readPropertyEditor` rebuilds the bag from the visible rows, and `failure.route` deliberately
-    // has no row. It is re-applied only while the edge is still a failure route, though. Naming an
-    // outcome against an `ERROR` target IS how an author overrides the default, and carrying the
-    // declaration past that override would hand the engine `failure.route` together with an
-    // explicit outcome -- the one combination it refuses AT LOAD. That would move the error from
-    // the drawing to the run, introduced by the code intended to preserve the author's declaration.
-    const boxGoverns = !controlRow.hidden;
-    const boxTicked = boxGoverns && values.get('failureRoute') === 'on';
-    const outcome = boxTicked
-      ? DEFAULT_EDGE_OUTCOME
-      : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
-    const declaresFailureRoute = boxGoverns
-      ? boxTicked
-      : edgeDeclaresFailureRoute(model) && outcome === DEFAULT_EDGE_OUTCOME;
-    setEdgeFailureRoute(custom, declaresFailureRoute);
-    const patch = {
-      source: String(values.get('source')),
-      target: String(values.get('target')),
-      outcome,
-      command: String(values.get('command') || '').trim().toLowerCase(),
-      label: outcome,
-      // Was an inline 'continue'/'default' split that didn't recognize 'failed' or
-      // 'completed', so an edge authored or edited through this form here didn't pick up the
-      // renderer's red-dashed/green style until a save-and-reload round trip re-parsed it.
-      // The failure classification is deliberately NOT repeated here: `classifyFailureRoutes` runs
-      // over the whole document inside `buildElements` on the rebuild below, and it is the only
-      // place that can see the target node's kind. Computing it twice is how the two answers
-      // eventually disagree.
-      edgeType: outcomeToEdgeType(outcome),
-      edgeName: String(values.get('edgeName') || '').trim(),
-      status: Number(values.get('status')) || 0,
-      trafficWeight: values.get('trafficWeight') === '' ? null : Number(values.get('trafficWeight')),
-      parallel: values.get('parallel') === 'on',
-      description: String(values.get('description') || '').trim(),
-      properties: custom.properties,
-      propertyTypes: custom.propertyTypes,
-    };
+    const patch = readEdgeEditorPatch(form, model);
     if (creating) {
-      const created = createEdge(id, patch.source, patch.target, outcome);
+      const created = createEdge(id, patch.source, patch.target, patch.outcome);
       Object.assign(created, patch);
       insertEdgeElement(graphData, created, editHistory);
-    } else if (!updateEdgeFields(graphData, model.id, patch, editHistory)) {
-      return showFormError(form, 'This edge is no longer part of the document');
+    } else {
+      const draft = inspectorDraft?.form === form ? inspectorDraft : null;
+      if (draft) {
+        const assessment = inspectInspectorDraft(draft);
+        if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
+        if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
+          return showFormError(form, 'This edge is no longer part of the document');
+        }
+      } else if (edgePatchChanged(model, patch)) {
+        if (!updateEdgeFields(graphData, model.id, patch, editHistory)) {
+          return showFormError(form, 'This edge is no longer part of the document');
+        }
+        syncAutosavedEdgeRenderer(model.id);
+      }
     }
-    rebuildGraph();
+    retireInspectorDraft(form);
+    if (creating) rebuildGraph();
     updateHistoryUi();
     showEdgeInfo(cy.getElementById(id));
   });
   document.getElementById('delete-edge')?.addEventListener('click', () => {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return;
-    deleteElements(graphData, [], [model.id], editHistory);
-    rebuildGraph();
-    updateHistoryUi();
-    closeInfo();
+    runAfterInspectorDraft(() => {
+      deleteElements(graphData, [], [model.id], editHistory);
+      rebuildGraph();
+      updateHistoryUi();
+      closeInfo();
+      return true;
+    });
   });
+  bindInspectorDraft(form, model, 'edge', creating);
 }
 
 function propertyEditorHtml(id, properties) {
@@ -7314,17 +8734,22 @@ function onSearch(q) {
   clearFilter();
   if (!q.trim()) return;
   const lq = q.toLowerCase();
-  const hit = cy.nodes().filter(n =>
+  const hit = cy.nodes().filter(n => Object.hasOwn(graphData?.nodeMap || {}, n.id()) && (
     n.data('name').toLowerCase().includes(lq) ||
     (n.data('classname') || '').toLowerCase().includes(lq)
-  );
+  ));
   if (!hit.length) return;
   filterActive = { type: 'search', q };
   cy.elements().addClass('dim');
   hit.removeClass('dim').addClass('hi');
   hit.connectedEdges().removeClass('dim');
-  if (hit.length === 1)
-    cy.animate({ center: { eles: hit }, zoom: 1.6 }, { duration: 380 });
+  if (hit.length === 1) {
+    revealVisualGroupMember(hit.first().id());
+    cy.animate({ center: { eles: hit } }, { duration: 240 });
+  } else {
+    const projection = groupProjection();
+    hit.forEach(node => cy.getElementById(projection?.representativeByNodeId.get(node.id()) || node.id()).removeClass('dim').addClass('hi'));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7452,12 +8877,16 @@ function toggleLegendFilter(elType, type) {
     cy.elements().addClass('dim');
     hit.removeClass('dim').addClass('hi');
     hit.connectedEdges().removeClass('dim');
+    hit.forEach(node => cy.getElementById(groupProjection()?.representativeByNodeId.get(node.id()) || node.id()).removeClass('dim').addClass('hi'));
   } else {
     hit = cy.edges(`[edgeType="${type}"]`);
     cy.elements().addClass('dim');
     hit.removeClass('dim').addClass('hi');
     hit.sources().removeClass('dim');
     hit.targets().removeClass('dim');
+    const ids = new Set(hit.map(edge => edge.id()));
+    cy.edges(':visible').filter(edge => groupProjection()?.originalEdgeIdsByVisibleId.get(edge.id())?.some(id => ids.has(id)))
+      .removeClass('dim').addClass('hi');
   }
 }
 
@@ -7467,14 +8896,19 @@ function toggleLegendFilter(elType, type) {
 
 function updateStats() {
   if (!cy) return;
-  document.getElementById('b-nodes').textContent = cy.nodes().length;
-  document.getElementById('b-edges').textContent = cy.edges().length;
+  document.getElementById('b-nodes').textContent = graphData.nodes.length;
+  document.getElementById('b-edges').textContent = graphData.edges.length;
 
   const nc = {}, ec = {};
-  cy.nodes().forEach(n => { const t = n.data('nodeType'); nc[t] = (nc[t]||0)+1; });
-  cy.edges().forEach(e => { const t = e.data('edgeType'); ec[t] = (ec[t]||0)+1; });
+  graphData.nodes.forEach(n => { const t = n.nodeType; nc[t] = (nc[t]||0)+1; });
+  graphData.edges.forEach(e => { const t = e.edgeType; ec[t] = (ec[t]||0)+1; });
 
-  renderGraphStatistics(document.getElementById('graph-stats'), cy.nodes().length, cy.edges().length, nc, ec);
+  renderGraphStatistics(document.getElementById('graph-stats'), graphData.nodes.length, graphData.edges.length, nc, ec);
+  const summaries = groupProjection()?.groups.filter(group => group.collapsed).length || 0;
+  if (summaries) {
+    const visible = document.createElement('p'); visible.textContent = `${summaries} visible group summaries · ${cy.nodes(':visible').length} visible nodes and headers`;
+    document.getElementById('graph-stats').append(visible);
+  }
   // The graph's content just changed, so what the assistant would attach changed with it.
   // Recomposed HERE rather than on every render because this is already the "graph content
   // changed" hook and already walks every node and edge — the chips stay truthful at the same
@@ -7497,7 +8931,8 @@ function rendererMinimapState(owner = workspace.active) {
   const renderer = rendererFor(owner);
   if (!owner || !renderer) return null;
   if (renderer.kind === 'elastic') {
-    const nodes = (renderer.nodes || []).filter(node => Number.isFinite(node.x) && Number.isFinite(node.y));
+    const visibleGraph = renderer.elasticMount?.getVisibleGraph?.();
+    const nodes = (visibleGraph?.nodes || renderer.nodes || []).filter(node => Number.isFinite(node.x) && Number.isFinite(node.y));
     if (!nodes.length || !renderer.host.clientWidth || !renderer.host.clientHeight) return null;
     const transform = d3.zoomTransform(renderer.svg);
     const contentBounds = normalizeBounds({
@@ -7514,7 +8949,7 @@ function rendererMinimapState(owner = workspace.active) {
         y2: (renderer.host.clientHeight - transform.y) / transform.k,
       }),
       nodes: nodes.map(node => ({ x: node.x, y: node.y, color: node.color })),
-      edges: (renderer.links || []).map(edge => ({
+      edges: (visibleGraph?.links || visibleGraph?.edges || renderer.links || []).map(edge => ({
         source: { x: edge.source.x, y: edge.source.y },
         target: { x: edge.target.x, y: edge.target.y }, color: edge.color,
       })),
@@ -7527,12 +8962,12 @@ function rendererMinimapState(owner = workspace.active) {
   if (!target || !target.width() || !target.height()) return null;
   return {
     kind: 'cytoscape',
-    contentBounds: normalizeBounds(target.elements().boundingBox({ includeLabels: true, includeOverlays: true })),
+    contentBounds: normalizeBounds(target.elements(':visible').boundingBox({ includeLabels: true, includeOverlays: true })),
     visibleBounds: normalizeBounds(target.extent()),
-    nodes: target.nodes().map(node => ({
+    nodes: target.nodes(':visible').filter(node => node.data('rrVisualRole') !== 'ghost').map(node => ({
       ...node.position(), color: NODE_TYPE_COLORS[node.data('nodeType')] || rendererPalette.nodeBorder,
     })),
-    edges: target.edges().map(edge => ({
+    edges: target.edges(':visible').map(edge => ({
       source: edge.source().position(), target: edge.target().position(),
       color: EDGE_TYPE_COLORS[edge.data('edgeType')] || rendererPalette.edgeType.default,
     })),
@@ -7816,7 +9251,7 @@ function showAddEdgeForm({ skipDraftGuard = false } = {}) {
   renderEdgeForm(createEdge(id, graphData.nodes[0].id, graphData.nodes[1].id), true);
 }
 
-function downloadDocument(id) {
+function prepareDocumentDownload(id) {
   const target = workspace.find(id);
   // A freshly opened active document lives in the working view until the first capture. Saving is
   // itself a capture boundary, so write that view back before asking the record what it contains.
@@ -7824,33 +9259,58 @@ function downloadDocument(id) {
   if (!target?.graph || target.graph.format === 'graphify') {
     if (id === workspace.activeId) showInspectorMessage(
       'Only Ravenroot workflow documents can be exported as executable GraphML.');
-    return false;
+    return null;
   }
-  if (id === workspace.activeId) {
+  if (id === workspace.activeId && documentIsEditable(target)) {
     syncGraphPositions();
     captureActiveDocument();
-  } else if (target.layoutMode !== 'elastic') {
+  } else if (id !== workspace.activeId && documentIsEditable(target) && target.layoutMode !== 'elastic') {
     syncGraphPositionsFromCy(target.graph, target.cy);
   }
-  const xml = serializeGraphML(target.graph);
-  const blob = new Blob([xml], { type: 'application/graphml+xml;charset=utf-8' });
+  finishVisualGroups(target);
+  const xml = serializeGraphML(documentIsEditable(target)
+    ? graphWithVisualGroupPresentation(target.graph, target.visualGroupState) : target.graph);
+  return {
+    target,
+    xml,
+    filename: target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`,
+  };
+}
+
+function dispatchDocumentDownload(prepared) {
+  const blob = new Blob([prepared.xml], { type: 'application/graphml+xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = prepared.filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function markDocumentDownloaded(prepared, { announce = true } = {}) {
+  const { target } = prepared;
   // Exporting GraphML is the only persistence this editor has, so it is the save point: the undo
   // stack keeps its depth and the document becomes clean at its current position.
   target.history.markSaved();
-  if (id === workspace.activeId) {
+  if (documentIsEditable(target)) target.visualGroupPresentationDirty = false;
+  if (target.id === workspace.activeId) {
     editHistory.markSaved();
     updateHistoryUi();
-    addActivityMessage('editor', `Saved ${anchor.download}`, 'completed');
+    if (announce) addActivityMessage('editor', `Saved ${prepared.filename}`, 'completed');
   } else {
     syncPaneHeaders();
     syncDocumentSwitcher();
   }
+}
+
+function downloadDocument(id) {
+  const prepared = prepareDocumentDownload(id);
+  if (!prepared) return false;
+  dispatchDocumentDownload(prepared);
+  markDocumentDownloaded(prepared);
   return true;
 }
 
@@ -7862,12 +9322,26 @@ function rebuildGraph(options = {}) {
   if (!graphData) return;
   // Undo and redo have just written the document. Reading positions back out of the renderer here
   // would overwrite the state that was restored, so history rebuilds skip the sync.
-  if (options.syncPositions !== false) syncGraphPositions();
+  if (options.syncPositions !== false && documentIsEditable(workspace.active)) syncGraphPositions();
+  const owner = workspace.active;
   const activeStyle = visualStyle;
+  const viewport = cy && !cy.destroyed() ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
+  const selectedIds = cy && !cy.destroyed() ? cy.$(':selected').map(element => element.id()) : [];
+  invalidateDocumentLayouts(owner);
   graphData.nodeMap = Object.fromEntries(graphData.nodes.map(node => [node.id, node]));
   initCy(buildElements(graphData), graphData, {
     visualStyle: activeStyle,
   });
+  if (options.retainedNodePositions) {
+    cy.batch(() => options.retainedNodePositions.forEach((position, id) => {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.position(position);
+    }));
+  }
+  if (viewport) cy.viewport(viewport);
+  const retainedSelection = selectedIds.filter(id => cy.getElementById(id).nonempty());
+  if (retainedSelection.length) applyStableSelection(cy, retainedSelection);
+  applyActiveEdgeVisualContract(cy, owner?.visualStyle || activeStyle);
   // initCy built a new renderer, so the keyboard's position has to be put back on it or the next
   // arrow key would start from the top of the graph again.
   if (graphCursorId && cy.getElementById(graphCursorId).nonempty()) setGraphCursor(graphCursorId);
@@ -7878,25 +9352,29 @@ function rebuildGraph(options = {}) {
 // ═══════════════════════════════════════════════════════════════
 
 function undoEdit() {
-  if (!graphData || !editHistory.canUndo() || !finalizeInspectorBeforeHistory()) return;
+  if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canUndo()
+      || !finalizeInspectorBeforeHistory()) return;
+  suspendVisualGroups(workspace.active);
   applyHistoryStep(editHistory.undo(graphData), 'Undo');
 }
 
 function redoEdit() {
-  if (!graphData || !editHistory.canRedo() || !finalizeInspectorBeforeHistory()) return;
+  if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canRedo()
+      || !finalizeInspectorBeforeHistory()) return;
+  suspendVisualGroups(workspace.active);
   applyHistoryStep(editHistory.redo(graphData), 'Redo');
 }
 
 function finalizeInspectorBeforeHistory() {
   const draft = inspectorDraft;
   if (!draft?.form.isConnected) return true;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (!assessment.changed) {
     retireInspectorDraft(draft.form);
     return true;
   }
   if (inspectorAutosave && assessment.valid
-      && commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+      && commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
     retireInspectorDraft(draft.form);
     return true;
   }
@@ -7910,8 +9388,17 @@ function applyHistoryStep(command, verb) {
   retireInspectorDraft();
   dragSnapshot = null;
   resetConnectGesture();
-  rebuildGraph({ syncPositions: false });
+  const modelPositionIds = new Set(commandPositionNodeIds(command));
+  const retainedNodePositions = new Map(cy?.nodes().map(node => [node.id(), node.position()]) || []);
+  modelPositionIds.forEach(id => retainedNodePositions.delete(id));
+  // History commands are disabled while a layout owns the document. Retire any later paint-only
+  // route frame left by ordinary node movement before restoring authoritative model positions.
+  clearDynamicEdgeGeometry(workspace.active);
+  if (!syncGraphRendererInPlace({
+    nodeIds: null, edgeIds: null, restoreModelPositionIds: modelPositionIds,
+  })) rebuildGraph({ syncPositions: false, retainedNodePositions });
   selectCommandTargets(command);
+  refreshVisualGroups();
   updateHistoryUi();
   addActivityMessage('editor', `${verb}: ${command.label}`, 'completed');
 }
@@ -7931,28 +9418,22 @@ function selectCommandTargets(command) {
 }
 
 function confirmDiscardChanges() {
-  if (!editHistory.isDirty()) return true;
+  if (!paneIsDirty(workspace.active)) return true;
   return confirm(discardChangesMessage(graphName));
 }
 
 function updateHistoryUi() {
   const state = editHistory.state();
-  const undoButton = document.getElementById('btn-undo');
-  if (undoButton) {
-    undoButton.title = state.canUndo ? `Undo ${state.undoLabel}` : 'Nothing to undo';
-  }
-  const redoButton = document.getElementById('btn-redo');
-  if (redoButton) {
-    redoButton.title = state.canRedo ? `Redo ${state.redoLabel}` : 'Nothing to redo';
-  }
+  const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
+  const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
-    indicator.classList.toggle('dirty', state.dirty);
-    indicator.textContent = state.dirty ? 'unsaved changes' : 'saved';
+    indicator.classList.toggle('dirty', dirty);
+    indicator.textContent = dirty ? 'unsaved changes' : presentationDirty ? 'local presentation' : 'saved';
   }
   const exportButton = document.getElementById('btn-export');
   if (exportButton) {
-    exportButton.classList.toggle('primary', state.dirty && graphData?.format !== 'graphify');
+    exportButton.classList.toggle('primary', dirty && graphData?.format !== 'graphify');
   }
   // The pane strip carries the same `*` this indicator carries, for the document it names. Hooked
   // here because this already runs on every edit, undo, redo and save: a modified marker that
@@ -7960,6 +9441,7 @@ function updateHistoryUi() {
   syncPaneHeaders();
   syncDocumentSwitcher();
   refreshCommands();
+  scheduleWorkspacePersistence();
 }
 
 function setEditorAvailability() {
@@ -8000,7 +9482,8 @@ function setModifyMode(enabled) {
     button.setAttribute('aria-label', modifyEnabled ? 'Editing mode active' : 'Switch to Editing mode');
   }
   const mode = document.getElementById('graph-mode-label');
-  if (mode) mode.textContent = modifyEnabled ? 'Editing' : 'Viewer';
+  if (mode) mode.textContent = workspace.active
+    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
   document.getElementById('cy-wrap')?.classList.toggle('modify-on', modifyEnabled);
   applyCanvasInteraction();
   updateConnectButton();
@@ -8040,7 +9523,11 @@ function applyNodeGrabPolicy(targetCy, state = canvasInteractionState({
   navigating: navigationEnabled,
 })) {
   if (!targetCy || targetCy.destroyed()) return;
+  const owner = workspace.documents.find(document_ => document_.cy === targetCy);
+  const projection = groupProjection(owner);
   targetCy.nodes().forEach(node => {
+    if (projection?.syntheticIds.has(node.id()) && !groupAuthoringAllowed(owner)) { node.ungrabify(); return; }
+    if (node.data('rrVisualRole') === 'ghost' || node.data('rrVisualRole') === 'header' || !node.visible()) { node.ungrabify(); return; }
     if (nodeIsGrabbable(state, node.selected())) node.grabify();
     else node.ungrabify();
   });
@@ -8168,7 +9655,7 @@ function toggleModify({ skipDraftGuard = false } = {}) {
 function toggleInspectorAutosave() {
   inspectorAutosave = !inspectorAutosave;
   writeInspectorAutosavePreference(inspectorAutosave);
-  if (inspectorAutosave && inspectorDraft) scheduleNodeDraftCommit(inspectorDraft, true);
+  if (inspectorAutosave && inspectorDraft) scheduleInspectorDraftCommit(inspectorDraft, true);
   refreshCommands();
 }
 
@@ -8216,6 +9703,10 @@ function handleConnectTap(owner, node, originalEvent) {
 
 function edgeSourceIsAvailable(node) {
   if (!node || node.empty()) return false;
+  if (!node.visible() || !Object.hasOwn(graphData?.nodeMap || {}, node.id())) {
+    announceGraph('Expand the visual group and select a real node for edge authoring.');
+    return false;
+  }
   if (nodeCanSourceEdge(node.selected())) return true;
   const label = node.data('name') || node.id();
   const message = `${label} is selected and moves in Editing. Move to an unselected node to start an edge.`;
@@ -8718,7 +10209,15 @@ function captureEdgePointerOrigin(originalEvent) {
     };
     const sourceId = nodeAtRenderedPosition(renderedPosition, targetCy);
     const source = sourceId ? targetCy.getElementById(sourceId) : null;
-    if (sourceId && nodeCanSourceEdge(source.selected())
+    const intent = pointerNodeGestureIntent({
+      editing: modifyEnabled,
+      navigating: navigationEnabled,
+      connectArmed,
+      edgeGestureActive: Boolean(edgeGestureSession),
+      selectedAtPointerStart: nodeWasSelectedAtPointerStart(owner, targetCy, sourceId),
+      sourceEligible: nodeCanSourceEdge(source?.selected()),
+    });
+    if (sourceId && intent === 'connect'
         && startEdgeGesture(owner, beginConnectGesture(graphData, sourceId), {
       announce: false, deferVisuals: true,
     })) {
@@ -8776,7 +10275,7 @@ function edgeGestureTargetAtClientPosition(originalEvent) {
   if (!sourceCenter || !source || source.empty()) return null;
   const sourceRendered = source.renderedPosition();
   const snap = 18;
-  const nearby = session.cy.nodes().filter(node => {
+  const nearby = session.cy.nodes(':visible').filter(node => Object.hasOwn(session.graph.nodeMap, node.id())).filter(node => {
     const rendered = node.renderedPosition();
     const center = {
       x: sourceCenter.x + rendered.x - sourceRendered.x,
@@ -8810,7 +10309,18 @@ function captureStagePointerSelection(originalEvent) {
   if (originalEvent.type === 'mousedown' && stageSelectionAtPointerStart.has(owner.cy)) return;
   stageSelectionAtPointerStart.set(owner.cy, {
     hasSelection: owner.cy.$(':selected').nonempty(),
+    owner,
+    rendererToken: rendererFor(owner)?.token || null,
+    selectedIds: owner.cy.$(':selected').map(element => element.id()),
   });
+}
+
+function nodeWasSelectedAtPointerStart(owner, targetCy, nodeId) {
+  const selection = elementSelectionAtPointerStart.get(targetCy)
+    || stageSelectionAtPointerStart.get(targetCy);
+  if (!selection || selection.owner !== owner
+      || selection.rendererToken !== (rendererFor(owner)?.token || null)) return false;
+  return selection.selectedIds?.includes(nodeId) ?? false;
 }
 
 // Cytoscape may stop its synthetic drag stream at a node boundary. The bubbling native event is
@@ -8865,7 +10375,7 @@ function nodeAtModelPosition(position, targetCy = cy) {
 
 function nodeAtRenderedPosition(position, targetCy = edgeGestureSession?.cy) {
   if (!position || !targetCy) return null;
-  const hits = targetCy.nodes().filter(node => {
+  const hits = targetCy.nodes(':visible').filter(node => Object.hasOwn(graphData?.nodeMap || {}, node.id())).filter(node => {
     const center = node.renderedPosition();
     const halfWidth = node.renderedWidth() / 2;
     const halfHeight = node.renderedHeight() / 2;
@@ -8883,7 +10393,7 @@ function edgeGestureTargetAtRenderedPosition(position) {
   // A modest magnetic corridor makes the target state predictable at node boundaries and gives
   // coarse or unsteady pointers the same explicit snap feedback as a pixel-perfect mouse.
   const snap = 18;
-  const nearby = session.cy.nodes().filter(node => {
+  const nearby = session.cy.nodes(':visible').filter(node => Object.hasOwn(session.graph.nodeMap, node.id())).filter(node => {
     const center = node.renderedPosition();
     return Math.abs(position.x - center.x) <= node.renderedWidth() / 2 + snap
       && Math.abs(position.y - center.y) <= node.renderedHeight() / 2 + snap;
@@ -8918,7 +10428,7 @@ function consumeSuppressedEdgeTap(targetCy) {
 function setGraphCursor(nodeId) {
   if (!cy) return;
   const element = nodeId ? cy.getElementById(nodeId) : null;
-  if (!element || element.empty()) return;
+  if (!element || element.empty() || !element.visible()) return;
   graphCursorId = nodeId;
   cy.nodes().removeClass('graph-cursor');
   element.addClass('graph-cursor');
@@ -8930,8 +10440,8 @@ function setGraphCursor(nodeId) {
 }
 
 function ensureGraphCursor() {
-  if (graphCursorId && cy?.getElementById(graphCursorId).nonempty()) return graphCursorId;
-  const first = cy?.nodes().first();
+  if (graphCursorId && cy?.getElementById(graphCursorId).nonempty() && cy.getElementById(graphCursorId).visible()) return graphCursorId;
+  const first = cy?.nodes(':visible').filter(node => node.data('rrVisualRole') !== 'ghost').first();
   if (!first || first.empty()) return null;
   setGraphCursor(first.id());
   return graphCursorId;
@@ -8949,8 +10459,9 @@ function moveGraphCursor(direction) {
   const axis = direction === 'left' || direction === 'right' ? 'x' : 'y';
   const sign = direction === 'right' || direction === 'down' ? 1 : -1;
   let best = null;
-  cy.nodes().forEach(node => {
+  cy.nodes(':visible').forEach(node => {
     if (node.id() === currentId) return;
+    if (node.data('rrVisualRole') === 'ghost') return;
     const to = node.position();
     const along = (to[axis] - from[axis]) * sign;
     if (along <= 0) return;
@@ -8984,8 +10495,11 @@ function cycleIncidentEdge(step, { skipDraftGuard = false } = {}) {
   }
   invalidateStableSelection();
   cy.elements().unselect();
-  cy.getElementById(next.id).select();
-  showEdgeInfo(cy.getElementById(next.id));
+  const projection = groupProjection();
+  const projectedEdge = projection?.edges.find(edge => edge.originalEdgeIds.includes(next.id));
+  const visibleId = projectedEdge?.id || next.id;
+  cy.getElementById(visibleId).select();
+  showEdgeInfo(cy.getElementById(visibleId));
   announceGraph(`${describeEdge(next, graphData)} Press R to move its target, Shift plus R for its source.`);
 }
 
@@ -9129,8 +10643,18 @@ function deleteCurrentSelection({ skipDraftGuard = false } = {}) {
   const selectedNodes = cy.nodes(':selected').map(node => node.id());
   const selectedEdges = cy.edges(':selected').map(edge => edge.id());
   if (!selectedNodes.length && !selectedEdges.length) return false;
+  const projected = groupProjection();
+  const synthetic = [...selectedNodes, ...selectedEdges].filter(id => projected?.syntheticIds.has(id));
+  if (synthetic.length) {
+    const group = selectedNodes.length === 1 && !selectedEdges.length ? groupForVisibleNode(selectedNodes[0]) : null;
+    if (group) return manageVisualGroup('ungroup', group);
+    showInspectorMessage('Cannot delete a mixed selection of visual groups and graph elements. Ungroup first, or select only the intended real elements.');
+    return false;
+  }
+  finishVisualGroups();
   const removed = deleteElements(graphData, selectedNodes, selectedEdges, editHistory);
   cy.remove(cy.$(':selected'));
+  refreshVisualGroups();
   closeInfo();
   updateStats();
   scheduleMinimap();
@@ -9207,14 +10731,18 @@ function duplicateSelectedNode() {
 }
 
 function syncGraphPositions() {
-  if (!cy || !graphData || graphData.format === 'graphify' || layoutMode === 'elastic') return;
+  finishVisualGroups();
+  if (!cy || !graphData || !documentIsEditable(workspace.active)
+      || graphData.format === 'graphify' || layoutMode === 'elastic') return;
   syncGraphPositionsFromCy(graphData, cy);
 }
 
 // `atBoot` marks the attempt the page makes for itself on load, with nobody watching the tab yet.
 // It changes two things and nothing else: the wording of the in-flight state, and the refusal to
 // raise a modal confirmation that no user asked for.
-function connectRuntime(atBoot = false) {
+async function connectRuntime(atBoot = false) {
+  const connectionGeneration = ++runtimeConnectionGeneration;
+  const authorityGeneration = beginWorkspaceAuthority(null);
   const input = document.getElementById('service-url');
   const baseUrl = input.value.trim().replace(/\/$/, '');
   input.value = baseUrl;
@@ -9247,11 +10775,16 @@ function connectRuntime(atBoot = false) {
         if (runtimeDisconnect) runtimeDisconnect();
         runtimeDisconnect = null;
         runtimeClient = null;
+        runtimeConfigurationRequest = null;
+        runtimeConfiguration = null;
+        void configureHumanTasks();
         return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
       }
       confirmedServiceOrigin = target.origin;
     }
   }
+  await flushWorkspacePersistence({ allowSuspended: true });
+  if (connectionGeneration !== runtimeConnectionGeneration) return;
   if (runtimeDisconnect) runtimeDisconnect();
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
@@ -9260,20 +10793,47 @@ function connectRuntime(atBoot = false) {
   // nothing else — it has no base URL of its own to be pointed elsewhere. That is what makes "a
   // denial to the user is a denial to the panel" true here rather than merely intended, and it is
   // why no provider host appears anywhere in this file.
-  assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
-  void refreshAssistantAvailability();
   // A construction site of the same shape, for the same reason. The credential window reaches
   // THE SAME Ravenroot service with THE SAME authentication and has no base URL of its own — which is what
   // makes "a value typed there goes to your own service and nowhere else" true by construction
   // rather than by inspection. Re-listing here is also what refreshes the node inspector's
   // SECRET_REFERENCE choices after an authentication, without the window ever being opened.
-  void credentialsWindow?.setClient(
-    new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
   // the Deployments window's client IS the runtime client, not a construction of its
   // own -- `/v1/deployments` is one of `RavenrootRuntimeClient`'s own routes (see `runtime-client.js`),
   // unlike credentials, which has a transport entirely to itself.
-  void deploymentsWindow?.setClient(runtimeClient);
   const connectedClient = runtimeClient;
+  workspaceAuthority = Object.freeze({ state: 'pending', client: connectedClient, scope: null,
+    generation: authorityGeneration });
+  assistantClient = null;
+  void refreshAssistantAvailability();
+  runtimeConfiguration = null;
+  runtimeConfigurationRequest = connectedClient.configuration().then(async configuration => {
+    const result = { client: connectedClient, configuration, error: null };
+    if (runtimeClient === connectedClient) {
+      runtimeConfiguration = result;
+      const scope = await switchWorkspacePersistence(configuration, connectedClient);
+      if (scope !== false && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
+        assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
+        void refreshAssistantAvailability();
+        void credentialsWindow?.setClient(
+          new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
+        void deploymentsWindow?.setClient(connectedClient);
+        void configureHumanTasks();
+        workspace.documents.forEach(scheduleProgramGraphReadiness);
+      } else if (scope === false) {
+        failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
+      }
+    }
+    return result;
+  }).catch(error => {
+    if (runtimeClient === connectedClient) {
+      runtimeConfiguration = null;
+      failWorkspaceAuthority(connectedClient, authorityGeneration,
+        `Workspace authority could not be verified: ${error.message}`);
+    }
+    return { client: connectedClient, configuration: null, error };
+  });
+  const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
     atBoot ? 'Connecting to the service — the access token is kept in memory only'
       : 'Connecting with an in-memory bearer token');
@@ -9282,17 +10842,23 @@ function connectRuntime(atBoot = false) {
   try {
     runtimeDisconnect = runtimeClient.connect(handleRuntimeEvent, (status, message) => {
       setRuntimeConnectionState(status, message);
+      if (status === 'connected') void configureHumanTasks();
     });
-    connectedClient.nodeTypes().then(catalog => {
-      if (runtimeClient !== connectedClient) return;
+    connectedClient.nodeTypes().then(async catalog => {
+      await connectedConfigurationRequest;
+      if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
+          || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = catalog;
       nodeCatalogFailure = null;
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
       renderNodeCatalog();
       workspace.documents.forEach(scheduleProgramGraphReadiness);
-    }).catch(error => {
-      if (runtimeClient !== connectedClient) return;
+    }).catch(async error => {
+      if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient) return;
+      await connectedConfigurationRequest;
+      if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
+          || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = [];
       nodeCatalogFailure = error;
       nodeCatalogLoaded = true;
@@ -9319,16 +10885,29 @@ function authenticateRuntime() {
   }
   runtimeTokenProvider.setAccessToken(token);
   hasRuntimeToken = true;
+  // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
+  // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
+  suspendHumanTaskRecovery();
   refreshCommands();
   connectRuntime();
 }
 
-function revokeRuntimeAccess() {
+async function revokeRuntimeAccess() {
+  const connectionGeneration = ++runtimeConnectionGeneration;
+  beginWorkspaceAuthority(null, 'revoked');
+  await flushWorkspacePersistence({ allowSuspended: true });
+  if (connectionGeneration !== runtimeConnectionGeneration) return;
   runtimeTokenProvider.clearAccessToken();
   hasRuntimeToken = false;
   runtimeDisconnect?.();
   runtimeDisconnect = null;
   runtimeClient = null;
+  runtimeConfigurationRequest = null;
+  runtimeConfiguration = null;
+  workspacePersistenceReason = 'Workspace authority was revoked. Documents remain open for export.';
+  syncActiveDocumentChrome();
+  suspendHumanTaskRecovery();
+  void configureHumanTasks();
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
   // listing AND republishes `{loaded: false}`, so the node inspector's SECRET_REFERENCE control goes
@@ -9357,33 +10936,127 @@ function setRuntimeConnectionState(status, message) {
   state.setAttribute('aria-label', `Runtime status: ${status.replaceAll('-', ' ')}. ${message}`);
 }
 
-function graphLifecycleCommand(action) {
+function stopCurrentSourceSession() {
   if (!workspace.active || !graphData) return showInspectorMessage('Create or load a workflow first.');
-  if (action === 'stop' && sourceSessionIsActive(activeSourceSession)) {
-    void stopActiveSourceSession(workspace.active);
-    return { status: 'stopping', deploymentId: activeSourceSession.sessionId };
+  if (!tenantAuthorityAllows(workspace.active)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified.');
   }
-  const result = requestGraphLifecycle(action, {
-    documentId: workspace.activeId,
-    graphName: graphDisplayName,
-    // A transient Test graph version is deliberately not treated as a durable deployment ID.
-    deploymentId: null,
-  });
-  const target = result.deploymentId
-    ? `deployment ${shortId(result.deploymentId)}`
-    : `current graph “${result.graphName || result.documentId}”`;
-  const message = `${result.status}: ${result.message} The command is scoped to ${target}, never the shared ActorSystem.`;
-  addActivityMessage(action === 'forceStop' ? 'Force stop' : action, message, 'failed');
-  document.getElementById('info-title').textContent = `${action === 'forceStop' ? 'Force stop' : action} · not yet implemented`;
-  document.getElementById('info-body').innerHTML = `<div class="info-empty">${escapeHtml(message)}</div>`;
-  return result;
+  if (!sourceSessionIsActive(activeSourceSession)) {
+    return showInspectorMessage('No process-local source session is active for this document.');
+  }
+  void stopActiveSourceSession(workspace.active);
+  return true;
 }
 
-function updateSourceSession(owner, status, token = null, { observationUnavailable = false } = {}) {
+function showUnavailableLifecycle(reason) {
+  showInspectorMessage(reason);
+  addActivityMessage('Lifecycle control unavailable', reason, 'failed');
+  return false;
+}
+
+async function executionLifecycleCommand(action) {
+  const owner = workspace.active;
+  if (!owner || !graphData) return showInspectorMessage('Create or load a workflow first.');
+  if (!tenantAuthorityAllows(owner)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified.');
+  }
+  const flight = acquireExecutionCommand(owner.execution);
+  if (!flight || !flight.executionId || flight.executionId === PENDING_EXECUTION) {
+    if (flight) releaseExecutionCommand(flight);
+    addActivityMessage('Execution control unavailable',
+      'Another command is already in flight, or this execution has not received its runtime ID.', 'failed');
+    refreshCommands();
+    return false;
+  }
+  const current = () => workspace.find(owner.id) === owner && tenantAuthorityAllows(owner, flight.client)
+    && executionCommandIsCurrent(flight);
+  if (owner.id === workspace.activeId) activeExecutionCommandInFlight = true;
+  refreshCommands();
+  addActivityMessage(action, `${action[0].toUpperCase()}${action.slice(1)} requested for execution ${shortId(flight.executionId)}…`);
+  try {
+    const result = await requestExecutionLifecycle(action, {
+      client: flight.client,
+      executionId: flight.executionId,
+      signal: flight.controller.signal,
+      isCurrent: current,
+    });
+    if (result.status === 'stale' || !current()) return false;
+    if (result.status === 'unknown') {
+      setExecutionReconciliationState(owner, 'unknown');
+      if (workspace.activeId === owner.id) {
+        const reason = result.observationError?.message || result.commandError?.message
+          || 'the runtime returned no readable reason';
+        addActivityMessage(`${action} status unknown`,
+          `Execution ${shortId(flight.executionId)} could not be authoritatively read after the command: ${reason}. `
+          + 'Automatic reconciliation continues; no success state was assumed.', 'failed');
+        syncExecutionReconciliationChrome(true);
+      }
+      return false;
+    }
+
+    const outcome = result.authoritative;
+    setExecutionReconciliationState(owner, 'known');
+    setExecutionPaused(owner, Boolean(outcome?.paused));
+    if (isTerminalExecution(outcome)) {
+      settleReconciledExecution(owner, flight.executionId, flight.client, flight.generation, outcome, false);
+    }
+    if (workspace.activeId === owner.id) {
+      const commandOutcome = result.command?.outcome || 'transport outcome unavailable';
+      const status = String(outcome?.status || 'active').toLowerCase();
+      const paused = outcome?.paused ? 'paused' : 'not paused';
+      addActivityMessage(action,
+        `${commandOutcome} · authoritative state ${status}, ${paused} · execution ${shortId(flight.executionId)}`,
+        result.commandError ? 'failed' : 'completed');
+      if (result.commandError) addActivityMessage(`${action} request response unavailable`,
+        `${result.commandError.message}. The displayed lifecycle state comes from the authoritative execution read.`,
+        'failed');
+      document.getElementById('activity-summary').textContent =
+        `${action[0].toUpperCase()}${action.slice(1)} · ${status} · execution ${shortId(flight.executionId)}`;
+      document.getElementById('activity-summary').removeAttribute('aria-label');
+    }
+    return true;
+  } finally {
+    releaseExecutionCommand(flight);
+    if (owner.id === workspace.activeId) activeExecutionCommandInFlight = false;
+    refreshCommands();
+  }
+}
+
+// `fromRuntime` separates an answer the SERVER gave from one this file synthesized. Only the first
+// can carry a deployment identity, and only the first can prove one is missing: warning on a local
+// STARTING placeholder would report the runtime for something the runtime was never asked.
+function updateSourceSession(owner, status, token = null,
+  { observationUnavailable = false, fromRuntime = false } = {}) {
   if (token && !sourceSessionCommandIsCurrent(owner, token)) return false;
   const session = owner.sourceSession;
   const changed = session.state !== status.state || session.diagnostic !== (status.diagnostic || '')
     || session.observationUnavailable !== observationUnavailable;
+  // The one thing that makes a listening graph observable. Locally synthesized statuses (STARTING,
+  // the recovery states above) carry no deploymentId and must not erase the one the server gave.
+  if (typeof status.deploymentId === 'string' && status.deploymentId) {
+    session.deploymentId = status.deploymentId;
+    // The projection accumulates across every traversal this deployment produces, instead of being
+    // reset by each one, which is what the per-traversal binding did to a source. Rebound on every
+    // observation rather than only when the id changes: the call is idempotent -- rebinding to the
+    // deployment it already holds preserves the projection -- and doing it unconditionally means the
+    // projection cannot fall out of step with the session it belongs to. Guarding on the session's
+    // own field would have made that agreement rest on a separate fact (that a live session's id is
+    // never reused across a reset), which is true today and is not this function's to rely on.
+    owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
+    bindMonitoringRuntimeStateToDeployment(owner.execution.monitoringFlow, status.deploymentId);
+    session.deploymentUnreported = false;
+  } else if (fromRuntime && !session.deploymentId && !session.deploymentUnreported) {
+    // A server answer that named no deployment. Say it once: the session will still start and the
+    // lifecycle pill will still be truthful, but nothing on the canvas can be attributed to it, and
+    // an unexplained blank canvas is exactly the symptom this binding exists to remove.
+    session.deploymentUnreported = true;
+    if (owner === workspace.active) {
+      addActivityMessage('Source activity not attributable',
+        'This runtime reported no deployment identity for the session, so its runtime events cannot '
+        + 'be attributed to this graph. The lifecycle state remains accurate; node activity, '
+        + 'monitoring and log output will stay empty.', 'failed');
+    }
+  }
   session.state = status.state;
   session.sourceCount = status.sourceCount ?? session.sourceCount;
   session.diagnostic = status.diagnostic || '';
@@ -9402,7 +11075,8 @@ function updateSourceSession(owner, status, token = null, { observationUnavailab
 }
 
 function sourceSessionCommandIsCurrent(owner, token) {
-  return workspace.find(owner.id) === owner && sourceSessionCleanupIsCurrent(owner, token);
+  return workspace.find(owner.id) === owner && tenantAuthorityAllows(owner, token?.client)
+    && sourceSessionCleanupIsCurrent(owner, token);
 }
 
 // Stop claims backend cleanup before it waits for a pending start. Closing the document detaches its
@@ -9422,7 +11096,7 @@ async function observeSourceSession(owner, token) {
       if (controller.signal.aborted) break;
       const status = await client.sourceSession(sessionId, { signal: controller.signal });
       if (!sourceSessionCommandIsCurrent(owner, token)) break;
-      updateSourceSession(owner, status, token);
+      updateSourceSession(owner, status, token, { fromRuntime: true });
       if (status.state === 'FAILED' || status.state === 'STOPPED') break;
     } catch (error) {
       if (controller.signal.aborted) break;
@@ -9472,7 +11146,7 @@ async function startSourceSession(owner, client, graphMl, sourceCount) {
   try {
     const status = await startPromise;
     if (!sourceSessionCommandIsCurrent(owner, token)) return false;
-    updateSourceSession(owner, status, token);
+    updateSourceSession(owner, status, token, { fromRuntime: true });
     if (!session.stopRequested
         && (status.state === 'STARTING' || status.state === 'LISTENING' || status.state === 'DEGRADED')) {
       void observeSourceSession(owner, token);
@@ -9526,7 +11200,9 @@ async function stopActiveSourceSession(owner) {
       session.pollController?.abort();
       const status = await token.client.stopSourceSession(token.sessionId);
       if (!sourceSessionCleanupIsCurrent(owner, token)) return false;
-      if (sourceSessionCommandIsCurrent(owner, token)) updateSourceSession(owner, status, token);
+      if (sourceSessionCommandIsCurrent(owner, token)) {
+        updateSourceSession(owner, status, token, { fromRuntime: true });
+      }
       return status.state === 'STOPPED';
     } catch (error) {
       if (!sourceSessionCleanupIsCurrent(owner, token)) return false;
@@ -9556,6 +11232,7 @@ async function stopActiveSourceSession(owner) {
     }
   })();
   session.stopPromise = stopPromise;
+  if (owner === workspace.active) refreshCommands();
   return stopPromise;
 }
 
@@ -9580,12 +11257,12 @@ function reportExecutionOutcomeOnce(owner, token, outcome) {
 
 async function fetchAndReportExecutionOutcome(owner, token) {
   if (!token?.client || !token.executionId || token.executionId === PENDING_EXECUTION
-      || !claimExecutionOutcomeFetch(token)) return;
+      || !tenantAuthorityAllows(owner, token.client) || !claimExecutionOutcomeFetch(token)) return;
   try {
     const outcome = await token.client.execution(token.executionId, {
       signal: executionOutcomeFetchSignal(token),
     });
-    reportExecutionOutcomeOnce(owner, token, outcome);
+    if (tenantAuthorityAllows(owner, token.client)) reportExecutionOutcomeOnce(owner, token, outcome);
   } catch {
     // The terminal event is still truthful. A failed lookup produces no fabricated clean/failure
     // outcome and never exposes the request error, payload or protected diagnostic in the panel.
@@ -9625,7 +11302,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
     return await reconcileExecution({
       lookup: () => client.execution(executionId, { signal: controller.signal }),
       isCurrent: () => owner.execution.executionId === executionId
-        && !owner.execution.finished.has(executionId),
+        && !owner.execution.finished.has(executionId) && tenantAuthorityAllows(owner, client),
       onUnknown: ({ error, failureCount }) => {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
@@ -9643,6 +11320,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
       },
       onKnown: outcome => {
         setExecutionReconciliationState(owner, 'known');
+        setExecutionPaused(owner, Boolean(outcome?.paused));
         if (owner.id !== workspace.activeId) return;
         syncExecutionReconciliationChrome(true);
         addActivityMessage('Execution status available',
@@ -9650,6 +11328,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
           + 'Test and Run remain unavailable while it is active.');
       },
       onTerminal: ({ outcome, recoveredFromUnknown }) => {
+        setExecutionPaused(owner, false);
         settleReconciledExecution(owner, executionId, client, generation, outcome, recoveredFromUnknown);
       },
     });
@@ -9673,6 +11352,7 @@ async function preflightUnknownExecution(owner, flight) {
     onNonTerminal: outcome => {
       if (!executionCommandIsCurrent(flight)) return;
       setExecutionReconciliationState(owner, 'known');
+      setExecutionPaused(owner, Boolean(outcome?.paused));
       if (workspace.activeId === owner.id) {
         syncExecutionReconciliationChrome(true);
         addActivityMessage('Execution still active',
@@ -9695,6 +11375,9 @@ async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
   if (!owner || !ownerGraph) return showInspectorMessage('Create or load a workflow first.');
+  if (!tenantAuthorityAllows(owner)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified before execution.');
+  }
   if (programNodes(ownerGraph).length) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
@@ -9720,7 +11403,7 @@ async function playGraph(mode = 'test') {
   // Everything a later POST can consume is captured before the first await. The graph is serialized
   // now, not read from whichever document may become active while a delayed terminal GET is pending.
   syncGraphPositions();
-  const graphMl = serializeGraphML(ownerGraph);
+  const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
   const payload = document.getElementById('execution-payload').value;
   const displayName = graphDisplayName;
   const ownerCy = cy;
@@ -9762,7 +11445,8 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner;
+  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner
+    && tenantAuthorityAllows(owner, executionClient);
   if (!ownerStillActive || !executionCommandIsCurrent(flight)) {
     releaseExecutionCommand(flight);
     return;
@@ -9773,6 +11457,11 @@ async function playGraph(mode = 'test') {
   // as required by the confirmation-text contract above.
   if (sourceCount > 0) {
     try {
+      // The canvas is cleared for a listener session exactly as it is for a run. Before this, a
+      // source start left the previous run's colours in place -- and once a session can actually
+      // paint, stale paint is no longer harmless decoration but a claim about traffic that is not
+      // this session's.
+      resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
       await startSourceSession(owner, executionClient, graphMl, sourceCount);
     } catch (error) {
       // startSourceSession normally converts request failures to an honest, fenced lifecycle state.
@@ -9809,6 +11498,12 @@ async function playGraph(mode = 'test') {
       graphMl, payload);
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
         || owner.execution.reconciliationClient !== executionClient) return;
+    // Test and Run are executions of the immutable GraphML captured above, not document lifecycle
+    // operations. Keep the binding on the document that submitted that snapshot: creating a Test
+    // projection here used to change focus, identity, editability, history and viewport merely
+    // because an asynchronous POST completed. The owner reference is also the routing fence for
+    // later events, so a response received after the user switches panes still cannot attach to the
+    // newly active document.
     setDocumentExecution(owner, submission.executionId, submission.graphVersion, executionClient,
       submission.processInstanceId ?? null);
     void reconcileTestCompletion(owner, submission.executionId, executionClient);
@@ -9817,6 +11512,7 @@ async function playGraph(mode = 'test') {
       `${submission.executionPolicy || 'policy unreported'} · execution ${shortId(submission.executionId)} · graph ${shortId(submission.graphVersion)}`,
       'completed');
     if (owner.execution.finished.has(submission.executionId)) refreshCommands();
+    scheduleWorkspacePersistence();
   } catch (error) {
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
         || owner.execution.reconciliationClient !== executionClient) return;
@@ -9833,8 +11529,9 @@ async function playGraph(mode = 'test') {
 // to be in front of the user is how a run in one document used to light up another.
 function handleRuntimeEvent(event) {
   const target = documentForRuntimeEvent(workspace, event);
-  if (!target) return;
-  const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED';
+  if (!target || !tenantAuthorityAllows(target)) return;
+  const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
+    || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
   // The activity log is one panel and follows the active document, so only its events are logged.
   if (isActive) appendActivityEvent(event);
@@ -9858,11 +11555,24 @@ function handleRuntimeEvent(event) {
   // is its default state.
   if (isActive) refreshAssistantContext();
 
+  // Events provide the low-latency projection; the reconciliation GET remains authoritative and
+  // will continuously confirm or correct this flag. Binding lookup above fences document/version.
+  if (event.type === 'EXECUTION_PAUSED') setExecutionPaused(target, true);
+  if (event.type === 'EXECUTION_RESUMED') setExecutionPaused(target, false);
+
   if (isTerminal) {
+    setExecutionPaused(target, false);
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
       target.execution.generation, {
+      // The durable contract, unchanged by this event type existing: a cancelled execution is still
+      // reported as FAILED (see ExecutionTerminationReason's own documented rationale), so this is
+      // not a guess -- it is the same status the server itself will report once `fetchOutcome: true`
+      // below fetches the real outcome. `terminationReason` rides along so the one caller that reads
+      // this synthetic object directly (the "recovered from unknown" activity message) does not call
+      // a cancellation an ordinary failure while the real outcome is still in flight.
       status: event.type === 'EXECUTION_COMPLETED' ? 'COMPLETED' : 'FAILED',
+      terminationReason: event.type === 'EXECUTION_CANCELLED' ? 'CANCELLED' : null,
     }, recoveredFromUnknown, { fetchOutcome: true });
     const binding = target.execution.executionId;
     if (isActive && (binding === event.executionId || binding === PENDING_EXECUTION)) {
@@ -9882,48 +11592,93 @@ function handleRuntimeEvent(event) {
     return;
   }
   if (!event.nodeId || !targetCy) return;
-  const node = targetCy.getElementById(event.nodeId);
-  if (!node.length) return;
-
-  let state = node.data('runtimeState') || 'idle';
-  if (event.type === 'NODE_STARTED') state = 'active';
-  if (event.type === 'NODE_DEFAULTED') state = 'fallback';
-  if (event.type === 'NODE_BYPASSED') state = 'bypassed';
-  if (event.type === 'NODE_COMPLETED' && state !== 'fallback' && state !== 'bypassed') state = 'completed';
-  if (event.type === 'NODE_FAILED') state = 'failed';
+  if (!targetCy.getElementById(event.nodeId).length) return;
+  // What the node shows is decided by the aggregate over every traversal in this view, not by
+  // whichever event arrived last -- see `observeNodeActivity` for the rule and why one is needed.
   // `activeInstances` is the count of LIVE INSTANCES of this node's actor -- 1 for a resident
   // nature however much traffic crosses it, one per concurrent invocation for the default one. It is
   // what the node is rendered by. `inFlightArrivals` is the queue depth and is deliberately kept in a
   // separate field: the two are equal for an ordinary worker node and differ for a resident one, and
-  // rendering the second under the first's name reports the wrong quantity.
-  const instances = Number(event.activeInstances) || 0;
-  const arrivals = Number(event.inFlightArrivals) || 0;
-  node.data('instances', instances);
-  node.data('arrivals', arrivals);
-  node.data('runtimeState', state);
-  node.data('runtimeObserved', true);
-  node.data('lastEventType', event.type);
-  node.data('lastOccurredAt', event.occurredAt || null);
-  node.data('processingDuration', event.processingDuration ?? null);
-  node.data('fallback', Boolean(event.fallback));
-  const model = targetGraph?.nodeMap[event.nodeId];
-  if (model) {
-    model.instances = instances;
-    model.arrivals = arrivals;
-    model.runtimeState = state;
-    model.runtimeObserved = true;
-    model.lastEventType = event.type;
-    model.lastOccurredAt = event.occurredAt || null;
-    model.processingDuration = event.processingDuration ?? null;
-    model.fallback = Boolean(event.fallback);
+  // rendering the second under the first's name reports the wrong quantity. Both are carried through
+  // the aggregate unchanged.
+  target.execution.monitoringFlow ||= createMonitoringRuntimeState();
+  if (!observeNodeActivity(target.execution.monitoringFlow, event).changed) return;
+  scheduleRuntimeNodePaint(target, event.nodeId);
+}
+
+// ── Painting is coalesced, per document, to one frame ────────────────────────────────────────────
+//
+// A run emits a handful of node events and painting each one as it arrives cost nothing. A source
+// has no such ceiling: it emits as fast as it admits, and every paint writes Cytoscape styles, runs
+// a 180 ms D3 transition and restarts the force simulation. At that point per-event repainting is
+// not merely wasteful, it is self-defeating -- the browser spends the frame it needed for the next
+// event on re-rendering a state that is already superseded.
+//
+// So events update the aggregate immediately and the canvas is repainted at most once per frame,
+// from that aggregate. Nothing is dropped: a node touched fifty times in one frame is painted once,
+// with the state it actually ended the frame in. The queue holds node ids only, so it is bounded by
+// the size of the document rather than by the volume of the stream.
+const runtimeNodePaintQueues = new WeakMap();
+
+function scheduleFrame(callback) {
+  return typeof globalThis.requestAnimationFrame === 'function'
+    ? globalThis.requestAnimationFrame(callback)
+    : setTimeout(callback, 16);
+}
+
+function scheduleRuntimeNodePaint(owner, nodeId) {
+  let queue = runtimeNodePaintQueues.get(owner);
+  if (!queue) {
+    queue = { nodes: new Set(), scheduled: false };
+    runtimeNodePaintQueues.set(owner, queue);
   }
-  applyRuntimeVisual(node);
-  updateD3RuntimeNode(target, event.nodeId, instances, state, arrivals, event);
+  queue.nodes.add(nodeId);
+  if (queue.scheduled) return;
+  queue.scheduled = true;
+  scheduleFrame(() => {
+    queue.scheduled = false;
+    flushRuntimeNodePaint(owner, queue);
+  });
+}
+
+function flushRuntimeNodePaint(owner, queue) {
+  const pending = [...queue.nodes];
+  queue.nodes.clear();
+  if (!pending.length || workspace.find(owner.id) !== owner) return;
+  const isActive = owner === workspace.active;
+  const ownerCy = isActive ? cy : owner.cy;
+  if (!ownerCy) return;
+  const flow = owner.execution.monitoringFlow;
+  for (const nodeId of pending) {
+    const node = ownerCy.getElementById(nodeId);
+    if (!node.length) continue;
+    const view = nodeActivitySnapshot(flow, nodeId);
+    // A reset between the event and this frame leaves nothing to paint, and painting the frame's
+    // stale aggregate would put a cleared run back on the canvas.
+    if (!view.observed) continue;
+    node.data('instances', view.instances);
+    node.data('arrivals', view.arrivals);
+    node.data('runtimeState', view.state);
+    node.data('runtimeObserved', true);
+    node.data('runtimeFailures', view.failures);
+    node.data('lastEventType', view.lastEventType);
+    node.data('lastOccurredAt', view.lastOccurredAt);
+    node.data('processingDuration', view.processingDuration);
+    node.data('fallback', view.fallback);
+    applyRuntimeVisual(node);
+    updateD3RuntimeNode(owner, nodeId, view.instances, view.state, view.arrivals, {
+      type: view.lastEventType,
+      occurredAt: view.lastOccurredAt,
+      processingDuration: view.processingDuration,
+      fallback: view.fallback,
+    });
+  }
 }
 
 function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targetVisualStyle) {
   owner.execution.monitoringFlow ||= createMonitoringRuntimeState();
   resetMonitoringRuntimeState(owner.execution.monitoringFlow, null);
+  runtimeNodePaintQueues.get(owner)?.nodes.clear();
   if (!targetCy) return;
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
@@ -9934,22 +11689,12 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     node.data('lastOccurredAt', '');
     node.data('processingDuration', null);
     node.data('fallback', false);
+    node.data('runtimeFailures', 0);
     // `removeStyle` drops the run's inline border and hands the node back to the stylesheet,
     // where `node[?bypassed]` still applies -- the flag is a property of the DOCUMENT, not of the
     // run, so clearing run state must not clear it. The label is rebuilt through the same helper for
     // the same reason: the marker belongs to the idle node too.
-    node.data('label',
-      `${NODE_ICONS[node.data('nodeType')] || '• '}${bypassedNodeName(node.data('name'), node.data('bypassed'))}`);
-    const model = targetGraph.nodeMap[node.id()];
-    if (model) {
-      model.instances = 0;
-      model.runtimeState = 'idle';
-      model.runtimeObserved = false;
-      model.lastEventType = null;
-      model.lastOccurredAt = null;
-      model.processingDuration = null;
-      model.fallback = false;
-    }
+    node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   });
   if (targetLayoutMode === 'elastic') {
     startD3Elastic(owner, targetCy, owner.layoutSessionToken);
@@ -9980,28 +11725,36 @@ function runtimeColor(state) {
  * For an ordinary worker node they are equal and one number is shown -- printing "10 instances · 10 in
  * flight" everywhere would train the eye to ignore a pair that matters precisely when it stops matching.
  */
-function runtimeCountLabel(name, instances, arrivals = 0) {
-  if (!(instances > 0)) return name;
+function runtimeCountLabel(name, instances, arrivals = 0, failures = 0) {
+  // The colour answers "what is this node doing now" and can only answer one question at a time; a
+  // node that failed for one message and then succeeded for the next is green, truthfully. This
+  // number is the other half: every failed arrival since the binding began, never decremented, so a
+  // failure under a busy source leaves a mark instead of a flash the user had to be watching for.
+  const failed = failures > 0 ? `${failures} failed` : '';
+  if (!(instances > 0)) return failed ? `${name} · ${failed}` : name;
   const noun = instances === 1 ? 'instance' : 'instances';
   const queued = arrivals > instances ? ` · ${arrivals} in flight` : '';
-  return `${name} · ${instances} ${noun}${queued}`;
+  return `${name} · ${instances} ${noun}${queued}${failed ? ` · ${failed}` : ''}`;
 }
 
 function runtimeNodeLabel(node) {
   const instances = Number(node.data('instances')) || 0;
   const arrivals = Number(node.data('arrivals')) || 0;
+  const attention = { pending: Number(node.data('humanTaskPending')) || 0,
+    escalated: Number(node.data('humanTaskEscalated')) || 0 };
   // The switched-off marker rides on the node's name, so it survives a run painting over the
   // label. A bypassed node can still report instances -- a run that crosses it emits NODE_BYPASSED
   // with a count -- and the two facts belong on the same label, not one replacing the other.
+  const failures = Number(node.data('runtimeFailures')) || 0;
   const name = bypassedNodeName(node.data('name'), node.data('bypassed'));
-  if (!(instances > 0)) return name;
+  if (!(instances > 0) && !(failures > 0)) return humanTaskNodeLabel(name, attention);
   // Same text as the elastic caption, on the line break this renderer uses. Composed against the RAW
   // name and recombined with the display name afterwards, so the `.replace` below keeps operating on
   // the one separator pinned it to: the bypass marker uses the same ` · `, and a first-match
   // replace over the display name would put the line break INSIDE the name instead of after it.
-  const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals)
+  const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals, failures)
     .replace(' · ', '\n').split('\n');
-  return `${name}\n${stats}`;
+  return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }
 
 function applyRuntimeVisual(node) {
@@ -10044,7 +11797,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
     .attr('stroke-width', state === 'active' ? 5 : 3);
   if (renderer.nodeLabelSelection) {
     renderer.nodeLabelSelection.filter(node => node.id === nodeId)
-      .text(node => runtimeCountLabel(node.label, activeInstances, inFlightArrivals));
+      .text(() => runtimeNodeLabel(owner.cy.getElementById(nodeId)));
   }
   if (renderer.simulation && rendererSessions.isLive(renderer.token)) {
     renderer.simulation.force('collision', d3.forceCollide().radius(node => node.r + 8));
@@ -10097,6 +11850,15 @@ function activityIdentifiersHtml(event) {
     ['invocation', event.invocationId],
     ['attempt', event.attemptId],
   ];
+  // A fifth level, and the only one rendered conditionally. The four above are the execution
+  // hierarchy every event sits somewhere in, so an em dash for an absent one reads as "above that
+  // level". A handler is not part of that hierarchy: it is the durable wait a process is parked on,
+  // and only handler-lifecycle events carry one. Emitting an empty `handler —` on every node event
+  // would assert that every event has a handler slot, which is the opposite of the distinction this
+  // row exists to make.
+  if (event.handlerId) {
+    identifiers.push(['handler', event.handlerId]);
+  }
   return identifiers.map(([kind, value]) =>
     `<span class="activity-id" data-id-kind="${kind}">${escapeHtml(kind)} <code>${escapeHtml(shortId(value))}</code></span>`
   ).join('');
@@ -10763,6 +12525,10 @@ function renderAssistantProposal(proposal) {
 function confirmAssistantProposal(proposalId) {
   const pending = assistantProposals.get(proposalId);
   if (!pending || pending.state !== 'pending') return;
+  if (!documentIsEditable(workspace.active)) {
+    pending.status.textContent = 'This snapshot is read-only. Fork it before applying a proposal.';
+    return;
+  }
   const result = applyAssistantGraphProposal(pending.proposal, liveAssistantProposalContext());
   if (!result.ok) {
     pending.state = 'invalid';
@@ -10864,33 +12630,47 @@ function onFileInput(evt) {
   const f = evt.target.files[0];
   // Clearing the control keeps re-selecting the same file working after a cancelled confirm.
   evt.target.value = '';
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 }
 
 function onReplaceFileInput(event) {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  showLoading();
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      replaceActiveDocumentFromText(String(reader.result), file.name, document.getElementById('menu-file'));
-    } catch (error) {
-      alert('Error: ' + error.message);
-    } finally {
-      hideLoading();
-    }
-  };
-  reader.onerror = () => {
-    hideLoading();
-    alert('Error: ' + (reader.error?.message || 'The file could not be read'));
-  };
-  reader.readAsText(file);
+  void loadReplacementFile(file);
 }
 
-function parsePreparedGraph(text, name, { automatic = false } = {}) {
-  let graph = detectAndParse(text, name);
+function graphConfigurationUnavailable(cause = null) {
+  const detail = cause?.message ? `: ${cause.message}` : '';
+  return new Error(
+    `Graph document loading is unavailable until the connected service returns valid configuration${detail}`,
+  );
+}
+
+async function graphDocumentByteLimitForLoad() {
+  // A service-origin change replaces the request. Follow the newest request until the value and
+  // connected client describe the same runtime, then return one captured number to the load.
+  while (true) {
+    const request = runtimeConfigurationRequest;
+    if (!request) throw graphConfigurationUnavailable();
+    const result = await request;
+    if (request !== runtimeConfigurationRequest || result.client !== runtimeClient) continue;
+    if (result.error || !result.configuration) {
+      throw graphConfigurationUnavailable(result.error);
+    }
+    return result.configuration.graphDocumentMaxBytes;
+  }
+}
+
+function currentGraphDocumentByteLimit() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient) {
+    throw graphConfigurationUnavailable();
+  }
+  return runtimeConfiguration.configuration.graphDocumentMaxBytes;
+}
+
+function parsePreparedGraph(text, name, { automatic = false, maxBytes } = {}) {
+  let graph = detectAndParse(text, name, maxBytes);
   if (graph.format === 'graphify' && graph.nodes.length > GFY_MAX_WARN) {
     if (automatic) return sampleLargeGraph(graph, GFY_SAMPLE);
     const keep = GFY_SAMPLE;
@@ -10904,14 +12684,21 @@ function parsePreparedGraph(text, name, { automatic = false } = {}) {
   return graph;
 }
 
-function loadFileObj(file) {
-  loadLocalGraphInput(file, {
+async function loadFileObj(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
     createReader: () => new FileReader(),
     onStart: showLoading,
     parseAndRender: text => {
       // Parse and make the large-graph decision BEFORE allocating a record: failures leave the
       // workspace, active id and every existing history exactly as they were.
-      const graph = parsePreparedGraph(text, file.name);
+      const graph = parsePreparedGraph(text, file.name, { maxBytes });
       openDocument({ name: file.name, graph });
       clearActivity();
       addActivityMessage('editor', `Loaded ${file.name}`, 'completed');
@@ -10925,13 +12712,39 @@ function loadFileObj(file) {
   });
 }
 
+async function loadReplacementFile(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
+    createReader: () => new FileReader(),
+    onStart: showLoading,
+    parseAndRender: text => replaceActiveDocumentFromText(
+      String(text), file.name, document.getElementById('menu-file'), maxBytes),
+    onRejected: error => alert('Error: ' + error.message),
+    onError: error => alert('Error: ' + error.message),
+    onComplete: hideLoading,
+  });
+}
+
 async function autoLoadUrl(url) {
   const name = url.split('/').pop();
-  await loadUrlGraphInput(url, {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    console.warn('Auto-load failed:', error.message);
+    return false;
+  }
+  return loadUrlGraphInput(url, maxBytes, {
     fetchImpl: fetch,
     onStart: showLoading,
     parseAndRender: text => {
-      const gd = parsePreparedGraph(text, name, { automatic: true });
+      const gd = parsePreparedGraph(text, name, { automatic: true, maxBytes });
       const active = workspace.active;
       active.name = name;
       active.displayName = allocateDocumentDisplayName(name);
@@ -10981,7 +12794,7 @@ wrap.addEventListener('drop', e => {
     return;
   }
   const f = e.dataTransfer.files[0];
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -11001,9 +12814,10 @@ function executeGlobalShortcut(event, expectedCommandId = '') {
 // Delete is an editing command for the graph selection, not for whichever non-editable child last
 // received focus. Some legitimate controls own and stop their keydown contract, so a document-level
 // bubbling listener cannot guarantee that a released canvas gesture reaches deletion. Capture only
-// these two keys; every other global shortcut retains its established bubbling/menu behaviour.
+// the platform spellings of the two delete key families; every other global shortcut retains its
+// established bubbling/menu behaviour.
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+  if (!isDeleteShortcut(event)) return;
   if (executeGlobalShortcut(event, 'edit.deleteSelection')) capturedDeleteShortcutEvents.add(event);
 }, true);
 
@@ -11873,16 +13687,248 @@ function completeCloseDocument(id) {
   return true;
 }
 
-function requestCloseDocument(id, origin = document.activeElement) {
+function requestCloseDocument(id, origin = document.activeElement, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard && workspace.activeId === id && inspectorDraft?.form.isConnected) {
+    return runAfterInspectorDraft(
+      () => requestCloseDocument(id, origin, { skipDraftGuard: true }),
+    );
+  }
   captureActiveDocument();
   const target = workspace.find(id);
   if (!target) return false;
-  if (!target.history?.isDirty()) return proceedToCloseDocument(id, origin);
+  if (!paneIsDirty(target)) return proceedToCloseDocument(id, origin);
   return openUnsavedDocumentDialog({
     documentId: id,
     origin,
     complete: () => proceedToCloseDocument(id, origin),
   });
+}
+
+let pendingCloseAllDocuments = null;
+
+function closeAllDocumentsDialog() {
+  return document.getElementById('close-all-documents-dialog');
+}
+
+function closeAllDescription(oneKey, manyKey, count) {
+  return uiText(count === 1 ? oneKey : manyKey, { count });
+}
+
+function renderCloseAllList(documents, kind) {
+  const list = document.getElementById('close-all-documents-list');
+  list.replaceChildren(...documents.map(document_ => {
+    const item = document.createElement('li');
+    if (kind === 'sessions') {
+      const count = document_.sourceSession.sourceCount;
+      item.textContent = uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
+        name: document_.displayName,
+        count,
+      });
+    } else {
+      item.textContent = document_.displayName;
+    }
+    return item;
+  }));
+}
+
+function renderCloseAllActions(actions) {
+  const host = document.getElementById('close-all-documents-actions');
+  host.replaceChildren(...actions.map(({ action, label, kind = '' }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn${kind ? ` ${kind}` : ''}`;
+    button.dataset.closeAllAction = action;
+    button.textContent = label;
+    return button;
+  }));
+}
+
+function showCloseAllStep(step, targets) {
+  const dialog = closeAllDocumentsDialog();
+  const title = document.getElementById('close-all-documents-title');
+  const description = document.getElementById('close-all-documents-description');
+  const status = document.getElementById('close-all-documents-status');
+  dialog.removeAttribute('aria-busy');
+  status.textContent = '';
+  delete status.dataset.state;
+  if (step === 'dirty') {
+    title.textContent = uiText('closeAll.dirty.title');
+    description.textContent = closeAllDescription(
+      'closeAll.dirty.description.one', 'closeAll.dirty.description.many', targets.length);
+    renderCloseAllList(targets, 'dirty');
+    renderCloseAllActions([
+      { action: 'save', label: uiText('closeAll.dirty.save'), kind: 'primary' },
+      { action: 'discard', label: uiText('closeAll.dirty.discard'), kind: 'danger' },
+      { action: 'cancel', label: uiText('closeAll.cancel') },
+    ]);
+  } else {
+    title.textContent = uiText('closeAll.sessions.title');
+    description.textContent = closeAllDescription(
+      'closeAll.sessions.description.one', 'closeAll.sessions.description.many', targets.length);
+    renderCloseAllList(targets, 'sessions');
+    renderCloseAllActions([
+      { action: 'stop', label: uiText('closeAll.sessions.stop'), kind: 'danger' },
+      { action: 'keep', label: uiText('closeAll.sessions.keep') },
+      { action: 'cancel', label: uiText('closeAll.cancel') },
+    ]);
+  }
+  if (!dialog.open) dialog.showModal();
+  dialog.querySelector('[data-close-all-action="cancel"]')?.focus();
+}
+
+function showCloseAllWorking() {
+  const dialog = closeAllDocumentsDialog();
+  dialog.setAttribute('aria-busy', 'true');
+  document.getElementById('close-all-documents-title').textContent = uiText('closeAll.working.title');
+  document.getElementById('close-all-documents-description').textContent =
+    uiText('closeAll.working.description');
+  document.getElementById('close-all-documents-list').replaceChildren();
+  document.getElementById('close-all-documents-status').textContent = '';
+  renderCloseAllActions([]);
+}
+
+function showCloseAllFailure(stage) {
+  const dialog = closeAllDocumentsDialog();
+  dialog.removeAttribute('aria-busy');
+  document.getElementById('close-all-documents-title').textContent = uiText('closeAll.failure.title');
+  document.getElementById('close-all-documents-description').textContent =
+    uiText('closeAll.failure.description');
+  document.getElementById('close-all-documents-list').replaceChildren();
+  const status = document.getElementById('close-all-documents-status');
+  status.dataset.state = 'error';
+  status.textContent = uiText(stage === 'stop' ? 'closeAll.failure.stop' : 'closeAll.failure.save');
+  renderCloseAllActions([
+    { action: 'retry', label: uiText('closeAll.retry'), kind: 'primary' },
+    { action: 'cancel', label: uiText('closeAll.cancel') },
+  ]);
+  dialog.querySelector('[data-close-all-action="retry"]')?.focus();
+}
+
+function focusAfterCloseAll() {
+  const newDocument = document.getElementById('btn-new');
+  const target = workspace.size
+    ? document.getElementById('document-switcher')
+    : (newDocument?.getClientRects().length ? newDocument : menuTrigger('file'));
+  target?.focus();
+}
+
+function cancelCloseAllDocuments() {
+  const pending = pendingCloseAllDocuments;
+  if (!pending) return false;
+  pending.cancelled = true;
+  pendingCloseAllDocuments = null;
+  const dialog = closeAllDocumentsDialog();
+  if (dialog.open) dialog.close('cancel');
+  const focusTarget = pending.origin?.isConnected ? pending.origin : menuTrigger('view');
+  focusTarget?.focus();
+  return true;
+}
+
+function finishCloseAllDocuments(snapshot) {
+  const dialog = closeAllDocumentsDialog();
+  pendingCloseAllDocuments = null;
+  if (dialog.open) dialog.close('closed');
+  closeDocumentSwitcher();
+  closeDocumentSnapshot(snapshot);
+  focusAfterCloseAll();
+}
+
+async function commitCloseAllDocuments() {
+  const pending = pendingCloseAllDocuments;
+  if (!pending || pending.committing) return false;
+  const targets = resolveDocumentCloseSnapshot(workspace, pending.snapshot);
+  if (!targets.length) {
+    finishCloseAllDocuments(pending.snapshot);
+    return true;
+  }
+  const classified = classifyDocumentCloseTargets(targets);
+  if (classified.dirty.length && !pending.dirtyChoice) {
+    showCloseAllStep('dirty', classified.dirty);
+    return true;
+  }
+  if (classified.activeSessions.length && !pending.sessionChoice) {
+    showCloseAllStep('sessions', classified.activeSessions);
+    return true;
+  }
+
+  pending.committing = true;
+  showCloseAllWorking();
+  let stage = 'save';
+  try {
+    const prepared = pending.dirtyChoice === 'save'
+      ? classified.dirty.map(document_ => {
+        const download = prepareDocumentDownload(document_.id);
+        if (!download) throw new Error('Document download preparation failed.');
+        return download;
+      })
+      : [];
+
+    if (pending.sessionChoice === 'stop') {
+      stage = 'stop';
+      for (const owner of classified.activeSessions) {
+        if (!resolveDocumentCloseSnapshot(workspace, pending.snapshot).includes(owner)) continue;
+        const stopped = sourceSessionIsActive(owner.sourceSession)
+          ? await stopActiveSourceSession(owner) : true;
+        if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
+        if (!stopped) {
+          throw new Error('Source session did not stop.');
+        }
+      }
+    }
+
+    stage = 'save';
+    if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
+    const liveTargets = new Set(resolveDocumentCloseSnapshot(workspace, pending.snapshot));
+    const liveDownloads = prepared.filter(item => liveTargets.has(item.target));
+    liveDownloads.forEach(dispatchDocumentDownload);
+    liveDownloads.forEach(item => markDocumentDownloaded(item, { announce: false }));
+    finishCloseAllDocuments(pending.snapshot);
+    return true;
+  } catch {
+    pending.committing = false;
+    showCloseAllFailure(stage);
+    return false;
+  }
+}
+
+function beginCloseAllDocuments(snapshot, origin) {
+  const targets = resolveDocumentCloseSnapshot(workspace, snapshot);
+  if (!targets.length) return false;
+  pendingCloseAllDocuments = {
+    snapshot,
+    origin,
+    dirtyChoice: null,
+    sessionChoice: null,
+    committing: false,
+  };
+  const { dirty, activeSessions } = classifyDocumentCloseTargets(targets);
+  if (dirty.length) return showCloseAllStep('dirty', dirty) || true;
+  if (activeSessions.length) return showCloseAllStep('sessions', activeSessions) || true;
+  finishCloseAllDocuments(snapshot);
+  return true;
+}
+
+function requestCloseAllDocuments(origin = document.activeElement) {
+  captureActiveDocument();
+  const snapshot = captureDocumentCloseSnapshot(workspace.documents);
+  if (!snapshot.length || pendingCloseAllDocuments) return false;
+  const begin = () => beginCloseAllDocuments(snapshot, origin);
+  return runAfterInspectorDraft(begin, { deferredAction: begin, deferredResult: true });
+}
+
+function handleCloseAllDocumentsAction(action) {
+  const pending = pendingCloseAllDocuments;
+  if (!pending || pending.committing) return false;
+  if (action === 'cancel') return cancelCloseAllDocuments();
+  if (action === 'retry') {
+    void commitCloseAllDocuments();
+    return true;
+  }
+  if (action === 'save' || action === 'discard') pending.dirtyChoice = action;
+  else if (action === 'stop' || action === 'keep') pending.sessionChoice = action;
+  else return false;
+  void commitCloseAllDocuments();
+  return true;
 }
 
 /**
@@ -11942,7 +13988,10 @@ function closeActiveDeploymentDialog(outcome) {
     // matching `stopActiveSourceSession`'s own token discipline: closing first would abort the poll
     // controller closeDocument itself owns, but the stop request it kicks off here is unaffected by
     // that abort (see `sourceSessionCleanupIsCurrent`, which does not depend on the pollController).
-    void stopActiveSourceSession(target).finally(() => completeCloseDocument(pending.documentId));
+    void stopActiveSourceSession(target).then(stopped => {
+      if (stopped) completeCloseDocument(pending.documentId);
+      else if (pending.origin?.isConnected) pending.origin.focus();
+    });
     return;
   }
   // outcome === 'close': detach observation only, the exact contract closeDocument's own comment
@@ -11951,10 +14000,11 @@ function closeActiveDeploymentDialog(outcome) {
 }
 
 const commandRegistry = createCommandRegistry(createAppCommands({
-  newDocument: () => openDocument(),
-  openFile: () => document.getElementById('file-inp').click(),
-  replaceActive: () => document.getElementById('replace-file-inp').click(),
-  save: () => exportGraphML(),
+  newDocument: () => runAfterInspectorDraft(() => openDocument()),
+  openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
+  replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
+  forkDocument: () => runAfterInspectorDraft(() => forkActiveDocument()),
+  save: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),
@@ -11967,11 +14017,19 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   addEdge: () => showAddEdgeForm(),
   duplicateNode: () => duplicateSelectedNode(),
   deleteSelection: () => deleteCurrentSelection(),
+  groupSelection: () => createVisualGroupAction(),
+  toggleGroup: () => { const group = selectedVisualGroup(); return group && toggleVisualGroup(group.id); },
+  renameGroup: () => manageVisualGroup('rename'),
+  replaceGroupMembers: () => manageVisualGroup('replace'),
+  ungroup: () => manageVisualGroup('ungroup'),
+  removeGroupMetadata: () => manageVisualGroup('repair'),
   migrateJoinSemantics: () => migrateJoinSemanticsAction(),
   fit: () => fitGraph(),
   zoomIn: () => zoomBy(1.2),
   zoomOut: () => zoomBy(0.8),
   openDocumentSwitcher: () => openDocumentSwitcher(),
+  closeAllDocuments: (_context, invocation) => requestCloseAllDocuments(
+    invocation.control?.closest('#application-menu') ? menuTrigger('view') : invocation.control),
   openPanels: () => openPanelsIndex(document.querySelector('.rail-index')),
   toggleLeftPanels: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'left', !panelLayout.zones.left.collapsed)),
   toggleRightInspector: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'right', !panelLayout.zones.right.collapsed)),
@@ -11984,9 +14042,12 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
-  pause: () => graphLifecycleCommand('pause'),
-  stop: () => graphLifecycleCommand('stop'),
-  forceStop: () => graphLifecycleCommand('forceStop'),
+  pause: () => executionLifecycleCommand('pause'),
+  resume: () => executionLifecycleCommand('resume'),
+  cancel: () => executionLifecycleCommand('cancel'),
+  stop: () => stopCurrentSourceSession(),
+  stopDeployment: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.deploymentStop),
+  shutdown: () => showUnavailableLifecycle(UNAVAILABLE_LIFECYCLE_REASONS.shutdown),
   authenticate: () => authenticateRuntime(),
   forgetToken: () => revokeRuntimeAccess(),
   openCredentials: () => credentialsWindow?.open(),
@@ -11997,13 +14058,27 @@ const commandRegistry = createCommandRegistry(createAppCommands({
 
 function commandContext() {
   const history = editHistory.state();
-  const transientRunning = Boolean(activeExecutionId) && !finishedExecutions.has(activeExecutionId);
+  const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
+    && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
   const running = transientRunning || sourceSessionActive;
   const selectedNodes = cy?.nodes(':selected');
+  const groupMetadata = readVisualGroups(graphData);
+  const selectedReal = selectedRealNodeIds();
+  const groupedIds = new Set(groupMetadata.groups.flatMap(group => group.memberNodeIds));
   return {
+    hasVisualGroup: Boolean(selectedVisualGroup()),
+    hasManagedVisualGroup: Boolean(managedVisualGroup()),
+    selectedRealNodeCount: selectedReal.length,
+    canGroupSelection: selectedReal.length >= 2 && ['none', 'valid'].includes(groupMetadata.status)
+      && !selectedReal.some(id => groupedIds.has(id)),
+    invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
+    hasOpenDocuments: workspace.size > 0,
     editable: Boolean(graphData && graphData.format !== 'graphify'),
+    documentEditable: Boolean(documentIsEditable(workspace.active)),
+    documentMode: workspace.find(workspace.activeId)?.mode ?? null,
+    tenantAuthority: tenantAuthorityAllows(workspace.active),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
     modifyEnabled,
@@ -12021,11 +14096,18 @@ function commandContext() {
     renderMode,
     workspaceLayoutMode: workspaceLayout.mode,
     workspaceLayoutDefault: workspaceLayoutIsDefault(),
-    canUndo: history.canUndo && !layoutBusy,
-    canRedo: history.canRedo && !layoutBusy,
+    canUndo: documentIsEditable(workspace.active) && history.canUndo && !layoutBusy,
+    canRedo: documentIsEditable(workspace.active) && history.canRedo && !layoutBusy,
+    // Empty when there is no step, which is what makes the history commands describe themselves
+    // as having nothing to reverse.
+    undoLabel: history.canUndo ? history.undoLabel : '',
+    redoLabel: history.canRedo ? history.redoLabel : '',
     running,
     transientRunning,
+    executionPaused: activeExecutionPaused,
+    executionCommandInFlight: activeExecutionCommandInFlight,
     sourceSessionActive,
+    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise),
     executionUnknown: activeExecutionReconciliation === 'unknown',
     hasToken: hasRuntimeToken,
     leftCollapsed: Boolean(panelLayout.zones.left.collapsed),
@@ -12045,13 +14127,24 @@ function refreshCommands({ menu = true } = {}) {
     const id = control.dataset.commandId;
     const command = commandRegistry.get(id);
     const state = commandRegistry.state(id, context);
+    control.hidden = state.visible === false;
     if ('disabled' in control) control.disabled = !state.enabled;
     control.setAttribute('aria-disabled', String(!state.enabled));
     control.classList.toggle('active', state.checked === true);
     if (command.kind === 'checkbox') control.setAttribute('aria-pressed', String(state.checked === true));
     if (command.kind === 'radio') control.setAttribute('aria-checked', String(state.checked === true));
     if (control.hasAttribute('data-command-label')) control.textContent = command.label;
-    if (command.help && control.hasAttribute('data-command-label')) control.title = command.help;
+    // This runs after every edit, undo, redo and save, so whatever it writes here is the last
+    // word: a title applied elsewhere before the refresh does not survive it. Writing the state's
+    // description rather than the static help is what lets the history controls keep naming the
+    // step they would reverse, while every other control still shows its help -- including the
+    // lifecycle controls, which need it here because they carry no `data-command-label`.
+    if (state.description) {
+      control.title = state.description;
+      if (command.group === 'unavailable-lifecycle') {
+        control.setAttribute('aria-label', `${command.label}. ${command.help}`);
+      }
+    }
     const firstShortcut = command.shortcuts?.find(shortcut => (shortcut.scope || 'global') === 'global');
     if (firstShortcut) control.setAttribute('aria-keyshortcuts', commandRegistry.ariaShortcut(firstShortcut));
   });
@@ -12086,7 +14179,8 @@ function menuTrigger(name) {
 function renderApplicationMenu(name) {
   const popup = document.getElementById('application-menu');
   const context = commandContext();
-  const commands = commandRegistry.listPlacement(`menu.${name}`);
+  const commands = commandRegistry.listPlacement(`menu.${name}`)
+    .filter(command => commandRegistry.state(command.id, context).visible !== false);
   let lastGroup = null;
   popup.innerHTML = commands.map(command => {
     const state = commandRegistry.state(command.id, context);
@@ -12099,8 +14193,11 @@ function renderApplicationMenu(name) {
     const shortcut = shortcuts.length ? shortcuts.map(item => commandRegistry.shortcutLabel(item)).join(' / ') : '';
     const ariaShortcut = shortcuts[0] ? ` aria-keyshortcuts="${escapeAttribute(commandRegistry.ariaShortcut(shortcuts[0]))}"` : '';
     const checked = command.kind ? ` aria-checked="${state.checked === true}"` : '';
+    const help = state.description ? ` title="${escapeAttribute(state.description)}"` : '';
+    const unavailableLabel = command.group === 'unavailable-lifecycle' && command.help
+      ? ` aria-label="${escapeAttribute(`${command.label}. ${command.help}`)}"` : '';
     return `${separator}<button type="button" class="application-menu-item" role="${role}"
-      data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}>
+      data-command-id="${escapeAttribute(command.id)}" aria-disabled="${!state.enabled}"${checked}${ariaShortcut}${help}${unavailableLabel}>
       <span>${escapeHtml(command.label)}</span><span class="application-menu-shortcut" aria-hidden="true">${escapeHtml(shortcut)}</span>
     </button>`;
   }).join('');
@@ -12110,7 +14207,8 @@ function renderApplicationMenu(name) {
 function openApplicationMenu(name, { focus = true } = {}) {
   const dialog = document.getElementById('unsaved-document-dialog');
   const activeDeploymentDialog = document.getElementById('active-deployment-dialog');
-  if (dialog.open || activeDeploymentDialog.open) return false;
+  const closeAllDialog = closeAllDocumentsDialog();
+  if (dialog.open || activeDeploymentDialog.open || closeAllDialog.open) return false;
   closePopovers({ applicationMenu: false });
   const trigger = menuTrigger(name);
   const popup = document.getElementById('application-menu');
@@ -12314,6 +14412,11 @@ document.addEventListener('click', event => {
     completeInspectorTransition(inspectorUnsavedAction.dataset.inspectorUnsavedAction);
     return;
   }
+  const closeAllAction = event.target.closest('[data-close-all-action]');
+  if (closeAllAction) {
+    handleCloseAllDocumentsAction(closeAllAction.dataset.closeAllAction);
+    return;
+  }
   const unsavedAction = event.target.closest('[data-unsaved-action]');
   if (unsavedAction) {
     closeUnsavedDocumentDialog(unsavedAction.dataset.unsavedAction);
@@ -12402,8 +14505,8 @@ document.addEventListener('click', event => {
     const form = removeProperty.closest('form');
     removeProperty.closest('.property-row')?.remove();
     if (form === inspectorDraft?.form) {
-      inspectorDraft.dirty = inspectNodeDraft(inspectorDraft).changed;
-      scheduleNodeDraftCommit(inspectorDraft, true);
+      inspectorDraft.dirty = inspectInspectorDraft(inspectorDraft).changed;
+      scheduleInspectorDraftCommit(inspectorDraft, true);
     }
     return;
   }
@@ -12422,7 +14525,7 @@ document.addEventListener('click', event => {
   const action = control.dataset.action;
   if (action === 'fit') fitGraph();
   else if (action === 'help') toggleHelp();
-  else if (action === 'new-document') openDocument();
+  else if (action === 'new-document') runAfterInspectorDraft(() => openDocument());
   else if (action === 'modify') toggleModify();
   else if (action === 'connect') toggleConnect();
   else if (action === 'add-node') showAddNodeForm();
@@ -12528,6 +14631,47 @@ document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter =
 // after boot would make the first pane plan wrong.
 applyPanelLayout();
 
+humanTaskController = createHumanTaskController({ onChange: receiveHumanTaskProjection });
+humanTaskDecisionDialog = createHumanTaskDecisionDialog({
+  dialog: document.getElementById('human-task-dialog'),
+  onClose: () => {
+    clearHumanTaskSelection();
+    // Native dialog focus restoration runs as close completes. The actionable list may have been
+    // replaced by reconciliation while the dialog was open, so focus the current row/status after
+    // that browser step instead of returning to a detached opener.
+    requestAnimationFrame(focusHumanTaskInspector);
+  },
+  onSubmit: async ({ task, action, comment, isCurrent }) => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    const owner = workspace.active;
+    const incarnation = owner?.incarnation;
+    const authorityGeneration = workspaceAuthority.generation;
+    const current = () => isCurrent() && runtimeClient === client && workspace.active === owner
+      && owner?.incarnation === incarnation && currentHumanTaskCapability() === capability
+      && workspaceAuthority.generation === authorityGeneration && tenantAuthorityAllows(owner, client);
+    if (!client || !capability || !current()) {
+      throw new Error('Reconnect to this document workspace before deciding this task.');
+    }
+    try {
+      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
+        { capability });
+      if (!current()) return result;
+      clearHumanTaskSelection();
+      addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+        'completed');
+      if (!current()) return result;
+      await humanTaskController.refresh();
+      return result;
+    } catch (error) {
+      // Fetch rejection cannot prove whether the CAS committed. Refresh, but never retry the
+      // decision automatically. The dialog remains open with the exact original generation.
+      if (current()) void humanTaskController.refresh();
+      throw error;
+    }
+  },
+});
+
 // Constructed BEFORE `connectRuntime(true)` at the bottom of this file so the page's own first
 // connection hands it a client. The window binds itself to its own container and owns its own
 // listeners, so nothing about it reaches this file's delegated `click`/`input` handlers or the
@@ -12552,9 +14696,46 @@ credentialsWindow = createCredentialsWindow({
 deploymentsWindow = createDeploymentsWindow({
   dialog: document.getElementById('deployments-dialog'),
   currentDocument: () => {
-    if (!workspace.active || !graphData) return null;
-    syncGraphPositions();
-    return { displayName: graphDisplayName, graphMl: serializeGraphML(graphData) };
+    if (!workspace.active || !graphData || !tenantAuthorityAllows(workspace.active)) return null;
+    if (documentIsEditable(workspace.active)) syncGraphPositions();
+    return { documentId: workspace.activeId, displayName: graphDisplayName,
+      incarnation: activeDocumentIncarnation,
+      authorityGeneration: workspaceAuthority.generation,
+      graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
+  },
+  onRegistered: (deployment, source) => {
+    const owner = workspace.find(source.documentId);
+    if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion
+        || source.authorityGeneration !== workspaceAuthority.generation
+        || !tenantAuthorityAllows(owner)) return;
+    owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.graphVersion = deployment.graphVersion;
+    source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
+    const deployedId = openDocument({
+      name: source.name,
+      displayName: allocateDocumentDisplayName(`${source.displayName} · deployed`),
+      graph: source.graph,
+      tenantId: owner.tenantId,
+      mode: DOCUMENT_MODES.DEPLOYED,
+      provenance: {
+        originMode: owner.mode,
+        sourceDocumentId: owner.documentId,
+        sourceGraphVersion: deployment.graphVersion,
+        deploymentId: deployment.deploymentId,
+      },
+    });
+    const deployed = workspace.find(deployedId);
+    deployed.humanTasks.deploymentId = deployment.deploymentId;
+    deployed.humanTasks.graphVersion = deployment.graphVersion;
+    void configureHumanTasks(deployed);
+    scheduleWorkspacePersistence();
+  },
+  onDeploymentSelected: deployment => {
+    const owner = workspace.active;
+    if (!owner || !tenantAuthorityAllows(owner)) return;
+    owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.graphVersion = deployment.graphVersion;
+    void configureHumanTasks(owner);
   },
 });
 
@@ -12659,6 +14840,13 @@ document.getElementById('unsaved-document-dialog').addEventListener('cancel', ev
   event.preventDefault();
   closeUnsavedDocumentDialog('cancel');
 });
+document.getElementById('close-all-documents-dialog').addEventListener('keydown', event => {
+  event.stopPropagation();
+});
+document.getElementById('close-all-documents-dialog').addEventListener('cancel', event => {
+  event.preventDefault();
+  cancelCloseAllDocuments();
+});
 // Same containment as the unsaved-changes dialog above, for the same reason -- Escape must
 // resolve this modal's own cancel action, not fall through to canvas or global shortcuts behind it.
 document.getElementById('active-deployment-dialog').addEventListener('keydown', event => {
@@ -12747,6 +14935,10 @@ window.addEventListener('load', () => {
   // The attempt is unconditional: a build flag or an environment variable here would be the same
   // assumption behind a switch. It runs before the graph loads so the request departs immediately,
   // and a failure only fills the palette with a reason — the editor stays usable offline.
+  // A durable-task locator is the only browser state retained for recovery. Restore its service
+  // origin before boot connection; the existing cross-origin gate still refuses to send a token
+  // until the user explicitly confirms that origin again.
+  restoreHumanTaskServiceOrigin();
   connectRuntime(true);
   // Composed once at boot so the chips are truthful from the first paint rather than blank
   // until something happens. `connectRuntime` above has already asked the service what it offers.

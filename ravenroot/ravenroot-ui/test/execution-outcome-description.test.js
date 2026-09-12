@@ -80,6 +80,34 @@ describe('execution outcome reconciliation in Runtime activity', () => {
     });
   });
 
+  describe('a cancelled execution, stored and reported as FAILED', () => {
+    it('renders a plain failure exactly as before when nothing marks it a cancellation', () => {
+      expect(executionOutcomeMessages({ status: 'FAILED' })).toContainEqual({
+        title: 'execution outcome', detail: 'FAILED', css: 'failed',
+      });
+    });
+
+    it('never reports a cancelled execution as a bare, indistinguishable FAILED', () => {
+      const messages = executionOutcomeMessages({ status: 'FAILED', cancelled: true,
+        terminationReason: 'CANCELLED' });
+      expect(messages).not.toContainEqual({ title: 'execution outcome', detail: 'FAILED', css: 'failed' });
+      expect(messages[0].detail).toContain('CANCELLED');
+      expect(messages[0].css).not.toBe('failed');
+    });
+
+    it('recognises the cancellation from terminationReason alone, for a caller that never learned cancelled', () => {
+      const messages = executionOutcomeMessages({ status: 'FAILED', terminationReason: 'CANCELLED' });
+      expect(messages[0].detail).toContain('CANCELLED');
+    });
+
+    it('is a no-op against an older server response carrying neither field', () => {
+      // Both fields are additive on the same outcome JSON; a server that predates them sets neither,
+      // and this branch must simply never trigger -- see execution-outcome-description.js's own
+      // reasoning beside this branch.
+      expect(executionOutcomeMessages({ status: 'FAILED' })[0].css).toBe('failed');
+    });
+  });
+
   it('does not hide a true boolean when an older peer omits the node list', () => {
     expect(executionOutcomeMessages({ status: 'COMPLETED', handledFailure: true })[0].detail)
       .toContain('handled node failure');

@@ -113,9 +113,9 @@ class ConcurrencyGateThresholdTest {
     }
 
     private static NodeAction mailSendAction(int maxConcurrency) {
-        var behavior = new MailSendNodeBehavior(reference -> Optional.empty(),
+        var behavior = MailTestSupport.loopbackBehavior(reference -> Optional.empty(),
                 (tenant, name) -> Optional.of(MailTestSupport.profile(tenant, name, "127.0.0.1", 2525,
-                        "SMTP", "", "", 0)));
+                        "SMTP", "", "", 0)), "127.0.0.1");
         var properties = new LinkedHashMap<String, Object>();
         properties.put("mailProfile", MailTestSupport.PROFILE);
         properties.put("credentialRef", "");

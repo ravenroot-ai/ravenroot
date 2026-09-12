@@ -15,6 +15,8 @@
 // A command model that rebuilt objects instead would perturb key order and canonical-source
 // tracking, and the round trip would drift.
 
+import { readVisualGroups, groupsAfterNodeRemoval, visualGroupsValue, VISUAL_GROUPS_PROPERTY } from './visual-groups.js';
+
 export const COMMAND_HISTORY_LIMIT = 100;
 
 // A save point that has been trimmed off the bottom of a bounded stack can never be reached again
@@ -132,6 +134,8 @@ const HANDLERS = {
   },
 
   'remove-nodes': (graph, command) => {
+    const grouping = readVisualGroups(graph);
+    const priorGroups = graph.graphProperties?.[VISUAL_GROUPS_PROPERTY];
     const wanted = new Set(command.nodeIds);
     for (const id of wanted) {
       if (!graph.nodes.some(node => node.id === id)) {
@@ -146,7 +150,12 @@ const HANDLERS = {
     reindexNodes(graph);
     // Ascending capture order matters: re-inserting removed indices in ascending order into the
     // reduced array reproduces the original array exactly.
-    return insertNodesCommand(entries, command.label);
+    const restoreNodes = insertNodesCommand(entries, command.label);
+    if (grouping.status === 'valid' && grouping.groups.some(group => group.memberNodeIds.some(id => wanted.has(id)))) {
+      graph.graphProperties[VISUAL_GROUPS_PROPERTY] = visualGroupsValue(groupsAfterNodeRemoval(grouping.groups, wanted), graph);
+      return compositeCommand([restoreNodes, updateGraphPropertiesCommand({ [VISUAL_GROUPS_PROPERTY]: priorGroups })], command.label);
+    }
+    return restoreNodes;
   },
 
   'insert-edges': (graph, command) => {
@@ -192,8 +201,15 @@ const HANDLERS = {
   'update-graph-properties': (graph, command) => {
     graph.graphProperties = graph.graphProperties || {};
     const inverse = invertPatch(graph.graphProperties, command);
+    const ownsGrouping = Object.hasOwn(command.patch, VISUAL_GROUPS_PROPERTY) || command.unset?.includes(VISUAL_GROUPS_PROPERTY);
+    const priorMetadata = graph._visualGroupsMetadata;
     applyPatch(graph.graphProperties, command);
-    return updateGraphPropertiesCommand(inverse.patch, command.label, inverse.unset);
+    if (ownsGrouping) {
+      if (command.visualGroupsMetadata) graph._visualGroupsMetadata = command.visualGroupsMetadata;
+      else delete graph._visualGroupsMetadata;
+    }
+    return { ...updateGraphPropertiesCommand(inverse.patch, command.label, inverse.unset),
+      ...(ownsGrouping ? { visualGroupsMetadata: priorMetadata || null } : {}) };
   },
 
   'update-edge': (graph, command) => {
@@ -350,6 +366,24 @@ export function commandTargets(command) {
   const edgeIds = new Set();
   collectTargets(command, nodeIds, edgeIds);
   return { nodeIds: [...nodeIds], edgeIds: [...edgeIds] };
+}
+
+// Position state has narrower ownership than general command targeting. Structural and metadata
+// commands may mention a node without authoring its coordinates; only move-nodes entries make the
+// graph model authoritative for position during the corresponding history step.
+export function commandPositionNodeIds(command) {
+  const nodeIds = new Set();
+  collectPositionNodeIds(command, nodeIds);
+  return [...nodeIds];
+}
+
+function collectPositionNodeIds(command, nodeIds) {
+  if (!command) return;
+  if (command.type === 'move-nodes') {
+    command.entries.forEach(entry => nodeIds.add(entry.id));
+  } else if (command.type === 'composite') {
+    command.commands.forEach(child => collectPositionNodeIds(child, nodeIds));
+  }
 }
 
 function collectTargets(command, nodeIds, edgeIds) {

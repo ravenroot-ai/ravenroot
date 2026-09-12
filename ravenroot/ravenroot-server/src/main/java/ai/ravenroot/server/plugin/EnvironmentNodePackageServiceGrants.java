@@ -4,10 +4,14 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.ToolCallAuditSink;
+import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
 import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import ai.ravenroot.core.security.nodepackage.TenantCredentialResolver;
+import ai.ravenroot.core.approval.ToolApprovalService;
+import ai.ravenroot.core.approval.ToolApprovalSettings;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -132,7 +136,7 @@ public final class EnvironmentNodePackageServiceGrants {
     private static final Set<String> ENCRYPTED_SCHEMES = Set.of("https", "wss");
     private static final Set<String> LIMIT_KEYS = Set.of("maxRequestBytes", "maxResponseBytes",
             "maxWebSocketMessageBytes", "maxWebSocketFragments", "maxQueuedWebSocketSends",
-            "maxConcurrentOperations", "maxConcurrentPerTenant", "maxDeadlineMs",
+            "maxConcurrentOperations", "maxConcurrentPerTenant", "maxDecompressionRatio", "maxDeadlineMs",
             "maxWebSocketLifetimeMs", "maxWebSocketIdleMs");
     private static final Set<String> ORIGIN_KEYS = Set.of("scheme", "host", "port");
     private static final Set<String> CREDENTIAL_BINDING_KEYS =
@@ -161,8 +165,41 @@ public final class EnvironmentNodePackageServiceGrants {
      */
     public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
                                                              TenantCredentialResolver credentials) {
+        return fromEnvironment(environment, credentials, ToolPolicy.denyAll(), ToolCallAuditSink.discarding());
+    }
+
+    /**
+     * Reads grants and composes each view with the deployment's one tool-policy and audit path.
+     */
+    public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
+                                                             TenantCredentialResolver credentials,
+                                                             ToolPolicy toolPolicy,
+                                                             ToolCallAuditSink toolAuditSink) {
+        return fromEnvironment(environment, credentials, toolPolicy, toolAuditSink, null, null);
+    }
+
+    /** Reads grants and optionally installs the trusted durable approval coordinator. */
+    public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
+                                                             TenantCredentialResolver credentials,
+                                                             ToolPolicy toolPolicy,
+                                                             ToolCallAuditSink toolAuditSink,
+                                                             ToolApprovalService approvals,
+                                                             ToolApprovalSettings approvalSettings) {
+        return fromEnvironment(environment, credentials, toolPolicy, toolAuditSink, approvals,
+                approvalSettings, null);
+    }
+
+    public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
+                                                             TenantCredentialResolver credentials,
+                                                             ToolPolicy toolPolicy,
+                                                             ToolCallAuditSink toolAuditSink,
+                                                             ToolApprovalService approvals,
+                                                             ToolApprovalSettings approvalSettings,
+                                                             ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         Objects.requireNonNull(environment, "environment");
         Objects.requireNonNull(credentials, "credentials");
+        Objects.requireNonNull(toolPolicy, "toolPolicy");
+        Objects.requireNonNull(toolAuditSink, "toolAuditSink");
 
         // Sorted so that a deployment with two malformed grants fails on the same one every run.
         // An operator fixing startup failures one at a time needs the order to be a property of the
@@ -190,7 +227,8 @@ public final class EnvironmentNodePackageServiceGrants {
             String packageId = packageIdOf(variable);
             Map<String, Object> grant = decode(variable, encoded);
             try {
-                registry.grant(packageId, services(variable, packageId, grant, credentials));
+                registry.grant(packageId, services(variable, packageId, grant, credentials,
+                        toolPolicy, toolAuditSink, approvals, approvalSettings, agentBudgets));
             } catch (IllegalArgumentException refused) {
                 // Everything the operator wrote about origins, headers, methods, subprotocols,
                 // bindings and ceilings is validated by NodePackageEgressPolicy.Builder and by the
@@ -265,7 +303,12 @@ public final class EnvironmentNodePackageServiceGrants {
 
     private static ManagedNodePackageServices services(String variable, String packageId,
                                                        Map<String, Object> grant,
-                                                       TenantCredentialResolver credentials) {
+                                                       TenantCredentialResolver credentials,
+                                                       ToolPolicy toolPolicy,
+                                                       ToolCallAuditSink toolAuditSink,
+                                                       ToolApprovalService approvals,
+                                                       ToolApprovalSettings approvalSettings,
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         exactlyKnownKeys(variable, grant, GRANT_KEYS, "grant");
         Set<NodePackageCapability> capabilities = capabilities(variable, grant.get("capabilities"));
 
@@ -321,7 +364,12 @@ public final class EnvironmentNodePackageServiceGrants {
 
         TenantCredentialResolver scoped = credentialScope(variable, grant.get("credentialReferences"),
                 boundReferences, capabilities, credentials);
-        var services = ManagedNodePackageServices.builder(packageId, policy.build(), scoped);
+        var services = ManagedNodePackageServices.builder(packageId, policy.build(), scoped)
+                .toolAuthorization(toolPolicy, toolAuditSink);
+        if (approvals != null && approvalSettings != null) {
+            services.durableToolApprovals(approvals, approvalSettings);
+        }
+        if (agentBudgets != null) services.agentAuthorityBudgets(agentBudgets);
         capabilities.forEach(services::grant);
         return services.build();
     }
@@ -495,6 +543,8 @@ public final class EnvironmentNodePackageServiceGrants {
                 count(variable, limits, "maxQueuedWebSocketSends", DEFAULTS.maximumQueuedWebSocketSends()),
                 millis(variable, limits, "maxWebSocketLifetimeMs", DEFAULTS.maximumWebSocketLifetime()),
                 millis(variable, limits, "maxWebSocketIdleMs", DEFAULTS.maximumWebSocketIdle()));
+        policy.maximumDecompressionRatio(count(variable, limits, "maxDecompressionRatio",
+                DEFAULTS.maximumDecompressionRatio()));
         policy.maximumDeadline(millis(variable, limits, "maxDeadlineMs", DEFAULTS.maximumDeadline()));
     }
 

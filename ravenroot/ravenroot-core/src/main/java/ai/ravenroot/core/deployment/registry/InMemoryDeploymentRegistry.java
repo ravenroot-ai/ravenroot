@@ -3,6 +3,8 @@ package ai.ravenroot.core.deployment.registry;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.registry.DeploymentIdSource;
 import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistryPolicy;
+import ai.ravenroot.api.deployment.registry.GenerationExpectation;
 import ai.ravenroot.api.deployment.registry.GraphVersion;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 
@@ -30,17 +32,28 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
 
     private final Clock clock;
     private final DeploymentIdSource ids;
-    private final Limits limits = new Limits(100, Duration.ofMinutes(5));
+    // This adapter's clock IS the caller's clock -- one process, one Clock instance -- so the skew
+    // it allows is zero. Publishing a comfortable-looking non-zero value would let a caller calibrate
+    // against a tolerance that does not exist here and then carry that calibration to a durable
+    // adapter where it does, which is exactly the class of error the published bound exists to stop.
+    private final Limits limits;
     private final Map<Key, Entry> entries = new HashMap<>();
     private final Map<CreateLedgerKey, Recorded> createLedger = new HashMap<>();
 
     public InMemoryDeploymentRegistry(Clock clock) {
-        this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()));
+        this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()),
+                DeploymentRegistryPolicy.inMemoryLimits());
     }
 
     public InMemoryDeploymentRegistry(Clock clock, DeploymentIdSource ids) {
+        this(clock, ids, DeploymentRegistryPolicy.inMemoryLimits());
+    }
+
+    /** Opens the reference adapter with explicit programmatic limits. */
+    public InMemoryDeploymentRegistry(Clock clock, DeploymentIdSource ids, Limits limits) {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
+        this.limits = Objects.requireNonNull(limits, "limits");
     }
 
     @Override public Limits limits() { return limits; }
@@ -122,7 +135,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             Recorded prior = entry.ledger.get(key);
             if (prior != null) return replay(prior, command.digest());
             if (entry.tombstone != null) throw failure(new FailureReason.Conflict());
-            expect(entry, command.expectedRevision());
+            expect(entry, command);
             evidenceTime(entry, tombstone.at());
             entry.tombstone = tombstone;
             entry.lease = null;
@@ -177,7 +190,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
                 if (recordedLease == null || !isCurrentLive(entry, recordedLease)) throw failure(new FailureReason.LeaseLost());
                 return prior.record;
             }
-            expect(entry, command.expectedRevision());
+            expect(entry, command);
             Instant current = now();
             if (entry.lease != null && entry.lease.expiresAt().isAfter(current)) throw failure(new FailureReason.Conflict());
             entry.fence++;
@@ -211,7 +224,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
                 return prior.record;
             }
             ownerGuard(entry, lease);
-            expect(entry, command.expectedRevision());
+            expect(entry, command);
             entry.lease = null;
             Record result = entry.advance(now());
             entry.ledger.put(key, new Recorded(command.digest(), result));
@@ -226,7 +239,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             LedgerKey key = new LedgerKey(action, command.key());
             Recorded prior = entry.ledger.get(key);
             if (prior != null) return replay(prior, command.digest());
-            expect(entry, command.expectedRevision());
+            expect(entry, command);
             Record result = operation.apply(entry);
             entry.ledger.put(key, new Recorded(command.digest(), result));
             return result;
@@ -245,7 +258,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             LedgerKey key = new LedgerKey(action, command.key());
             Recorded prior = entry.ledger.get(key);
             if (prior != null) return replay(prior, command.digest());
-            expect(entry, command.expectedRevision());
+            expect(entry, command);
             Record result = operation.apply(entry);
             entry.ledger.put(key, new Recorded(command.digest(), result));
             return result;
@@ -264,8 +277,16 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
         return entry;
     }
 
-    private void expect(Entry entry, RevisionExpectation.Exactly expectation) {
-        if (expectation.revision() != entry.revision) throw failure(new FailureReason.Conflict());
+    // Both expectations, revision first. They answer different questions (see Command's javadoc):
+    // the revision asks whether anything was written, the generation whether the lifecycle moved.
+    // Both violations are Conflict, because FailureReason is sealed and describes store faults; the
+    // client-facing StaleGeneration distinction is the coordinator's to draw from the record it holds.
+    private void expect(Entry entry, Command command) {
+        if (command.expectedRevision().revision() != entry.revision) throw failure(new FailureReason.Conflict());
+        if (command.expectedGeneration() instanceof GenerationExpectation.Exactly exact
+                && exact.generation() != entry.generation) {
+            throw failure(new FailureReason.Conflict());
+        }
     }
 
     private void ownerGuard(Entry entry, Lease lease) {

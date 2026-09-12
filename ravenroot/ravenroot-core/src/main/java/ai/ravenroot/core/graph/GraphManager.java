@@ -144,7 +144,13 @@ public final class GraphManager implements AutoCloseable {
     }
 
     public static ParsedGraphMl readGraphMlDocument(InputStream input) {
-        byte[] bytes = SecureGraphMlParser.readAndValidate(input, GraphMlLimits.DEFAULTS);
+        return readGraphMlDocument(input, GraphMlLimits.DEFAULTS);
+    }
+
+    /** Reads and retains a GraphML document under caller-selected resource budgets. */
+    public static ParsedGraphMl readGraphMlDocument(InputStream input, GraphMlLimits limits) {
+        Objects.requireNonNull(limits, "limits");
+        byte[] bytes = SecureGraphMlParser.readAndValidate(input, limits);
         return new ParsedGraphMl(readValidatedGraphMl(bytes), bytes);
     }
 
@@ -321,8 +327,8 @@ public final class GraphManager implements AutoCloseable {
             if (exception instanceof GraphMlCompatibilityException compatibilityException) {
                 throw compatibilityException;
             }
-            throw GraphMlRejection.compatibilityFailure(
-                    GraphMlRejection.Sentence.SCALAR_MAPPING_FAILED, null, exception);
+            throw GraphMlRejection.compatibilityFailureFromException(
+                    GraphMlRejection.Sentence.SCALAR_MAPPING_FAILED, exception);
         }
     }
 

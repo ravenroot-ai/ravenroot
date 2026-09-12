@@ -130,8 +130,9 @@ class RecoveryRestoreTransactionTest {
         assertFalse(journalText.contains(target.executionStoreLocation().databaseFile().toString()));
 
         var startup = assertThrows(ExecutionStoreBootstrap.StartupException.class,
-                () -> ExecutionStoreBootstrap.openOwned(new ExecutionStoreConfiguration(
-                        true, target.executionStoreLocation()), Clock.systemUTC()));
+                () -> ExecutionStoreBootstrap.openOwned(
+                        new ExecutionStoreConfiguration.SingleHost(target.executionStoreLocation()),
+                        Clock.systemUTC()));
         assertEquals(ExecutionStoreBootstrap.FailureReason.RECOVERY_PENDING, startup.reason());
 
         assertEquals(0, new BackupRestoreCommand(nullOutput(), new PrintStream(errors)).restore(target, bundle),

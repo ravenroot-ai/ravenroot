@@ -230,7 +230,7 @@ public record RateLimitConfiguration(
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException invalid) {
-            throw new IllegalArgumentException(name + " must be an integer", invalid);
+            throw new IllegalArgumentException(name + " must be an integer");
         }
     }
 }

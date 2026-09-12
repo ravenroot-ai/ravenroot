@@ -15,7 +15,9 @@ describe('application command catalog', () => {
     for (const menu of ['file', 'edit', 'view', 'layout', 'run']) {
       expect(commands.some(command => command.placements?.includes(`menu.${menu}`))).toBe(true);
     }
-    expect(commands.some(command => /save all|recent|rename|preferences/i.test(command.label))).toBe(false);
+    expect(commands.filter(command => command.id !== 'edit.renameGroup')
+      .some(command => /save all|recent|rename|preferences/i.test(command.label))).toBe(false);
+    expect(commands.find(command => command.id === 'edit.renameGroup').label).toBe('Rename group');
     const reserved = commands.flatMap(command => command.shortcuts || [])
       .filter(shortcut => shortcut.primary).map(shortcut => shortcut.key.toLowerCase());
     expect(reserved).not.toContain('n');
@@ -26,25 +28,50 @@ describe('application command catalog', () => {
   it('expresses document, editing, layout, runtime and selection state without DOM access', () => {
     const byId = Object.fromEntries(commands.map(command => [command.id, command]));
     const context = {
-      hasDocument: true, editable: true, canModify: true, modifyEnabled: true,
+      hasDocument: true, editable: true, documentEditable: true, tenantAuthority: true,
+      canModify: true, modifyEnabled: true,
+      documentMode: 'draft',
       layoutBusy: false,
       connectArmed: true, hasSelection: true, layoutMode: 'cyto', renderMode: 'design', running: false,
       canUndo: true, canRedo: false, hasToken: true, leftCollapsed: false, rightCollapsed: true,
       workspaceLayoutMode: 'grid', workspaceLayoutDefault: false,
+      hasOpenDocuments: true,
       applicationTheme: 'dark',
       canDuplicateSelectedNode: true,
     };
     expect(byId['file.replaceActive'].isEnabled(context)).toBe(true);
+    expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false }))
+      .toBe(true);
+    expect(byId['file.fork'].isEnabled(context)).toBe(false);
+    expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false, documentMode: 'test' })).toBe(true);
+    expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: true, documentMode: 'test' }))
+      .toBe(false);
+    expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false, documentMode: 'deployed' }))
+      .toBe(false);
+    expect(byId['file.save'].isEnabled({ ...context, documentEditable: false })).toBe(true);
+    expect(byId['run.play'].isEnabled({ ...context, documentEditable: false })).toBe(true);
     expect(byId['edit.undo'].isEnabled(context)).toBe(true);
     expect(byId['edit.redo'].isEnabled(context)).toBe(false);
+    // The history controls have to name the step they would reverse; a control that only offers
+    // the generic help leaves an assistive-technology user to guess what "Undo" would undo.
+    expect(byId['edit.undo'].describe({ ...context, undoLabel: 'Edit properties on 2 selected nodes' }))
+      .toBe('Undo Edit properties on 2 selected nodes');
+    expect(byId['edit.undo'].describe({ ...context, undoLabel: '' })).toBe('Nothing to undo');
+    expect(byId['edit.redo'].describe({ ...context, redoLabel: 'Connect start' })).toBe('Redo Connect start');
+    expect(byId['edit.redo'].describe({ ...context, redoLabel: '' })).toBe('Nothing to redo');
     expect(byId['edit.connect'].isChecked(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled(context)).toBe(true);
     expect(byId['edit.duplicateNode'].isEnabled({ ...context, canDuplicateSelectedNode: false })).toBe(false);
+    expect(byId['edit.deleteSelection'].shortcuts).toEqual([
+      expect.objectContaining({ key: 'Delete', keyAliases: ['Del', 'Canc'] }),
+      expect.objectContaining({ key: 'Backspace' }),
+    ]);
     expect(byId['layout.design'].isChecked(context)).toBe(true);
     expect(byId['layout.design'].isChecked({ ...context, hasDocument: false })).toBe(false);
     expect(byId['workspace.grid'].isChecked(context)).toBe(true);
     expect(byId['workspace.reset'].isEnabled(context)).toBe(true);
     expect(byId['run.play'].isEnabled(context)).toBe(true);
+    expect(byId['run.play'].isEnabled({ ...context, tenantAuthority: false })).toBe(false);
     expect(byId['run.play'].isEnabled({ ...context, running: true })).toBe(false);
     expect(byId['run.play'].isEnabled({ ...context, running: true, executionUnknown: true })).toBe(true);
     expect(byId['run.start'].isEnabled({ ...context, running: true, executionUnknown: true })).toBe(true);
@@ -58,19 +85,34 @@ describe('application command catalog', () => {
       expect(byId[id].isEnabled({ ...context, edgeGestureActive: true })).toBe(false);
     }
     expect(byId['run.start'].isEnabled(context)).toBe(true);
-    for (const id of ['run.pause', 'run.stop', 'run.forceStop']) {
+    for (const id of ['run.pause', 'run.resume', 'run.cancel', 'run.stop']) {
       expect(byId[id].isEnabled(context)).toBe(false);
       expect(byId[id].placements).toContain('menu.run');
       expect(byId[id].placements).toContain('toolbar.primary');
     }
     expect(byId['run.stop'].isEnabled({ ...context, sourceSessionActive: true })).toBe(true);
     expect(byId['run.pause'].isEnabled({ ...context, sourceSessionActive: true })).toBe(false);
-    expect(byId['run.forceStop'].isEnabled({ ...context, sourceSessionActive: true })).toBe(false);
     expect(byId['run.pause'].isEnabled({ ...context, transientRunning: true })).toBe(true);
-    expect(byId['run.forceStop'].isEnabled({ ...context, transientRunning: true })).toBe(true);
+    expect(byId['run.resume'].isEnabled({ ...context, transientRunning: true, executionPaused: true })).toBe(true);
+    expect(byId['run.cancel'].isEnabled({ ...context, transientRunning: true })).toBe(true);
+    for (const id of ['run.pause', 'run.resume', 'run.cancel']) {
+      expect(byId[id].isEnabled({ ...context, transientRunning: true, executionCommandInFlight: true }))
+        .toBe(false);
+      expect(byId[id].isEnabled({ ...context, transientRunning: true, executionUnknown: true }))
+        .toBe(false);
+    }
+    expect(byId['run.pause'].isVisible({ ...context, transientRunning: true, executionPaused: false })).toBe(true);
+    expect(byId['run.resume'].isVisible({ ...context, transientRunning: true, executionPaused: false })).toBe(false);
+    expect(byId['run.resume'].isVisible({ ...context, transientRunning: true, executionPaused: true })).toBe(true);
+    expect(byId['run.stopDeployment'].isEnabled(context)).toBe(false);
+    expect(byId['run.stopDeployment'].help).toMatch(/does not advertise.*Stop API/i);
+    expect(byId['run.shutdown'].isEnabled(context)).toBe(false);
+    expect(byId['run.shutdown'].help).toMatch(/does not advertise.*Shutdown API/i);
     expect(byId['view.rightInspector'].isChecked(context)).toBe(false);
     expect(byId['view.themeDark'].isChecked(context)).toBe(true);
     expect(byId['view.themeLight'].isChecked(context)).toBe(false);
+    expect(byId['view.closeAllDocuments'].isEnabled(context)).toBe(true);
+    expect(byId['view.closeAllDocuments'].isEnabled({ ...context, hasOpenDocuments: false })).toBe(false);
     // Offered while the document is editable and has not already declared join semantics;
     // withdrawn once it has, since migrating an already-declared document is a defined no-op.
     expect(byId['edit.migrateJoinSemantics'].placements).toContain('menu.edit');
@@ -138,6 +180,31 @@ describe('application command catalog', () => {
     spied['layout.design'].execute();
     spied['layout.monitoring'].execute();
     expect(setRenderMode.mock.calls).toEqual([['design'], ['monitoring']]);
+  });
+
+  it('adds the layered arrangements as a sibling group after the established four', () => {
+    const commands = createAppCommands({});
+    const established = commands.filter(command => command.group === 'design-arrange');
+    const layered = commands.filter(command => command.group === 'design-arrange-layered');
+    expect(layered.map(command => command.id)).toEqual([
+      'layout.arrange.hierarchical-new',
+      'layout.arrange.layered-down',
+    ]);
+    expect(layered.map(command => command.label)).toEqual([
+      'Arrange — Hierarchical (new)',
+      'Arrange — Layered (top-down)',
+    ]);
+    expect(Math.min(...layered.map(command => command.order)))
+      .toBeGreaterThan(Math.max(...established.map(command => command.order)));
+    expect(layered.every(command => command.kind == null
+      && command.placements.includes('menu.layout') && command.placements.includes('help'))).toBe(true);
+    expect(layered.every(command => command.isEnabled({ hasDocument: true, renderMode: 'design' }))).toBe(true);
+    expect(layered.some(command => command.isEnabled({ hasDocument: true, renderMode: 'monitoring' }))).toBe(false);
+    const arrange = vi.fn();
+    const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));
+    spied['layout.arrange.hierarchical-new'].execute();
+    spied['layout.arrange.layered-down'].execute();
+    expect(arrange.mock.calls).toEqual([['hierarchical-new'], ['layered-down']]);
   });
 
   it('offers semantic Design arrangements as actions after the render modes', () => {
@@ -212,6 +279,21 @@ describe('application command catalog', () => {
       createAppCommands({ openDocumentSwitcher }).map(cmd => [cmd.id, cmd]));
     byIdSpied['view.graphs'].execute({ hasDocument: true });
     expect(openDocumentSwitcher).toHaveBeenCalledOnce();
+  });
+
+  it('exposes Close All Documents from View through the canonical command action', () => {
+    const closeAllDocuments = vi.fn();
+    const byId = Object.fromEntries(
+      createAppCommands({ closeAllDocuments }).map(command => [command.id, command]));
+
+    expect(byId['view.closeAllDocuments']).toMatchObject({
+      label: 'Close All Documents', group: 'panels',
+    });
+    expect(byId['view.closeAllDocuments'].placements).toContain('menu.view');
+    expect(byId['view.closeAllDocuments'].isEnabled({ hasOpenDocuments: true })).toBe(true);
+    expect(byId['view.closeAllDocuments'].isEnabled({ hasOpenDocuments: false })).toBe(false);
+    byId['view.closeAllDocuments'].execute();
+    expect(closeAllDocuments).toHaveBeenCalledOnce();
   });
 });
 

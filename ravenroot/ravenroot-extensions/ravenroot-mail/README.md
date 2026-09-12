@@ -45,6 +45,20 @@ source `char[]` and `SecretValue` are cleared immediately after that String is f
 connection attempt; only the unavoidable String remains for the bounded retry sequence and it is never stored or logged.
 All transport failures are converted to safe typed errors with no protocol/server cause chain exposed to execution monitoring. Tenant and profile identifiers are bounded safe tokens. Inspector legacy endpoint, TLS, authentication, sender and limit fields are migration-only: authority fields exact-match the profile and numeric fields can only tighten it. The optional Inspector `maxConcurrency` integer accepts 1–16; when blank it uses the operator profile ceiling, and when set it can only tighten that ceiling. Admission is fail-fast and acquired before virtual-thread submission: the extension has a global cap of 32, an exact tenant cap of 16, an exact tenant/profile cap from the operator profile (1–16), and a per-NodeAction, per-tenant graph-tightened cap. These quotas reserve headroom so one tenant cannot occupy every global slot; they are capacity limits, not a fairness or scheduling guarantee.
 
+## Exact node properties
+
+| Node | Required strings | Optional properties and defaults |
+|---|---|---|
+| `mail.send` | `mailProfile` | legacy exact-match strings `host`, `securityMode`, `authUsername`, `defaultFrom`; integer `port`; Boolean `tlsVerify=true`; secret reference `credentialRef`; tightening integers `connectTimeoutMs`, `readTimeoutMs`, `writeTimeoutMs`, `retries`, `maxRecipients`, `maxHeaders`, `maxHeaderChars`, `maxBodyChars`, `maxAttachments`, `maxAttachmentBytes`, `maxTotalAttachmentBytes`, `maxEncodedAttachmentBytes`, `maxConcurrency` |
+| `mail.imap.query` | `profile` | string `folder=INBOX`; integer `limit=50`; `contentMode=preview` (`preview`, `full`); integer `maxConcurrency`; `recovery.repeatable` has no default |
+| `mail.imap.consume` | `profile` | strings `folder`, `consumerId`; `initialPosition=earliest` (`earliest`, `latest`); integers `pollIntervalMs`, `batchSize`, `retryBackoffMs`, `maxRetryBackoffMs`, `poisonAttempts`; `maxInFlight=1`; `contentMode=metadata` (`metadata`, `preview`); conditional integer `previewChars`; comma-separated string `allowedHeaders`; `checkpointPolicy=require-durable` |
+| `mail.imap.move` | `profile`, `destinationFolder` | string `sourceFolder=INBOX`; integer `maxConcurrency`; `recovery.repeatable` has no default |
+| `mail.imap.delete` | `profile` | string `sourceFolder=INBOX`; `deleteMode=TRASH` (`TRASH`, `HARD_DELETE`); conditional `hardDeleteAcknowledgement`; integer `maxConcurrency`; `recovery.repeatable` has no default |
+
+Blank tightening integers inherit the operator profile. `previewChars` applies only when consume uses
+`contentMode=preview`; `hardDeleteAcknowledgement` applies only to `HARD_DELETE`. SMTP cannot expose an
+honest repeatability choice after DATA handoff and therefore has no recovery-repeatability property.
+
 ## One-shot IMAP queries
 
 The package also contributes `mail.imap.query`. It opens one read-only IMAP session per invocation and always closes the folder and store; it never listens, polls, uses IDLE, or changes flags. GraphML stores only an opaque tenant-scoped `profile` and tightening defaults. The resolver reads `RAVENROOT_IMAP_PROFILE_<TENANT_HEX>_<PROFILE_HEX>` as `host;port;IMAPS|STARTTLS;username;credentialRef;folders;connectMs;readMs;concurrency;results;previewChars`. All eleven fields are mandatory; unlike the SMTP format nothing has been appended to it, so ten fields, or twelve, are simply wrong rather than a compatibility shape. `folders` is a comma-separated set; the other ten are single values. `securityMode` is matched **case-sensitively** against `IMAPS` and `STARTTLS` — `imaps` is rejected, which is *not* how the SMTP format behaves. `username` and `credentialRef` must **both** be non-blank; the SMTP format's "both blank means unauthenticated" shape has no IMAP equivalent, because a read-only query always authenticates.
@@ -115,10 +129,10 @@ Each query uses ascending UID windows of at most 128 messages and stops after 4,
 `mail.imap.consume` is the polling-only, long-lived inbound source. It supports the same encrypted
 `IMAPS` and required-`STARTTLS` profile modes as the one-shot query. It does not support POP3, IDLE,
 flag changes, move, delete, expunge, or any mutation; mutation actions are a separate capability. The source
-opens the operator-authorized folder read-only with peek enabled, waits for a durable-ingress probe,
-then for authenticated folder open and generation-specific checkpoint recovery before reporting
-READY. Each interval performs an IMAP `NOOP` round trip on the selected folder, processes refreshed
-EXISTS/EXPUNGE state, and scans a bounded ascending UID window. It never uses `STATUS` as a selected-
+requires durable ingress, opens the operator-authorized folder read-only with peek enabled, and
+recovers or durably initializes its checkpoint before reporting READY. Each interval performs an
+IMAP `NOOP` round trip on the selected folder, processes refreshed EXISTS/EXPUNGE state, and scans a
+bounded ascending UID window. It never uses `STATUS` as a selected-
 mailbox new-mail poll.
 
 The existing eleven-field `RAVENROOT_IMAP_PROFILE_<TENANT_HEX>_<PROFILE_HEX>` remains the sole owner
@@ -141,11 +155,52 @@ The folder is UTF-8-byte bounded to 256 bytes, control-free, and must also be in
 profile. Poll and retry intervals are 100–60,000 ms; batch is 1–100; scanWindow is at least batch and
 at most 512; poisonAttempts is 1–100; maxMessageBytes is 1–1,048,576; contentMode is `metadata` or
 `preview`; maxPreviewChars is 0–65,536 and must be zero in metadata mode. A graph stores only the
-opaque `profile` plus optional restrictions. Batch, poison-attempt, and preview limits can only lower
-operator ceilings. Poll/retry values can only raise operator floors, up to 60 seconds, so a graph
+opaque `profile`, consumer identity and initial position, plus optional restrictions. Batch,
+poison-attempt, and preview limits can only lower operator ceilings. Poll/retry values can only raise
+operator floors, up to 60 seconds, so a graph
 cannot amplify server traffic. `previewChars` is ignored unless `contentMode=preview`; a hidden value
 in hand-authored GraphML carries no authority. Unknown properties, unauthorized folders, and invalid
 inactive/active combinations are rejected before credential lookup or network access.
+
+### Consumer identity and first start
+
+Set `consumerId` to a stable name for this consumer, for example `incoming-mail`. It is case-sensitive
+and must match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`: 1–128 ASCII letters, digits, dots, underscores or
+hyphens, starting with a letter or digit. Whitespace is invalid. Keep the same value, source node,
+behavior, profile and canonical folder to resume after UI Stop/Run, document reload, server/container
+restart, or a new source-session ID. State is isolated by tenant and that consumer/source identity;
+a different `consumerId` starts independently and never inherits another consumer's cursor.
+
+`initialPosition` accepts exactly `earliest` or `latest`, with `earliest` as the compatibility default.
+It is consulted only when this identity has no checkpoint:
+
+| Value | First start | Subsequent starts |
+|---|---|---|
+| `earliest` | Establish a durable baseline before mailbox history, then consume existing messages. | Resume after the last durably acknowledged UID. |
+| `latest` | Snapshot the selected mailbox's current high-water UID and atomically persist that baseline before READY; skip existing messages. | Resume after the last durably acknowledged UID. |
+
+An empty mailbox also gets a durable baseline. After initialization, changing `initialPosition` has
+no effect: messages arriving while Ravenroot is stopped are consumed after restart in either mode.
+There is no graph property for entering an arbitrary UID.
+
+**Existing graphs:** omitting `consumerId`, or setting it to the empty string, keeps the legacy
+namespace tied to the deployment ID. A non-empty whitespace-only value is invalid. The default remains
+`earliest`; an existing positive checkpoint in that exact legacy namespace for the current
+UIDVALIDITY takes precedence even if `latest` is selected. No other deployment's cursor is imported.
+The first startup after upgrade establishes the persistent UIDVALIDITY binding. A rollover that
+happened before that binding existed cannot be detected retrospectively; migration reads only the
+exact current-epoch legacy cursor. A new source-session/deployment ID
+starts a separate legacy consumer, so add an explicit `consumerId` for continuity across those IDs.
+Adding one creates a new identity and does not import the old deployment checkpoint; choose its first
+position intentionally.
+
+**Store support:** explicit stable consumers require exclusive checkpoint ownership. SQLite supports
+this on its documented local-filesystem topology; a second owner of the same identity fails closed.
+PostgreSQL currently refuses explicit `consumerId`, including with one replica, because stable-source
+ownership is not implemented for that adapter. Existing graphs without `consumerId` retain their
+legacy persistence path. This feature does not enable a multi-replica server topology.
+
+### Checkpoints and delivery
 
 Every accepted message begins one trusted durable traversal with version `mail.imap.message.v1`.
 Its public envelope is:
@@ -163,16 +218,24 @@ The checkpoint version is `mail.imap.checkpoint.v1`. `candidateDeliveredThroughU
 position proposed by this event; it is deliberately not named `deliveredThrough` and is not proof
 that durable source state advanced. The source advances its durable cursor to that UID only after
 `offerDurably` returns an acknowledgeable `DurablyCommitted` or `Duplicate` receipt. Refused,
-volatile, and ambiguous admission leaves it unchanged. A restart reads that durable cursor, while a
-UIDVALIDITY rollover changes both the checkpoint's UIDVALIDITY and its durable source namespace.
+volatile, and ambiguous admission leaves it unchanged. A restart reads that durable cursor.
+Initial bootstrap writes establish mailbox identity and position; later position advances require
+durable ingress acknowledgement.
 
 The event's stable identity fields are top-level `sourceFolder`, unsigned-32 `uidValidity`, and
 unsigned-32 positive `uid`, so the output can feed mutation actions without LLM transcription. The event
-does not contain the profile, host, username, credential reference, or secret. The durable source
-namespace injectively encodes node, profile, canonical folder, and UIDVALIDITY; the cursor position is
-the UID alone. UIDVALIDITY and UID are never bit-packed into a signed long. A UIDVALIDITY rollover
-selects a new checkpoint namespace, fences the old session generation, and reconnects through capped,
-stop-interruptible jittered backoff.
+does not contain the profile, host, username, credential reference, or secret. Durable checkpoint and
+inbox deduplication share the consumer's namespace, with profile, canonical folder and UIDVALIDITY
+binding the mailbox stream. The public checkpoint remains a UID; internal versioned storage
+separately distinguishes an initialized empty baseline from absent state. UIDVALIDITY and UID are
+never bit-packed into a signed long.
+
+**UIDVALIDITY changes stop the consumer.** The persisted binding is checked on startup and reconnect,
+and a change observed while polling also fails closed. Once bound, Ravenroot never silently applies
+an old UID to the new mailbox generation, replays its history, or reapplies `latest`. After investigating the
+mailbox change, deliberately choose a new `consumerId` and `initialPosition` to establish a new
+stream. This replaces the earlier automatic namespace rollover behavior and applies to legacy
+consumers too. Reusing the old identity continues to fail safely.
 
 Delivery is at least once. `DurablyCommitted` and `Duplicate` receipts advance the checkpoint;
 `VolatileCustody`, `Refused`, and `Ambiguous` never do. Refused or ambiguous admission reoffers the
@@ -210,8 +273,9 @@ provider API prevents claiming end-to-end in-memory erasure before session close
 Stable author-visible health reasons are fixed tokens such as `imap-consumer-reconnecting`,
 `message-projection-unavailable`, `ambiguous-ingress`, `ingress-refused`, and terminal checkpoint,
 policy, or poison-halt classifications. Raw server messages and credential material are never used as
-health text. Deployment is single-process/single-active-consumer; durable checkpointing survives
-source restart, while the process-local lease itself does not coordinate multiple Ravenroot pods.
+health text. Stable-consumer storage ownership is retained until pending durable operations settle,
+including during stop; cancelling a wait does not release ownership early. The server remains
+single-replica, and the process-local mailbox lease alone is not cross-process coordination.
 
 The dedicated lifecycle proof is `./scripts/verify-mail-imap-consumer-container.sh`. It builds and
 installs the mail bundle, then runs GreenMail IMAPS, SQLite durability, `DefaultGraphDeployment`, and

@@ -7,8 +7,9 @@ element built from two properties (``ravenroot.surefire.extraArgLine``,
 text element declared by a second ``<plugin>`` block or a child module's own ``pom.xml`` wholesale
 rather than appending to it: there is no parent-side XML trick that prevents this, so a second
 ``<argLine>`` anywhere in the reactor silently drops the locale pin, with no warning and no error
-from Maven itself. This guard supplies that warning and error deterministically instead of requiring
-a lost test run to reveal the problem.
+from Maven itself. Child modules may populate ``ravenroot.surefire.extraArgLine``: the inherited
+``<argLine>`` composes that value with the separately protected locale property. This guard supplies
+the warning and error deterministically instead of requiring a lost test run to reveal the problem.
 
 Run ``python3 scripts/check_argline.py`` from the repository root. Does not invoke Maven and does
 not fork a JVM: it is a static text guard over the committed ``pom.xml`` files, deliberately fast
@@ -29,18 +30,17 @@ from pathlib import Path
 AUTHORITATIVE_POM = Path("ravenroot/pom.xml")
 REQUIRED_TOKENS = ("${ravenroot.surefire.extraArgLine}", "${ravenroot.surefire.localeArgLine}")
 
-# The two properties AUTHORITATIVE_POM's <argLine> is built from. Property inheritance in Maven
+# The locale property AUTHORITATIVE_POM's <argLine> is built from. Property inheritance in Maven
 # is the same scalar-override mechanism as plugin configuration: a child pom's own <properties>
-# entry with one of these names fully replaces the inherited value for ${} interpolation, exactly
-# like a second <argLine> element does, EXCEPT it leaves no <argLine> text anywhere for
-# ARG_LINE_RE to find. Confirmed empirically against the real reactor:
+# entry fully replaces the inherited value for ${} interpolation, EXCEPT it leaves no <argLine>
+# text anywhere for ARG_LINE_RE to find. Confirmed empirically against the real reactor:
 # a child pom declaring only
 #   <properties><ravenroot.surefire.localeArgLine></ravenroot.surefire.localeArgLine></properties>
 # drops the locale pin from the forked JVM (en/US became the machine's it/IT) under BUILD SUCCESS,
-# no warning, and this guard reported green before this check existed. This gap belongs to this
-# change, not a follow-up: the property indirection that makes composition possible is exactly
-# what opened it.
-COMPOSABLE_PROPERTIES = ("ravenroot.surefire.extraArgLine", "ravenroot.surefire.localeArgLine")
+# no warning, and this guard reported green before this check existed. The extraArgLine property is
+# deliberately different: a child value fills the module-specific part of the inherited argLine while
+# localeArgLine remains appended independently.
+PROTECTED_CHILD_PROPERTIES = ("ravenroot.surefire.localeArgLine",)
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # \b[^>]* tolerates an attribute on the opening tag (e.g. <argLine combine.self="override">):
@@ -61,7 +61,7 @@ def _property_element_re(name: str) -> re.Pattern[str]:
     return re.compile(rf"<{escaped}\b[^>]*?/>|<{escaped}\b[^>]*>.*?</{escaped}>", re.DOTALL)
 
 
-PROPERTY_RE_BY_NAME = {name: _property_element_re(name) for name in COMPOSABLE_PROPERTIES}
+PROPERTY_RE_BY_NAME = {name: _property_element_re(name) for name in PROTECTED_CHILD_PROPERTIES}
 
 # The locale override requirement is that -Dtest.locale.language / -Dtest.locale.country keep
 # overriding the forked JVM's locale. That override is wired

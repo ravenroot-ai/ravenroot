@@ -12,11 +12,13 @@ const graphMl = readFileSync(new URL('../test/fixtures/lifecycle-document.graphm
 async function records(page) {
   return page.evaluate(() => window.ravenroot.documents().map(document_ => ({
     id: document_.id,
+    documentId: document_.documentId,
     name: document_.name,
     displayName: document_.displayName,
     dirty: document_.history.isDirty(),
     active: document_.id === window.ravenroot.workspace.activeId,
     format: document_.graph?.format,
+    mode: document_.mode,
   })));
 }
 
@@ -252,8 +254,101 @@ test.describe('multi-document lifecycle', () => {
     await expect.poll(async () => (await records(page)).at(-1)?.format).toBe('graphify');
     await expect(page.locator('#btn-modify')).toBeDisabled();
     await expect(page.locator('#btn-export')).toBeDisabled();
+    const graphifyDocument = (await records(page)).at(-1);
+    expect(graphifyDocument).toEqual(expect.objectContaining({ mode: 'draft', active: true }));
+    await page.locator('#menu-file').click();
+    const chooserPromise = page.waitForEvent('filechooser');
+    await page.getByRole('menuitem', { name: 'Replace Active…' }).click();
+    const chooser = await chooserPromise;
+    await chooser.setFiles({
+      name: 'graphify-replacement.graphml',
+      mimeType: 'application/xml',
+      buffer: graphMl,
+    });
+    await expect.poll(async () => (await records(page)).at(-1)).toEqual(expect.objectContaining({
+      id: graphifyDocument.id,
+      documentId: graphifyDocument.documentId,
+      name: 'graphify-replacement.graphml',
+      format: 'graphml',
+      mode: 'draft',
+      active: true,
+    }));
+    await expect(page.locator('#btn-modify')).toBeEnabled();
     expect((await records(page))[0]).toEqual(expect.objectContaining({
       name: 'replacement.graphml', dirty: false, format: 'graphml',
     }));
+  });
+
+  test('replace rejects N+1 local bytes before constructing a FileReader', async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = FileReader.prototype.readAsText;
+      window.__ravenrootFileReads = 0;
+      FileReader.prototype.readAsText = function measuredReadAsText(...args) {
+        window.__ravenrootFileReads += 1;
+        return original.apply(this, args);
+      };
+    });
+    await page.route('**/v1/configuration', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 64 }),
+    }));
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(() => {
+      try {
+        return window.ravenroot.graphDocumentByteLimit();
+      } catch {
+        return null;
+      }
+    })).toBe(64);
+
+    let message = '';
+    page.once('dialog', async dialog => {
+      message = dialog.message();
+      await dialog.dismiss();
+    });
+    await page.locator('#replace-file-inp').setInputFiles({
+      name: 'oversized.graphml',
+      mimeType: 'application/graphml+xml',
+      buffer: Buffer.from('x'.repeat(65)),
+    });
+
+    await expect.poll(() => message).toContain('document exceeds the configured byte limit');
+    await expect.poll(() => page.evaluate(() => window.__ravenrootFileReads)).toBe(0);
+  });
+
+  test('malformed runtime configuration fails closed before opening a local file', async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = FileReader.prototype.readAsText;
+      window.__ravenrootFileReads = 0;
+      FileReader.prototype.readAsText = function measuredReadAsText(...args) {
+        window.__ravenrootFileReads += 1;
+        return original.apply(this, args);
+      };
+    });
+    await page.route('**/v1/configuration', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 0 }),
+    }));
+    await page.goto('/');
+    const before = await records(page);
+
+    let message = '';
+    page.once('dialog', async dialog => {
+      message = dialog.message();
+      await dialog.dismiss();
+    });
+    await page.locator('#file-inp').setInputFiles({
+      name: 'valid.graphml',
+      mimeType: 'application/graphml+xml',
+      buffer: graphMl,
+    });
+
+    await expect.poll(() => message).toContain(
+      'Graph document loading is unavailable until the connected service returns valid configuration',
+    );
+    await expect.poll(() => page.evaluate(() => window.__ravenrootFileReads)).toBe(0);
+    expect(await records(page)).toEqual(before);
   });
 });

@@ -17,7 +17,7 @@ import java.util.Set;
  *
  * <h2>Why the body is not simply appended to the instructions</h2>
  * <p>Because that is the whole of what makes a skill a skill rather than more text in a prompt.
- * {@link LoadSkillTool} hands the body over on request, so the system turn carries only the name and
+ * {@link LoadSkillTool} hands the body over on request, so the untrusted author turn carries only the name and
  * the description: an unused skill then costs its one-line entry and nothing else, and ten declared
  * skills do not multiply the conversation by ten on every turn. The bounded agent loop makes this
  * possible, and {@code load_skill} uses that loop for exactly this purpose.</p>

@@ -18,5 +18,10 @@
             <outputDirectory>/</outputDirectory>
             <fileMode>0755</fileMode>
         </fileSet>
+        <fileSet>
+            <directory>src/main/resources/META-INF/licenses</directory>
+            <outputDirectory>/licenses</outputDirectory>
+            <fileMode>0644</fileMode>
+        </fileSet>
     </fileSets>
 </assembly>

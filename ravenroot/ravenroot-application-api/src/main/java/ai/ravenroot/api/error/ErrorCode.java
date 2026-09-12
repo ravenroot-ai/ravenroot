@@ -34,12 +34,42 @@ public enum ErrorCode {
      */
     UNKNOWN_EXECUTION(404, "unknown execution"),
     /**
+     * The durable-inventory counterpart of {@link #UNKNOWN_EXECUTION}, and deliberately a distinct
+     * code rather than a reuse: a process instance is the durable aggregate, addressed by
+     * {@code processInstanceId}, and is not the same identity {@link #UNKNOWN_EXECUTION} names
+     * ({@code executionId}, which is the traversal id). Says nothing about why for the identical
+     * reason {@link #UNKNOWN_EXECUTION} does not: an instance that never existed, one belonging to
+     * another tenant, and one purged past its terminal retention window all answer with this code,
+     * because distinguishing the first two would disclose them. A caller that needs to tell "never
+     * existed" from "expired by policy" apart compares against the retention floor a durable
+     * inventory listing carries, not against a second failure channel here.
+     */
+    UNKNOWN_PROCESS_INSTANCE(404, "unknown process instance"),
+    /**
      * The counterpart that makes {@link #UNKNOWN_EXECUTION} honest rather than a catch-all: the
      * execution provably ran and its terminal status is still known, but its result is past the
      * retention horizon. A caller that receives this learns its run really did happen, which an empty
      * body or a bare 404 would have hidden.
      */
     EXECUTION_RESULT_EXPIRED(410, "the execution result is no longer retained"),
+    /**
+     * The counterpart that keeps {@link #EXECUTION_RESULT_EXPIRED} honest in the other direction: the
+     * execution provably ran and its terminal status is still known, but its payload was never
+     * retained in the first place -- refused because it exceeded a configured payload budget, or
+     * because the value does not project onto the closed payload model at all. Distinct from
+     * {@link #EXECUTION_RESULT_EXPIRED} on purpose: one names a record that aged out under a
+     * retention policy working as configured, the other names a record whose payload was refused at
+     * write time and that no amount of reading it sooner would have recovered. A caller told "expired"
+     * learns nothing actionable; a caller told "redacted" can distinguish a size limit an operator may
+     * raise from a node returning a value no remote adapter could ever persist -- the two published
+     * {@code payloadState} values ({@code WITHHELD}, {@code UNCONVERTIBLE}) this response body carries
+     * beside {@code status} and {@code terminationReason}, for the identical reason those two travel
+     * beside {@link #EXECUTION_RESULT_EXPIRED}'s own body. 410, the same status
+     * {@link #EXECUTION_RESULT_EXPIRED} uses, because both describe the identical shape of absence to
+     * an HTTP caller -- the resource is known and its content is not being returned -- and the two are
+     * told apart by the closed-vocabulary {@code code}, not by the transport status.
+     */
+    EXECUTION_RESULT_REDACTED(410, "the execution result was never retained"),
     /** The request violates an input contract without disclosing rejected content. */
     INVALID_REQUEST(400, "the request was rejected as invalid"),
     /**
@@ -63,6 +93,16 @@ public enum ErrorCode {
     UNSUPPORTED_MEDIA_TYPE(415, "the request content type is not supported"),
     /** The deployment does not implement the requested execution policy. */
     EXECUTION_POLICY_UNSUPPORTED(501, "the requested execution policy is not implemented"),
+    /**
+     * This deployment has no durable, inventory-capable execution store configured, so
+     * the durable process inventory cannot answer at all. 501, the same status
+     * {@link #EXECUTION_POLICY_UNSUPPORTED} uses, because this is a fact about this deployment's
+     * composed capability rather than about the caller's request: an operator must compose a store
+     * that declares {@code StoreCapability.PROCESS_INVENTORY} before this route can answer, and no
+     * retry of the same request changes that.
+     */
+    PROCESS_INVENTORY_UNAVAILABLE(501, "this deployment has no durable process inventory configured; "
+            + "an operator must compose an execution store that declares PROCESS_INVENTORY"),
     /** Processing stopped before the operation reached a terminal result. */
     REQUEST_INTERRUPTED(503, "the operation was interrupted before it completed"),
     /** A request-rate or concurrency limit refused the operation. */
@@ -192,6 +232,8 @@ public enum ErrorCode {
     GRAPHML_DOCUMENT_TOO_LARGE(413, "the GraphML document exceeds the configured byte limit"),
     /** Secure GraphML parsing exceeded a configured resource budget. */
     GRAPHML_RESOURCE_LIMIT(413, "the GraphML document exceeds a configured resource limit"),
+    /** A valid graph exceeds an operator-owned execution or amplification limit. */
+    GRAPH_EXECUTION_RESOURCE_LIMIT(413, "the graph exceeds a configured execution resource limit"),
     /** Secure XML parsing rejected a construct that could expand or access unsafe resources. */
     GRAPHML_UNSAFE_XML(400, "the GraphML document was refused by the secure parser"),
     /** GraphML bytes are not well-formed XML. */

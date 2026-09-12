@@ -820,6 +820,20 @@ public interface ExecutionStore extends AutoCloseable {
     CompletionStage<Long> journalRetainedFrom(String tenantId);
 
     /**
+     * Opens exclusive source checkpoint/inbox ownership, scoped to tenant and namespace.
+     * The default refuses: process-local synchronization cannot establish shared-store ownership.
+     * Implementations must retain ownership through every admitted asynchronous write, including
+     * cancelled or timed-out calls, and release it on process death within their supported topology.
+     * @param tenantId owning tenant
+     * @param namespace stable source identity, independent of a transient deployment ID
+     * @return exclusive store handle
+     * @throws UnsupportedOperationException when safe ownership is unavailable
+     */
+    default SourceCheckpointStore openSourceCheckpointStore(String tenantId, String namespace) {
+        throw new UnsupportedOperationException("exclusive source checkpoints are unavailable");
+    }
+
+    /**
      * Reads a publisher destination's durable position. A destination that has never delivered
      * anything reads as {@link JournalCursor#start(String, String)} rather than as an absence,
      * because "has delivered nothing" and "does not exist" call for the identical action — start at

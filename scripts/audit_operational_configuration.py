@@ -10629,8 +10629,9 @@ def agent_budget_authority_from_source(
         "scope": "Packaged server agent authority budget.",
         "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
         "coverage": (
-            "Exact environment lookup and fallback atom, positive parser helper chain, typed record "
-            "constructor slot and validation, and focused default/blank/invalid-value tests."
+            "Exact startup composition, environment lookup and fallback atom, positive parser helper "
+            "chain, typed record constructor slot and validation, model-reservation consumer, and "
+            "focused default/blank/invalid-value tests."
         ),
         "rationale": (
             "The per-turn input-token budget is an operator-controlled deployment setting. Its "

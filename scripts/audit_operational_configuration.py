@@ -15417,6 +15417,28 @@ def render_report(document: dict[str, object], root: Path = ROOT) -> str:
                 coverage=entry.get("coverage", "")))
     else:
         lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
+    jwk_authorities = document.get("jwkPolicyAuthorities", {})
+    jwk_authority = (jwk_authorities.get(JWK_POLICY_AUTHORITY_ID)
+                     if isinstance(jwk_authorities, dict) else None)
+    jwk_contracts = jwk_authority.get("contracts", []) if isinstance(jwk_authority, dict) else []
+    jwk_partitions = (jwk_authority.get("semanticPartitions", [])
+                      if isinstance(jwk_authority, dict) else [])
+    lines.extend(("", "## Source-proven JWKS retrieval policy", "",
+                  "The closed family distinguishes the operator-selected cache and transport durations",
+                  "from the response admission ceiling, HTTP media contract, and overflow sentinel.", "",
+                  "| Setting | State | Typed owner | Field | Binding | Default | Candidates |",
+                  "|---|---|---|---|---|---|---:|"))
+    for contract in sorted(jwk_contracts, key=lambda item: str(item.get("setting", ""))):
+        bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", []))
+        lines.append(f"| {contract.get('setting', '')} | {contract.get('status', '')} | "
+                     f"`{contract.get('owner', '')}` | `{contract.get('field', '')}` | {bindings} | "
+                     f"`{contract.get('defaultExpression', '')}` | {len(contract.get('candidateIds', []))} |")
+    lines.extend(("", "Retained JWKS atoms are reported by their exact source role:", "",
+                  "| Semantic partition | Classification | Candidates |", "|---|---|---:|"))
+    for partition in jwk_partitions:
+        lines.append(f"| {partition.get('semanticPartition', '')} | "
+                     f"{partition.get('classification', '')} | "
+                     f"{len(partition.get('candidateIds', []))} |")
     persistence_authorities = document.get("persistencePolicyAuthorities", {})
     persistence_authority = (persistence_authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID)
                              if isinstance(persistence_authorities, dict) else None)

@@ -6543,7 +6543,7 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
          "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
-         "8c259d0cbe9588b242bf82e395288abe1f388d12a6e26e4318cc7e52c7b2ff97"),
+         "43f2c51c4787ff0480754524b4d204f6c615c364d4bced2a81aa527f48a367a5"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
          "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",

@@ -27,6 +27,7 @@ class AgentAuthorityBudgetConfigurationTest {
         assertEquals("ravenroot-server", first.runtimeInstanceId());
         assertEquals("builtin-conservative-v1", first.rateCardVersion());
         assertEquals("USD", first.currency());
+        assertEquals(128_000, first.maximumInputTokensPerTurn());
         assertEquals(10, first.inputTokenRateMicros());
         assertEquals(30, first.outputTokenRateMicros());
         assertTrue(first.rootMaxima().turns() > 0);

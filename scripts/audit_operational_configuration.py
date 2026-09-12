@@ -38,6 +38,39 @@ INVENTORY = ROOT / "scripts" / "operational-configuration-inventory.json"
 REPORT = ROOT / "docs" / "architecture" / "operational-configuration-audit.md"
 FINAL_REVIEW = ROOT / "docs" / "architecture" / "operational-configuration-final-review.json"
 FINAL_REVIEW_AUTHORITY_ID = "issue-321-final-semantic-review-v1"
+AGENT_BUDGET_AUTHORITY_ID = "agent-authority-budget-environment-v1"
+AGENT_BUDGET_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java")
+AGENT_BUDGET_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java")
+AGENT_BUDGET_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java")
+AGENT_BUDGET_CANDIDATE_IDS = (
+    "oc-2d29419d18f18da74d3c",
+    "oc-473ffef3055ed509d856",
+    "oc-defbd8454b4343da9a9f",
+)
+AGENT_BUDGET_METHOD_DIGESTS = {
+    "fromEnvironment": "9cf80fd044370a3b05ac4c016c91f549e7fdbbcad1ded9c5d764687c8697f4a6",
+    "positive": "d80613da351478a33247ab8eb1e32227f329ee2c86fa6055dc69bd2c9a8eb325",
+    "number": "e8d2aa2d22d3e52953d9272074c77534e3a084ff31ace7eab2237da38f8810b5",
+}
+AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
+    "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
+AGENT_BUDGET_TEST_METHOD_DIGESTS = {
+    "shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs":
+        "c92a7682f6a8af357c428d64a123342d3cf334830a821a9562d8a65fc12008e4",
+    "absentAndBlankNumericValuesUseTheSameDefaults":
+        "75e7fc12bafc1093eb95370641e0b309a366be900383a7456f02ccac6d2abbba",
+    "malformedAndOverflowingNumbersHaveCauseFreeSettingOnlyDiagnostics":
+        "9c29165f0f6cf7b114fcdfa6f57b8518e2badc0b25af251c8156b47147860405",
+    "positiveBudgetsRejectZeroAndNegativeValues":
+        "66e4f703dbf6012c733ffdfb82c31b604000352b4139b62c804cdbeae7a8e382",
+    "assertSameConfiguredValues":
+        "770c92e24483d3be8cebc32fb443ecc97dd752b0c3d49dc2ac32153274967af7",
+    "numericNames": "e48b2b346f5877e06cb3792f693e6c07b674b361c02fe84bd8f80eaf4bac1bf7",
+    "positiveNumericNames": "bdd007eac80d84b840eeb37774e3184d0620810d0d62993840fb9077faae3ea3",
+}
 
 SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
@@ -1245,6 +1278,30 @@ def candidate_ids_in_source_span(relative: Path, source: str, start: int, end: i
                 and occurrence < len(ids):
             selected.append(ids[occurrence])
     return selected
+
+
+def all_candidate_ids_in_source_span(relative: Path, source: str, start: int, end: int,
+                                     discovered: dict[str, Candidate]) -> list[str]:
+    """Return every current lexical candidate whose exact occurrence begins in one source span."""
+    grouped: dict[tuple[str, str, str, str, str], list[str]] = {}
+    for candidate in discovered.values():
+        if candidate.path != relative.as_posix():
+            continue
+        key = (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+               candidate.evidence_digest)
+        grouped.setdefault(key, []).append(candidate.id)
+    occurrences: Counter[tuple[str, str, str, str, str]] = Counter()
+    selected: list[str] = []
+    for offset, symbol_name, candidate_kind, candidate_role, expression, evidence in code_candidates(
+            relative, source, surface(relative) or "java"):
+        evidence_digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+        key = (symbol_name, candidate_kind, candidate_role, expression, evidence_digest)
+        occurrence = occurrences[key]
+        occurrences[key] += 1
+        identifiers = grouped.get(key, [])
+        if start <= offset < end and occurrence < len(identifiers):
+            selected.append(identifiers[occurrence])
+    return sorted(selected)
 
 
 def java_package(source: str) -> str:
@@ -3019,6 +3076,9 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "agentBudgetAuthorities" \
+            and path[2] in {"candidateIds", "defaultCandidateIds"}:
+        return path[3].isdigit()
     if len(path) == 4 and path[0] == "interactionWebSocketAuthorities" and path[2] == "candidateIds":
         return path[3].isdigit()
     if len(path) == 6 and path[0] == "interactionWebSocketAuthorities" \
@@ -3186,6 +3246,13 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field != "semanticPartitions":
                             remap_list(row, "defaultCandidateIds")
+
+    agent_budget_authorities = document.get("agentBudgetAuthorities")
+    if isinstance(agent_budget_authorities, dict):
+        for authority in agent_budget_authorities.values():
+            if isinstance(authority, dict):
+                remap_list(authority, "candidateIds")
+                remap_list(authority, "defaultCandidateIds")
 
     interaction_authorities = document.get("interactionWebSocketAuthorities")
     if isinstance(interaction_authorities, dict):
@@ -3431,6 +3498,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             return None, ["cannot derive the closed program/GitHub policy authority from current source"]
         refreshed["programGithubPolicyAuthorities"] = {
             PROGRAM_GITHUB_POLICY_AUTHORITY_ID: program_github_authority,
+        }
+    if agent_budget_policy_source_present(root):
+        agent_budget_authority = agent_budget_authority_from_source(root, current)
+        if agent_budget_authority is None:
+            return None, ["cannot derive the closed agent budget setting authority from current source"]
+        refreshed["agentBudgetAuthorities"] = {
+            AGENT_BUDGET_AUTHORITY_ID: agent_budget_authority,
         }
     if interaction_websocket_source_present(root):
         interaction_authority = interaction_websocket_authority_from_source(root, current)
@@ -10393,6 +10467,190 @@ def program_github_policy_source_present(root: Path) -> bool:
                for key in ("runtime", "github", "authoring", "selector", "core"))
 
 
+def agent_budget_policy_source_present(root: Path) -> bool:
+    """Keep the family mandatory when any defining, owning, or test source remains."""
+    return any((root / relative).exists() for relative in (
+        AGENT_BUDGET_CONFIGURATION_PATH, AGENT_BUDGET_POLICY_PATH, AGENT_BUDGET_TEST_PATH,
+    ))
+
+
+def agent_budget_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive one operator setting from its exact factory argument and typed policy slot.
+
+    The fixed executable digests are reviewed source evidence, rather than values copied from the
+    inventory. A source change must receive a new review even when a caller refreshes file digests
+    or rewrites the claimed authority alongside it.
+    """
+    try:
+        configuration = (root / AGENT_BUDGET_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        policy = (root / AGENT_BUDGET_POLICY_PATH).read_text(encoding="utf-8")
+        tests = (root / AGENT_BUDGET_TEST_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    components = java_record_components(policy, "AgentAuthorityBudgetPolicy")
+    expected_components = (
+        "runtimeInstanceId", "bootEpoch", "policyVersion", "rateCardVersion", "currency",
+        "rootLifetime", "rootMaxima", "maximumInputTokensPerTurn",
+        "maximumOutputTokensPerTurn", "inputTokenRateMicros", "outputTokenRateMicros",
+        "dataScopes", "authorityScopes",
+    )
+    if components != expected_components:
+        return None
+    argument = java_constructor_component_call(
+        configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment",
+        "AgentAuthorityBudgetPolicy", components, "maximumInputTokensPerTurn",
+    )
+    expected_argument = (
+        'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000)'
+    )
+    if argument is None or normalized(argument[0]) != expected_argument:
+        return None
+    candidate_ids = all_candidate_ids_in_source_span(
+        AGENT_BUDGET_CONFIGURATION_PATH, configuration, argument[1], argument[2], discovered)
+    if candidate_ids != list(AGENT_BUDGET_CANDIDATE_IDS):
+        return None
+    span_keys = Counter(
+        (symbol, kind, role, expression, hashlib.sha256(evidence.encode("utf-8")).hexdigest())
+        for offset, symbol, kind, role, expression, evidence in code_candidates(
+            AGENT_BUDGET_CONFIGURATION_PATH, configuration, "java")
+        if argument[1] <= offset < argument[2]
+    )
+    discovered_span_keys = Counter(
+        (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+         candidate.evidence_digest)
+        for candidate in discovered.values()
+        if candidate.path == AGENT_BUDGET_CONFIGURATION_PATH.as_posix()
+        and (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+             candidate.evidence_digest) in span_keys
+    )
+    if discovered_span_keys != span_keys:
+        return None
+    candidates = [discovered.get(identifier) for identifier in candidate_ids]
+    if any(candidate is None for candidate in candidates):
+        return None
+    binding_ids = [candidate.id for candidate in candidates
+                   if candidate is not None and candidate.kind == "environment-binding"
+                   and candidate.expression == "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"]
+    default_ids = [candidate.id for candidate in candidates
+                   if candidate is not None and candidate.expression == "128_000"]
+    binding_literal_ids = [candidate.id for candidate in candidates
+                           if candidate is not None
+                           and candidate.expression == '"RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"']
+    if binding_ids != ["oc-defbd8454b4343da9a9f"] \
+            or default_ids != ["oc-473ffef3055ed509d856"] \
+            or binding_literal_ids != ["oc-2d29419d18f18da74d3c"]:
+        return None
+    if java_reachable_helper_methods(
+            configuration, "AgentAuthorityBudgetConfiguration", ("positive",)) != {"number"}:
+        return None
+    if any(java_method_digest(configuration, "AgentAuthorityBudgetConfiguration", method) != digest
+           for method, digest in AGENT_BUDGET_METHOD_DIGESTS.items()):
+        return None
+    if java_span_digest(
+            policy, java_compact_constructor_span(policy, "AgentAuthorityBudgetPolicy")) \
+            != AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST:
+        return None
+    if any(java_method_digest(tests, "AgentAuthorityBudgetConfigurationTest", method) != digest
+           for method, digest in AGENT_BUDGET_TEST_METHOD_DIGESTS.items()):
+        return None
+    positive_names = java_direct_stream_string_return(
+        tests, "AgentAuthorityBudgetConfigurationTest", "positiveNumericNames")
+    if positive_names != (
+            "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", "RAVENROOT_AGENT_MAX_TURNS",
+            "RAVENROOT_AGENT_MAX_INPUT_TOKENS", "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS",
+            "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS", "RAVENROOT_AGENT_MAX_COST_MICROS",
+            "RAVENROOT_AGENT_MAX_TOOL_CALLS", "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH",
+            "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", "RAVENROOT_AGENT_MAX_TEAM_ACTIVE",
+            "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN",
+            "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN"):
+        return None
+    evaluated = evaluated_java_default("128_000", False)
+    if evaluated != {"kind": "integer", "value": 128000}:
+        return None
+    owner = f"{AGENT_BUDGET_POLICY_PATH.as_posix()}#AgentAuthorityBudgetPolicy"
+    return {
+        "kind": "java-agent-budget-environment-setting-v1",
+        "setting": "agent.maximum-input-tokens-per-turn",
+        "owner": owner,
+        "field": "maximumInputTokensPerTurn",
+        "bindings": ["RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"],
+        "defaultExpression": "128_000",
+        "evaluatedDefault": evaluated,
+        "candidateIds": candidate_ids,
+        "defaultCandidateIds": default_ids,
+        "factoryArgument": argument[0],
+        "validation": (
+            "Absent or blank uses 128000; otherwise a stripped base-10 long is required, and "
+            "zero, negative, malformed, and overflowing values are rejected with setting-only diagnostics."
+        ),
+        "scope": "Packaged server agent authority budget.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": (
+            "Exact environment lookup and fallback atom, positive parser helper chain, typed record "
+            "constructor slot and validation, and focused default/blank/invalid-value tests."
+        ),
+        "rationale": (
+            "The per-turn input-token budget is an operator-controlled deployment setting. Its "
+            "128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal."
+        ),
+        "sourceBodyDigests": {
+            **AGENT_BUDGET_METHOD_DIGESTS,
+            "AgentAuthorityBudgetPolicy.compactConstructor": AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST,
+        },
+        "sourceDigests": [
+            {"path": relative.as_posix(), "digest": _source_digest(source)}
+            for relative, source in (
+                (AGENT_BUDGET_CONFIGURATION_PATH, configuration),
+                (AGENT_BUDGET_POLICY_PATH, policy),
+                (AGENT_BUDGET_TEST_PATH, tests),
+            )
+        ],
+        "testEvidence": [
+            {"path": AGENT_BUDGET_TEST_PATH.as_posix(), "type": "AgentAuthorityBudgetConfigurationTest",
+             "method": method, "methodDigest": digest}
+            for method, digest in AGENT_BUDGET_TEST_METHOD_DIGESTS.items()
+        ],
+    }
+
+
+def agent_budget_authority_errors(root: Path, authorities: object,
+                                  entries: dict[str, dict[str, object]],
+                                  discovered: dict[str, Candidate]) -> list[str]:
+    if not agent_budget_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["agent budget authority exists without its source family"])
+    expected = agent_budget_authority_from_source(root, discovered)
+    if expected is None:
+        return ["agent budget policy source family is incomplete, mis-slotted, or unsupported"]
+    errors: list[str] = []
+    if authorities != {AGENT_BUDGET_AUTHORITY_ID: expected}:
+        errors.append("agent budget setting requires the exact mandatory source-derived authority")
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("agentBudgetAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("agent budget authority candidate partition is missing, duplicated, or foreign")
+    expected_fields = {
+        "status": "already-centralized", "classification": "operator-configurable",
+        "agentBudgetAuthority": AGENT_BUDGET_AUTHORITY_ID,
+        "setting": expected["setting"], "owner": expected["owner"], "field": expected["field"],
+        "bindings": expected["bindings"], "default": str(expected["evaluatedDefault"]["value"]),
+        "defaultEvidence": expected["defaultCandidateIds"], "validation": expected["validation"],
+        "scope": expected["scope"], "pinning": expected["pinning"],
+        "coverage": expected["coverage"], "rationale": expected["rationale"],
+    }
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None:
+            errors.append(f"{identifier}: mandatory agent budget source atom is absent")
+            continue
+        for field, expected_value in expected_fields.items():
+            if entry.get(field) != expected_value:
+                errors.append(f"{identifier}: agent budget {field} authority has drifted")
+    return errors
+
+
 def program_github_deployment_candidate(root: Path, candidate: Candidate) -> bool:
     paths = PROGRAM_GITHUB_PATHS
     if candidate.path not in {paths[key] for key in ("compose", "helmValues", "helmSchema", "helmDeployment", "kubernetes")}:
@@ -13925,6 +14183,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     pass
                 elif entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
                     pass
+                elif entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID:
+                    pass
                 elif entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
                     pass
                 elif current_source_owner(root, owner) is None:
@@ -14142,6 +14402,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(program_github_policy_authority_errors(
         root, document.get("programGithubPolicyAuthorities"), entries, discovered,
     ))
+    errors.extend(agent_budget_authority_errors(
+        root, document.get("agentBudgetAuthorities"), entries, discovered,
+    ))
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
@@ -14169,6 +14432,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
             continue
         if representative.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
+            continue
+        if representative.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID:
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
             continue

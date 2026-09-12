@@ -10,6 +10,7 @@ report are the source of the issue's counts.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 from bisect import bisect_right
 import hashlib
@@ -841,6 +842,8 @@ def code_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
                     rows.append((candidate_offset, containing_symbol(markers, candidate_offset),
                                  "inline-operational-call", f"timeunit-{method}",
                                  normalized(text[atom.start():atom.end()]), evidence))
+    if suffix == ".java":
+        rows.extend(interaction_websocket_default_candidates(relative, text))
     return rows
 
 
@@ -2761,6 +2764,12 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "interactionWebSocketAuthorities" and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "interactionWebSocketAuthorities" \
+            and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -2921,6 +2930,19 @@ def remap_declared_candidate_references(document: dict[str, object],
                     for row in rows:
                         remap_list(row, "candidateIds")
                         if field != "semanticPartitions":
+                            remap_list(row, "defaultCandidateIds")
+
+    interaction_authorities = document.get("interactionWebSocketAuthorities")
+    if isinstance(interaction_authorities, dict):
+        for authority in interaction_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("contracts", "bindingCarriers", "semanticPartitions"):
+                for row in authority.get(field, []):
+                    if isinstance(row, dict):
+                        remap_list(row, "candidateIds")
+                        if field == "contracts":
                             remap_list(row, "defaultCandidateIds")
 
     domains = document.get("remediationDomains")
@@ -3154,6 +3176,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             return None, ["cannot derive the closed program/GitHub policy authority from current source"]
         refreshed["programGithubPolicyAuthorities"] = {
             PROGRAM_GITHUB_POLICY_AUTHORITY_ID: program_github_authority,
+        }
+    if interaction_websocket_source_present(root):
+        interaction_authority = interaction_websocket_authority_from_source(root, current)
+        if interaction_authority is None:
+            return None, ["cannot derive the closed interaction WebSocket authority from current source"]
+        refreshed["interactionWebSocketAuthorities"] = {
+            INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
@@ -5312,7 +5341,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "e302af041134ce578d9cbf70ea35ebcb29e4928f70f7baec99fbef96c9478d13"),
+         "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -6942,7 +6971,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  'e302af041134ce578d9cbf70ea35ebcb29e4928f70f7baec99fbef96c9478d13',
+  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -10283,6 +10312,868 @@ def program_github_policy_authority_errors(root: Path, authorities: object,
     return errors
 
 
+INTERACTION_WEBSOCKET_SETTINGS = [{'suffix': 'enabled',
+  'environment': 'RAVENROOT_WEBSOCKET_ENABLED',
+  'field': 'enabled',
+  'componentIndex': 0,
+  'componentPart': 'value',
+  'helper': 'bool',
+  'fallback': 'false',
+  'evaluated': {'kind': 'boolean', 'value': False},
+  'validation': 'strict Boolean; enabled refuses disabled authentication',
+  'bindingCandidateIds': ['oc-9e28f161f43693c559ed',
+                          'oc-b13eff4a40d962cffe60',
+                          'oc-dc12eba6bd889c1cc5c7']},
+ {'suffix': 'bind',
+  'environment': 'RAVENROOT_WEBSOCKET_BIND',
+  'field': 'bindAddress',
+  'componentIndex': 1,
+  'componentPart': 'bind',
+  'helper': 'value',
+  'fallback': '"127.0.0.1"',
+  'evaluated': {'kind': 'string', 'value': '127.0.0.1'},
+  'validation': 'canonical IP literal or localhost',
+  'bindingCandidateIds': ['oc-13e07be93e1c8322b1fd',
+                          'oc-aed00961852be00b90a0',
+                          'oc-f9dd85e360ca5b23dd1f']},
+ {'suffix': 'port',
+  'environment': 'RAVENROOT_WEBSOCKET_PORT',
+  'field': 'bindAddress',
+  'componentIndex': 1,
+  'componentPart': 'port',
+  'helper': 'integer',
+  'fallback': '8081',
+  'evaluated': {'kind': 'integer', 'value': 8081},
+  'validation': 'integer 1..65535',
+  'bindingCandidateIds': ['oc-17886066f99cd29df2e6',
+                          'oc-4c2e325174fb927be216',
+                          'oc-66b7c2cee01a78772737']},
+ {'suffix': 'max-connections',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_CONNECTIONS',
+  'field': 'maxConnections',
+  'componentIndex': 2,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '256',
+  'evaluated': {'kind': 'integer', 'value': 256},
+  'validation': 'integer 1..100000',
+  'bindingCandidateIds': ['oc-73cc1700243a35612eb0',
+                          'oc-8f84af8efaa4f6eecdc9',
+                          'oc-b0f564e4df6eb25b3695']},
+ {'suffix': 'pending-authentication',
+  'environment': 'RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION',
+  'field': 'maxPendingAuthentication',
+  'componentIndex': 3,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '32',
+  'evaluated': {'kind': 'integer', 'value': 32},
+  'validation': 'integer 1..maxConnections',
+  'bindingCandidateIds': ['oc-1ef539325ca72a835ff3',
+                          'oc-28f2724707efb2dc569c',
+                          'oc-aaf3adb4cfa168278ac0']},
+ {'suffix': 'pending-authentication-per-address',
+  'environment': 'RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION_PER_ADDRESS',
+  'field': 'maxPendingAuthenticationPerAddress',
+  'componentIndex': 4,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '4',
+  'evaluated': {'kind': 'integer', 'value': 4},
+  'validation': 'integer 1..maxPendingAuthentication',
+  'bindingCandidateIds': ['oc-541a224dc213ad1c64a0',
+                          'oc-a0205ce634a613c2377b',
+                          'oc-ef140e9c120a82d1b399']},
+ {'suffix': 'backend-operations',
+  'environment': 'RAVENROOT_WEBSOCKET_BACKEND_OPERATIONS',
+  'field': 'maxBackendOperations',
+  'componentIndex': 5,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '128',
+  'evaluated': {'kind': 'integer', 'value': 128},
+  'validation': 'integer 1..100000',
+  'bindingCandidateIds': ['oc-0d699da0857e2ef74363',
+                          'oc-3de773f7a70587f9d2c6',
+                          'oc-44272f4d32fdcbd52831']},
+ {'suffix': 'authentication-deadline-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_AUTHENTICATION_DEADLINE_SECONDS',
+  'field': 'authenticationDeadline',
+  'componentIndex': 6,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '5',
+  'evaluated': {'kind': 'duration-seconds', 'value': 5},
+  'validation': 'duration 1..60 seconds',
+  'bindingCandidateIds': ['oc-3845d261e5586af4fc25',
+                          'oc-8e9591be1abe3702bd60',
+                          'oc-dde8986ae9c96dadf72b']},
+ {'suffix': 'max-message-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_MESSAGE_BYTES',
+  'field': 'maxMessageBytes',
+  'componentIndex': 7,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '512 * 1_024',
+  'evaluated': {'kind': 'integer', 'value': 524288},
+  'validation': 'integer 1024..16777216',
+  'bindingCandidateIds': ['oc-31eb82774aa4cb560fde',
+                          'oc-33b1853de942d8938f93',
+                          'oc-b65c8d149e396f55c704']},
+ {'suffix': 'max-fragments',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_FRAGMENTS',
+  'field': 'maxFragments',
+  'componentIndex': 8,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '16',
+  'evaluated': {'kind': 'integer', 'value': 16},
+  'validation': 'integer 1..1024',
+  'bindingCandidateIds': ['oc-01f941d8d461f82f760a',
+                          'oc-08e73abdbce98f5c61df',
+                          'oc-3df568ca0522d534485b']},
+ {'suffix': 'pending-commands',
+  'environment': 'RAVENROOT_WEBSOCKET_PENDING_COMMANDS',
+  'field': 'maxPendingCommands',
+  'componentIndex': 9,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '32',
+  'evaluated': {'kind': 'integer', 'value': 32},
+  'validation': 'integer 1..1024 per connection',
+  'bindingCandidateIds': ['oc-0214d7a08716e5ad60e8',
+                          'oc-7b440b74e3893348de0c',
+                          'oc-c6bf43c88f0d62b17852']},
+ {'suffix': 'queued-incoming-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_QUEUED_INCOMING_BYTES',
+  'field': 'maxQueuedIncomingBytes',
+  'componentIndex': 10,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '1024 * 1024',
+  'evaluated': {'kind': 'integer', 'value': 1048576},
+  'validation': 'integer maxMessageBytes..67108864 per connection',
+  'bindingCandidateIds': ['oc-8f18eecc4570e82e7a97',
+                          'oc-c0f412fae83a0ce094f7',
+                          'oc-dab874b0a4d9edacaf0e']},
+ {'suffix': 'max-outgoing-frame-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_OUTGOING_FRAME_BYTES',
+  'field': 'maxOutgoingFrameBytes',
+  'componentIndex': 11,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '64 * 1_024',
+  'evaluated': {'kind': 'integer', 'value': 65536},
+  'validation': 'integer 1024..maxMessageBytes',
+  'bindingCandidateIds': ['oc-c290aa7f35fbe025d798',
+                          'oc-c5fa1b7575cae649d7da',
+                          'oc-fd8effc7df884df9c21d']},
+ {'suffix': 'queued-outgoing-frames',
+  'environment': 'RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_FRAMES',
+  'field': 'maxQueuedOutgoingFrames',
+  'componentIndex': 12,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '64',
+  'evaluated': {'kind': 'integer', 'value': 64},
+  'validation': 'integer 1..4096 per connection',
+  'bindingCandidateIds': ['oc-0a5a6bf2901605e92c04',
+                          'oc-2b3f7ed1d25287805770',
+                          'oc-d6ca7a3a48c9c711e182']},
+ {'suffix': 'queued-outgoing-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_BYTES',
+  'field': 'maxQueuedOutgoingBytes',
+  'componentIndex': 13,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '1024 * 1024',
+  'evaluated': {'kind': 'integer', 'value': 1048576},
+  'validation': 'integer maxOutgoingFrameBytes..67108864 per connection',
+  'bindingCandidateIds': ['oc-38731131acd8f3504db9',
+                          'oc-979260b7c213c48f7b72',
+                          'oc-eaea492e98edcf8ab078']},
+ {'suffix': 'unacknowledged-events',
+  'environment': 'RAVENROOT_WEBSOCKET_UNACKNOWLEDGED_EVENTS',
+  'field': 'maxUnacknowledgedEvents',
+  'componentIndex': 14,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '64',
+  'evaluated': {'kind': 'integer', 'value': 64},
+  'validation': 'integer 1..4096 per connection',
+  'bindingCandidateIds': ['oc-0202d9651098772b6e6d',
+                          'oc-57ecfaa0ef37bcf5c976',
+                          'oc-a43214a8ff5932ddb729']},
+ {'suffix': 'replay-poll-millis',
+  'environment': 'RAVENROOT_WEBSOCKET_REPLAY_POLL_MILLIS',
+  'field': 'replayPollInterval',
+  'componentIndex': 15,
+  'componentPart': 'value',
+  'helper': 'millis',
+  'fallback': '100',
+  'evaluated': {'kind': 'duration-milliseconds', 'value': 100},
+  'validation': 'duration 50..60000 milliseconds',
+  'bindingCandidateIds': ['oc-58b0e24a974ff9bba443',
+                          'oc-60c9e753107aa473b9b1',
+                          'oc-f0f147f5900af030cea7']},
+ {'suffix': 'acknowledgement-deadline-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_ACKNOWLEDGEMENT_DEADLINE_SECONDS',
+  'field': 'acknowledgementDeadline',
+  'componentIndex': 16,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '30',
+  'evaluated': {'kind': 'duration-seconds', 'value': 30},
+  'validation': 'duration 1..300 seconds',
+  'bindingCandidateIds': ['oc-0070aa2c8724d4fc82b0',
+                          'oc-2856b9bbe9d493fb25c7',
+                          'oc-742babd642f7bc5d4e34']},
+ {'suffix': 'idle-timeout-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_IDLE_TIMEOUT_SECONDS',
+  'field': 'idleTimeout',
+  'componentIndex': 17,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '60',
+  'evaluated': {'kind': 'duration-seconds', 'value': 60},
+  'validation': 'duration 1..3600 seconds',
+  'bindingCandidateIds': ['oc-01a7e53809dcd24ff7f1',
+                          'oc-91eef30d6e4b804e44e4',
+                          'oc-c1ebd27dd47d99cd2bec']},
+ {'suffix': 'absolute-lifetime-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_ABSOLUTE_LIFETIME_SECONDS',
+  'field': 'absoluteLifetime',
+  'componentIndex': 18,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '3_600',
+  'evaluated': {'kind': 'duration-seconds', 'value': 3600},
+  'validation': 'duration 1..86400 seconds',
+  'bindingCandidateIds': ['oc-748c63c150e70c4f3481',
+                          'oc-85577f20d5d1a924ddc6',
+                          'oc-d77ac6c70e36974ee0b1']},
+ {'suffix': 'shutdown-timeout-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS',
+  'field': 'shutdownTimeout',
+  'componentIndex': 19,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '5',
+  'evaluated': {'kind': 'duration-seconds', 'value': 5},
+  'validation': 'duration 1..60 seconds',
+  'bindingCandidateIds': ['oc-39d6f7e259ddc85cadce',
+                          'oc-6868bf9fdff8a18b3c72',
+                          'oc-a738f49bf78540579079']}]
+
+INTERACTION_WEBSOCKET_COMPONENTS = ('enabled',
+ 'bindAddress',
+ 'maxConnections',
+ 'maxPendingAuthentication',
+ 'maxPendingAuthenticationPerAddress',
+ 'maxBackendOperations',
+ 'authenticationDeadline',
+ 'maxMessageBytes',
+ 'maxFragments',
+ 'maxPendingCommands',
+ 'maxQueuedIncomingBytes',
+ 'maxOutgoingFrameBytes',
+ 'maxQueuedOutgoingFrames',
+ 'maxQueuedOutgoingBytes',
+ 'maxUnacknowledgedEvents',
+ 'replayPollInterval',
+ 'acknowledgementDeadline',
+ 'idleTimeout',
+ 'absoluteLifetime',
+ 'shutdownTimeout')
+
+INTERACTION_WEBSOCKET_PRODUCTION_PATHS = ['ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java']
+
+INTERACTION_WEBSOCKET_MAIN_PATH = 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java'
+
+INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environment_reference.py'
+
+INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
+ 'scripts/publish_environment_reference.py': '1e990505413c0e500635a06674ad09894e086adb61a7391028a70944d8be8d0b',
+ 'scripts/tests/test_publish_environment_reference.py': '135e497abc1202d12264bba621dfb75d29854df4f59e90b5a1a994108b46bb49',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
+
+INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+  'RavenrootServerMain',
+  'run',
+  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029'),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'RavenrootServer',
+  'installInteractionWebSockets',
+  '8e139193181b7eb3622ece92403e9fa22b568ca955b68134e9184426a201c97c'),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'RavenrootServer',
+  'start',
+  '70c93f7c7d1802742dfe51a89b1f5ef032f6ad3052df24257461a5c03e45977c'),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'RavenrootServer',
+  'close',
+  'e1b43cb51ffacf4750c2d240b7f5fc529c67dc67a456378fda67688fe06119cf')]
+
+INTERACTION_WEBSOCKET_TEST_PROOFS = [('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'allPublishedDefaultsAreExact',
+  '3a3e224b4a108268a362e37c0cd14f436578e6237ef993df2c409dcd4402680c'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'everyPropertyAndEnvironmentBindingResolvesThroughOneTypedAuthority',
+  '81c8b269a0dcaf85331e9dec63fdf188bf2cc0249c4716703e68e0acd9124aef'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'blankAndNonStringPropertiesUseTheDocumentedFallbackChain',
+  'c89e61221dce35f7ac55b220947fe3b367d74ba2db326bce9bd7cae4dbb7aa33'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'resolvedConfigurationIsAnImmutableSnapshotOfInputs',
+  '468c13a38c7d798861f55d49fe5525d0fac3b0be4dd78e230fe3dc9436d9220b'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'strictScalarParsingAndEverySimpleBoundRefuse',
+  '8edcf3b76f35869429845eb1cab56f957b3e709cd690fa1d6b90224c23fe3596'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'everySimpleBoundAcceptsItsExactEndpoints',
+  '8ba385d2b461a68217daaab1c812914e33b0934cd92c6e66fe204eefc8ccd2e8'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'everyCrossFieldBoundRefuses',
+  '8538f3575b10ccba5ccae30897976738bdc8add741b36f1d4a0490b09bd9d41b'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'enabledListenerRefusesDisabledAuthentication',
+  'd558d332c1d1e5b30508f348648b83a2f40c448e8159b195b8aeb1432c561538'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java',
+  'RavenrootServerInteractionLifecycleTest',
+  'installedInteractionListenerStartsAndClosesWithTheServerLifecycle',
+  '4b50e2deee29ba6da32018dd0e38e69f83a96487a5d7bf14b0efc85224752cde')]
+
+INTERACTION_WEBSOCKET_REQUIRED_PATHS = ['ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+ 'scripts/publish_environment_reference.py',
+ 'scripts/tests/test_publish_environment_reference.py']
+
+INTERACTION_WEBSOCKET_BINDING_CARRIER = {'candidateIds': ['oc-8661ab6558d7b802ae8a'],
+ 'classification': 'protocol-or-format-invariant',
+ 'status': 'retained',
+ 'bindingCarrier': {'kind': 'interaction-websocket-property-prefix-v1',
+                    'prefix': 'ravenroot.websocket.',
+                    'owner': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java#InteractionWebSocketConfiguration',
+                    'method': 'value',
+                    'role': 'Forms each full property name from the exact reviewed setting suffix; '
+                            'carries no scalar value/default.'}}
+
+INTERACTION_WEBSOCKET_RETAINED_PARTITIONS = [{'semanticPartition': 'interaction.server.counter-or-byte-origin',
+  'classification': 'derived',
+  'status': 'retained',
+  'rationale': 'Zero is the exact initial/reset origin for a bounded in-memory counter or byte '
+               'accumulator.',
+  'candidateIds': ['oc-01f492f57995392a492c',
+                   'oc-1617336b4f40ea4321b6',
+                   'oc-601d2acd6904b4513ffa',
+                   'oc-8cd26c923f63689770b8',
+                   'oc-9eab3cbadcac7913b641',
+                   'oc-ef7b11d44ed21993ea62']},
+ {'semanticPartition': 'interaction.publisher.replay-poll-millis',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-024468c4185ceaddc0c3', 'oc-cb82030d17932d1b2e1f'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.protocol.parser-ceilings',
+  'classification': 'security-ceiling-or-default',
+  'status': 'retained',
+  'rationale': 'This fixed parser/token ceiling bounds the public interaction wire grammar and is '
+               'enforced before command authority.',
+  'candidateIds': ['oc-02c3a578bd0e0cf954d4',
+                   'oc-67070fa727a916e32c9c',
+                   'oc-9f4766ed4f852b913299',
+                   'oc-c1450f6faeca937bddde',
+                   'oc-db4202cabfb155ea60dd',
+                   'oc-effdce91b72ed45d73fc',
+                   'oc-f473dbda9b83cc0bf18a']},
+ {'semanticPartition': 'interaction.publisher.enabled',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-05b76d906c5449103b0f', 'oc-d9e745f43f0e6c7f9be0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.test-fixture',
+  'classification': 'test-fixture',
+  'status': 'retained',
+  'rationale': 'This literal is confined to the publisher regression that distinguishes interaction '
+               'listener variables from outbound profile variables.',
+  'candidateIds': ['oc-0a5ee148a41a3457a1e2',
+                   'oc-38a6fc859d10fc83215a',
+                   'oc-54448df6af97b09a2238',
+                   'oc-54474268e4d6a43bcc5d',
+                   'oc-8ad90786644dea1e6227',
+                   'oc-90a7ea5b4fe026815594',
+                   'oc-b3fef9fac3f5323c343a',
+                   'oc-da47c43068594a0b4dc3',
+                   'oc-e06facf10c0299f5457f',
+                   'oc-e0999fa708f8e4fe41d9',
+                   'oc-e68f75fa60142aef3e91',
+                   'oc-ff0126da7b183eec0cf5']},
+ {'semanticPartition': 'interaction.publisher.queued-outgoing-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-11e28e9db0743c1a626c', 'oc-a450a0be998b9af73ad0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-message-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-12d15486e77fc4b5383b', 'oc-e696dc905ae3483dfad5'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-outgoing-frame-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-1da353f0de82e7a55412', 'oc-cafd8fc870c336ba115d'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-connections',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-2532910b3bf0186c90ac', 'oc-2bf09157c105a974b9d0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-fragments',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-287b74d86284f8c45b88', 'oc-5543506f8e68ab7606e2'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.bind',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-33d56ce331d34c00f695', 'oc-a49248d36a1eb7a5b2d0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.acknowledgement-deadline-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-36b91f96ce53237fb8d3', 'oc-56a1aaf4eb8fadd8b04d'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.pending-commands',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-3b6197752cf27f6f0505', 'oc-4407bb362c93d6033ab5'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.unacknowledged-events',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-3deb6adb710bf647dd14', 'oc-6fa05819dfd4f7f8451b'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.idle-timeout-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-41cda62b7e24e2b6605c', 'oc-6b2b6ea7bf04e33c0c27'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.server.constructor-field-labels',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The exact constructor dependency label is structural failure vocabulary.',
+  'candidateIds': ['oc-4c5d05274b003bd7ed3c', 'oc-89fd6cb91623ee3201f5']},
+ {'semanticPartition': 'interaction.protocol.listener-identity',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The path and WebSocket subprotocol are fixed public wire identities.',
+  'candidateIds': ['oc-4e937d0d15a823cc708c', 'oc-c3cdbde3e652e96b4b67', 'oc-ea57f08120417ef42e1a']},
+ {'semanticPartition': 'interaction.publisher.absolute-lifetime-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-5c576a94d93e637e0f3b', 'oc-de82b0dc44248925b53f'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.queued-incoming-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-5cda9859766e1684ec7b', 'oc-fc2d1e1b8f2187fce283'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.pending-authentication',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-5edd1523f971557a2c69', 'oc-d6f67d06fc8d109ad618'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.diagnostic.authentication-requirement',
+  'classification': 'presentation-text',
+  'status': 'retained',
+  'rationale': 'This token appears in a fixed startup refusal message and does not read or default '
+               'either setting.',
+  'candidateIds': ['oc-5f90ea084a36bfd1ab71', 'oc-7b6457670ddec2b86a6b']},
+ {'semanticPartition': 'interaction.publisher.pending-authentication-per-address',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-624a9a0e82f5d929a590', 'oc-e3dd01ed7f85ba25eed0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.validation.duration-unit',
+  'classification': 'derived',
+  'status': 'retained',
+  'rationale': 'Zero is the derived comparison origin used while translating validated duration units.',
+  'candidateIds': ['oc-6d22f53e57378ab1d83f',
+                   'oc-81c21960eb5c94966c58',
+                   'oc-95c98d399aaf71704c1a',
+                   'oc-989efa11eed9b518ffd4']},
+ {'semanticPartition': 'interaction.publisher.port',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-775c3f97bf73171ac904', 'oc-a9237e10e83b212ebbe9'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.authentication-deadline-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-9490e2feeba5dec456f9', 'oc-c4a1c943156a48500dcd'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.shutdown-timeout-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-a4ade30ec474a27ec4db', 'oc-dfa0f503452f7ce86e87'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.validation.setting-label',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The exact port field label is structural validation vocabulary; the numeric default is '
+               'owned separately.',
+  'candidateIds': ['oc-a96ad2d82f8f7f8b4f7a']},
+ {'semanticPartition': 'interaction.publisher.backend-operations',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-a989123e01970621a5ce', 'oc-b963df6336cf9b9e1def'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.queued-outgoing-frames',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-f1c71dd9674ee3c81279', 'oc-f72dbf1ad32b5a779753'],
+  'retainedAuthority': 'environment-reference-generator-v1'}]
+
+# This family belongs to the upstream interaction listener, not the program/GitHub remediation.
+INTERACTION_WEBSOCKET_AUTHORITY_ID = "ravenroot-interaction-websocket-policy-v1"
+INTERACTION_WEBSOCKET_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java")
+INTERACTION_WEBSOCKET_PROPERTY_PREFIX = "ravenroot.websocket."
+
+
+def interaction_websocket_default_calls(source: str) -> dict[str, dict[str, object]] | None:
+    """Resolve only the exact named fallback arguments of the supported typed factory.
+
+    This extracts real source spans, including arithmetic expressions. It does not infer defaults
+    from binding names, scan unrelated helpers, or manufacture an ID for a scanner-blind field.
+    """
+    span = java_method_span(source, "InteractionWebSocketConfiguration", "from")
+    if span is None:
+        return None
+    start, end = span
+    code = strip_c_comments_and_literals(source)
+    if re.match(r"from\s*\(\s*Properties\s+properties\s*,\s*Map\s*<\s*String\s*,\s*String\s*>\s+environment\s*\)",
+                code[start:end]) is None:
+        return None
+    supported = {item["suffix"]: item for item in INTERACTION_WEBSOCKET_SETTINGS}
+    result: dict[str, dict[str, object]] = {}
+    for match in re.finditer(r"\b(bool|value|integer|seconds|millis)\s*\(", code[start:end]):
+        call_start = start + match.start()
+        if call_start and code[call_start - 1] == ".":
+            return None
+        opening = code.find("(", call_start)
+        parsed = split_java_arguments(source, code, opening)
+        if parsed is None or parsed[1] >= end or len(parsed[0]) != 4:
+            return None
+        args, closing = parsed
+        if [arg[0] for arg in args[:2]] != ["properties", "environment"]:
+            return None
+        name = java_string_value(args[2][0])
+        if name not in supported or name in result or match.group(1) != supported[name]["helper"]:
+            return None
+        expression, left, right = args[3]
+        while left < right and source[left].isspace(): left += 1
+        while right > left and source[right - 1].isspace(): right -= 1
+        helper = match.group(1)
+        if helper == "bool":
+            evaluated = {"kind": "boolean", "value": expression == "true"} if expression in {"true", "false"} else None
+        elif helper == "value":
+            string = java_string_value(expression)
+            evaluated = {"kind": "string", "value": string} if string is not None else None
+        else:
+            evaluated = evaluated_java_default(expression, False)
+            if evaluated is not None and helper in {"seconds", "millis"}:
+                evaluated = {"kind": "duration-seconds" if helper == "seconds" else "duration-milliseconds",
+                             "value": evaluated["value"]}
+        if evaluated is None:
+            return None
+        result[name] = {"helper": helper, "expression": expression, "evaluated": evaluated,
+                        "start": left, "end": right,
+                        "evidence": normalized(strip_c_comments(source[call_start:closing + 1]))}
+    return result if set(result) == set(supported) else None
+
+
+def interaction_websocket_default_candidates(relative: Path, source: str) -> list[tuple[int, str, str, str, str, str]]:
+    if relative != INTERACTION_WEBSOCKET_CONFIGURATION_PATH:
+        return []
+    calls = interaction_websocket_default_calls(source)
+    if calls is None:
+        return []
+    result = []
+    for name, call in calls.items():
+        if name == "port":
+            # The ordinary operational-declaration scanner already owns this exact 8081 span.
+            # The source authority below requires that one existing candidate, never a duplicate.
+            continue
+        result.append((call["start"], "from", "inline-operational-call",
+                       "interaction-websocket-default:" + name, call["expression"], call["evidence"]))
+    return result
+
+
+def interaction_websocket_source_present(root: Path) -> bool:
+    if any((root / path).exists() for path in INTERACTION_WEBSOCKET_PRODUCTION_PATHS):
+        return True
+    # A removed defining class cannot opt out while its shipped factory consumer remains.
+    main = root / INTERACTION_WEBSOCKET_MAIN_PATH
+    try:
+        return re.search(r"\bInteractionWebSocketConfiguration\b", strip_c_comments_and_literals(main.read_text())) is not None
+    except (OSError, UnicodeError):
+        return False
+
+
+def interaction_websocket_publisher_span(source: str) -> tuple[int, int] | None:
+    try:
+        nodes = [node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "INTERACTION_WEBSOCKET_VARIABLES"
+                         for target in node.targets)]
+    except SyntaxError:
+        return None
+    if len(nodes) != 1:
+        return None
+    node = nodes[0]
+    value = node.value
+    if not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name) or value.func.id != "frozenset" \
+            or len(value.args) != 1 or value.keywords or not isinstance(value.args[0], ast.Set):
+        return None
+    elements = value.args[0].elts
+    names = [element.value for element in elements if isinstance(element, ast.Constant) and isinstance(element.value, str)]
+    expected = {item["environment"] for item in INTERACTION_WEBSOCKET_SETTINGS}
+    if len(names) != len(elements) or len(names) != len(set(names)) or set(names) != expected:
+        return None
+    return node.lineno, node.end_lineno
+
+
+def interaction_websocket_publication_candidate_ids(root: Path, candidates: Iterable[Candidate]) -> set[str]:
+    try:
+        source = (root / ENVIRONMENT_REFERENCE_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return set()
+    span = interaction_websocket_publisher_span(source)
+    if span is None:
+        return set()
+    names = {item["environment"] for item in INTERACTION_WEBSOCKET_SETTINGS}
+    return {item.id for item in candidates if item.path == ENVIRONMENT_REFERENCE_PATH.as_posix()
+            and span[0] <= item.line <= span[1]
+            and item.kind in {"environment-binding", "inline-script-operational", "binding-default"}
+            and item.expression.strip('"\'') in names}
+
+
+def interaction_websocket_cohort_candidate_ids(root: Path, discovered: dict[str, Candidate]) -> set[str]:
+    selected = {item.id for item in discovered.values() if item.path in INTERACTION_WEBSOCKET_PRODUCTION_PATHS}
+    try:
+        publisher = (root / ENVIRONMENT_REFERENCE_PATH).read_text(encoding="utf-8")
+        # Locate the entire declaration, even if malformed/unreviewed names were inserted in it.
+        tree = ast.parse(publisher)
+        spans = [(node.lineno, node.end_lineno) for node in tree.body if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "INTERACTION_WEBSOCKET_VARIABLES"
+                         for target in node.targets)]
+        test_source = (root / INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH).read_text(encoding="utf-8")
+        test_nodes = [node for node in ast.walk(ast.parse(test_source)) if isinstance(node, ast.FunctionDef)
+                      and node.name == "test_interaction_listener_and_outbound_profile_have_distinct_references"]
+        test_spans = [(node.lineno, node.end_lineno) for node in test_nodes]
+        for item in discovered.values():
+            if item.path == ENVIRONMENT_REFERENCE_PATH.as_posix() and any(a <= item.line <= b for a, b in spans):
+                selected.add(item.id)
+            if item.path == INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH and any(a <= item.line <= b for a, b in test_spans):
+                selected.add(item.id)
+    except (OSError, UnicodeError, SyntaxError):
+        pass
+    return selected
+
+
+def interaction_websocket_authority_from_source(root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Close consumed defaults, typed routing, immutable listener lifetime and all source atoms."""
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in INTERACTION_WEBSOCKET_REQUIRED_PATHS}
+    except (OSError, UnicodeError):
+        return None
+    # Fixed reviewed expectations are independent of refreshed inventory/sourceDigests metadata.
+    for path, expected in INTERACTION_WEBSOCKET_FILE_PROOFS.items():
+        if _source_digest(sources[path]) != expected:
+            return None
+    for path, type_symbol, method, expected in INTERACTION_WEBSOCKET_METHOD_PROOFS:
+        if java_method_digest(sources[path], type_symbol, method) != expected:
+            return None
+    if not INTERACTION_WEBSOCKET_TEST_PROOFS:
+        return None
+    tests = []
+    for path, type_symbol, method, expected in INTERACTION_WEBSOCKET_TEST_PROOFS:
+        source = sources[path]
+        if java_method_digest(source, type_symbol, method) != expected \
+                or not re.search(rf"@Test\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:public\s+)?void\s+{re.escape(method)}\s*\(", source) \
+                or re.search(r"@Disabled\b|\babstract\s+class\b", strip_c_comments(source)):
+            return None
+        tests.append({"path": path, "type": type_symbol, "method": method, "methodDigest": expected})
+    source = sources[INTERACTION_WEBSOCKET_CONFIGURATION_PATH.as_posix()]
+    if java_record_components(source, "InteractionWebSocketConfiguration") != INTERACTION_WEBSOCKET_COMPONENTS:
+        return None
+    calls = interaction_websocket_default_calls(source)
+    if calls is None:
+        return None
+    environment_entries = re.findall(r'Map\.entry\(\s*"([a-z-]+)"\s*,\s*"(RAVENROOT_[A-Z_]+)"\s*\)', strip_c_comments(source))
+    if len(environment_entries) != 21 or dict(environment_entries) != {
+            item["suffix"]: item["environment"] for item in INTERACTION_WEBSOCKET_SETTINGS}:
+        return None
+    # Preserve every lexical candidate; environment and string atoms can share an offset.
+    positioned = java_source_candidates(INTERACTION_WEBSOCKET_CONFIGURATION_PATH, source)
+    contracts = []
+    owner = INTERACTION_WEBSOCKET_CONFIGURATION_PATH.as_posix() + "#InteractionWebSocketConfiguration"
+    for item in INTERACTION_WEBSOCKET_SETTINGS:
+        call = calls[item["suffix"]]
+        if call["expression"] != item["fallback"] or call["evaluated"] != item["evaluated"]:
+            return None
+        defaults = [candidate for offset, candidate in positioned
+                    if call["start"] <= offset < call["end"] and candidate.expression == call["expression"]
+                    and ((item["suffix"] == "port" and candidate.kind == "operational-declaration" and candidate.role == "port")
+                         or candidate.role == "interaction-websocket-default:" + item["suffix"])]
+        if len(defaults) != 1:
+            return None
+        default = defaults[0]
+        if discovered.get(default.id) != default:
+            return None
+        ids = sorted(set(item["bindingCandidateIds"]) | {default.id})
+        if len(ids) != 4 or any(identifier not in discovered for identifier in ids):
+            return None
+        contracts.append({"setting": "interaction.websocket." + item["suffix"], "owner": owner,
+            "field": item["field"], "componentIndex": item["componentIndex"], "componentPart": item["componentPart"],
+            "property": INTERACTION_WEBSOCKET_PROPERTY_PREFIX + item["suffix"], "environment": item["environment"],
+            "bindings": [INTERACTION_WEBSOCKET_PROPERTY_PREFIX + item["suffix"], item["environment"]],
+            "defaultExpression": item["fallback"], "evaluatedDefault": copy.deepcopy(item["evaluated"]),
+            "defaultCandidateIds": [default.id], "candidateIds": ids,
+            "bindingAuthority": {"kind": "interaction-websocket-named-property-environment-v1",
+                "prefix": INTERACTION_WEBSOCKET_PROPERTY_PREFIX, "suffix": item["suffix"],
+                "property": INTERACTION_WEBSOCKET_PROPERTY_PREFIX + item["suffix"], "environment": item["environment"],
+                "precedence": "Nonblank Properties.getProperty result (including inherited defaults), then nonblank environment, then fallback; selected values are trimmed. Null or blank getProperty result delegates to environment."},
+            "defaultAuthority": {"kind": "interaction-websocket-fallback-span-v1", "path": INTERACTION_WEBSOCKET_CONFIGURATION_PATH.as_posix(),
+                "method": "from", "helper": call["helper"], "start": call["start"], "end": call["end"],
+                "expression": call["expression"], "evaluated": copy.deepcopy(call["evaluated"]), "evidenceDigest": default.evidence_digest},
+            "validation": item["validation"], "scope": "Resolved once at packaged server startup for the optional interaction listener.",
+            "pinning": "Immutable deployment/listener-lifetime snapshot; a later process resolves new configuration; no execution-manifest pin.",
+            "coverage": "Exact named fallback, typed helper, compact-constructor bounds, authenticated startup, listener consumers and lifecycle, fixed source/test proof."})
+    carriers = [copy.deepcopy(INTERACTION_WEBSOCKET_BINDING_CARRIER)]
+    partitions = copy.deepcopy(INTERACTION_WEBSOCKET_RETAINED_PARTITIONS)
+    all_ids = [identifier for group in contracts + carriers + partitions for identifier in group["candidateIds"]]
+    if len(all_ids) != 164 or len(all_ids) != len(set(all_ids)) \
+            or set(all_ids) != interaction_websocket_cohort_candidate_ids(root, discovered):
+        return None
+    published = {identifier for group in partitions if group["classification"] == "published-contract-description"
+                 for identifier in group["candidateIds"]}
+    if published != interaction_websocket_publication_candidate_ids(root, discovered.values()):
+        return None
+    return {"kind": "interaction-websocket-policy-family-v1", "logicalSettingCount": 21,
+            "contracts": contracts, "bindingCarriers": carriers, "semanticPartitions": partitions,
+            "candidateIds": sorted(all_ids), "sourceDigests": [{"path": path, "digest": _source_digest(text)}
+                for path, text in sorted(sources.items())], "testEvidence": tests}
+
+
+def interaction_websocket_authority_errors(root: Path, authorities: object,
+        entries: dict[str, dict[str, object]], discovered: dict[str, Candidate]) -> list[str]:
+    if not interaction_websocket_source_present(root):
+        return [] if authorities in (None, {}) else ["interaction WebSocket authority exists without its source family"]
+    expected = interaction_websocket_authority_from_source(root, discovered)
+    if expected is None:
+        return ["interaction WebSocket source family is incomplete, unpartitioned, or unsupported"]
+    errors = []
+    if authorities != {INTERACTION_WEBSOCKET_AUTHORITY_ID: expected}:
+        errors.append("interaction WebSocket settings require the exact mandatory source-derived authority")
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, row in entries.items() if row.get("interactionWebSocketAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("interaction WebSocket candidate partition is missing, duplicated, or foreign")
+    operators = {identifier: contract for contract in expected["contracts"] for identifier in contract["candidateIds"]}
+    retained = {identifier: group for group in expected["semanticPartitions"] + expected["bindingCarriers"]
+                for identifier in group["candidateIds"]}
+    for identifier in sorted(expected_ids):
+        row = entries.get(identifier)
+        if row is None or row.get("status") == "pending-review" or row.get("authorityStatus") == "unresolved":
+            errors.append(f"{identifier}: mandatory interaction WebSocket candidate requires resolved semantic review")
+            continue
+        if row.get("interactionWebSocketAuthority") != INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            errors.append(f"{identifier}: interaction WebSocket marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            if row.get("classification") != "operator-configurable" or row.get("status") != "already-centralized":
+                errors.append(f"{identifier}: interaction WebSocket operator classification has drifted")
+            expected_fields = {key: contract[key] for key in ("setting", "owner", "field", "bindings", "bindingAuthority",
+                "defaultAuthority", "validation", "scope", "pinning", "coverage")}
+            expected_fields.update(default=contract["defaultExpression"], defaultEvidence=contract["defaultCandidateIds"])
+        else:
+            group = retained[identifier]
+            expected_fields = {"status": group["status"], "classification": group["classification"]}
+            if "retainedAuthority" in group:
+                expected_fields["retainedAuthority"] = group["retainedAuthority"]
+            if identifier in INTERACTION_WEBSOCKET_BINDING_CARRIER["candidateIds"]:
+                expected_fields["bindingCarrier"] = group["bindingCarrier"]
+                for forbidden in ("setting", "default", "defaultEvidence", "owner", "field", "bindingAuthority", "defaultAuthority"):
+                    if forbidden in row:
+                        errors.append(f"{identifier}: interaction WebSocket prefix carrier must not claim {forbidden}")
+        for key, value in expected_fields.items():
+            if row.get(key) != value:
+                errors.append(f"{identifier}: interaction WebSocket {key} authority has drifted")
+    return errors
+
+
+
 MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
 MANIFEST_PIN_CONFIGURATION_PATH = PERSISTENCE_STORE_CONFIGURATION_PATH
 MANIFEST_PIN_BOOTSTRAP_PATH = Path(
@@ -11038,6 +11929,7 @@ ROUTE_BOUND_PATHS = {
 def environment_reference_description_candidate_ids(
         root: Path, candidates: Iterable[Candidate]) -> set[str]:
     """Return source-derived atoms that route real production bindings into the reference page."""
+    candidates = tuple(candidates)
     production_names: set[str] = set()
     source_root = root / "ravenroot"
     if source_root.is_dir():
@@ -11062,6 +11954,7 @@ def environment_reference_description_candidate_ids(
                 and candidate.kind == "environment-binding" \
                 and any(name.startswith(expression) for name in production_names):
             identifiers.add(candidate.id)
+    identifiers.update(interaction_websocket_publication_candidate_ids(root, candidates))
     return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
@@ -12776,6 +13669,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     pass
                 elif entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
                     pass
+                elif entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+                    pass
                 elif current_source_owner(root, owner) is None:
                     errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
                 elif not current_source_field(root, owner, str(entry.get("field", ""))):
@@ -12991,6 +13886,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(program_github_policy_authority_errors(
         root, document.get("programGithubPolicyAuthorities"), entries, discovered,
     ))
+    errors.extend(interaction_websocket_authority_errors(
+        root, document.get("interactionWebSocketAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -13015,6 +13913,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
             continue
         if representative.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
+            continue
+        if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -13277,6 +14177,18 @@ def render_report(document: dict[str, object]) -> str:
         for partition in program_authority.get("semanticPartitions", []):
             lines.append(f"| {partition.get('semanticPartition', '')} | {partition.get('classification', '')} | "
                          f"{len(partition.get('candidateIds', []))} |")
+    interaction_authorities = document.get("interactionWebSocketAuthorities", {})
+    interaction = (interaction_authorities.get(INTERACTION_WEBSOCKET_AUTHORITY_ID)
+                   if isinstance(interaction_authorities, dict) else None)
+    if isinstance(interaction, dict):
+        lines.extend(("", "## Source-proven interaction WebSocket policy", "",
+                      "The upstream listener has 21 deployment-lifetime settings. Each default is anchored",
+                      "to its consumed factory argument. The property prefix is a separate protocol carrier",
+                      "with no scalar value or default; these upstream rows do not add program/GitHub remediation credit.", "",
+                      "| Setting | Field | Default expression | Candidates |", "|---|---|---|---:|"))
+        for contract in interaction.get("contracts", []):
+            lines.append(f"| {contract['setting']} | `{contract['field']}` | `{contract['defaultExpression']}` | "
+                         f"{len(contract['candidateIds'])} |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
     deferred_entries = sorted(
         (entry for entry in typed if entry.get("status") == "deferred"),

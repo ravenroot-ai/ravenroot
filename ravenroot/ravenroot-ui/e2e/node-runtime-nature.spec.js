@@ -87,7 +87,12 @@ test.beforeEach(async () => {
   await startService();
 });
 
-test.afterEach(async () => new Promise(resolve => service.close(resolve)));
+// The page under test is still open during this hook and holds keep-alive connections to the stub, so
+// a bare `close()` would wait on that traffic and can time out after the test body has passed.
+test.afterEach(async () => new Promise(resolve => {
+  service.closeAllConnections();
+  service.close(resolve);
+}));
 
 test('a new node shows the effective nature as inherited, not merely absent', async ({ page }) => {
   await connectAndModify(page);

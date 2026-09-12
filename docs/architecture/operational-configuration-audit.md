@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 19675 |
+| Atomic operational candidates discovered | 19735 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 19675 |
+| Reviewed | 19735 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
-| Unique confirmed operator-configurable parameters | 242 |
-| Unique parameters converted to centralized configuration | 14 |
+| Unique confirmed operator-configurable parameters | 245 |
+| Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1842 |
-| Retained protocol or format invariants | 8134 |
+| Retained security ceilings or defaults | 1838 |
+| Retained protocol or format invariants | 8132 |
 | Retained published contract descriptions | 424 |
 | Retained presentation text | 477 |
-| Retained derived values | 1001 |
-| Test fixtures | 6479 |
+| Retained derived values | 1002 |
+| Test fixtures | 6524 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 1592.
@@ -62,34 +62,34 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 18.
+Checked source reconciliations: 19.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 19675 candidates.
+zero-count or unclassified rows as needed and sums to 19735 candidates.
 
 ### Status counts
 
 | Status | Candidates |
 |---|---:|
-| already-centralized | 1275 |
+| already-centralized | 1279 |
 | confirmed-hardcoded | 0 |
-| converted | 43 |
+| converted | 59 |
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 18357 |
+| retained | 18397 |
 
 ### Classification counts
 
 | Classification | Candidates |
 |---|---:|
-| derived | 1001 |
-| operator-configurable | 1318 |
+| derived | 1002 |
+| operator-configurable | 1338 |
 | presentation-text | 477 |
-| protocol-or-format-invariant | 8134 |
+| protocol-or-format-invariant | 8132 |
 | published-contract-description | 424 |
-| security-ceiling-or-default | 1842 |
-| test-fixture | 6479 |
+| security-ceiling-or-default | 1838 |
+| test-fixture | 6524 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -98,9 +98,9 @@ zero-count or unclassified rows as needed and sums to 19675 candidates.
 |---|---:|
 | deployment | 2042 |
 | deployment-example | 20 |
-| java | 6318 |
+| java | 6333 |
 | script | 1906 |
-| test-fixture | 6479 |
+| test-fixture | 6524 |
 | ui | 2910 |
 
 ### Owning remediation counts
@@ -117,8 +117,8 @@ assigned to an issue retroactively.
 | #318 | 107 |
 | #319 | 287 |
 | #320 | 1541 |
-| #321 | 8650 |
-| Retained; no remediation required | 8433 |
+| #321 | 8665 |
+| Retained; no remediation required | 8478 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 19671 |
-| Unchanged identities | 19666 |
-| Approved identity migrations | 0 |
-| Approved retirements | 5 |
-| Semantically classified additions | 9 |
-| Current candidates | 19675 |
+| Source inventory candidates | 19675 |
+| Unchanged identities | 19669 |
+| Approved identity migrations | 6 |
+| Approved retirements | 0 |
+| Semantically classified additions | 60 |
+| Current candidates | 19735 |
 
 ## Final semantic review
 
@@ -199,10 +199,10 @@ tamper-evident; new candidates receive no classification by similarity.
 | Java Server Component Defaults | security-ceiling-or-default | 3 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Server Derived Arithmetic | derived | 9 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Server Diagnostic Presentation | presentation-text | 10 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
-| Java Server Environment Binding Identities | protocol-or-format-invariant | 96 | Each candidate is a literal key at a server environment lookup boundary; typed setting authorities remain independently enforced. |
-| Java Server Protocol Storage And Domain Invariants | protocol-or-format-invariant | 317 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
-| Java Server Resource And Safety Bounds | security-ceiling-or-default | 111 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
-| Java Server Timing And Lifecycle Defaults | security-ceiling-or-default | 33 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Environment Binding Identities | protocol-or-format-invariant | 95 | Each candidate is a literal key at a server environment lookup boundary; typed setting authorities remain independently enforced. |
+| Java Server Protocol Storage And Domain Invariants | protocol-or-format-invariant | 313 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Resource And Safety Bounds | security-ceiling-or-default | 109 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Timing And Lifecycle Defaults | security-ceiling-or-default | 29 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Supporting Runtime Derived Arithmetic | derived | 1 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Supporting Runtime Protocol Storage And Domain Invariants | protocol-or-format-invariant | 86 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Supporting Runtime Resource And Safety Bounds | security-ceiling-or-default | 4 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
@@ -222,6 +222,12 @@ tamper-evident; new candidates receive no classification by similarity.
 | Ui Resource And Safety Bounds | security-ceiling-or-default | 108 | Only numeric atoms whose owning symbol names the resource boundary enter this group. |
 | Ui State Derived Values | derived | 501 | Timing, capacity, and geometry symbols are removed first, leaving local state arithmetic. |
 | Ui Timing And Retry Defaults | security-ceiling-or-default | 14 | Only numeric atoms whose owning symbol names the timing role enter this group. |
+| JWKS Cache Lifetime Setting | operator-configurable | 4 | The 300-second cache lifetime is an existing operator default; 30 seconds and one hour are validation endpoints, not additional fixed lifetimes. |
+| JWKS Connect Timeout Setting | operator-configurable | 1 | The former fixed three-second external connection timeout is converted to a typed environment setting with the same shipped fallback. |
+| JWKS Request Timeout Setting | operator-configurable | 1 | The former fixed five-second complete HTTP request timeout is converted to a typed environment setting with the same shipped fallback. |
+| JWKS Response Payload Ceiling | security-ceiling-or-default | 2 | The 64 KiB limit is enforced before parsing untrusted JWKS bytes and is retained as an intrinsic admission ceiling. |
+| JWKS HTTP Media Contract | protocol-or-format-invariant | 2 | The Accept header and JSON/JWK-set media values are wire compatibility tokens consumed by request and response validation. |
+| JWKS Payload Overflow Sentinel | derived | 1 | The extra byte is derived from the 64 KiB cap and exists only to detect overflow without admitting it. |
 
 ## Follow-up domain ownership
 
@@ -466,6 +472,9 @@ in this table.
 | rate.tracking.max-clients | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ratelimit/RateLimitConfiguration.java#RateLimitConfiguration` | `maxTrackedClients` | `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS` | 10000 | `oc-19f34f533f940b16febf`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS<br>`oc-2579d25bff832a1bd14b`: 10_000<br>`oc-3200557bae662c8a921d`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS<br>`oc-35779e8fa74367e009b1`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS<br>`oc-a440683c3f8e33d59919`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS<br>`oc-d13e5a734fb8b0aec4d1`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS<br>`oc-d3fed0d981830cc3fa0f`: "RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS"<br>`oc-e0e517c4e860bf5b01b6`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS<br>`oc-f1be3c27a3c2cf9fd560`: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS | 1..2147483647 | one server process | live process-startup limit; not durable | Java authority plus current Compose, Helm, and raw Kubernetes carriers are source-backed at this checkpoint |
 | rate.tracking.max-principals | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ratelimit/RateLimitConfiguration.java#RateLimitConfiguration` | `maxTrackedPrincipals` | `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | 10000 | `oc-34fc2c95fc7b70cc8863`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS<br>`oc-3a15e5f6280ed453e4c3`: "RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS"<br>`oc-4dcf1e1966c6bf1eb6b7`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS<br>`oc-5a99778355a084569296`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS<br>`oc-a2e8c35f8988a111c7d6`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS<br>`oc-d6837a25768dd8c37ead`: 10_000<br>`oc-d70b9582a57e2104c725`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS<br>`oc-d9c18f15a0e06db06c82`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS<br>`oc-eab6b8e98ca8670c83bf`: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS | 1..2147483647 | one server process | live process-startup limit; not durable | Java authority plus current Compose, Helm, and raw Kubernetes carriers are source-backed at this checkpoint |
 | rate.tracking.max-tenants | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ratelimit/RateLimitConfiguration.java#RateLimitConfiguration` | `maxTrackedTenants` | `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS` | 1000 | `oc-117235ab7bb71bf5d785`: "RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS"<br>`oc-254edb8e6bd6eb7e1f06`: 1_000<br>`oc-28888b7e216a67626cda`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS<br>`oc-468eb5ac94a60ba5528f`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS<br>`oc-49f2fd1ca2e99f1221e9`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS<br>`oc-5b9ee4d12d6fbf557690`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS<br>`oc-7119683f37e5df858084`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS<br>`oc-a1d4f9a8b08632b52bc8`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS<br>`oc-f75d0ca7cf05b85a6855`: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS | 1..2147483647 | one server process | live process-startup limit; not durable | Java authority plus current Compose, Helm, and raw Kubernetes carriers are source-backed at this checkpoint |
+| security.oidc.jwks-cache-seconds | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#JwkSetProvider` | `ttl` | `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | 300 | `oc-1972abe40785cf368bab`: "JWKS cache TTL"<br>`oc-38fae1f8e9c909fd83b9`: 30<br>`oc-861ff8fceaa83b669d94`: RAVENROOT_AUTH_JWKS_CACHE_SECONDS<br>`oc-eead090c5276bf93cc0e`: 1 | Whole seconds from 30 through 3600; the typed provider revalidates the same 30-second through one-hour range. | Packaged-server OIDC JWKS retrieval for one process lifetime. | Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance. | Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests. |
+| security.oidc.jwks-connect-timeout-seconds | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#TransportPolicy` | `connectTimeout` | `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS` | 3 | `oc-0a79907d0c0d60fe319b`: 1<br>`oc-381e5a180527cc1fcd7d`: 1<br>`oc-4ebf73a069117c0f9ea5`: 3<br>`oc-6cc82b875f3ed6307f11`: "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS"<br>`oc-764d4f52cd42f218091c`: 5<br>`oc-78e46e964af43d845252`: 300<br>`oc-cf4e6c5cbdc26a20c1e0`: RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS<br>`oc-d6e6e3714fd483bc0e45`: "JWKS connect timeout" | Whole seconds from 1 through 300, revalidated by the typed transport policy before HttpClient construction. | Packaged-server OIDC JWKS retrieval for one process lifetime. | Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance. | Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests. |
+| security.oidc.jwks-request-timeout-seconds | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#TransportPolicy` | `requestTimeout` | `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | 5 | `oc-0797ac4abdb190f878d3`: "JWKS request timeout"<br>`oc-0d756f56f0730903ebfc`: "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS"<br>`oc-55cca610c684dbaf2ec1`: 300<br>`oc-6f8939a818a5be4420bb`: RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS<br>`oc-7d56e461d90bd9bc6c44`: 1<br>`oc-bf9f875c30ad65973a91`: 5<br>`oc-c2cd64f3692a38ad3d34`: 1<br>`oc-c46f0158107cc34e12fd`: 5 | Whole seconds from 1 through 300, revalidated by the typed transport policy before each HttpRequest is built. | Packaged-server OIDC JWKS retrieval for one process lifetime. | Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance. | Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests. |
 | sqlite.busy-timeout | already-centralized | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java#SqliteStoreConfig` | `busyTimeout` | none | SqliteConnectionPolicy.DEFAULTS.busyTimeout() | `oc-15d2e4aa1148b5cab235`: 5 | The immutable SQLite store policy owns this programmatic default and validates it before the adapter is opened; shared connection policy remains separately typed. | The deployment, adapter, registry, query, or store instance named by the typed owner and mandatory source-derived contract. | Execution persistence capacity is pinned in manifest format 3 and checked against the immutable managed store; connection credentials and deployment coordination remain live operational policy. | Mandatory owner, default, binding, validation, consumer, and executable-test evidence are derived from the accepted source. |
 | sqlite.execution-result-retention | already-centralized | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java#SqliteStoreConfig` | `executionResultRetention` | none | Duration.ofDays(7) | `oc-ecaca3605c81469e084f`: 7 | The immutable SQLite store policy owns this programmatic default and validates it before the adapter is opened; shared connection policy remains separately typed. | The deployment, adapter, registry, query, or store instance named by the typed owner and mandatory source-derived contract. | Execution persistence capacity is pinned in manifest format 3 and checked against the immutable managed store; connection credentials and deployment coordination remain live operational policy. | Mandatory owner, default, binding, validation, consumer, and executable-test evidence are derived from the accepted source. |
 | sqlite.journal-retention | already-centralized | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java#SqliteStoreConfig` | `journalRetention` | none | Duration.ofHours(24) | `oc-df1bff38357edce0ea61`: 24 | The immutable SQLite store policy owns this programmatic default and validates it before the adapter is opened; shared connection policy remains separately typed. | The deployment, adapter, registry, query, or store instance named by the typed owner and mandatory source-derived contract. | Execution persistence capacity is pinned in manifest format 3 and checked against the immutable managed store; connection credentials and deployment coordination remain live operational policy. | Mandatory owner, default, binding, validation, consumer, and executable-test evidence are derived from the accepted source. |
@@ -487,6 +496,25 @@ in this table.
 | websocket.profile.reconnect-backoff-ms | already-centralized | `ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketProfile.java#WebSocketProfile` | `reconnectBackoffMs` | `RAVENROOT_WEBSOCKET_PROFILE_<hex-name>` | required field in a named profile | `oc-26b42a0f0c177ef2afd3`: "reconnectBackoffMs" | The typed policy validates the value before external I/O is admitted. | WebSocket receive lifecycle backoff | Current source lifecycle; not execution-pinned. | Source-derived owner, default, binding, consumer and test evidence. |
 | websocket.profile.subprotocols | already-centralized | `ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketProfile.java#WebSocketProfile` | `subprotocols` | `RAVENROOT_WEBSOCKET_PROFILE_<hex-name>` | required field in a named profile | `oc-da5ca8878aa9fb154fe8`: "subprotocols" | The typed policy validates the value before external I/O is admitted. | live subprotocol authorization | Current authorization; never manifest-pinned. | Source-derived owner, default, binding, consumer and test evidence. |
 | websocket.profile.timeout-ms | already-centralized | `ravenroot/ravenroot-extensions/ravenroot-websocket/src/main/java/ai/ravenroot/extensions/websocket/WebSocketProfile.java#WebSocketProfile` | `timeoutMs` | `RAVENROOT_WEBSOCKET_PROFILE_<hex-name>` | required field in a named profile | `oc-51069131823fa8245df8`: "timeoutMs" | The typed policy validates the value before external I/O is admitted. | WebSocket send and receive timeout | Pinned per send node; receive sources use the current deployment profile. | Source-derived owner, default, binding, consumer and test evidence. |
+
+## Source-proven JWKS retrieval policy
+
+The closed family distinguishes the operator-selected cache and transport durations
+from the response admission ceiling, HTTP media contract, and overflow sentinel.
+
+| Setting | State | Typed owner | Field | Binding | Default | Candidates |
+|---|---|---|---|---|---|---:|
+| security.oidc.jwks-cache-seconds | already-centralized | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#JwkSetProvider` | `ttl` | `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | `300` | 4 |
+| security.oidc.jwks-connect-timeout-seconds | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#TransportPolicy` | `connectTimeout` | `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS` | `Duration.ofSeconds(3)` | 8 |
+| security.oidc.jwks-request-timeout-seconds | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#TransportPolicy` | `requestTimeout` | `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | `Duration.ofSeconds(5)` | 8 |
+
+Retained JWKS atoms are reported by their exact source role:
+
+| Semantic partition | Classification | Candidates |
+|---|---|---:|
+| jwks-response-payload-ceiling | security-ceiling-or-default | 2 |
+| jwks-http-media-contract | protocol-or-format-invariant | 3 |
+| jwks-payload-overflow-sentinel | derived | 1 |
 
 ## Source-proven persistence policy
 
@@ -9062,13 +9090,21 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-0930812e4cd42bfba63c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:72` `oidc` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-9bf223d751a36594c7d9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:73` `oidc` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-525aef35d81da0cbdd02` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:74` `oidc` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-861ff8fceaa83b669d94` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:75` `oidc` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-420dbd015ab378bbe64c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:80` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-18b1ffd653c8240ffd28` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:87` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-a06b412d7a5006f0e633` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:95` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-293ca98fa5592b54fd8d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-16176eaa6708c80eb7b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:115` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-3add4efd8bcaa192c3c7` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:116` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-861ff8fceaa83b669d94` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:75` `oidc` | java | already-centralized | operator-configurable | The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints. |
+| `oc-420dbd015ab378bbe64c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:81` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-18b1ffd653c8240ffd28` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:88` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-6cc82b875f3ed6307f11` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:95` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-cf4e6c5cbdc26a20c1e0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:95` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-381e5a180527cc1fcd7d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:96` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-78e46e964af43d845252` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:96` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-0d756f56f0730903ebfc` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:98` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-6f8939a818a5be4420bb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:98` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-55cca610c684dbaf2ec1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-7d56e461d90bd9bc6c44` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:99` `jwksTransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-a06b412d7a5006f0e633` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:108` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-293ca98fa5592b54fd8d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:112` `catch` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-16176eaa6708c80eb7b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:128` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-3add4efd8bcaa192c3c7` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java:129` `if` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
 | `oc-8788816bda516daf3e69` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/BearerToken.java:9` `BearerToken` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-825b3bde581620b5c872` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/BearerToken.java:10` `BearerToken` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-2f9f48693743502261f9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/BrowserOriginPolicy.java:20` `BrowserOriginPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -9088,16 +9124,23 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e078aa2e71dbda380e27` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/HttpSecurityConfiguration.java:15` `compareTo` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-85fe7f8d70b56276cef3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/HttpSecurityConfiguration.java:16` `compareTo` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-abe464e12461cf17c5a5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/HttpSecurityConfiguration.java:21` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-18f3ea4b8508424c593c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:16` `JwkSetProvider` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-ee37729742d42f331cd8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:16` `JwkSetProvider` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-1972abe40785cf368bab` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:29` `JwkSetProvider` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-38fae1f8e9c909fd83b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:29` `JwkSetProvider` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-eead090c5276bf93cc0e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:29` `JwkSetProvider` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-11aa2538e37479955ec0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:32` `JwkSetProvider` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-52d6c43c77559992cecb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:48` `refresh` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-414a41f674de376c44a3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:49` `refresh` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-bf8b21a3480bb67178d6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:49` `refresh` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-27c5ddd81d236551c769` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:53` `try` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-18f3ea4b8508424c593c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:16` `JwkSetProvider` | java | retained | security-ceiling-or-default | The fixed 64 KiB response ceiling bounds untrusted JWKS bytes before parsing. |
+| `oc-ee37729742d42f331cd8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:16` `JwkSetProvider` | java | retained | security-ceiling-or-default | The fixed 64 KiB response ceiling bounds untrusted JWKS bytes before parsing. |
+| `oc-4daaf0388a5c4757659d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:17` `JwkSetProvider` | java | retained | protocol-or-format-invariant | These exact HTTP header and JSON media values define JWKS request and response compatibility. |
+| `oc-b8d05f97d3e85bad0894` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:18` `JwkSetProvider` | java | retained | protocol-or-format-invariant | These exact HTTP header and JSON media values define JWKS request and response compatibility. |
+| `oc-e698915cb5222fa3577d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:19` `JwkSetProvider` | java | retained | protocol-or-format-invariant | These exact HTTP header and JSON media values define JWKS request and response compatibility. |
+| `oc-1972abe40785cf368bab` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:41` `JwkSetProvider` | java | already-centralized | operator-configurable | The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints. |
+| `oc-38fae1f8e9c909fd83b9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:41` `JwkSetProvider` | java | already-centralized | operator-configurable | The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints. |
+| `oc-eead090c5276bf93cc0e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:41` `JwkSetProvider` | java | already-centralized | operator-configurable | The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints. |
+| `oc-27c5ddd81d236551c769` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:66` `try` | java | retained | derived | The one extra byte is derived from the response ceiling so the consumer can detect an oversized body without admitting it. |
+| `oc-0a79907d0c0d60fe319b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:120` `TransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-764d4f52cd42f218091c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:121` `TransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-c2cd64f3692a38ad3d34` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:122` `TransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-bf9f875c30ad65973a91` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:123` `TransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-d6e6e3714fd483bc0e45` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:127` `TransportPolicy` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-0797ac4abdb190f878d3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:129` `TransportPolicy` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
+| `oc-4ebf73a069117c0f9ea5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:133` `defaults` | java | converted | operator-configurable | The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback. |
+| `oc-c46f0158107cc34e12fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java:133` `defaults` | java | converted | operator-configurable | The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback. |
 | `oc-9440df5b11bc92d505ac` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:25` `JwtRequestAuthenticator` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-351943d622744f1a9b37` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:43` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-d77fdac1407a5380555b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwtRequestAuthenticator.java:43` `if` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |

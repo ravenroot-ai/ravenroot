@@ -1789,7 +1789,7 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "fbe6c88cd611da3a334098090339dc5b66b33e446cb6efbdd873aa259674b26a",
+          "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
           "assertion": "Operator reference publishes strict Boolean syntax and false default."
         },
         {
@@ -5453,7 +5453,7 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "fbe6c88cd611da3a334098090339dc5b66b33e446cb6efbdd873aa259674b26a",
+          "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
           "assertion": "Operator reference publishes supported extension bindings."
         }
       ],
@@ -5747,12 +5747,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "fbe6c88cd611da3a334098090339dc5b66b33e446cb6efbdd873aa259674b26a",
+          "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
           "assertion": "Operator reference publishes supported server bindings."
         }
       ],
-      "candidateCount": 96,
-      "candidateSetDigest": "fc5a0022c5bd54675e31095124948a045b87a5e8a87212b639b02a0ae97ef188",
+      "candidateCount": 95,
+      "candidateSetDigest": "e01165406cb03dba02a6a8ae349fe24abcc5f8f67ae358af4a222907bdb10a5f",
       "candidateIds": [
         "oc-02c9cb904b5be6dd406c",
         "oc-0930812e4cd42bfba63c",
@@ -5800,7 +5800,6 @@
         "oc-80dbce3ebb1c87848502",
         "oc-84667d50e4ebe5627deb",
         "oc-86122ed5572d897b3ede",
-        "oc-861ff8fceaa83b669d94",
         "oc-877f863bd46cbe88ab25",
         "oc-88be6229ea9d29995c42",
         "oc-8ba8e2ed7472e2aedeb1",
@@ -5874,8 +5873,8 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 317,
-      "candidateSetDigest": "fb2cc02befdc193410b773eab623322b52f3af98750be652f9831d72525d0d1a",
+      "candidateCount": 313,
+      "candidateSetDigest": "287d8e4856d5a701a0e058c66b1ddb807d0734b709010fbfd978a770409e5e97",
       "candidateIds": [
         "oc-00733076b1001148a226",
         "oc-0093d6bdc1b62d30edc9",
@@ -5909,7 +5908,6 @@
         "oc-186fe3fc295df4283ef4",
         "oc-191de73027f2e6a2127f",
         "oc-196b466b644a4e00c0e3",
-        "oc-1972abe40785cf368bab",
         "oc-1aaf1ae52f3e462da9a1",
         "oc-1bed77f8f397cfa98208",
         "oc-1bf2cbf2971d3ee29cd4",
@@ -5928,7 +5926,6 @@
         "oc-23f50ddca7ea65fc2aec",
         "oc-25d2e6acf8f57fef492d",
         "oc-27b418ea5d2e648640f4",
-        "oc-27c5ddd81d236551c769",
         "oc-27ed2e55ecdcb885a997",
         "oc-27f8ca932843e59d3dd5",
         "oc-282aa3101b17e6109ead",
@@ -5967,7 +5964,6 @@
         "oc-3cecad5bed957559fbbc",
         "oc-3f5f38d574b36f396b0b",
         "oc-3f6d7203fa7a44d59107",
-        "oc-414a41f674de376c44a3",
         "oc-41b54dc55a831b20c20c",
         "oc-41bb9f37ca3ceed4ea4b",
         "oc-421b5bd45120ab8bbf30",
@@ -6119,7 +6115,6 @@
         "oc-bd5b24540ecdde4a811e",
         "oc-be5b990c35d15c4b7421",
         "oc-bea610928a55e1bda2e4",
-        "oc-bf8b21a3480bb67178d6",
         "oc-c1f1f013a1abb763e3ad",
         "oc-c2b343438b12d4381b49",
         "oc-c2eee17e60b6eb8c69f7",
@@ -6218,8 +6213,8 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 111,
-      "candidateSetDigest": "de52becbcb40de0d703a629a02437233bf0b72de1d54fef34a7042cb98929483",
+      "candidateCount": 109,
+      "candidateSetDigest": "ae73bf278fcfc6cae557ecbf965624d8004647ad17a20960dbf53ea885bd625d",
       "candidateIds": [
         "oc-02784eba076c21026c31",
         "oc-065b5f04b0945d4ab34d",
@@ -6235,7 +6230,6 @@
         "oc-1794389cb5b9874d5500",
         "oc-17bd358413a89cf0dbc4",
         "oc-18d85bb02da44ff556ac",
-        "oc-18f3ea4b8508424c593c",
         "oc-1a3e97ca562fe1988b17",
         "oc-1dfec92fa018d55c7c82",
         "oc-20d1e6ebffd83a83bbd2",
@@ -6323,7 +6317,6 @@
         "oc-ec462411e56e4063172b",
         "oc-ed23de6ac2d1a363737e",
         "oc-ed9f13aeeab438248639",
-        "oc-ee37729742d42f331cd8",
         "oc-ef6fbd4dbce258a1d8ff",
         "oc-f3abb3e72ec2fad2a426",
         "oc-f44653ca82c2bc001348",
@@ -6356,21 +6349,18 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 33,
-      "candidateSetDigest": "a4d899cbc071dc7b3b6f50878cfb89216a0dbb60c3ca0756e4603a3de71f6be3",
+      "candidateCount": 29,
+      "candidateSetDigest": "490c489c43988c28828e08a5fcb066aa594ddf4cd7fc1e9e6b8e3005117f227c",
       "candidateIds": [
         "oc-0067c29a9b072e2c7201",
         "oc-09f18a2c3fdb11586b07",
         "oc-0d1b8f9765cde16cb247",
-        "oc-11aa2538e37479955ec0",
         "oc-170bdbd0e9edd2e8c8da",
         "oc-26b2b81d0e92e45613e2",
         "oc-33cec57484edded99509",
         "oc-351943d622744f1a9b37",
-        "oc-38fae1f8e9c909fd83b9",
         "oc-3c0130c650d3cce583fb",
         "oc-4aeeae3f84fb5cda7587",
-        "oc-52d6c43c77559992cecb",
         "oc-53375f9df2dc580cf4af",
         "oc-5b70093154b9bdeb572b",
         "oc-6e2d2d14ca8ecb2be1c3",
@@ -6389,7 +6379,6 @@
         "oc-e078aa2e71dbda380e27",
         "oc-e9e6b367b31bf6739387",
         "oc-ee4a38fb19b2811511db",
-        "oc-eead090c5276bf93cc0e",
         "oc-f34580ab0f43d20dfd87",
         "oc-f7796137612eae42fae7"
       ]
@@ -11447,6 +11436,281 @@
         "oc-d133fda850b5dc7c8d02",
         "oc-d3f70da77fb94e8da700",
         "oc-e5d4e83fc5b2ad93cee8"
+      ]
+    },
+    {
+      "id": "jwks-cache-lifetime-setting",
+      "title": "JWKS Cache Lifetime Setting",
+      "owner": "#321",
+      "metadata": {
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "jwkPolicyAuthority": "jwks-retrieval-policy-environment-v1",
+        "setting": "security.oidc.jwks-cache-seconds",
+        "owner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#JwkSetProvider",
+        "field": "ttl",
+        "bindings": [
+          "RAVENROOT_AUTH_JWKS_CACHE_SECONDS"
+        ],
+        "default": "300",
+        "defaultEvidence": [],
+        "validation": "Whole seconds from 30 through 3600; the typed provider revalidates the same 30-second through one-hour range.",
+        "scope": "Packaged-server OIDC JWKS retrieval for one process lifetime.",
+        "pinning": "Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance.",
+        "coverage": "Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests.",
+        "rationale": "The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints."
+      },
+      "semanticDecision": "The 300-second cache lifetime is an existing operator default; 30 seconds and one hour are validation endpoints, not additional fixed lifetimes.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java",
+          "digest": "91435846c89b4f74aa8cc80069800469618fdb78eaf672e09f2092f71c65790c",
+          "assertion": "Exact parseLong arguments establish binding, fallback, and allowed seconds."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "digest": "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+          "assertion": "Typed fields revalidate and feed the cache, HttpClient, or HttpRequest consumer."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/security/AuthenticationConfigurationTest.java",
+          "digest": "fdc935834c3c6d076c174cf94a5597288e176b463223c95ba14b82c1b9075e4e",
+          "assertion": "Runnable tests prove defaults, exact boundaries, blank fallback, and refusal behavior."
+        },
+        {
+          "path": "docs/reference/configuration.md",
+          "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults."
+        },
+        {
+          "path": "docs/reference/environment-variables.md",
+          "digest": "21ba50aa80c2ec60add3acc42711e0842e401b10cf209b7e5276dad4812f0bd9",
+          "assertion": "The environment reference publishes each exact binding name."
+        }
+      ],
+      "candidateCount": 4,
+      "candidateSetDigest": "8b843949bb863957ae1178e3e43c5217fcbaabe71e49c00e69026bc2ca6fa222",
+      "candidateIds": [
+        "oc-1972abe40785cf368bab",
+        "oc-38fae1f8e9c909fd83b9",
+        "oc-861ff8fceaa83b669d94",
+        "oc-eead090c5276bf93cc0e"
+      ]
+    },
+    {
+      "id": "jwks-connect-timeout-setting",
+      "title": "JWKS Connect Timeout Setting",
+      "owner": "#321",
+      "metadata": {
+        "status": "converted",
+        "classification": "operator-configurable",
+        "jwkPolicyAuthority": "jwks-retrieval-policy-environment-v1",
+        "setting": "security.oidc.jwks-connect-timeout-seconds",
+        "owner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#TransportPolicy",
+        "field": "connectTimeout",
+        "bindings": [
+          "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS"
+        ],
+        "default": "3",
+        "defaultEvidence": [
+          "oc-4ebf73a069117c0f9ea5"
+        ],
+        "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before HttpClient construction.",
+        "scope": "Packaged-server OIDC JWKS retrieval for one process lifetime.",
+        "pinning": "Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance.",
+        "coverage": "Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests.",
+        "rationale": "The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback.",
+        "conversion": {
+          "kind": "java-jwks-timeout-conversion-v1",
+          "issue": "#321",
+          "beforeRevision": "5f6182ec565383165b18b0e336628d2f40ac8b1c",
+          "afterRevision": "e1e0d074387847712c55caf297cb8f56f0c1e80c",
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "symbol": "JwkSetProvider",
+          "binding": "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+          "bindingSymbol": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java#jwksTransportPolicy",
+          "field": "connectTimeout",
+          "beforeExpression": "Duration.ofSeconds(3)",
+          "afterExpression": "transportPolicy.connectTimeout()"
+        }
+      },
+      "semanticDecision": "The former fixed three-second external connection timeout is converted to a typed environment setting with the same shipped fallback.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java",
+          "digest": "91435846c89b4f74aa8cc80069800469618fdb78eaf672e09f2092f71c65790c",
+          "assertion": "Exact parseLong arguments establish binding, fallback, and allowed seconds."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "digest": "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+          "assertion": "Typed fields revalidate and feed the cache, HttpClient, or HttpRequest consumer."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/security/AuthenticationConfigurationTest.java",
+          "digest": "fdc935834c3c6d076c174cf94a5597288e176b463223c95ba14b82c1b9075e4e",
+          "assertion": "Runnable tests prove defaults, exact boundaries, blank fallback, and refusal behavior."
+        },
+        {
+          "path": "docs/reference/configuration.md",
+          "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults."
+        },
+        {
+          "path": "docs/reference/environment-variables.md",
+          "digest": "21ba50aa80c2ec60add3acc42711e0842e401b10cf209b7e5276dad4812f0bd9",
+          "assertion": "The environment reference publishes each exact binding name."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "0c1fbb0c97cf20354f4d565b39bacb5422dcfa85f230a5f7c094f366f43145c3",
+      "candidateIds": [
+        "oc-11aa2538e37479955ec0"
+      ]
+    },
+    {
+      "id": "jwks-request-timeout-setting",
+      "title": "JWKS Request Timeout Setting",
+      "owner": "#321",
+      "metadata": {
+        "status": "converted",
+        "classification": "operator-configurable",
+        "jwkPolicyAuthority": "jwks-retrieval-policy-environment-v1",
+        "setting": "security.oidc.jwks-request-timeout-seconds",
+        "owner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java#TransportPolicy",
+        "field": "requestTimeout",
+        "bindings": [
+          "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS"
+        ],
+        "default": "5",
+        "defaultEvidence": [
+          "oc-c46f0158107cc34e12fd"
+        ],
+        "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before each HttpRequest is built.",
+        "scope": "Packaged-server OIDC JWKS retrieval for one process lifetime.",
+        "pinning": "Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance.",
+        "coverage": "Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests.",
+        "rationale": "The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback.",
+        "conversion": {
+          "kind": "java-jwks-timeout-conversion-v1",
+          "issue": "#321",
+          "beforeRevision": "5f6182ec565383165b18b0e336628d2f40ac8b1c",
+          "afterRevision": "e1e0d074387847712c55caf297cb8f56f0c1e80c",
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "symbol": "JwkSetProvider",
+          "binding": "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS",
+          "bindingSymbol": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java#jwksTransportPolicy",
+          "field": "requestTimeout",
+          "beforeExpression": "Duration.ofSeconds(5)",
+          "afterExpression": "requestTimeout"
+        }
+      },
+      "semanticDecision": "The former fixed five-second complete HTTP request timeout is converted to a typed environment setting with the same shipped fallback.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java",
+          "digest": "91435846c89b4f74aa8cc80069800469618fdb78eaf672e09f2092f71c65790c",
+          "assertion": "Exact parseLong arguments establish binding, fallback, and allowed seconds."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "digest": "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+          "assertion": "Typed fields revalidate and feed the cache, HttpClient, or HttpRequest consumer."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/security/AuthenticationConfigurationTest.java",
+          "digest": "fdc935834c3c6d076c174cf94a5597288e176b463223c95ba14b82c1b9075e4e",
+          "assertion": "Runnable tests prove defaults, exact boundaries, blank fallback, and refusal behavior."
+        },
+        {
+          "path": "docs/reference/configuration.md",
+          "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults."
+        },
+        {
+          "path": "docs/reference/environment-variables.md",
+          "digest": "21ba50aa80c2ec60add3acc42711e0842e401b10cf209b7e5276dad4812f0bd9",
+          "assertion": "The environment reference publishes each exact binding name."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "772523426a3ac32112030b6b2b8890fa0b0cd2fe8620a871f1ef34e14c0cb2a0",
+      "candidateIds": [
+        "oc-52d6c43c77559992cecb"
+      ]
+    },
+    {
+      "id": "jwks-response-payload-ceiling",
+      "title": "JWKS Response Payload Ceiling",
+      "owner": "#321",
+      "metadata": {
+        "status": "retained",
+        "classification": "security-ceiling-or-default",
+        "rationale": "The fixed 64 KiB response ceiling bounds untrusted JWKS bytes before parsing.",
+        "jwkPolicyAuthority": "jwks-retrieval-policy-environment-v1"
+      },
+      "semanticDecision": "The 64 KiB limit is enforced before parsing untrusted JWKS bytes and is retained as an intrinsic admission ceiling.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "digest": "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+          "assertion": "The 64 KiB limit is enforced before parsing untrusted JWKS bytes and is retained as an intrinsic admission ceiling."
+        }
+      ],
+      "candidateCount": 2,
+      "candidateSetDigest": "731a973e3d2f2a445f2b208eee6686575ddb8e0d6f6a283c069a52dd291514bf",
+      "candidateIds": [
+        "oc-18f3ea4b8508424c593c",
+        "oc-ee37729742d42f331cd8"
+      ]
+    },
+    {
+      "id": "jwks-http-media-contract",
+      "title": "JWKS HTTP Media Contract",
+      "owner": "#321",
+      "metadata": {
+        "status": "retained",
+        "classification": "protocol-or-format-invariant",
+        "rationale": "These exact HTTP header and JSON media values define JWKS request and response compatibility.",
+        "jwkPolicyAuthority": "jwks-retrieval-policy-environment-v1"
+      },
+      "semanticDecision": "The Accept header and JSON/JWK-set media values are wire compatibility tokens consumed by request and response validation.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "digest": "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+          "assertion": "The Accept header and JSON/JWK-set media values are wire compatibility tokens consumed by request and response validation."
+        }
+      ],
+      "candidateCount": 2,
+      "candidateSetDigest": "412a453f48e9d38af2b1f91c6123391fd302490bceb0ba233109b515e6bba58a",
+      "candidateIds": [
+        "oc-414a41f674de376c44a3",
+        "oc-bf8b21a3480bb67178d6"
+      ]
+    },
+    {
+      "id": "jwks-payload-overflow-sentinel",
+      "title": "JWKS Payload Overflow Sentinel",
+      "owner": "#321",
+      "metadata": {
+        "status": "retained",
+        "classification": "derived",
+        "rationale": "The one extra byte is derived from the response ceiling so the consumer can detect an oversized body without admitting it.",
+        "jwkPolicyAuthority": "jwks-retrieval-policy-environment-v1"
+      },
+      "semanticDecision": "The extra byte is derived from the 64 KiB cap and exists only to detect overflow without admitting it.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java",
+          "digest": "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+          "assertion": "The extra byte is derived from the 64 KiB cap and exists only to detect overflow without admitting it."
+        }
+      ],
+      "candidateCount": 1,
+      "candidateSetDigest": "83fc984713433624967a2c229e922e932f4869dba4ceba78badb56e34ff181e3",
+      "candidateIds": [
+        "oc-27c5ddd81d236551c769"
       ]
     }
   ]

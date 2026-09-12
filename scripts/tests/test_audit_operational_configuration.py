@@ -4,6 +4,7 @@ import json
 import hashlib
 import io
 import copy
+import os
 import shutil
 import subprocess
 import sys
@@ -6567,6 +6568,212 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
                     audit, "agent_budget_authority_errors",
                     return_value=["agent-budget-routing-probe"]) as routed:
                 self.assertIn("agent-budget-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+
+class JwkPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in (
+                audit.JWK_PROVIDER_PATH, audit.JWK_CONFIGURATION_PATH, audit.JWK_TEST_PATH,
+                audit.JWK_CONFIGURATION_DOC_PATH, audit.JWK_ENVIRONMENT_DOC_PATH):
+            target = cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout.strip()
+        common_path = (ROOT / common).resolve()
+        alternates = cls.root / ".git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternates.write_text(str(common_path / "objects") + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        tree = subprocess.run(
+            ["git", "write-tree"], cwd=cls.root, check=True,
+            capture_output=True, text=True).stdout.strip()
+        commit = subprocess.run(
+            ["git", "commit-tree", tree, "-p", audit.JWK_CONVERSION_BEFORE_REVISION],
+            cwd=cls.root, check=True, input="JWKS source fixture\n", capture_output=True,
+            text=True, env={**dict(os.environ), "GIT_AUTHOR_NAME": "audit fixture",
+                            "GIT_AUTHOR_EMAIL": "audit@example.invalid",
+                            "GIT_COMMITTER_NAME": "audit fixture",
+                            "GIT_COMMITTER_EMAIL": "audit@example.invalid"}).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/heads/main", commit], cwd=cls.root, check=True)
+        subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.jwk_policy_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The exact JWKS policy family must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            expected = {
+                "status": contract["status"], "classification": "operator-configurable",
+                "jwkPolicyAuthority": audit.JWK_POLICY_AUTHORITY_ID,
+                "setting": contract["setting"], "owner": contract["owner"],
+                "field": contract["field"], "bindings": contract["bindings"],
+                "default": contract["default"],
+                "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+            if "conversion" in contract:
+                expected["conversion"] = contract["conversion"]
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(expected))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    jwkPolicyAuthority=audit.JWK_POLICY_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def document(self, entries=None, authority=None):
+        rows = self.entries if entries is None else entries
+        claimed = self.authority if authority is None else authority
+        return {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": list(copy.deepcopy(rows).values()),
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in self.candidates
+            },
+            "jwkPolicyAuthorities": {audit.JWK_POLICY_AUTHORITY_ID: copy.deepcopy(claimed)},
+        }
+
+    def assert_direct_and_global_jwk_error(self, document, candidates=None) -> None:
+        current_candidates = self.candidates if candidates is None else candidates
+        current = {candidate.id: candidate for candidate in current_candidates}
+        entries = {entry["id"]: entry for entry in document["entries"]}
+        direct = audit.jwk_policy_authority_errors(
+            self.root, document.get("jwkPolicyAuthorities"), entries, current)
+        self.assertTrue(direct)
+        global_errors = audit.inventory_errors(self.root, document, tuple(current_candidates))
+        self.assertTrue(any("JWKS" in error for error in global_errors), global_errors)
+
+    def test_jwk_policy_is_derived_from_exact_settings_typed_slots_and_consumers(self) -> None:
+        self.assertEqual(3, self.authority["logicalSettingCount"])
+        self.assertEqual(26, len(self.authority["candidateIds"]))
+        contracts = {contract["setting"]: contract for contract in self.authority["contracts"]}
+        self.assertEqual("already-centralized", contracts["security.oidc.jwks-cache-seconds"]["status"])
+        self.assertEqual([], contracts["security.oidc.jwks-cache-seconds"]["defaultCandidateIds"])
+        self.assertEqual(["oc-4ebf73a069117c0f9ea5"],
+                         contracts["security.oidc.jwks-connect-timeout-seconds"]["defaultCandidateIds"])
+        self.assertEqual(["oc-c46f0158107cc34e12fd"],
+                         contracts["security.oidc.jwks-request-timeout-seconds"]["defaultCandidateIds"])
+        self.assertEqual([], audit.jwk_policy_authority_errors(
+            self.root, {audit.JWK_POLICY_AUTHORITY_ID: self.authority},
+            self.entries, self.discovered))
+        global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
+        self.assertFalse([error for error in global_errors if "JWKS" in error], global_errors)
+
+    def test_jwk_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
+        without_authority = self.document()
+        del without_authority["jwkPolicyAuthorities"]
+        self.assert_direct_and_global_jwk_error(without_authority)
+
+        without_markers = self.document()
+        for row in without_markers["entries"]:
+            row.pop("jwkPolicyAuthority", None)
+        self.assert_direct_and_global_jwk_error(without_markers)
+
+        reclassified = self.document()
+        operator_ids = {identifier for contract in self.authority["contracts"]
+                        for identifier in contract["candidateIds"]}
+        for row in reclassified["entries"]:
+            if row["id"] in operator_ids:
+                row.update(status="retained", classification="derived")
+        self.assert_direct_and_global_jwk_error(reclassified)
+
+        duplicate = self.document()
+        foreign = next(row for row in duplicate["entries"]
+                       if row["id"] not in self.authority["candidateIds"])
+        foreign["jwkPolicyAuthority"] = audit.JWK_POLICY_AUTHORITY_ID
+        self.assert_direct_and_global_jwk_error(duplicate)
+
+    def test_jwk_actual_source_and_test_mutations_fail_with_refreshed_superficial_digests(self) -> None:
+        mutations = (
+            (audit.JWK_CONFIGURATION_PATH,
+             "defaults.connectTimeout().toSeconds(), 1, 300",
+             "defaults.requestTimeout().toSeconds(), 1, 300"),
+            (audit.JWK_CONFIGURATION_PATH,
+             "defaults.requestTimeout().toSeconds(), 1, 300",
+             "defaults.requestTimeout().toSeconds(), 1, 301"),
+            (audit.JWK_PROVIDER_PATH, "Duration.ofSeconds(3), Duration.ofSeconds(5)",
+             "Duration.ofSeconds(4), Duration.ofSeconds(5)"),
+            (audit.JWK_PROVIDER_PATH, ".connectTimeout(transportPolicy.connectTimeout())",
+             ".connectTimeout(transportPolicy.requestTimeout())"),
+            (audit.JWK_PROVIDER_PATH, "HttpRequest.newBuilder(uri).timeout(requestTimeout)",
+             "HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5))"),
+            (audit.JWK_PROVIDER_PATH,
+             "requestTimeout, MINIMUM_REQUEST_TIMEOUT, MAXIMUM_REQUEST_TIMEOUT",
+             "connectTimeout, MINIMUM_REQUEST_TIMEOUT, MAXIMUM_REQUEST_TIMEOUT"),
+            (audit.JWK_TEST_PATH,
+             "@Test\n    void jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange()",
+             "void jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange()"),
+            (audit.JWK_TEST_PATH,
+             "@Test\n    void authenticationDurationsAcceptTheirExactBoundaries()",
+             "@Disabled\n    @Test\n    void authenticationDurationsAcceptTheirExactBoundaries()"),
+            (audit.JWK_CONFIGURATION_DOC_PATH,
+             "whole seconds from `1` through `300`; `3`, `5`",
+             "whole seconds; defaults vary"),
+            (audit.JWK_ENVIRONMENT_DOC_PATH,
+             "| `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` |",
+             "| `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT` |"),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed_candidates = audit.discover(self.root)
+                    refreshed = {candidate.id: candidate for candidate in refreshed_candidates}
+                    self.assertIsNone(audit.jwk_policy_authority_from_source(self.root, refreshed))
+                    claimed = copy.deepcopy(self.authority)
+                    for source in claimed["sourceDigests"]:
+                        if source["path"] == relative.as_posix():
+                            source["digest"] = audit._source_digest(path.read_text(encoding="utf-8"))
+                    document = self.document(authority=claimed)
+                    direct = audit.jwk_policy_authority_errors(
+                        self.root, document["jwkPolicyAuthorities"], self.entries, refreshed)
+                    self.assertIn(
+                        "JWKS policy source family is incomplete, mis-slotted, or unsupported", direct)
+                    global_errors = audit.inventory_errors(
+                        self.root, document, refreshed_candidates)
+                    self.assertIn(
+                        "JWKS policy source family is incomplete, mis-slotted, or unsupported",
+                        global_errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_jwk_candidate_omission_and_foreign_atom_cannot_change_the_roster(self) -> None:
+        from dataclasses import replace
+        missing = dict(self.discovered)
+        del missing[self.authority["candidateIds"][0]]
+        self.assertIsNone(audit.jwk_policy_authority_from_source(self.root, missing))
+        template = self.discovered[self.authority["candidateIds"][0]]
+        injected = replace(template, id="oc-injected-jwks-atom")
+        foreign = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.jwk_policy_authority_from_source(self.root, foreign))
+
+    def test_jwk_inventory_dispatch_is_mandatory(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "jwk_policy_authority_errors",
+                    return_value=["JWKS-routing-probe"]) as routed:
+                self.assertIn("JWKS-routing-probe",
                               audit.inventory_errors(root, document, audit.discover(root)))
                 routed.assert_called_once()
 

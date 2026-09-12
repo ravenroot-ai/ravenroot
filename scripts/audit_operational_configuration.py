@@ -133,6 +133,45 @@ AGENT_BUDGET_SETTING_SPECS = (
     ("agent.output-token-rate-micros", "policy", "outputTokenRateMicros", "outputTokenRateMicros",
      "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", "30", "nonNegative"),
 )
+JWK_POLICY_AUTHORITY_ID = "jwks-retrieval-policy-environment-v1"
+JWK_PROVIDER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java")
+JWK_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java")
+JWK_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/security/AuthenticationConfigurationTest.java")
+JWK_CONFIGURATION_DOC_PATH = Path("docs/reference/configuration.md")
+JWK_ENVIRONMENT_DOC_PATH = Path("docs/reference/environment-variables.md")
+JWK_CONVERSION_BEFORE_REVISION = "5f6182ec565383165b18b0e336628d2f40ac8b1c"
+JWK_CONVERSION_BEFORE_SOURCE_DIGEST = \
+    "6b56d1c35c82476faa666e7a247542c894a0f000e467a617f75c10fe99eb1bdc"
+JWK_SOURCE_DIGESTS = {
+    JWK_PROVIDER_PATH: "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+    JWK_CONFIGURATION_PATH: "91435846c89b4f74aa8cc80069800469618fdb78eaf672e09f2092f71c65790c",
+    JWK_TEST_PATH: "fdc935834c3c6d076c174cf94a5597288e176b463223c95ba14b82c1b9075e4e",
+}
+JWK_METHOD_DIGESTS = {
+    "JwkSetProvider.current": "379db51d3e3d5e399c4f0001b9906f77a0d288edd50f995ff2fd7f5db2340f2d",
+    "JwkSetProvider.refresh": "cb88c5b4d5055dc96222577e5f81de21812aeb4cf1365e9cf6924f5394860503",
+    "JwkSetProvider.requireRange": "018f348a8dabc162905ab9b0ecf63a1a6728e90b772f37a124e2b664a7bbf94c",
+    "TransportPolicy.defaults": "96ac39d6da64a365dd0af332189c9850cc3d23766c09549a3ce5064059dda271",
+    "TransportPolicy.compactConstructor": "4c813ec5e71f94e3572a5986a4d2bb290aeaa5492854e7d958884daedf3c5464",
+    "AuthenticationConfiguration.oidc": "00eddd691b97facd8006db1379d02cc9d3518a847605ec7619f48087a46f3dd6",
+    "AuthenticationConfiguration.jwksTransportPolicy":
+        "3bde91fc932e50a7c1d8ffbbe1bab7ffd86acc11ce2efb5a62e2c4535b007086",
+    "AuthenticationConfiguration.parseLong":
+        "d2e27465a041f07ff537ac48f4830d46529401eed8a4d5a3a236afe26930fbd0",
+}
+JWK_TEST_METHOD_DIGESTS = {
+    "jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange":
+        "261b7ef85234e055c2e3138679bfae4f11ea3f79c79a621307ad2531bafed4e0",
+    "blankOptionalAuthenticationValuesUseTheirDefaults":
+        "9b1c0508cb89708f406cba04c2ebeed476f35facece446ddab5f43ec5eea6e3c",
+    "authenticationDurationsAcceptTheirExactBoundaries":
+        "6765873b53c50d5de14c11467a220a937e8bddae68fc8bdeb3cac8434857410e",
+    "malformedAuthenticationValuesFailWithSanitizedSettingNames":
+        "5b6e15a021f10d48f3f6c1400b12a9b22598980a96db9d45315b39e742d12fad",
+}
 
 SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
@@ -2866,6 +2905,22 @@ def final_review_authority_errors(
         identifier for identifier, entry in source_entries.items()
         if entry.get("status") in {"pending-review", "deferred"}
     }
+    replacements: dict[str, str] = {}
+    for record in document.get("reconciliationHistory", []):
+        if not isinstance(record, dict):
+            continue
+        for mapping in record.get("mappings", []):
+            if isinstance(mapping, dict) and isinstance(mapping.get("fromId"), str) \
+                    and isinstance(mapping.get("toId"), str):
+                replacements[str(mapping["fromId"])] = str(mapping["toId"])
+
+    def active_identifier(identifier: str) -> str:
+        seen: set[str] = set()
+        while identifier in replacements and identifier not in seen:
+            seen.add(identifier)
+            identifier = replacements[identifier]
+        return identifier
+
     errors: list[str] = []
     if authority.get("candidateCount") != len(reviewable) \
             or authority.get("candidateSetDigest") != candidate_set_digest(reviewable):
@@ -2928,9 +2983,10 @@ def final_review_authority_errors(
             errors.append(f"final review group {identifier} overlaps another semantic authority")
         for candidate in candidates:
             candidate_id = str(candidate)
-            if candidate_id not in expected_metadata:
+            active_id = active_identifier(candidate_id)
+            if active_id not in expected_metadata:
                 continue
-            expected_metadata[candidate_id] = {
+            expected_metadata[active_id] = {
                 **metadata,
                 "finalReviewAuthority": FINAL_REVIEW_AUTHORITY_ID,
                 "finalReviewGroup": identifier,
@@ -2948,8 +3004,9 @@ def final_review_authority_errors(
         if isinstance(entry, dict) and isinstance(entry.get("id"), str)
     }
     for identifier in assigned:
-        active = active_entries.get(identifier)
-        if active is None or candidate_semantic_payload(active) != expected_metadata.get(identifier):
+        active_id = active_identifier(identifier)
+        active = active_entries.get(active_id)
+        if active is None or candidate_semantic_payload(active) != expected_metadata.get(active_id):
             errors.append(f"final review candidate {identifier} lost its marker or approved classification")
     fixture_ids = {
         identifier for identifier, entry in source_entries.items()
@@ -3355,6 +3412,20 @@ def remap_declared_candidate_references(document: dict[str, object],
                                 remap_list(row, "candidateIds")
                                 remap_list(row, "defaultCandidateIds")
 
+    jwk_authorities = document.get("jwkPolicyAuthorities")
+    if isinstance(jwk_authorities, dict):
+        for authority in jwk_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("contracts", "semanticPartitions"):
+                rows = authority.get(field)
+                if isinstance(rows, list):
+                    for row in rows:
+                        if isinstance(row, dict):
+                            remap_list(row, "candidateIds")
+                            remap_list(row, "defaultCandidateIds")
+
     interaction_authorities = document.get("interactionWebSocketAuthorities")
     if isinstance(interaction_authorities, dict):
         for authority in interaction_authorities.values():
@@ -3606,6 +3677,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             return None, ["cannot derive the closed agent budget setting authority from current source"]
         refreshed["agentBudgetAuthorities"] = {
             AGENT_BUDGET_AUTHORITY_ID: agent_budget_authority,
+        }
+    if jwk_policy_source_present(root):
+        jwk_authority = jwk_policy_authority_from_source(root, current)
+        if jwk_authority is None:
+            return None, ["cannot derive the closed JWKS retrieval policy authority from current source"]
+        refreshed["jwkPolicyAuthorities"] = {
+            JWK_POLICY_AUTHORITY_ID: jwk_authority,
         }
     if interaction_websocket_source_present(root):
         interaction_authority = interaction_websocket_authority_from_source(root, current)
@@ -10881,6 +10959,403 @@ def agent_budget_authority_errors(root: Path, authorities: object,
     return errors
 
 
+def jwk_policy_source_present(root: Path) -> bool:
+    """Keep the JWKS family mandatory while any defining source remains."""
+    return any((root / relative).exists() for relative in (
+        JWK_PROVIDER_PATH, JWK_CONFIGURATION_PATH, JWK_TEST_PATH,
+        JWK_CONFIGURATION_DOC_PATH, JWK_ENVIRONMENT_DOC_PATH,
+    ))
+
+
+def jwk_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed JWKS cache, transport, payload, and HTTP policy from source."""
+    try:
+        provider = (root / JWK_PROVIDER_PATH).read_text(encoding="utf-8")
+        configuration = (root / JWK_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        tests = (root / JWK_TEST_PATH).read_text(encoding="utf-8")
+        configuration_doc = (root / JWK_CONFIGURATION_DOC_PATH).read_text(encoding="utf-8")
+        environment_doc = (root / JWK_ENVIRONMENT_DOC_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    if any(_source_digest(source) != JWK_SOURCE_DIGESTS[path] for path, source in (
+            (JWK_PROVIDER_PATH, provider), (JWK_CONFIGURATION_PATH, configuration),
+            (JWK_TEST_PATH, tests))):
+        return None
+    method_sources = {
+        "JwkSetProvider.current": (provider, "JwkSetProvider", "current"),
+        "JwkSetProvider.refresh": (provider, "JwkSetProvider", "refresh"),
+        "JwkSetProvider.requireRange": (provider, "JwkSetProvider", "requireRange"),
+        "TransportPolicy.defaults": (provider, "TransportPolicy", "defaults"),
+        "AuthenticationConfiguration.oidc":
+            (configuration, "AuthenticationConfiguration", "oidc"),
+        "AuthenticationConfiguration.jwksTransportPolicy":
+            (configuration, "AuthenticationConfiguration", "jwksTransportPolicy"),
+        "AuthenticationConfiguration.parseLong":
+            (configuration, "AuthenticationConfiguration", "parseLong"),
+    }
+    if any(java_method_digest(*method_sources[name]) != digest
+           for name, digest in JWK_METHOD_DIGESTS.items()
+           if name != "TransportPolicy.compactConstructor"):
+        return None
+    if java_span_digest(provider, java_compact_constructor_span(
+            provider, "TransportPolicy")) != JWK_METHOD_DIGESTS["TransportPolicy.compactConstructor"]:
+        return None
+    if java_record_components(provider, "TransportPolicy") != ("connectTimeout", "requestTimeout") \
+            or not java_type_declares_field(provider, "JwkSetProvider", "ttl") \
+            or not java_type_declares_field(provider, "TransportPolicy", "connectTimeout") \
+            or not java_type_declares_field(provider, "TransportPolicy", "requestTimeout"):
+        return None
+
+    def exact_ids(relative: Path, source: str,
+                  spans: list[tuple[int, int]]) -> list[str] | None:
+        selected = sorted(identifier for start, end in spans for identifier in
+                          all_candidate_ids_in_source_span(relative, source, start, end, discovered))
+        keys = Counter(
+            (symbol, kind, role, expression,
+             hashlib.sha256(evidence.encode("utf-8")).hexdigest())
+            for offset, symbol, kind, role, expression, evidence in code_candidates(
+                relative, source, "java")
+            if any(start <= offset < end for start, end in spans)
+        )
+        supplied = Counter(
+            (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+             candidate.evidence_digest)
+            for candidate in discovered.values()
+            if candidate.path == relative.as_posix()
+            and (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+                 candidate.evidence_digest) in keys
+        )
+        return selected if supplied == keys else None
+
+    def exact_statement(source: str, pattern: str) -> tuple[int, int] | None:
+        matches = list(re.finditer(pattern, source, flags=re.DOTALL))
+        return matches[0].span() if len(matches) == 1 else None
+
+    cache_initializer = java_method_local_initializer(
+        configuration, "AuthenticationConfiguration", "oidc", "cacheSeconds")
+    connect_initializer = java_method_local_initializer(
+        configuration, "AuthenticationConfiguration", "jwksTransportPolicy", "connectTimeoutSeconds")
+    request_initializer = java_method_local_initializer(
+        configuration, "AuthenticationConfiguration", "jwksTransportPolicy", "requestTimeoutSeconds")
+    initializers = {
+        "security.oidc.jwks-cache-seconds": cache_initializer,
+        "security.oidc.jwks-connect-timeout-seconds": connect_initializer,
+        "security.oidc.jwks-request-timeout-seconds": request_initializer,
+    }
+    argument_contracts = {
+        "security.oidc.jwks-cache-seconds": (
+            '"RAVENROOT_AUTH_JWKS_CACHE_SECONDS"', "300", "30", "3_600"),
+        "security.oidc.jwks-connect-timeout-seconds": (
+            '"RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS"',
+            "defaults.connectTimeout().toSeconds()", "1", "300"),
+        "security.oidc.jwks-request-timeout-seconds": (
+            '"RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS"',
+            "defaults.requestTimeout().toSeconds()", "1", "300"),
+    }
+    if any(initializer is None for initializer in initializers.values()):
+        return None
+    for setting, initializer in initializers.items():
+        assert initializer is not None
+        arguments = direct_factory_arguments(initializer[0], "parseLong")
+        expected = argument_contracts[setting]
+        if arguments is None or len(arguments) != 5 \
+                or normalized(arguments[0][0]) != "environment" \
+                or tuple(normalized(argument[0]) for argument in arguments[1:]) != expected:
+            return None
+
+    cache_assignment = exact_statement(
+        provider,
+        r'this\.ttl\s*=\s*requireRange\(ttl,\s*Duration\.ofSeconds\(30\),\s*'
+        r'Duration\.ofHours\(1\),\s*"JWKS cache TTL"\);')
+    connect_assignment = exact_statement(
+        provider,
+        r'connectTimeout\s*=\s*requireRange\(\s*connectTimeout,\s*MINIMUM_CONNECT_TIMEOUT,\s*'
+        r'MAXIMUM_CONNECT_TIMEOUT,\s*"JWKS connect timeout"\);')
+    request_assignment = exact_statement(
+        provider,
+        r'requestTimeout\s*=\s*requireRange\(\s*requestTimeout,\s*MINIMUM_REQUEST_TIMEOUT,\s*'
+        r'MAXIMUM_REQUEST_TIMEOUT,\s*"JWKS request timeout"\);')
+    if None in (cache_assignment, connect_assignment, request_assignment):
+        return None
+    default_components = java_record_components(provider, "TransportPolicy")
+    connect_default = java_constructor_component_call(
+        provider, "TransportPolicy", "defaults", "TransportPolicy", default_components, "connectTimeout")
+    request_default = java_constructor_component_call(
+        provider, "TransportPolicy", "defaults", "TransportPolicy", default_components, "requestTimeout")
+    if connect_default is None or normalized(connect_default[0]) != "Duration.ofSeconds(3)" \
+            or request_default is None or normalized(request_default[0]) != "Duration.ofSeconds(5)":
+        return None
+    connect_default_ids = exact_ids(
+        JWK_PROVIDER_PATH, provider, [(connect_default[1], connect_default[2])])
+    request_default_ids = exact_ids(
+        JWK_PROVIDER_PATH, provider, [(request_default[1], request_default[2])])
+    if connect_default_ids is None or len(connect_default_ids) != 1 \
+            or request_default_ids is None or len(request_default_ids) != 1:
+        return None
+    default_ids_by_setting = {
+        "security.oidc.jwks-cache-seconds": [],
+        "security.oidc.jwks-connect-timeout-seconds": connect_default_ids,
+        "security.oidc.jwks-request-timeout-seconds": request_default_ids,
+    }
+
+    constant_names = {
+        "security.oidc.jwks-connect-timeout-seconds":
+            ("MINIMUM_CONNECT_TIMEOUT", "MAXIMUM_CONNECT_TIMEOUT"),
+        "security.oidc.jwks-request-timeout-seconds":
+            ("MINIMUM_REQUEST_TIMEOUT", "MAXIMUM_REQUEST_TIMEOUT"),
+    }
+    setting_spans: dict[str, list[tuple[Path, str, tuple[int, int]]]] = {
+        setting: [(JWK_CONFIGURATION_PATH, configuration, (initializer[1], initializer[2]))]
+        for setting, initializer in initializers.items() if initializer is not None
+    }
+    setting_spans["security.oidc.jwks-cache-seconds"].append(
+        (JWK_PROVIDER_PATH, provider, cache_assignment))
+    for setting, assignment, default in (
+            ("security.oidc.jwks-connect-timeout-seconds", connect_assignment, connect_default),
+            ("security.oidc.jwks-request-timeout-seconds", request_assignment, request_default)):
+        setting_spans[setting].append((JWK_PROVIDER_PATH, provider, assignment))
+        setting_spans[setting].append((JWK_PROVIDER_PATH, provider, (default[1], default[2])))
+        for constant_name in constant_names[setting]:
+            constant = java_static_final_initializer(provider, "TransportPolicy", constant_name)
+            if constant is None:
+                return None
+            expected_expression = ("Duration.ofSeconds(1)" if constant_name.startswith("MINIMUM")
+                                   else "Duration.ofMinutes(5)")
+            if normalized(constant[0]) != expected_expression:
+                return None
+            setting_spans[setting].append((JWK_PROVIDER_PATH, provider, (constant[1], constant[2])))
+
+    setting_specs = {
+        "security.oidc.jwks-cache-seconds": {
+            "owner": f"{JWK_PROVIDER_PATH.as_posix()}#JwkSetProvider", "field": "ttl",
+            "binding": "RAVENROOT_AUTH_JWKS_CACHE_SECONDS", "default": "300",
+            "defaultExpression": "300", "status": "already-centralized",
+            "validation": "Whole seconds from 30 through 3600; the typed provider revalidates the same 30-second through one-hour range.",
+            "rationale": "The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints.",
+        },
+        "security.oidc.jwks-connect-timeout-seconds": {
+            "owner": f"{JWK_PROVIDER_PATH.as_posix()}#TransportPolicy", "field": "connectTimeout",
+            "binding": "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS", "default": "3",
+            "defaultExpression": "Duration.ofSeconds(3)", "status": "converted",
+            "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before HttpClient construction.",
+            "rationale": "The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback.",
+        },
+        "security.oidc.jwks-request-timeout-seconds": {
+            "owner": f"{JWK_PROVIDER_PATH.as_posix()}#TransportPolicy", "field": "requestTimeout",
+            "binding": "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", "default": "5",
+            "defaultExpression": "Duration.ofSeconds(5)", "status": "converted",
+            "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before each HttpRequest is built.",
+            "rationale": "The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback.",
+        },
+    }
+    before_source = committed_source(root, JWK_CONVERSION_BEFORE_REVISION, JWK_PROVIDER_PATH.as_posix())
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+    if before_source is None \
+            or hashlib.sha256(before_source.encode("utf-8")).hexdigest() != JWK_CONVERSION_BEFORE_SOURCE_DIGEST \
+            or before_source.count(".connectTimeout(Duration.ofSeconds(3))") != 1 \
+            or before_source.count(".timeout(Duration.ofSeconds(5))") != 1 \
+            or not revision_is_ancestor(root, JWK_CONVERSION_BEFORE_REVISION, head):
+        return None
+    provider_compact = normalized(provider)
+    configuration_compact = normalized(configuration)
+    if provider_compact.count(".connectTimeout(transportPolicy.connectTimeout())") != 1 \
+            or provider_compact.count("HttpRequest.newBuilder(uri).timeout(requestTimeout)") != 1 \
+            or provider_compact.count("this.requestTimeout = transportPolicy.requestTimeout();") != 1 \
+            or configuration_compact.count(
+                "new JwkSetProvider(jwks, Duration.ofSeconds(cacheSeconds), transportPolicy)") != 1 \
+            or configuration_compact.count(
+                "JwkSetProvider.TransportPolicy transportPolicy = jwksTransportPolicy(environment);") != 1:
+        return None
+
+    contracts: list[dict[str, object]] = []
+    assigned: set[str] = set()
+    for setting, spec in setting_specs.items():
+        ids: list[str] = []
+        for relative, source, span in setting_spans[setting]:
+            selected = exact_ids(relative, source, [span])
+            if selected is None:
+                return None
+            ids.extend(selected)
+        candidate_ids = sorted(set(ids))
+        if not candidate_ids or len(candidate_ids) != len(ids) or assigned & set(candidate_ids):
+            return None
+        assigned.update(candidate_ids)
+        default_ids = default_ids_by_setting[setting]
+        conversion = None
+        if spec["status"] == "converted":
+            suffix = "connect" if spec["field"] == "connectTimeout" else "request"
+            conversion = {
+                "kind": "java-jwks-timeout-conversion-v1", "issue": "#321",
+                "beforeRevision": JWK_CONVERSION_BEFORE_REVISION,
+                "afterRevision": "e1e0d074387847712c55caf297cb8f56f0c1e80c",
+                "path": JWK_PROVIDER_PATH.as_posix(), "symbol": "JwkSetProvider",
+                "binding": spec["binding"],
+                "bindingSymbol": f"{JWK_CONFIGURATION_PATH.as_posix()}#jwksTransportPolicy",
+                "field": spec["field"],
+                "beforeExpression": f"Duration.ofSeconds({spec['default']})",
+                "afterExpression": ("transportPolicy.connectTimeout()" if suffix == "connect"
+                                    else "requestTimeout"),
+            }
+        contract = {
+            "setting": setting, "owner": spec["owner"], "field": spec["field"],
+            "bindings": [spec["binding"]], "default": spec["default"],
+            "defaultExpression": spec["defaultExpression"], "defaultCandidateIds": default_ids,
+            "status": spec["status"], "validation": spec["validation"],
+            "scope": "Packaged-server OIDC JWKS retrieval for one process lifetime.",
+            "pinning": "Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance.",
+            "coverage": "Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests.",
+            "rationale": spec["rationale"], "candidateIds": candidate_ids,
+        }
+        if conversion is not None:
+            contract["conversion"] = conversion
+        contracts.append(contract)
+
+    retained_specs = (
+        ("jwks-response-payload-ceiling", "security-ceiling-or-default",
+         "The fixed 64 KiB response ceiling bounds untrusted JWKS bytes before parsing.",
+         ("MAX_JWKS_BYTES",)),
+        ("jwks-http-media-contract", "protocol-or-format-invariant",
+         "These exact HTTP header and JSON media values define JWKS request and response compatibility.",
+         ("ACCEPT_HEADER", "JSON_MEDIA_TYPE", "JWK_SET_MEDIA_TYPE")),
+    )
+    retained_partitions: list[dict[str, object]] = []
+    for partition, classification, rationale, names in retained_specs:
+        spans: list[tuple[int, int]] = []
+        for name in names:
+            constant = java_static_final_initializer(provider, "JwkSetProvider", name)
+            if constant is None:
+                return None
+            spans.append((constant[1], constant[2]))
+        ids = exact_ids(JWK_PROVIDER_PATH, provider, spans)
+        if ids is None or not ids or assigned & set(ids):
+            return None
+        assigned.update(ids)
+        retained_partitions.append({
+            "semanticPartition": partition, "status": "retained",
+            "classification": classification, "rationale": rationale, "candidateIds": ids,
+        })
+    sentinel = exact_statement(provider, r'input\.readNBytes\(MAX_JWKS_BYTES\s*\+\s*1\)')
+    if sentinel is None:
+        return None
+    sentinel_ids = exact_ids(JWK_PROVIDER_PATH, provider, [sentinel])
+    if sentinel_ids is None or len(sentinel_ids) != 1 or assigned & set(sentinel_ids):
+        return None
+    assigned.update(sentinel_ids)
+    retained_partitions.append({
+        "semanticPartition": "jwks-payload-overflow-sentinel", "status": "retained",
+        "classification": "derived",
+        "rationale": "The one extra byte is derived from the response ceiling so the consumer can detect an oversized body without admitting it.",
+        "candidateIds": sentinel_ids,
+    })
+    family_paths = {JWK_PROVIDER_PATH.as_posix(), JWK_CONFIGURATION_PATH.as_posix()}
+    expected_family = {
+        identifier for identifier, candidate in discovered.items()
+        if candidate.path == JWK_PROVIDER_PATH.as_posix()
+        or (candidate.path == JWK_CONFIGURATION_PATH.as_posix()
+            and candidate.role in {
+                "RAVENROOT_AUTH_JWKS_CACHE_SECONDS",
+                "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS",
+            })
+        or (candidate.path == JWK_CONFIGURATION_PATH.as_posix()
+            and candidate.symbol == "jwksTransportPolicy")
+    }
+    if assigned != expected_family:
+        return None
+    if not java_test_type_is_directly_runnable(tests, "AuthenticationConfigurationTest") \
+            or any(java_method_digest(tests, "AuthenticationConfigurationTest", method) != digest
+                   for method, digest in JWK_TEST_METHOD_DIGESTS.items()) \
+            or any(java_method_annotations(tests, "AuthenticationConfigurationTest", method) != ("@Test",)
+                   for method in JWK_TEST_METHOD_DIGESTS):
+        return None
+    configuration_row = ("| `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS`, "
+                         "`RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | "
+                         "whole seconds from `1` through `300`; `3`, `5` |")
+    if configuration_doc.count(configuration_row) != 1 \
+            or any(environment_doc.count(f"| `{binding}` | See the linked contract for exact type, default, and applicability. |") != 1
+                   for binding in ("RAVENROOT_AUTH_JWKS_CACHE_SECONDS",
+                                   "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                                   "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS")):
+        return None
+    return {
+        "kind": "java-jwks-retrieval-environment-family-v1",
+        "logicalSettingCount": len(contracts), "contracts": contracts,
+        "semanticPartitions": retained_partitions, "candidateIds": sorted(assigned),
+        "sourceDigests": [
+            {"path": path.as_posix(), "digest": _source_digest(source)}
+            for path, source in ((JWK_PROVIDER_PATH, provider),
+                                 (JWK_CONFIGURATION_PATH, configuration), (JWK_TEST_PATH, tests))
+        ],
+        "sourceBodyDigests": JWK_METHOD_DIGESTS,
+        "testEvidence": [
+            {"path": JWK_TEST_PATH.as_posix(), "type": "AuthenticationConfigurationTest",
+             "method": method, "methodDigest": digest}
+            for method, digest in JWK_TEST_METHOD_DIGESTS.items()
+        ],
+        "documentationEvidence": [
+            {"path": JWK_CONFIGURATION_DOC_PATH.as_posix(), "assertion": configuration_row},
+            *({"path": JWK_ENVIRONMENT_DOC_PATH.as_posix(), "assertion": binding}
+              for binding in ("RAVENROOT_AUTH_JWKS_CACHE_SECONDS",
+                              "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                              "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS")),
+        ],
+    }
+
+
+def jwk_policy_authority_errors(root: Path, authorities: object,
+                                entries: dict[str, dict[str, object]],
+                                discovered: dict[str, Candidate]) -> list[str]:
+    if not jwk_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["JWKS policy authority exists without its source family"])
+    expected = jwk_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["JWKS policy source family is incomplete, mis-slotted, or unsupported"]
+    errors: list[str] = []
+    if authorities != {JWK_POLICY_AUTHORITY_ID: expected}:
+        errors.append("JWKS settings require the exact mandatory source-derived authority")
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("jwkPolicyAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("JWKS authority candidate partition is missing, duplicated, or foreign")
+    operators = {identifier: contract for contract in expected["contracts"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in expected["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None:
+            errors.append(f"{identifier}: mandatory JWKS source atom is absent")
+            continue
+        if entry.get("jwkPolicyAuthority") != JWK_POLICY_AUTHORITY_ID:
+            errors.append(f"{identifier}: JWKS authority marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            expected_fields: dict[str, object] = {
+                "status": contract["status"], "classification": "operator-configurable",
+                "setting": contract["setting"], "owner": contract["owner"],
+                "field": contract["field"], "bindings": contract["bindings"],
+                "default": contract["default"], "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+            if "conversion" in contract:
+                expected_fields["conversion"] = contract["conversion"]
+        else:
+            partition = retained[identifier]
+            expected_fields = {field: partition[field]
+                               for field in ("status", "classification", "rationale")}
+        for field, expected_value in expected_fields.items():
+            if entry.get(field) != expected_value:
+                errors.append(f"{identifier}: JWKS {field} authority has drifted")
+    return errors
+
+
 def program_github_deployment_candidate(root: Path, candidate: Candidate) -> bool:
     paths = PROGRAM_GITHUB_PATHS
     if candidate.path not in {paths[key] for key in ("compose", "helmValues", "helmSchema", "helmDeployment", "kubernetes")}:
@@ -14386,7 +14861,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 errors.append(f"{identifier}: reviewed operator setting requires a string bindings array")
             default_evidence = entry.get("defaultEvidence")
             agent_budget_evidence = entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID
-            if not isinstance(default_evidence, list) or (not default_evidence and not agent_budget_evidence) or any(
+            jwk_policy_evidence = entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID
+            if not isinstance(default_evidence, list) \
+                    or (not default_evidence and not agent_budget_evidence and not jwk_policy_evidence) or any(
                     not isinstance(evidence_id, str) or not evidence_id.strip()
                     for evidence_id in default_evidence):
                 errors.append(f"{identifier}: reviewed operator setting requires defaultEvidence candidate ids")
@@ -14416,6 +14893,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     pass
                 elif entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID:
                     pass
+                elif entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
+                    pass
                 elif entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
                     pass
                 elif current_source_owner(root, owner) is None:
@@ -14430,6 +14909,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if family is None or conversion != family["conversion"]:
                         errors.append(
                             f"{identifier}: converted assistant row must cite its exact family conversion")
+                    continue
+                if entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
                     continue
                 if setting == MANIFEST_PIN_ATTEMPTS_SETTING \
                         and isinstance(conversion, dict) \
@@ -14636,6 +15117,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(agent_budget_authority_errors(
         root, document.get("agentBudgetAuthorities"), entries, discovered,
     ))
+    errors.extend(jwk_policy_authority_errors(
+        root, document.get("jwkPolicyAuthorities"), entries, discovered,
+    ))
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
@@ -14665,6 +15149,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
             continue
         if representative.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID:
+            continue
+        if representative.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
             continue
@@ -14728,6 +15214,9 @@ def remediation_owner(entry: dict[str, object]) -> str:
     if entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID \
             or entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
         return "#320"
+    if entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID \
+            or entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
+        return "#321"
     if entry.get("followUp") in {"#316", "#317", "#318", "#319", "#320", "#321"}:
         return str(entry["followUp"])
     return "Retained; no remediation required"

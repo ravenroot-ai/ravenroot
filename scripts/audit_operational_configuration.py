@@ -3138,38 +3138,18 @@ def final_review_authority_errors(
     embed_group = "embed-enabled-operator-setting"
     if embed_group in group_members:
         if group_members[embed_group] != embed_ids or len(embed_ids) != 5:
-            errors.append("embed enabled authority is not the exact five-consumer binding roster")
-        expected_embed = {
-            "status": "already-centralized", "classification": "operator-configurable",
-            "setting": "embed.enabled",
-            "owner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration",
-            "field": "enabled", "bindings": ["RAVENROOT_EMBED_ENABLED"],
-            "default": "false", "defaultEvidence": sorted(embed_ids),
-            "validation": "Absent defaults false; only exact lowercase true or false is accepted before composition.",
-            "scope": "Packaged server process at startup.",
-            "pinning": "Read once before opening embed registration storage and composing browser routes.",
-            "coverage": "Typed configuration, packaged startup refusal, replica guard, server composition, operator reference, and focused tests.",
-            "rationale": "The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment.",
-        }
+            errors.append("embed enabled authority is not the exact historical five-atom binding roster")
+        embed_authorities = document.get("embedEnabledAuthorities", {})
+        embed_authority = (embed_authorities.get(EMBED_ENABLED_AUTHORITY_ID)
+                           if isinstance(embed_authorities, dict) else None)
+        contract = embed_authority.get("contract") if isinstance(embed_authority, dict) else None
+        expected_embed = ({key: copy.deepcopy(value) for key, value in contract.items()
+                           if key != "candidateIds"}
+                          if isinstance(contract, dict) else None)
         raw_group = next(group for group in authority["groups"]
                          if isinstance(group, dict) and group.get("id") == embed_group)
-        if raw_group.get("metadata") != expected_embed:
+        if expected_embed is None or raw_group.get("metadata") != expected_embed:
             errors.append("embed enabled authority metadata has drifted")
-        try:
-            embed_configuration = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java").read_text(encoding="utf-8")
-            startup = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java").read_text(encoding="utf-8")
-            reference = (root / "docs/reference/configuration.md").read_text(encoding="utf-8")
-        except OSError:
-            embed_configuration = startup = reference = ""
-            errors.append("embed enabled source proof cannot be read")
-        if "record EmbedBrowserConfiguration(boolean enabled" not in embed_configuration \
-                or 'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)' not in embed_configuration \
-                or 'case "true" -> true;' not in embed_configuration \
-                or 'case "false" -> false;' not in embed_configuration \
-                or 'String enabled = environment.get("RAVENROOT_EMBED_ENABLED");' not in startup \
-                or '"RAVENROOT_EMBED_ENABLED must be true or false"' not in startup \
-                or "| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |" not in reference:
-            errors.append("embed enabled typed owner, strict parser, startup refusal, or reference has drifted")
     return errors
 
 

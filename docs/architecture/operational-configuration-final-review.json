@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1740,11 +1740,12 @@
     },
     {
       "id": "embed-enabled-operator-setting",
-      "title": "Embed Enabled Operator Setting",
+      "title": "Centralized Embed Enablement Setting",
       "owner": "#321",
       "metadata": {
         "status": "already-centralized",
         "classification": "operator-configurable",
+        "embedEnabledAuthority": "embed-enabled-startup-environment-v1",
         "setting": "embed.enabled",
         "owner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration",
         "field": "enabled",
@@ -1752,50 +1753,68 @@
           "RAVENROOT_EMBED_ENABLED"
         ],
         "default": "false",
-        "defaultEvidence": [
-          "oc-962b7f0237877684628e",
-          "oc-9afebfed0a8eeafb99ce",
-          "oc-b3b8db24d0c0c201aa50",
-          "oc-d2a8cec06bc7d5911c92",
-          "oc-e8ffbe9d45ac6a184c88"
-        ],
+        "defaultEvidence": [],
+        "centralization": {
+          "kind": "java-embed-enable-parser-centralization-v1",
+          "issue": "#321",
+          "beforeRevision": "a7f0c592e4b09adbee1fe0e7c4c1b59d05c99a5e",
+          "afterRevision": "9a77081bbac6133709685b6706fa0d400922160d",
+          "typedOwner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration",
+          "parser": "enabledFromEnvironment",
+          "field": "enabled",
+          "removedDuplicateReaders": [
+            "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java#evaluate",
+            "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java#run",
+            "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java#replicaLocalAuthorities"
+          ]
+        },
         "validation": "Absent defaults false; only exact lowercase true or false is accepted before composition.",
-        "scope": "Packaged server process at startup.",
-        "pinning": "Read once before opening embed registration storage and composing browser routes.",
-        "coverage": "Typed configuration, packaged startup refusal, replica guard, server composition, operator reference, and focused tests.",
-        "rationale": "The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment."
+        "scope": "Packaged server process during startup.",
+        "pinning": "Validated at the start of packaged-server run and read again only by later startup composition and topology checks in the same process environment.",
+        "coverage": "Typed strict parser, pre-composition startup refusal, registration-store and route composition, replica topology naming, operator reference, and runnable tests.",
+        "rationale": "The typed enabled field and its one shared parser own the false default and strict Boolean contract; every startup consumer calls that authority."
       },
-      "semanticDecision": "The exact five production reads form one startup pipeline: validation happens before registration storage and route composition, while later exact-true checks consume that validated process value.",
+      "semanticDecision": "The typed Boolean setting already existed; #321 removed three raw consumers and the duplicate startup parser, so one exact false-default parser now owns validation for every startup decision.",
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java",
-          "digest": "f4cb8b247127dc59e089eb1b4517bf8d3ecc7ec786de7ef98193a92759ced567",
-          "assertion": "Typed owner declares enabled and strict false-default parser."
+          "digest": "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
+          "assertion": "The typed enabled field and enabledFromEnvironment method own the exact false default and strict parser."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java",
-          "digest": "33e3a87cf5aba42d924facccfe3a456fd89f0faec591e03c3030ca63fd10c455",
-          "assertion": "Packaged startup rejects malformed values before composition."
+          "digest": "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
+          "assertion": "Packaged startup translates parser refusal to one sanitized diagnostic before composition."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
-          "assertion": "Server opens registration storage and routes only after startup validation."
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
+          "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java",
-          "digest": "c62a02252a86e4685d2ccb0a9564f215f1d22b949e087e5ada0b1d0c3d8191ef",
-          "assertion": "Replica refusal includes the conditional embed authority after startup validation."
+          "digest": "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
+          "assertion": "Replica topology naming calls the same shared typed parser."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/embed/EmbedBrowserConfigurationTest.java",
+          "digest": "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
+          "assertion": "Runnable tests prove absence, exact true, and refusal of blank, whitespace, uppercase, and other malformed values."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerMainLifecycleTest.java",
+          "digest": "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
+          "assertion": "Runnable lifecycle tests prove disabled startup, supported enablement, and sanitized malformed refusal before bind."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java",
+          "digest": "e482cd7a53c9c4b4ab259df5d251f1d716db91ccce9d9b8c354d0f93ea592b3a",
+          "assertion": "Runnable topology test proves enabled embed inclusion in replica-local authority refusal."
         },
         {
           "path": "docs/reference/configuration.md",
           "digest": "8e054f588a6d9e0639bb070738d0a8d2df2aef79ff938c669eaf4a6070253c91",
-          "assertion": "Operator reference publishes strict Boolean syntax and false default."
-        },
-        {
-          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/embed/EmbedBrowserConfigurationTest.java",
-          "digest": "509e286d64534f27e23a6257aacd27f1574b10f43d05eb24faa78052554b0a24",
-          "assertion": "Focused tests cover absence, exact true, malformed input, and related startup constraints."
+          "assertion": "The operator reference publishes strict Boolean syntax and false default."
         }
       ],
       "candidateCount": 5,
@@ -5644,7 +5663,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "digest": "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -11590,7 +11609,7 @@
         "scope": "Packaged-server OIDC JWKS retrieval for one process lifetime.",
         "pinning": "Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance.",
         "coverage": "Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests.",
-        "rationale": "The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback.",
+        "rationale": "The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback.",
         "conversion": {
           "kind": "java-jwks-timeout-conversion-v1",
           "issue": "#321",
@@ -11605,7 +11624,7 @@
           "afterExpression": "requestTimeout"
         }
       },
-      "semanticDecision": "The former fixed five-second complete HTTP request timeout is converted to a typed environment setting with the same shipped fallback.",
+      "semanticDecision": "The former fixed five-second HttpRequest response timeout is converted to a typed environment setting with the same shipped fallback; streamed-body admission remains bounded separately by the payload ceiling.",
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java",

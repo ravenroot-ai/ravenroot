@@ -2826,7 +2826,11 @@ def final_review_authority_errors(
         if entry.get("path") == catalog_path and identifier in reviewable
     }
     if catalog_entries and {"ui-message-catalog-keys", "ui-message-catalog-copy"} <= group_members.keys():
-        catalog_source = (root / catalog_path).read_text(encoding="utf-8")
+        try:
+            catalog_source = (root / catalog_path).read_text(encoding="utf-8")
+        except OSError:
+            catalog_source = ""
+            errors.append("UI message catalog source proof cannot be read")
         catalog_keys = set(re.findall(r"(?m)^\s*['\"]([^'\"]+)['\"]\s*:", catalog_source))
         key_ids: set[str] = set()
         for identifier, entry in catalog_entries.items():
@@ -2872,9 +2876,13 @@ def final_review_authority_errors(
                          if isinstance(group, dict) and group.get("id") == embed_group)
         if raw_group.get("metadata") != expected_embed:
             errors.append("embed enabled authority metadata has drifted")
-        embed_configuration = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java").read_text(encoding="utf-8")
-        startup = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java").read_text(encoding="utf-8")
-        reference = (root / "docs/reference/configuration.md").read_text(encoding="utf-8")
+        try:
+            embed_configuration = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java").read_text(encoding="utf-8")
+            startup = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java").read_text(encoding="utf-8")
+            reference = (root / "docs/reference/configuration.md").read_text(encoding="utf-8")
+        except OSError:
+            embed_configuration = startup = reference = ""
+            errors.append("embed enabled source proof cannot be read")
         if "record EmbedBrowserConfiguration(boolean enabled" not in embed_configuration \
                 or 'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)' not in embed_configuration \
                 or 'case "true" -> true;' not in embed_configuration \

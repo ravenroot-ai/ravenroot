@@ -172,6 +172,70 @@ JWK_TEST_METHOD_DIGESTS = {
     "malformedAuthenticationValuesFailWithSanitizedSettingNames":
         "5b6e15a021f10d48f3f6c1400b12a9b22598980a96db9d45315b39e742d12fad",
 }
+EMBED_ENABLED_AUTHORITY_ID = "embed-enabled-startup-environment-v1"
+EMBED_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java")
+EMBED_STARTUP_CHECK_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java")
+EMBED_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+EMBED_REPLICA_CHECK_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java")
+EMBED_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/embed/EmbedBrowserConfigurationTest.java")
+EMBED_MAIN_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerMainLifecycleTest.java")
+EMBED_REPLICA_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java")
+EMBED_CONFIGURATION_DOC_PATH = Path("docs/reference/configuration.md")
+EMBED_SOURCE_DIGESTS = {
+    EMBED_CONFIGURATION_PATH: "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
+    EMBED_STARTUP_CHECK_PATH: "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
+    EMBED_MAIN_PATH: "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
+    EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
+    EMBED_CONFIGURATION_TEST_PATH: "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
+    EMBED_MAIN_TEST_PATH: "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
+    EMBED_REPLICA_TEST_PATH: "e482cd7a53c9c4b4ab259df5d251f1d716db91ccce9d9b8c354d0f93ea592b3a",
+}
+EMBED_METHOD_DIGESTS = {
+    "EmbedBrowserConfiguration.fromEnvironment":
+        "63fe1dfd6a859b4ff386ad21c25adb8bebaae8008ca4b790c8488047aca2a576",
+    "EmbedBrowserConfiguration.enabledFromEnvironment":
+        "588d7b8040df972b78b2b4a561e29cd01af019c87a9cc5ab2a6d3b8d1250c030",
+    "EmbedBrowserConfiguration.strictBoolean":
+        "36be3f38649947f3cb45f162b238de19e534ac922d6532d70567b3dd145237f8",
+    "EmbedStartupCheck.evaluate":
+        "60a13454321273b46b39a3b06f36eba7afb5146860ccd2f48f2f48b929442811",
+    "RavenrootServerMain.run":
+        "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0",
+    "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
+        "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
+    "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
+        "6afe09b7fd2a809f9bd981d8117cc0c902df5b3cd31baa6cafa4e842d1807d1d",
+}
+EMBED_TEST_METHOD_DIGESTS = {
+    (EMBED_CONFIGURATION_TEST_PATH, "EmbedBrowserConfigurationTest",
+     "absentFlagIsDisabledWithoutRequiringAnyCollaborator"):
+        "c8ff441c413870d9eb4f71eaf51da261023c97783ea48892c17d9c75ecd5a8c2",
+    (EMBED_CONFIGURATION_TEST_PATH, "EmbedBrowserConfigurationTest",
+     "invalidBooleanCapacityAndTtlFailAtStartup"):
+        "cd81de013fc707db2067d336a4a21dfdda989389fe1dfe18a91bb30efb86651d",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedDisabledLeavesStartupPathUnchanged"):
+        "76f42769ecfa209e5bb9535dc6901bb6b5b48f09b215ab46edf624d9f7c1d45f",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedWithoutAConfiguredAuthorityRefusesBeforeBind"):
+        "bc996698e14c8fa502974a7ee070b9bf66781f965cbbe0370ace30c16a7cba09",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedWithADurableAuthorityAndOneReplicaProceedsToBind"):
+        "943d7673f59f39fd63e88136f81bd1cff9f0d169221b8152b7513c5ace9be9e6",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedInvalidFlagRefusesWithoutEchoingItsValue"):
+        "a5597a15d5479893c3ac10b0f65ce6133198d9f4d276818ce2b7a3e9f1fd2491",
+    (EMBED_REPLICA_TEST_PATH, "ReplicaTopologyStartupCheckTest",
+     "anEnabledEmbedIsNamedAmongThePerReplicaAuthorities"):
+        "f7093e8cfbc827f9449fdccf066288f6371cb92c8ba0d3f0a2843c63256ccf16",
+}
 
 SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
@@ -3003,7 +3067,16 @@ def final_review_authority_errors(
         str(entry["id"]): entry for entry in document.get("entries", [])
         if isinstance(entry, dict) and isinstance(entry.get("id"), str)
     }
+    retired_entries = {
+        str(entry["id"]): entry for entry in document.get("retiredEntries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        and isinstance(entry.get("retirementRationale"), str)
+        and str(entry["retirementRationale"]).strip()
+    }
     for identifier in assigned:
+        if identifier in retired_entries and identifier not in active_entries \
+                and identifier not in replacements:
+            continue
         active_id = active_identifier(identifier)
         active = active_entries.get(active_id)
         if active is None or candidate_semantic_payload(active) != expected_metadata.get(active_id):
@@ -11146,7 +11219,7 @@ def jwk_policy_authority_from_source(
             "binding": "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", "default": "5",
             "defaultExpression": "Duration.ofSeconds(5)", "status": "converted",
             "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before each HttpRequest is built.",
-            "rationale": "The operator controls the complete JWKS HTTP request timeout; the former fixed five-second choice is now the shipped fallback.",
+            "rationale": "The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback.",
         },
     }
     before_source = committed_source(root, JWK_CONVERSION_BEFORE_REVISION, JWK_PROVIDER_PATH.as_posix())
@@ -11353,6 +11426,193 @@ def jwk_policy_authority_errors(root: Path, authorities: object,
         for field, expected_value in expected_fields.items():
             if entry.get(field) != expected_value:
                 errors.append(f"{identifier}: JWKS {field} authority has drifted")
+    return errors
+
+
+def embed_enabled_source_present(root: Path) -> bool:
+    """Keep the packaged embed enablement authority mandatory with its source pipeline."""
+    return any((root / relative).exists() for relative in EMBED_SOURCE_DIGESTS)
+
+
+def embed_enabled_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the five exact enablement atoms from their validated startup sequence."""
+    try:
+        sources = {relative: (root / relative).read_text(encoding="utf-8")
+                   for relative in (*EMBED_SOURCE_DIGESTS, EMBED_CONFIGURATION_DOC_PATH)}
+    except (OSError, UnicodeError):
+        return None
+    if any(_source_digest(sources[path]) != digest
+           for path, digest in EMBED_SOURCE_DIGESTS.items()):
+        return None
+    method_sources = {
+        "EmbedBrowserConfiguration.fromEnvironment":
+            (sources[EMBED_CONFIGURATION_PATH], "EmbedBrowserConfiguration", "fromEnvironment"),
+        "EmbedBrowserConfiguration.enabledFromEnvironment":
+            (sources[EMBED_CONFIGURATION_PATH], "EmbedBrowserConfiguration",
+             "enabledFromEnvironment"),
+        "EmbedBrowserConfiguration.strictBoolean":
+            (sources[EMBED_CONFIGURATION_PATH], "EmbedBrowserConfiguration", "strictBoolean"),
+        "EmbedStartupCheck.evaluate":
+            (sources[EMBED_STARTUP_CHECK_PATH], "EmbedStartupCheck", "evaluate"),
+        "RavenrootServerMain.run":
+            (sources[EMBED_MAIN_PATH], "RavenrootServerMain", "run"),
+        "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
+            (sources[EMBED_MAIN_PATH], "RavenrootServerMain",
+             "refuseUnsupportablePackagedEmbed"),
+        "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
+            (sources[EMBED_REPLICA_CHECK_PATH], "ReplicaTopologyStartupCheck",
+             "replicaLocalAuthorities"),
+    }
+    if any(java_method_digest(*method_sources[name]) != digest
+           for name, digest in EMBED_METHOD_DIGESTS.items()):
+        return None
+    configuration = sources[EMBED_CONFIGURATION_PATH]
+    startup = sources[EMBED_STARTUP_CHECK_PATH]
+    main = sources[EMBED_MAIN_PATH]
+    replica = sources[EMBED_REPLICA_CHECK_PATH]
+    if not java_type_declares_field(configuration, "EmbedBrowserConfiguration", "enabled"):
+        return None
+    from_environment = java_method_span(
+        configuration, "EmbedBrowserConfiguration", "fromEnvironment")
+    enabled_from_environment = java_method_span(
+        configuration, "EmbedBrowserConfiguration", "enabledFromEnvironment")
+    strict_boolean = java_method_span(
+        configuration, "EmbedBrowserConfiguration", "strictBoolean")
+    startup_evaluate = java_method_span(startup, "EmbedStartupCheck", "evaluate")
+    main_run = java_method_span(main, "RavenrootServerMain", "run")
+    replica_authorities = java_method_span(
+        replica, "ReplicaTopologyStartupCheck", "replicaLocalAuthorities")
+    if None in (from_environment, enabled_from_environment, strict_boolean, startup_evaluate, main_run,
+                replica_authorities):
+        return None
+    assert from_environment is not None and enabled_from_environment is not None \
+        and strict_boolean is not None
+    assert startup_evaluate is not None and main_run is not None and replica_authorities is not None
+    from_source = normalized(configuration[slice(*from_environment)])
+    enabled_source = normalized(configuration[slice(*enabled_from_environment)])
+    strict_source = normalized(configuration[slice(*strict_boolean)])
+    startup_source = normalized(startup[slice(*startup_evaluate)])
+    main_source = normalized(main[slice(*main_run)])
+    replica_source = normalized(replica[slice(*replica_authorities)])
+    if from_source.count("if (!enabledFromEnvironment(environment)) return disabled();") != 1 \
+            or enabled_source.count(
+                'return strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false);') != 1 \
+            or strict_source.count("if (value == null) return fallback;") != 1 \
+            or strict_source.count('case "true" -> true;') != 1 \
+            or strict_source.count('case "false" -> false;') != 1 \
+            or startup_source.count(
+                "enabled = EmbedBrowserConfiguration.enabledFromEnvironment(environment);") != 1 \
+            or startup_source.count(
+                'catch (IllegalArgumentException invalid) { return new Refusal('
+                '"EMBED_CONFIGURATION_INVALID", "RAVENROOT_EMBED_ENABLED must be true or false");') != 1 \
+            or startup_source.count("if (!enabled) return null;") != 1 \
+            or main_source.count("refuseUnsupportablePackagedEmbed(System.getenv());") != 1 \
+            or main_source.count(
+                "EmbedBrowserConfiguration .enabledFromEnvironment(System.getenv())") != 1 \
+            or main_source.count("EmbedBrowserConfiguration.fromEnvironment( System.getenv(),") != 1 \
+            or replica_source.count(
+                "EmbedBrowserConfiguration.enabledFromEnvironment(environment)") != 1:
+        return None
+    if not (main_source.index("refuseUnsupportablePackagedEmbed(System.getenv());")
+            < main_source.index(
+                "EmbedBrowserConfiguration .enabledFromEnvironment(System.getenv())")
+            < main_source.index("EmbedBrowserConfiguration.fromEnvironment( System.getenv(),")):
+        return None
+
+    span_specs = (
+        (EMBED_CONFIGURATION_PATH, configuration, enabled_from_environment, 1),
+        (EMBED_STARTUP_CHECK_PATH, startup, startup_evaluate, 1),
+    )
+    candidate_ids: list[str] = []
+    for relative, source, span, count in span_specs:
+        selected = candidate_ids_in_source_span(
+            relative, source, span[0], span[1], "environment-binding",
+            "RAVENROOT_EMBED_ENABLED", discovered)
+        if len(selected) != count:
+            return None
+        candidate_ids.extend(selected)
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return None
+    family_candidates = {
+        identifier for identifier, candidate in discovered.items()
+        if candidate.kind == "environment-binding"
+        and candidate.role == "RAVENROOT_EMBED_ENABLED"
+        and candidate.path in {path.as_posix() for path, *_rest in span_specs}
+    }
+    if set(candidate_ids) != family_candidates or len(candidate_ids) != 2:
+        return None
+
+    test_evidence: list[dict[str, str]] = []
+    for (path, type_symbol, method), digest in EMBED_TEST_METHOD_DIGESTS.items():
+        source = sources[path]
+        if not java_test_type_is_directly_runnable(source, type_symbol) \
+                or java_method_digest(source, type_symbol, method) != digest \
+                or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            return None
+        test_evidence.append({
+            "path": path.as_posix(), "type": type_symbol,
+            "method": method, "methodDigest": digest,
+        })
+    documentation_row = "| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |"
+    if sources[EMBED_CONFIGURATION_DOC_PATH].count(documentation_row) != 1:
+        return None
+    metadata = {
+        "status": "already-centralized", "classification": "operator-configurable",
+        "embedEnabledAuthority": EMBED_ENABLED_AUTHORITY_ID,
+        "setting": "embed.enabled",
+        "owner": f"{EMBED_CONFIGURATION_PATH.as_posix()}#EmbedBrowserConfiguration",
+        "field": "enabled", "bindings": ["RAVENROOT_EMBED_ENABLED"],
+        "default": "false", "defaultEvidence": [candidate_ids[0]],
+        "validation": "Absent defaults false; only exact lowercase true or false is accepted before composition.",
+        "scope": "Packaged server process during startup.",
+        "pinning": "Validated at the start of packaged-server run and read again only by later startup composition and topology checks in the same process environment.",
+        "coverage": "Typed strict parser, pre-composition startup refusal, registration-store and route composition, replica topology naming, operator reference, and runnable tests.",
+        "rationale": "The typed enabled field and its one shared parser own the false default and strict Boolean contract; every startup consumer calls that authority.",
+    }
+    return {
+        "kind": "java-embed-enabled-startup-environment-family-v1",
+        "contract": {**metadata, "candidateIds": sorted(candidate_ids)},
+        "candidateIds": sorted(candidate_ids),
+        "sourceDigests": [
+            {"path": path.as_posix(), "digest": digest}
+            for path, digest in EMBED_SOURCE_DIGESTS.items()
+        ],
+        "sourceBodyDigests": EMBED_METHOD_DIGESTS,
+        "testEvidence": test_evidence,
+        "documentationEvidence": [{
+            "path": EMBED_CONFIGURATION_DOC_PATH.as_posix(),
+            "assertion": documentation_row,
+        }],
+    }
+
+
+def embed_enabled_authority_errors(
+        root: Path, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    if not embed_enabled_source_present(root):
+        return ([] if not any(entry.get("embedEnabledAuthority") is not None
+                              for entry in entries.values())
+                else ["embed enabled authority exists without its source pipeline"])
+    expected = embed_enabled_authority_from_source(root, discovered)
+    if expected is None:
+        return ["embed enabled source pipeline is incomplete, misordered, or unsupported"]
+    contract = expected["contract"]
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("embedEnabledAuthority") is not None}
+    errors: list[str] = []
+    if marked != expected_ids:
+        errors.append("embed enabled authority candidate partition is missing, duplicated, or foreign")
+    expected_fields = {key: value for key, value in contract.items() if key != "candidateIds"}
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None:
+            errors.append(f"{identifier}: mandatory embed enabled source atom is absent")
+            continue
+        for field, expected_value in expected_fields.items():
+            if entry.get(field) != expected_value:
+                errors.append(f"{identifier}: embed enabled {field} authority has drifted")
     return errors
 
 
@@ -15119,6 +15379,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     ))
     errors.extend(jwk_policy_authority_errors(
         root, document.get("jwkPolicyAuthorities"), entries, discovered,
+    ))
+    errors.extend(embed_enabled_authority_errors(
+        root, entries, discovered,
     ))
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,

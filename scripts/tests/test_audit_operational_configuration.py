@@ -236,6 +236,33 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     errors,
                 )
 
+            retired = copy.deepcopy(document)
+            retired["entries"] = []
+            retired["retiredEntries"] = [{
+                **source_entry,
+                "retirementRationale": "The reviewed source atom was removed by typed centralization.",
+            }]
+            retired_expected = {
+                "oc-final": {"status": "pending-review", "classification": None}}
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(
+                        audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                self.assertEqual([], audit.final_review_authority_errors(
+                    root, retired, retired_expected))
+
+            fake_retirement = copy.deepcopy(document)
+            fake_retirement["entries"][0]["classification"] = "derived"
+            fake_retirement["retiredEntries"] = retired["retiredEntries"]
+            fake_expected = {"oc-final": {"status": "pending-review", "classification": None}}
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(
+                        audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                errors = audit.final_review_authority_errors(root, fake_retirement, fake_expected)
+            self.assertIn(
+                "final review candidate oc-final lost its marker or approved classification", errors)
+
     def test_final_review_authority_rejects_duplicate_membership_and_proof_drift(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         reference = document.get("finalReviewAuthority")
@@ -6774,6 +6801,162 @@ class JwkPolicyAuditTest(unittest.TestCase):
                     audit, "jwk_policy_authority_errors",
                     return_value=["JWKS-routing-probe"]) as routed:
                 self.assertIn("JWKS-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+
+class EmbedEnabledAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in (*audit.EMBED_SOURCE_DIGESTS, audit.EMBED_CONFIGURATION_DOC_PATH):
+            target = cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.embed_enabled_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The exact embed enablement pipeline must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        contract = cls.authority["contract"]
+        expected = {key: copy.deepcopy(value) for key, value in contract.items()
+                    if key != "candidateIds"}
+        for identifier in cls.authority["candidateIds"]:
+            cls.entries[identifier].update(copy.deepcopy(expected))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def document(self, entries=None):
+        rows = self.entries if entries is None else entries
+        return {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": list(copy.deepcopy(rows).values()),
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in self.candidates
+            },
+        }
+
+    def assert_direct_and_global_embed_error(self, document, candidates=None) -> None:
+        current_candidates = self.candidates if candidates is None else candidates
+        current = {candidate.id: candidate for candidate in current_candidates}
+        entries = {entry["id"]: entry for entry in document["entries"]}
+        direct = audit.embed_enabled_authority_errors(self.root, entries, current)
+        self.assertTrue(direct)
+        global_errors = audit.inventory_errors(self.root, document, tuple(current_candidates))
+        self.assertTrue(any("embed enabled" in error for error in global_errors), global_errors)
+
+    def test_embed_setting_is_derived_from_strict_parser_and_ordered_startup_consumers(self) -> None:
+        self.assertEqual(2, len(self.authority["candidateIds"]))
+        self.assertEqual(
+            ["oc-c92f93b348c318a14a6d", "oc-e67c99abfd1d50dd0a6f"],
+            self.authority["candidateIds"])
+        self.assertEqual(["oc-c92f93b348c318a14a6d"],
+                         self.authority["contract"]["defaultEvidence"])
+        self.assertEqual([], audit.embed_enabled_authority_errors(
+            self.root, self.entries, self.discovered))
+        global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
+        self.assertFalse([error for error in global_errors if "embed enabled" in error], global_errors)
+
+    def test_embed_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
+        without_markers = self.document()
+        for row in without_markers["entries"]:
+            row.pop("embedEnabledAuthority", None)
+        self.assert_direct_and_global_embed_error(without_markers)
+
+        reclassified = self.document()
+        for row in reclassified["entries"]:
+            if row["id"] in self.authority["candidateIds"]:
+                row.update(status="retained", classification="derived")
+        self.assert_direct_and_global_embed_error(reclassified)
+
+        duplicate = self.document()
+        foreign = next(row for row in duplicate["entries"]
+                       if row["id"] not in self.authority["candidateIds"])
+        foreign["embedEnabledAuthority"] = audit.EMBED_ENABLED_AUTHORITY_ID
+        self.assert_direct_and_global_embed_error(duplicate)
+
+    def test_embed_actual_source_and_test_mutations_fail_after_file_digest_refresh(self) -> None:
+        mutations = (
+            (audit.EMBED_CONFIGURATION_PATH,
+             'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)',
+             'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", true)'),
+            (audit.EMBED_CONFIGURATION_PATH, 'case "true" -> true;',
+             'case "TRUE" -> true;'),
+            (audit.EMBED_STARTUP_CHECK_PATH,
+             'enabled = EmbedBrowserConfiguration.enabledFromEnvironment(environment);',
+             'enabled = EmbedBrowserConfiguration.enabledFromEnvironment(Map.of());'),
+            (audit.EMBED_MAIN_PATH, 'refuseUnsupportablePackagedEmbed(System.getenv());',
+             '// packaged embed startup validation removed'),
+            (audit.EMBED_MAIN_PATH,
+             '.enabledFromEnvironment(System.getenv())',
+             '.enabledFromEnvironment(Map.of())'),
+            (audit.EMBED_REPLICA_CHECK_PATH,
+             'EmbedBrowserConfiguration.enabledFromEnvironment(environment)',
+             'EmbedBrowserConfiguration.enabledFromEnvironment(Map.of())'),
+            (audit.EMBED_CONFIGURATION_TEST_PATH,
+             '@Test\n    void invalidBooleanCapacityAndTtlFailAtStartup()',
+             'void invalidBooleanCapacityAndTtlFailAtStartup()'),
+            (audit.EMBED_MAIN_TEST_PATH,
+             '@Test\n    void packagedEmbedDisabledLeavesStartupPathUnchanged()',
+             '@Disabled\n    @Test\n    void packagedEmbedDisabledLeavesStartupPathUnchanged()'),
+            (audit.EMBED_CONFIGURATION_DOC_PATH,
+             '| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |',
+             '| `RAVENROOT_EMBED_ENABLED` | Boolean |'),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed_candidates = audit.discover(self.root)
+                    refreshed = {candidate.id: candidate for candidate in refreshed_candidates}
+                    refreshed_digests = dict(audit.EMBED_SOURCE_DIGESTS)
+                    if relative in refreshed_digests:
+                        refreshed_digests[relative] = audit._source_digest(
+                            path.read_text(encoding="utf-8"))
+                    with mock.patch.object(audit, "EMBED_SOURCE_DIGESTS", refreshed_digests):
+                        self.assertIsNone(audit.embed_enabled_authority_from_source(
+                            self.root, refreshed))
+                        document = self.document()
+                        direct = audit.embed_enabled_authority_errors(
+                            self.root, self.entries, refreshed)
+                        self.assertIn(
+                            "embed enabled source pipeline is incomplete, misordered, or unsupported",
+                            direct)
+                        global_errors = audit.inventory_errors(
+                            self.root, document, refreshed_candidates)
+                        self.assertIn(
+                            "embed enabled source pipeline is incomplete, misordered, or unsupported",
+                            global_errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_embed_candidate_omission_and_foreign_atom_cannot_change_the_roster(self) -> None:
+        from dataclasses import replace
+        missing = dict(self.discovered)
+        del missing[self.authority["candidateIds"][0]]
+        self.assertIsNone(audit.embed_enabled_authority_from_source(self.root, missing))
+        template = self.discovered[self.authority["candidateIds"][0]]
+        injected = replace(template, id="oc-injected-embed-enabled-atom")
+        foreign = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.embed_enabled_authority_from_source(self.root, foreign))
+
+    def test_embed_inventory_dispatch_is_mandatory(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "embed_enabled_authority_errors",
+                    return_value=["embed-enabled-routing-probe"]) as routed:
+                self.assertIn("embed-enabled-routing-probe",
                               audit.inventory_errors(root, document, audit.discover(root)))
                 routed.assert_called_once()
 

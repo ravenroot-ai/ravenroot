@@ -171,7 +171,7 @@
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
         <!-- Jetty is used only by the optional, independently bound interaction WebSocket listener. -->
         <jetty.version>12.1.12</jetty.version>
-        <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
+        <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
         <!-- Same driver artifact ravenroot-extensions/ravenroot-jdbc already pins as a test
              fixture; one property so the two never drift apart. -->
         <postgresql-jdbc.version>42.7.7</postgresql-jdbc.version>

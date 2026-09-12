@@ -58,6 +58,21 @@ import java.util.concurrent.CompletionStage;
  */
 public interface TrustedIngress {
     /**
+     * Opens a stable durable consumer through an issued, active source context. The host binds the
+     * tenant, trusted behavior and node identity; only the consumer token is author-selected.
+     * One handle may be open per activation; closing it permits another open. The handle accepts
+     * only the issuing context's identity. Existing deployment-scoped methods retain their namespace;
+     * source-context facades enforce that identity and refuse cursors outside their own deployment.
+     * The default fails closed.
+     * @param consumerId case-sensitive token matching {@code [A-Za-z0-9][A-Za-z0-9._-]{0,127}}
+     * @return exclusive, activation-bound stable ingress
+     * @throws UnsupportedOperationException when stable ownership is unavailable
+     */
+    default DurableConsumerIngress openDurableConsumer(String consumerId) {
+        throw new UnsupportedOperationException("stable durable consumers are unavailable");
+    }
+
+    /**
      * Offers an unsolicited external event to this deployment.
      *
      * <p>Synchronous and non-blocking with respect to graph execution: it returns as soon as the

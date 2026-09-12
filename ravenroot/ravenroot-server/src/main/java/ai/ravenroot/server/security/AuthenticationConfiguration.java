@@ -73,9 +73,10 @@ public record AuthenticationConfiguration(InetSocketAddress bindAddress, Request
         String typeClaim = defaulted(environment.get("RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM"), "token_kind").trim();
         long skewSeconds = parseLong(environment, "RAVENROOT_AUTH_CLOCK_SKEW_SECONDS", 30, 0, 120);
         long cacheSeconds = parseLong(environment, "RAVENROOT_AUTH_JWKS_CACHE_SECONDS", 300, 30, 3_600);
+        JwkSetProvider.TransportPolicy transportPolicy = jwksTransportPolicy(environment);
         JwkSetProvider keys;
         try {
-            keys = new JwkSetProvider(jwks, Duration.ofSeconds(cacheSeconds));
+            keys = new JwkSetProvider(jwks, Duration.ofSeconds(cacheSeconds), transportPolicy);
         } catch (IllegalArgumentException invalidJwks) {
             throw new IllegalArgumentException("RAVENROOT_AUTH_JWKS_URI is invalid");
         }
@@ -86,6 +87,18 @@ public record AuthenticationConfiguration(InetSocketAddress bindAddress, Request
             // downstream exception out of startup diagnostics because a URI can contain credentials.
             throw new IllegalArgumentException("RAVENROOT_AUTH_ISSUER is invalid");
         }
+    }
+
+    static JwkSetProvider.TransportPolicy jwksTransportPolicy(Map<String, String> environment) {
+        var defaults = JwkSetProvider.TransportPolicy.defaults();
+        long connectTimeoutSeconds = parseLong(
+                environment, "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                defaults.connectTimeout().toSeconds(), 1, 300);
+        long requestTimeoutSeconds = parseLong(
+                environment, "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS",
+                defaults.requestTimeout().toSeconds(), 1, 300);
+        return new JwkSetProvider.TransportPolicy(
+                Duration.ofSeconds(connectTimeoutSeconds), Duration.ofSeconds(requestTimeoutSeconds));
     }
 
     private static InetAddress address(String value) {

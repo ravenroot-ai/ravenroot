@@ -6,6 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -17,6 +18,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AuthenticationConfigurationTest {
+    @Test
+    void jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange() {
+        var defaults = JwkSetProvider.TransportPolicy.defaults();
+        assertEquals(Duration.ofSeconds(3), defaults.connectTimeout());
+        assertEquals(Duration.ofSeconds(5), defaults.requestTimeout());
+
+        assertDoesNotThrow(() -> new JwkSetProvider.TransportPolicy(
+                Duration.ofSeconds(1), Duration.ofMinutes(5)));
+        assertThrows(IllegalArgumentException.class, () -> new JwkSetProvider.TransportPolicy(
+                Duration.ZERO, Duration.ofSeconds(5)));
+        assertThrows(IllegalArgumentException.class, () -> new JwkSetProvider.TransportPolicy(
+                Duration.ofSeconds(3), Duration.ofSeconds(301)));
+    }
+
     @Test
     void disabledModeIsExplicitAndRestrictedToLoopback() {
         var configuration = AuthenticationConfiguration.fromEnvironment(Map.of(
@@ -121,7 +136,13 @@ class AuthenticationConfigurationTest {
         oidc.put("RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM", " ");
         oidc.put("RAVENROOT_AUTH_CLOCK_SKEW_SECONDS", " ");
         oidc.put("RAVENROOT_AUTH_JWKS_CACHE_SECONDS", "\t");
+        oidc.put("RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS", " ");
+        oidc.put("RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", "\t");
         assertEquals("oidc", AuthenticationConfiguration.fromEnvironment(oidc, 8080).mode());
+
+        var transport = AuthenticationConfiguration.jwksTransportPolicy(oidc);
+        assertEquals(Duration.ofSeconds(3), transport.connectTimeout());
+        assertEquals(Duration.ofSeconds(5), transport.requestTimeout());
     }
 
     @Test
@@ -135,6 +156,14 @@ class AuthenticationConfigurationTest {
             Map<String, String> environment = oidcEnvironment();
             environment.put("RAVENROOT_AUTH_JWKS_CACHE_SECONDS", cache);
             assertEquals("oidc", AuthenticationConfiguration.fromEnvironment(environment, 8080).mode());
+        }
+        for (String timeout : new String[] {"1", "300"}) {
+            Map<String, String> environment = oidcEnvironment();
+            environment.put("RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS", timeout);
+            environment.put("RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", timeout);
+            var transport = AuthenticationConfiguration.jwksTransportPolicy(environment);
+            assertEquals(Duration.ofSeconds(Long.parseLong(timeout)), transport.connectTimeout());
+            assertEquals(Duration.ofSeconds(Long.parseLong(timeout)), transport.requestTimeout());
         }
     }
 
@@ -154,6 +183,16 @@ class AuthenticationConfigurationTest {
         assertSanitizedNumericFailure("RAVENROOT_AUTH_JWKS_CACHE_SECONDS", "29");
         assertSanitizedNumericFailure("RAVENROOT_AUTH_JWKS_CACHE_SECONDS", "3601");
         assertSanitizedNumericFailure("RAVENROOT_AUTH_JWKS_CACHE_SECONDS", "9223372036854775808");
+        assertSanitizedNumericFailure("RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS", "301");
+        assertSanitizedNumericFailure("RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", "secret-timeout");
+        assertSanitizedNumericFailure("RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", "301");
+        Map<String, String> zeroTimeout = oidcEnvironment();
+        zeroTimeout.put("RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS", "0");
+        var zeroTimeoutFailure = assertThrows(IllegalArgumentException.class,
+                () -> AuthenticationConfiguration.fromEnvironment(zeroTimeout, 8080));
+        assertTrue(zeroTimeoutFailure.getMessage().startsWith(
+                "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS must be an integer between "));
+        assertNull(zeroTimeoutFailure.getCause());
 
         var invalidBind = assertThrows(IllegalArgumentException.class,
                 () -> AuthenticationConfiguration.fromEnvironment(Map.of(

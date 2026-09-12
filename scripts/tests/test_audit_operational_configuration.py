@@ -389,13 +389,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             errors = audit.helm_authority_errors(root, None, {}, candidates)
             self.assertTrue(any("violate the closed authority" in error for error in errors), errors)
 
+        chart_metadata = audit.helm_chart_metadata(ROOT)
+        self.assertIsNotNone(chart_metadata)
+        assert chart_metadata is not None
+        chart_version = str(chart_metadata["version"])
+        chart_app_version = str(chart_metadata["appVersion"])
         chart_mutations = (
             ("apiVersion: v2", "apiVersion: v1"),
             ("name: ravenroot", "name: another-chart"),
             ("type: application", "type: library"),
             ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.\n", ""),
-            ("version: 0.1.0-alpha.1\n", ""),
-            ('appVersion: "0.1.0-alpha.1"\n', ""),
+            (f"version: {chart_version}\n", ""),
+            (f'appVersion: "{chart_app_version}"\n', ""),
             ('kubeVersion: ">=1.25.0-0"\n', ""),
             ("apiVersion: v2", "apiVersion: ["),
             ("description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.",
@@ -435,10 +440,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 shutil.copy2(ROOT / path, target)
             chart = root / audit.HELM_CHART_PATH
             source = chart.read_text(encoding="utf-8")
-            source = source.replace("version: 0.1.0-alpha.1",
-                                    "version: 0.1.0-alpha.1+build.7", 1)
-            source = source.replace('appVersion: "0.1.0-alpha.1"',
-                                    'appVersion: "0.1.0-alpha.1+build.7"', 1)
+            source = source.replace(f"version: {chart_version}",
+                                    f"version: {chart_version}+build.7", 1)
+            source = source.replace(f'appVersion: "{chart_app_version}"',
+                                    f'appVersion: "{chart_app_version}+build.7"', 1)
             chart.write_text(source, encoding="utf-8")
             self.assertIsNotNone(audit.helm_authority_from_source(root, candidates))
 

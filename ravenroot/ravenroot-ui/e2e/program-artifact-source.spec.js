@@ -389,7 +389,12 @@ test.beforeEach(async () => {
   currentLanguages = DEFAULT_LANGUAGES;
 });
 
-test.afterEach(async () => new Promise(resolve => service.close(resolve)));
+// The page under test is still open during this hook and holds keep-alive connections to the stub, so
+// a bare `close()` would wait on that traffic and can time out after the test body has passed.
+test.afterEach(async () => new Promise(resolve => {
+  service.closeAllConnections();
+  service.close(resolve);
+}));
 
 test('source written before the language catalog resolves survives, and the created artifact carries ITS sha256, not the starter\'s', async ({ page }) => {
   languageDelayMs = 700;

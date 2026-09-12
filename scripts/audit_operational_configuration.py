@@ -36,6 +36,208 @@ except ModuleNotFoundError:  # Imported as scripts.audit_operational_configurati
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "scripts" / "operational-configuration-inventory.json"
 REPORT = ROOT / "docs" / "architecture" / "operational-configuration-audit.md"
+FINAL_REVIEW = ROOT / "docs" / "architecture" / "operational-configuration-final-review.json"
+FINAL_REVIEW_AUTHORITY_ID = "issue-321-final-semantic-review-v1"
+AGENT_BUDGET_AUTHORITY_ID = "agent-authority-budget-environment-v1"
+AGENT_BUDGET_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java")
+AGENT_BUDGET_POLICY_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java")
+AGENT_BUDGET_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java")
+AGENT_BUDGET_COMPOSITION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+AGENT_BUDGET_CONSUMER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java")
+AGENT_BUDGET_VECTOR_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java")
+AGENT_BUDGET_CANDIDATE_IDS = (
+    "oc-2d29419d18f18da74d3c",
+    "oc-473ffef3055ed509d856",
+    "oc-defbd8454b4343da9a9f",
+)
+AGENT_BUDGET_METHOD_DIGESTS = {
+    "fromEnvironment": "9cf80fd044370a3b05ac4c016c91f549e7fdbbcad1ded9c5d764687c8697f4a6",
+    "positive": "d80613da351478a33247ab8eb1e32227f329ee2c86fa6055dc69bd2c9a8eb325",
+    "number": "e8d2aa2d22d3e52953d9272074c77534e3a084ff31ace7eab2237da38f8810b5",
+    "nonNegative": "0b2580caa63933c025d7e67a820ff78fe51e317874dd77ece70d8cbbc8cc8086",
+    "identity": "0a3831c20293ebab20d5d618aa2772b5fcc5511ef7ad60273710093e715e7d78",
+    "currency": "826e1d36fdd50775c95d308fb71c28c317dfbdd511da70956eb6ad0354094234",
+    "tokens": "ae19a9065c06212980f0ed4537338c27860f3c16d79fa10dadf112880c8dc183",
+}
+AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
+    "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
+AGENT_BUDGET_COMPOSITION_DIGEST = \
+    "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0"
+AGENT_BUDGET_CONSUMER_DIGEST = \
+    "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
+AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
+    "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288"
+AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
+    "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
+AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
+    "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697"
+AGENT_BUDGET_TEST_METHOD_DIGESTS = {
+    "shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs":
+        "26f10518f0277cd3f1901ab637cb5f762afc2dde2760f184d7bcf12b69f0a745",
+    "absentAndBlankNumericValuesUseTheSameDefaults":
+        "75e7fc12bafc1093eb95370641e0b309a366be900383a7456f02ccac6d2abbba",
+    "malformedAndOverflowingNumbersHaveCauseFreeSettingOnlyDiagnostics":
+        "9c29165f0f6cf7b114fcdfa6f57b8518e2badc0b25af251c8156b47147860405",
+    "positiveBudgetsRejectZeroAndNegativeValues":
+        "66e4f703dbf6012c733ffdfb82c31b604000352b4139b62c804cdbeae7a8e382",
+    "assertSameConfiguredValues":
+        "770c92e24483d3be8cebc32fb443ecc97dd752b0c3d49dc2ac32153274967af7",
+    "numericNames": "e48b2b346f5877e06cb3792f693e6c07b674b361c02fe84bd8f80eaf4bac1bf7",
+    "positiveNumericNames": "bdd007eac80d84b840eeb37774e3184d0620810d0d62993840fb9077faae3ea3",
+}
+AGENT_BUDGET_SETTING_SPECS = (
+    ("agent.runtime-instance", "local", "runtime", "runtimeInstanceId",
+     "RAVENROOT_AGENT_RUNTIME_INSTANCE", '"ravenroot-server"', "identity"),
+    ("agent.policy-version", "local", "policy", "policyVersion",
+     "RAVENROOT_AGENT_POLICY_VERSION", '"server-finite-v1"', "identity"),
+    ("agent.rate-card-version", "local", "rateCard", "rateCardVersion",
+     "RAVENROOT_AGENT_RATE_CARD_VERSION", '"builtin-conservative-v1"', "identity"),
+    ("agent.cost-currency", "local", "currency", "currency",
+     "RAVENROOT_AGENT_COST_CURRENCY", '"USD"', "currency"),
+    ("agent.root-lifetime-seconds", "local", "lifetime", "rootLifetime",
+     "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", "3_600", "positive"),
+    ("agent.max-turns", "vector", "turns", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TURNS", "1_024", "positive"),
+    ("agent.max-input-tokens", "vector", "inputTokens", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_INPUT_TOKENS", "20_000_000", "positive"),
+    ("agent.max-output-tokens", "vector", "outputTokens", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS", "2_000_000", "positive"),
+    ("agent.max-elapsed-millis", "vector", "elapsedMillis", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS", "3_600_000", "positive"),
+    ("agent.max-cost-micros", "vector", "costMicros", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_COST_MICROS", "100_000_000", "positive"),
+    ("agent.max-tool-calls", "vector", "toolCalls", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TOOL_CALLS", "4_096", "positive"),
+    ("agent.max-delegation-depth", "vector", "delegationDepth", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH", "8", "positive"),
+    ("agent.max-team-cumulative", "vector", "teamCumulative", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", "64", "positive"),
+    ("agent.max-team-active", "vector", "teamActive", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TEAM_ACTIVE", "16", "positive"),
+    ("agent.data-scopes", "local", "dataScopes", "dataScopes",
+     "RAVENROOT_AGENT_DATA_SCOPES", "Set.of()", "tokens"),
+    ("agent.authority-scopes", "local", "authorityScopes", "authorityScopes",
+     "RAVENROOT_AGENT_AUTHORITY_SCOPES", 'Set.of("runtime:delegate")', "tokens"),
+    ("agent.maximum-input-tokens-per-turn", "policy", "maximumInputTokensPerTurn",
+     "maximumInputTokensPerTurn", "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", "128_000", "positive"),
+    ("agent.maximum-output-tokens-per-turn", "policy", "maximumOutputTokensPerTurn",
+     "maximumOutputTokensPerTurn", "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", "32_000", "positive"),
+    ("agent.input-token-rate-micros", "policy", "inputTokenRateMicros", "inputTokenRateMicros",
+     "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", "10", "nonNegative"),
+    ("agent.output-token-rate-micros", "policy", "outputTokenRateMicros", "outputTokenRateMicros",
+     "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", "30", "nonNegative"),
+)
+JWK_POLICY_AUTHORITY_ID = "jwks-retrieval-policy-environment-v1"
+JWK_PROVIDER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/JwkSetProvider.java")
+JWK_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/security/AuthenticationConfiguration.java")
+JWK_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/security/AuthenticationConfigurationTest.java")
+JWK_CONFIGURATION_DOC_PATH = Path("docs/reference/configuration.md")
+JWK_ENVIRONMENT_DOC_PATH = Path("docs/reference/environment-variables.md")
+JWK_CONVERSION_BEFORE_REVISION = "5f6182ec565383165b18b0e336628d2f40ac8b1c"
+JWK_CONVERSION_BEFORE_SOURCE_DIGEST = \
+    "6b56d1c35c82476faa666e7a247542c894a0f000e467a617f75c10fe99eb1bdc"
+JWK_SOURCE_DIGESTS = {
+    JWK_PROVIDER_PATH: "f48ab36a52ef5ec4f45185db97416c4ce3e0e30a42e6c72e7dcce54ef6b8c688",
+    JWK_CONFIGURATION_PATH: "91435846c89b4f74aa8cc80069800469618fdb78eaf672e09f2092f71c65790c",
+    JWK_TEST_PATH: "fdc935834c3c6d076c174cf94a5597288e176b463223c95ba14b82c1b9075e4e",
+}
+JWK_METHOD_DIGESTS = {
+    "JwkSetProvider.current": "379db51d3e3d5e399c4f0001b9906f77a0d288edd50f995ff2fd7f5db2340f2d",
+    "JwkSetProvider.refresh": "cb88c5b4d5055dc96222577e5f81de21812aeb4cf1365e9cf6924f5394860503",
+    "JwkSetProvider.requireRange": "018f348a8dabc162905ab9b0ecf63a1a6728e90b772f37a124e2b664a7bbf94c",
+    "TransportPolicy.defaults": "96ac39d6da64a365dd0af332189c9850cc3d23766c09549a3ce5064059dda271",
+    "TransportPolicy.compactConstructor": "4c813ec5e71f94e3572a5986a4d2bb290aeaa5492854e7d958884daedf3c5464",
+    "AuthenticationConfiguration.oidc": "00eddd691b97facd8006db1379d02cc9d3518a847605ec7619f48087a46f3dd6",
+    "AuthenticationConfiguration.jwksTransportPolicy":
+        "3bde91fc932e50a7c1d8ffbbe1bab7ffd86acc11ce2efb5a62e2c4535b007086",
+    "AuthenticationConfiguration.parseLong":
+        "d2e27465a041f07ff537ac48f4830d46529401eed8a4d5a3a236afe26930fbd0",
+}
+JWK_TEST_METHOD_DIGESTS = {
+    "jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange":
+        "261b7ef85234e055c2e3138679bfae4f11ea3f79c79a621307ad2531bafed4e0",
+    "blankOptionalAuthenticationValuesUseTheirDefaults":
+        "9b1c0508cb89708f406cba04c2ebeed476f35facece446ddab5f43ec5eea6e3c",
+    "authenticationDurationsAcceptTheirExactBoundaries":
+        "6765873b53c50d5de14c11467a220a937e8bddae68fc8bdeb3cac8434857410e",
+    "malformedAuthenticationValuesFailWithSanitizedSettingNames":
+        "5b6e15a021f10d48f3f6c1400b12a9b22598980a96db9d45315b39e742d12fad",
+}
+EMBED_ENABLED_AUTHORITY_ID = "embed-enabled-startup-environment-v1"
+EMBED_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java")
+EMBED_STARTUP_CHECK_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java")
+EMBED_MAIN_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+EMBED_REPLICA_CHECK_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaTopologyStartupCheck.java")
+EMBED_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/embed/EmbedBrowserConfigurationTest.java")
+EMBED_MAIN_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerMainLifecycleTest.java")
+EMBED_REPLICA_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java")
+EMBED_CONFIGURATION_DOC_PATH = Path("docs/reference/configuration.md")
+EMBED_CENTRALIZATION_BEFORE_REVISION = "a7f0c592e4b09adbee1fe0e7c4c1b59d05c99a5e"
+EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
+EMBED_SOURCE_DIGESTS = {
+    EMBED_CONFIGURATION_PATH: "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
+    EMBED_STARTUP_CHECK_PATH: "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
+    EMBED_MAIN_PATH: "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
+    EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
+    EMBED_CONFIGURATION_TEST_PATH: "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
+    EMBED_MAIN_TEST_PATH: "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
+    EMBED_REPLICA_TEST_PATH: "e482cd7a53c9c4b4ab259df5d251f1d716db91ccce9d9b8c354d0f93ea592b3a",
+}
+EMBED_METHOD_DIGESTS = {
+    "EmbedBrowserConfiguration.fromEnvironment":
+        "63fe1dfd6a859b4ff386ad21c25adb8bebaae8008ca4b790c8488047aca2a576",
+    "EmbedBrowserConfiguration.enabledFromEnvironment":
+        "588d7b8040df972b78b2b4a561e29cd01af019c87a9cc5ab2a6d3b8d1250c030",
+    "EmbedBrowserConfiguration.strictBoolean":
+        "36be3f38649947f3cb45f162b238de19e534ac922d6532d70567b3dd145237f8",
+    "EmbedStartupCheck.evaluate":
+        "60a13454321273b46b39a3b06f36eba7afb5146860ccd2f48f2f48b929442811",
+    "RavenrootServerMain.run":
+        "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0",
+    "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
+        "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
+    "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
+        "6afe09b7fd2a809f9bd981d8117cc0c902df5b3cd31baa6cafa4e842d1807d1d",
+}
+EMBED_TEST_METHOD_DIGESTS = {
+    (EMBED_CONFIGURATION_TEST_PATH, "EmbedBrowserConfigurationTest",
+     "absentFlagIsDisabledWithoutRequiringAnyCollaborator"):
+        "c8ff441c413870d9eb4f71eaf51da261023c97783ea48892c17d9c75ecd5a8c2",
+    (EMBED_CONFIGURATION_TEST_PATH, "EmbedBrowserConfigurationTest",
+     "invalidBooleanCapacityAndTtlFailAtStartup"):
+        "cd81de013fc707db2067d336a4a21dfdda989389fe1dfe18a91bb30efb86651d",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedDisabledLeavesStartupPathUnchanged"):
+        "76f42769ecfa209e5bb9535dc6901bb6b5b48f09b215ab46edf624d9f7c1d45f",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedWithoutAConfiguredAuthorityRefusesBeforeBind"):
+        "bc996698e14c8fa502974a7ee070b9bf66781f965cbbe0370ace30c16a7cba09",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedWithADurableAuthorityAndOneReplicaProceedsToBind"):
+        "943d7673f59f39fd63e88136f81bd1cff9f0d169221b8152b7513c5ace9be9e6",
+    (EMBED_MAIN_TEST_PATH, "RavenrootServerMainLifecycleTest",
+     "packagedEmbedInvalidFlagRefusesWithoutEchoingItsValue"):
+        "a5597a15d5479893c3ac10b0f65ce6133198d9f4d276818ce2b7a3e9f1fd2491",
+    (EMBED_REPLICA_TEST_PATH, "ReplicaTopologyStartupCheckTest",
+     "anEnabledEmbedIsNamedAmongThePerReplicaAuthorities"):
+        "f7093e8cfbc827f9449fdccf066288f6371cb92c8ba0d3f0a2843c63256ccf16",
+}
 
 SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
@@ -71,6 +273,19 @@ TESTKIT_MODULES = {
     "ravenroot-persistence-testkit",
     "ravenroot-sandbox-supervisor-testkit",
 }
+VERIFICATION_FIXTURE_SCRIPTS = frozenset({
+    "scripts/measure-e2e-stability.sh",
+    "scripts/verify-empty-plugins-parity-ci.sh",
+    "scripts/verify-empty-plugins-parity.py",
+    "scripts/verify-empty-plugins-parity.sh",
+    "scripts/verify-extension-pack-consumer.sh",
+    "scripts/verify-mail-imap-consumer-container.sh",
+    "scripts/verify-mail-imap-mutations-container.sh",
+    "scripts/verify-plugin-activation-on-compose.sh",
+    "scripts/verify-plugin-activation-on-image.sh",
+    "scripts/verify-plugin-palette-ui.sh",
+    "scripts/verify-plugins-dir-confinement.sh",
+})
 EXCLUDED_PARTS = {"target", "node_modules", "dist", ".git"}
 SOURCE_SUFFIXES = {".java", ".js", ".mjs", ".ts", ".py", ".sh", ".yaml", ".yml", ".json"}
 
@@ -459,7 +674,8 @@ def surface(relative: Path) -> str | None:
         return "deployment"
     if relative.suffix == ".sh":
         if text.startswith("scripts/tests/") or "/e2e/" in text or "/src/test/" in text \
-                or text == "scripts/verify-source-session-editor-activity.sh":
+                or text == "scripts/verify-source-session-editor-activity.sh" \
+                or text in VERIFICATION_FIXTURE_SCRIPTS:
             return "test-fixture"
         return "script"
     # Documented runnable configuration is a deployment surface, not ordinary prose.
@@ -471,7 +687,8 @@ def surface(relative: Path) -> str | None:
     if text.startswith("ravenroot/ravenroot-ui/src/") or text.startswith("ravenroot/ravenroot-ui/public/"):
         return "ui"
     if text.startswith("scripts/"):
-        if text.startswith("scripts/tests/") or text.startswith("scripts/fixtures/"):
+        if text.startswith("scripts/tests/") or text.startswith("scripts/fixtures/") \
+                or text in VERIFICATION_FIXTURE_SCRIPTS:
             return "test-fixture"
         return "script"
     if "/src/test/" in text or "/e2e/" in text or "/test/" in text:
@@ -1230,6 +1447,30 @@ def candidate_ids_in_source_span(relative: Path, source: str, start: int, end: i
     return selected
 
 
+def all_candidate_ids_in_source_span(relative: Path, source: str, start: int, end: int,
+                                     discovered: dict[str, Candidate]) -> list[str]:
+    """Return every current lexical candidate whose exact occurrence begins in one source span."""
+    grouped: dict[tuple[str, str, str, str, str], list[str]] = {}
+    for candidate in discovered.values():
+        if candidate.path != relative.as_posix():
+            continue
+        key = (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+               candidate.evidence_digest)
+        grouped.setdefault(key, []).append(candidate.id)
+    occurrences: Counter[tuple[str, str, str, str, str]] = Counter()
+    selected: list[str] = []
+    for offset, symbol_name, candidate_kind, candidate_role, expression, evidence in code_candidates(
+            relative, source, surface(relative) or "java"):
+        evidence_digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+        key = (symbol_name, candidate_kind, candidate_role, expression, evidence_digest)
+        occurrence = occurrences[key]
+        occurrences[key] += 1
+        identifiers = grouped.get(key, [])
+        if start <= offset < end and occurrence < len(identifiers):
+            selected.append(identifiers[occurrence])
+    return sorted(selected)
+
+
 def java_package(source: str) -> str:
     code = strip_c_comments_and_literals(source)
     match = re.search(r"\bpackage\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*;", code)
@@ -1350,6 +1591,34 @@ def java_constructor_component_call(source: str, type_symbol: str, method: str,
     arguments, opening, closing = found[0]
     argument, start, end = arguments[components.index(component)]
     return argument, base + start, base + end
+
+
+def java_method_local_initializer(source: str, type_symbol: str, method: str,
+                                  variable: str) -> tuple[str, int, int] | None:
+    """Return one direct local initializer from an unambiguous Java method."""
+    method_span = java_method_span(source, type_symbol, method)
+    if method_span is None:
+        return None
+    base, limit = method_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    matches = list(re.finditer(
+        rf"\b(?:String|long|Set\s*<\s*String\s*>)\s+{re.escape(variable)}\s*=", code))
+    if len(matches) != 1:
+        return None
+    start = matches[0].end()
+    round_depth = square_depth = brace_depth = 0
+    for end in range(start, len(code)):
+        char = code[end]
+        if char == "(": round_depth += 1
+        elif char == ")": round_depth -= 1
+        elif char == "[": square_depth += 1
+        elif char == "]": square_depth -= 1
+        elif char == "{": brace_depth += 1
+        elif char == "}": brace_depth -= 1
+        elif char == ";" and round_depth == square_depth == brace_depth == 0:
+            return normalized(actual[start:end]), base + start, base + end
+    return None
 
 
 def java_invocation_arguments(source: str, type_symbol: str, method: str,
@@ -2639,6 +2908,255 @@ def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
             if key not in SOURCE_METADATA_FIELDS and key not in {"retirement", "identityMigration"}}
 
 
+def final_review_authority_errors(
+        root: Path, document: dict[str, object],
+        expected_metadata: dict[str, dict[str, object]]) -> list[str]:
+    """Apply the exact, source-anchored final-review partition without weakening row review.
+
+    Earlier issues recorded one semantic history object per changed row.  The final review covers
+    thousands of still-pending lexical atoms, so #321 records explicit candidate membership once in
+    a separate authority.  Counts and digests make each group closed, while the inventory row keeps
+    the group link and resulting metadata.  New candidates can never inherit a group by filename,
+    symbol, or a classifier heuristic.
+    """
+    reference = document.get("finalReviewAuthority")
+    if reference is None:
+        claimed = any(isinstance(entry, dict)
+                      and entry.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID
+                      for entry in document.get("entries", []))
+        return (["final review authority reference is missing while inventory rows claim it"]
+                if claimed else [])
+    expected_reference_fields = {"id", "path", "digest"}
+    if not isinstance(reference, dict) or set(reference) != expected_reference_fields \
+            or reference.get("id") != FINAL_REVIEW_AUTHORITY_ID \
+            or reference.get("path") != FINAL_REVIEW.relative_to(ROOT).as_posix() \
+            or not isinstance(reference.get("digest"), str):
+        return ["finalReviewAuthority has an unsupported or incomplete reference"]
+    authority_path = root / str(reference["path"])
+    try:
+        raw = authority_path.read_bytes()
+        authority = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return ["final review authority cannot be read as JSON"]
+    if hashlib.sha256(raw).hexdigest() != reference["digest"]:
+        return ["final review authority digest has drifted"]
+    required_authority_fields = {
+        "schemaVersion", "id", "issue", "sourceRevision", "sourceInventoryPath",
+        "sourceInventoryDigest", "candidateCount", "candidateSetDigest", "groups",
+    }
+    if not isinstance(authority, dict) or set(authority) != required_authority_fields \
+            or authority.get("schemaVersion") != 1 \
+            or authority.get("id") != FINAL_REVIEW_AUTHORITY_ID \
+            or authority.get("issue") != "#321" \
+            or not isinstance(authority.get("sourceRevision"), str) \
+            or re.fullmatch(r"[0-9a-f]{40}", str(authority.get("sourceRevision"))) is None \
+            or authority.get("sourceInventoryPath") != INVENTORY.relative_to(ROOT).as_posix() \
+            or not isinstance(authority.get("groups"), list) or not authority["groups"]:
+        return ["final review authority has an unsupported or incomplete shape"]
+    source_document, source_raw = committed_json(
+        root, str(authority["sourceRevision"]), str(authority["sourceInventoryPath"]))
+    if source_document is None or source_raw is None \
+            or hashlib.sha256(source_raw).hexdigest() != authority.get("sourceInventoryDigest"):
+        return ["final review authority is not anchored to its exact committed inventory"]
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+    if not revision_is_ancestor(root, str(authority["sourceRevision"]), head):
+        return ["final review source revision is not an ancestor of the checked-out HEAD"]
+    source_entries = {
+        str(entry["id"]): entry for entry in source_document.get("entries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+    reviewable = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("status") in {"pending-review", "deferred"}
+    }
+    replacements: dict[str, str] = {}
+    for record in document.get("reconciliationHistory", []):
+        if not isinstance(record, dict):
+            continue
+        for mapping in record.get("mappings", []):
+            if isinstance(mapping, dict) and isinstance(mapping.get("fromId"), str) \
+                    and isinstance(mapping.get("toId"), str):
+                replacements[str(mapping["fromId"])] = str(mapping["toId"])
+
+    def active_identifier(identifier: str) -> str:
+        seen: set[str] = set()
+        while identifier in replacements and identifier not in seen:
+            seen.add(identifier)
+            identifier = replacements[identifier]
+        return identifier
+
+    errors: list[str] = []
+    if authority.get("candidateCount") != len(reviewable) \
+            or authority.get("candidateSetDigest") != candidate_set_digest(reviewable):
+        errors.append("final review authority candidate roster has drifted from its committed source")
+    assigned: set[str] = set()
+    group_ids: set[str] = set()
+    group_members: dict[str, set[str]] = {}
+    group_fields = {
+        "id", "title", "owner", "metadata", "semanticDecision",
+        "sourceAndConsumerProof", "candidateCount",
+        "candidateSetDigest", "candidateIds",
+    }
+    tracked = set(tracked_files(root))
+    for raw_group in authority["groups"]:
+        identifier = raw_group.get("id") if isinstance(raw_group, dict) else None
+        if not isinstance(raw_group, dict) or set(raw_group) != group_fields \
+                or not isinstance(identifier, str) or not identifier or identifier in group_ids:
+            errors.append("final review authority contains an invalid or duplicate group")
+            continue
+        group_ids.add(identifier)
+        candidates = raw_group.get("candidateIds")
+        proof = raw_group.get("sourceAndConsumerProof")
+        decision = raw_group.get("semanticDecision")
+        metadata = raw_group.get("metadata")
+        classification = metadata.get("classification") if isinstance(metadata, dict) else None
+        status = metadata.get("status") if isinstance(metadata, dict) else None
+        rationale = metadata.get("rationale") if isinstance(metadata, dict) else None
+        if raw_group.get("owner") != "#321" \
+                or status not in {"retained", "already-centralized", "converted"} \
+                or classification not in CLASSIFICATIONS \
+                or status not in CLASSIFICATION_STATUSES.get(str(classification), set()) \
+                or not isinstance(rationale, str) or not rationale.strip() \
+                or not isinstance(metadata, dict) \
+                or not isinstance(decision, str) or not decision.strip() \
+                or not isinstance(candidates, list) or candidates != sorted(candidates) \
+                or len(candidates) != len(set(candidates)) \
+                or raw_group.get("candidateCount") != len(candidates) \
+                or raw_group.get("candidateSetDigest") != candidate_set_digest(candidates) \
+                or not isinstance(proof, list) or not proof:
+            errors.append(f"final review group {identifier} has incomplete decision evidence")
+            continue
+        for item in proof:
+            if not isinstance(item, dict) or set(item) != {"path", "digest", "assertion"} \
+                    or not isinstance(item.get("path"), str) \
+                    or not isinstance(item.get("digest"), str) \
+                    or not isinstance(item.get("assertion"), str) or not item["assertion"].strip():
+                errors.append(f"final review group {identifier} has invalid source proof")
+                continue
+            relative = Path(str(item["path"]))
+            proof_path = root / relative
+            if relative.is_absolute() or ".." in relative.parts or relative not in tracked \
+                    or not proof_path.is_file() \
+                    or hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]:
+                errors.append(f"final review group {identifier} source proof has drifted: {item['path']}")
+        foreign = set(str(candidate) for candidate in candidates) - reviewable
+        overlap = assigned & set(str(candidate) for candidate in candidates)
+        if foreign:
+            errors.append(f"final review group {identifier} contains non-reviewable candidates")
+        if overlap:
+            errors.append(f"final review group {identifier} overlaps another semantic authority")
+        for candidate in candidates:
+            candidate_id = str(candidate)
+            source_entry = source_entries.get(candidate_id)
+            if source_entry is not None:
+                errors.extend(final_review_candidate_semantic_errors(
+                    root, source_entry, classification))
+            active_id = active_identifier(candidate_id)
+            if active_id not in expected_metadata:
+                continue
+            expected_metadata[active_id] = {
+                **metadata,
+                "finalReviewAuthority": FINAL_REVIEW_AUTHORITY_ID,
+                "finalReviewGroup": identifier,
+                "remediationOwner": "#321",
+            }
+        assigned.update(str(candidate) for candidate in candidates)
+        group_members[identifier] = set(str(candidate) for candidate in candidates)
+    if assigned != reviewable:
+        errors.append("final review groups do not exactly partition the committed pending and deferred cohort")
+    if authority.get("candidateCount") != len(reviewable) \
+            or authority.get("candidateSetDigest") != candidate_set_digest(reviewable):
+        errors.append("final review authority cohort count or digest has drifted")
+    active_entries = {
+        str(entry["id"]): entry for entry in document.get("entries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+    retired_entries = {
+        str(entry["id"]): entry for entry in document.get("retiredEntries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        and isinstance(entry.get("retirementRationale"), str)
+        and str(entry["retirementRationale"]).strip()
+    }
+    for identifier in assigned:
+        if identifier in retired_entries and identifier not in active_entries \
+                and identifier not in replacements:
+            continue
+        active_id = active_identifier(identifier)
+        active = active_entries.get(active_id)
+        if active is None or candidate_semantic_payload(active) != expected_metadata.get(active_id):
+            errors.append(f"final review candidate {identifier} lost its marker or approved classification")
+    fixture_ids = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("path") in VERIFICATION_FIXTURE_SCRIPTS and identifier in reviewable
+    }
+    if "executable-verification-fixtures" in group_members:
+        if group_members["executable-verification-fixtures"] != fixture_ids:
+            errors.append("executable verification fixture group is not the exact eleven-script roster")
+        for relative in VERIFICATION_FIXTURE_SCRIPTS:
+            fixture = root / relative
+            try:
+                executable = bool(fixture.stat().st_mode & 0o111)
+                shebang = fixture.read_bytes().startswith(b"#!")
+            except OSError:
+                executable = shebang = False
+            if not executable or not shebang:
+                errors.append(f"verification fixture is not executable with an interpreter: {relative}")
+    catalog_path = "ravenroot/ravenroot-ui/src/ui-text.js"
+    catalog_entries = {
+        identifier: entry for identifier, entry in source_entries.items()
+        if entry.get("path") == catalog_path and identifier in reviewable
+    }
+    if catalog_entries and {"ui-message-catalog-keys", "ui-message-catalog-copy"} <= group_members.keys():
+        try:
+            catalog_source = (root / catalog_path).read_text(encoding="utf-8")
+        except OSError:
+            catalog_source = ""
+            errors.append("UI message catalog source proof cannot be read")
+        catalog_keys = set(re.findall(r"(?m)^\s*['\"]([^'\"]+)['\"]\s*:", catalog_source))
+        key_ids: set[str] = set()
+        for identifier, entry in catalog_entries.items():
+            try:
+                value = ast.literal_eval(str(entry.get("expression", "")))
+            except (SyntaxError, ValueError):
+                value = None
+            if value in catalog_keys:
+                key_ids.add(identifier)
+        if group_members["ui-message-catalog-keys"] != key_ids \
+                or group_members["ui-message-catalog-copy"] != set(catalog_entries) - key_ids:
+            errors.append("UI message catalog keys and copy are not the exact structural partition")
+    stream_ids = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("path") == "ravenroot/ravenroot-ui/src/monitoring-runtime-state.js"
+        and entry.get("role") in {"MAX_EVENT_STREAMS", "MAX_DEPLOYMENT_EVENT_STREAMS"}
+        and identifier in reviewable
+    }
+    if "ui-event-replay-safety-bounds" in group_members \
+            and group_members["ui-event-replay-safety-bounds"] != stream_ids:
+        errors.append("UI event replay safety group is not the exact traversal/deployment bound pair")
+    embed_ids = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("role") == "RAVENROOT_EMBED_ENABLED" and identifier in reviewable
+    }
+    embed_group = "embed-enabled-operator-setting"
+    if embed_group in group_members:
+        if group_members[embed_group] != embed_ids or len(embed_ids) != 5:
+            errors.append("embed enabled authority is not the exact historical five-atom binding roster")
+        embed_authorities = document.get("embedEnabledAuthorities", {})
+        embed_authority = (embed_authorities.get(EMBED_ENABLED_AUTHORITY_ID)
+                           if isinstance(embed_authorities, dict) else None)
+        contract = embed_authority.get("contract") if isinstance(embed_authority, dict) else None
+        expected_embed = ({key: copy.deepcopy(value) for key, value in contract.items()
+                           if key != "candidateIds"}
+                          if isinstance(contract, dict) else None)
+        raw_group = next(group for group in authority["groups"]
+                         if isinstance(group, dict) and group.get("id") == embed_group)
+        if expected_embed is None or raw_group.get("metadata") != expected_embed:
+            errors.append("embed enabled authority metadata has drifted")
+    return errors
+
+
 def catalog_property_key(source: str | None, line: object) -> str | None:
     if source is None or not isinstance(line, int):
         return None
@@ -2764,6 +3282,20 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "agentBudgetAuthorities" \
+            and path[2] in {"candidateIds", "defaultCandidateIds"}:
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "agentBudgetAuthorities" \
+            and path[2] in {"contracts", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
+    if len(path) == 4 and path[0] == "embedEnabledAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 5 and path[0] == "embedEnabledAuthorities" \
+            and path[2] == "contract" \
+            and path[3] in {"candidateIds", "defaultEvidence"}:
+        return path[4].isdigit()
     if len(path) == 4 and path[0] == "interactionWebSocketAuthorities" and path[2] == "candidateIds":
         return path[3].isdigit()
     if len(path) == 6 and path[0] == "interactionWebSocketAuthorities" \
@@ -2931,6 +3463,45 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field != "semanticPartitions":
                             remap_list(row, "defaultCandidateIds")
+
+    agent_budget_authorities = document.get("agentBudgetAuthorities")
+    if isinstance(agent_budget_authorities, dict):
+        for authority in agent_budget_authorities.values():
+            if isinstance(authority, dict):
+                remap_list(authority, "candidateIds")
+                remap_list(authority, "defaultCandidateIds")
+                for field in ("contracts", "semanticPartitions"):
+                    rows = authority.get(field)
+                    if isinstance(rows, list):
+                        for row in rows:
+                            if isinstance(row, dict):
+                                remap_list(row, "candidateIds")
+                                remap_list(row, "defaultCandidateIds")
+
+    jwk_authorities = document.get("jwkPolicyAuthorities")
+    if isinstance(jwk_authorities, dict):
+        for authority in jwk_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("contracts", "semanticPartitions"):
+                rows = authority.get(field)
+                if isinstance(rows, list):
+                    for row in rows:
+                        if isinstance(row, dict):
+                            remap_list(row, "candidateIds")
+                            remap_list(row, "defaultCandidateIds")
+
+    embed_authorities = document.get("embedEnabledAuthorities")
+    if isinstance(embed_authorities, dict):
+        for authority in embed_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            contract = authority.get("contract")
+            if isinstance(contract, dict):
+                remap_list(contract, "candidateIds")
+                remap_list(contract, "defaultEvidence")
 
     interaction_authorities = document.get("interactionWebSocketAuthorities")
     if isinstance(interaction_authorities, dict):
@@ -3177,6 +3748,27 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["programGithubPolicyAuthorities"] = {
             PROGRAM_GITHUB_POLICY_AUTHORITY_ID: program_github_authority,
         }
+    if agent_budget_policy_source_present(root):
+        agent_budget_authority = agent_budget_authority_from_source(root, current)
+        if agent_budget_authority is None:
+            return None, ["cannot derive the closed agent budget setting authority from current source"]
+        refreshed["agentBudgetAuthorities"] = {
+            AGENT_BUDGET_AUTHORITY_ID: agent_budget_authority,
+        }
+    if jwk_policy_source_present(root):
+        jwk_authority = jwk_policy_authority_from_source(root, current)
+        if jwk_authority is None:
+            return None, ["cannot derive the closed JWKS retrieval policy authority from current source"]
+        refreshed["jwkPolicyAuthorities"] = {
+            JWK_POLICY_AUTHORITY_ID: jwk_authority,
+        }
+    if embed_enabled_source_present(root):
+        embed_authority = embed_enabled_authority_from_source(root, current)
+        if embed_authority is None:
+            return None, ["cannot derive the centralized embed enablement authority from current source"]
+        refreshed["embedEnabledAuthorities"] = {
+            EMBED_ENABLED_AUTHORITY_ID: embed_authority,
+        }
     if interaction_websocket_source_present(root):
         interaction_authority = interaction_websocket_authority_from_source(root, current)
         if interaction_authority is None:
@@ -3344,6 +3936,7 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
             errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
             continue
         expected_metadata[identifier] = dict(review["afterMetadata"])
+    errors.extend(final_review_authority_errors(root, document, expected_metadata))
     for identifier, expected in expected_metadata.items():
         target = active.get(identifier)
         if target is None or candidate_semantic_payload(target) != expected:
@@ -5341,7 +5934,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"),
+         "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -6971,7 +7564,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029',
+  '1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -10137,6 +10730,947 @@ def program_github_policy_source_present(root: Path) -> bool:
                for key in ("runtime", "github", "authoring", "selector", "core"))
 
 
+def agent_budget_policy_source_present(root: Path) -> bool:
+    """Keep the family mandatory when any defining, owning, or test source remains."""
+    return any((root / relative).exists() for relative in (
+        AGENT_BUDGET_CONFIGURATION_PATH, AGENT_BUDGET_POLICY_PATH, AGENT_BUDGET_TEST_PATH,
+        AGENT_BUDGET_COMPOSITION_PATH, AGENT_BUDGET_CONSUMER_PATH, AGENT_BUDGET_VECTOR_PATH,
+    ))
+
+
+def agent_budget_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the complete packaged agent policy family from exact typed source positions."""
+    try:
+        configuration = (root / AGENT_BUDGET_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        policy = (root / AGENT_BUDGET_POLICY_PATH).read_text(encoding="utf-8")
+        tests = (root / AGENT_BUDGET_TEST_PATH).read_text(encoding="utf-8")
+        composition = (root / AGENT_BUDGET_COMPOSITION_PATH).read_text(encoding="utf-8")
+        consumer = (root / AGENT_BUDGET_CONSUMER_PATH).read_text(encoding="utf-8")
+        vector = (root / AGENT_BUDGET_VECTOR_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    policy_components = java_record_components(policy, "AgentAuthorityBudgetPolicy")
+    expected_policy_components = (
+        "runtimeInstanceId", "bootEpoch", "policyVersion", "rateCardVersion", "currency",
+        "rootLifetime", "rootMaxima", "maximumInputTokensPerTurn",
+        "maximumOutputTokensPerTurn", "inputTokenRateMicros", "outputTokenRateMicros",
+        "dataScopes", "authorityScopes",
+    )
+    vector_components = java_record_components(vector, "AgentBudgetVector")
+    if policy_components != expected_policy_components or vector_components != (
+            "turns", "inputTokens", "outputTokens", "elapsedMillis", "costMicros", "toolCalls",
+            "delegationDepth", "teamCumulative", "teamActive"):
+        return None
+    policy_slots = {
+        component: java_constructor_component_call(
+            configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment",
+            "AgentAuthorityBudgetPolicy", policy_components, component)
+        for component in policy_components
+    }
+    if any(policy_slots[component] is None for component in policy_components):
+        return None
+    if normalized(policy_slots["rootMaxima"][0]) != "maxima":
+        return None
+
+    def exact_ids(spans: list[tuple[int, int]]) -> list[str] | None:
+        selected = sorted(identifier for start, end in spans for identifier in
+                          all_candidate_ids_in_source_span(
+                              AGENT_BUDGET_CONFIGURATION_PATH, configuration,
+                              start, end, discovered))
+        keys = Counter(
+            (symbol, kind, role, expression,
+             hashlib.sha256(evidence.encode("utf-8")).hexdigest())
+            for offset, symbol, kind, role, expression, evidence in code_candidates(
+                AGENT_BUDGET_CONFIGURATION_PATH, configuration, "java")
+            if any(start <= offset < end for start, end in spans)
+        )
+        supplied = Counter(
+            (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+             candidate.evidence_digest)
+            for candidate in discovered.values()
+            if candidate.path == AGENT_BUDGET_CONFIGURATION_PATH.as_posix()
+            and (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+                 candidate.evidence_digest) in keys
+        )
+        return selected if supplied == keys else None
+
+    def canonical_default(expression: str) -> str | None:
+        evaluated = evaluated_java_default(expression, False)
+        if evaluated is not None:
+            return str(evaluated["value"])
+        if expression.startswith('"'):
+            try:
+                value = json.loads(expression)
+            except json.JSONDecodeError:
+                return None
+            return value if isinstance(value, str) else None
+        if normalized(expression) == "Set.of()":
+            return "empty set"
+        if normalized(expression) == 'Set.of("runtime:delegate")':
+            return "runtime:delegate"
+        return None
+
+    validation_by_helper = {
+        "identity": "Absent or blank uses the shipped identity; otherwise a stripped 1..128 character identity token is required.",
+        "currency": "Absent or blank uses USD; otherwise the stripped value is uppercased with Locale.ROOT and must be three letters.",
+        "positive": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "nonNegative": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long at least zero is required, with cause-free setting-only diagnostics.",
+        "tokens": "Absence uses the shipped set; explicit blank selects an empty set; comma-separated stripped tokens are syntax-checked, deduplicated, and bounded.",
+    }
+    contracts: list[dict[str, object]] = []
+    assigned: set[str] = set()
+    for setting, location, source_field, policy_field, binding, default_expression, helper in AGENT_BUDGET_SETTING_SPECS:
+        spans: list[tuple[int, int]] = []
+        if location == "local":
+            initializer = java_method_local_initializer(
+                configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment", source_field)
+            expected_policy_argument = ("Duration.ofSeconds(lifetime)"
+                                        if policy_field == "rootLifetime" else source_field)
+            slot = policy_slots[policy_field]
+            if initializer is None or slot is None or normalized(slot[0]) != expected_policy_argument:
+                return None
+            expression, start, end = initializer
+            spans.append((start, end))
+        elif location == "vector":
+            initializer = java_constructor_component_call(
+                configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment",
+                "AgentBudgetVector", vector_components, source_field)
+            if initializer is None:
+                return None
+            expression, start, end = initializer
+            spans.append((start, end))
+        else:
+            initializer = policy_slots[policy_field]
+            if initializer is None:
+                return None
+            expression, start, end = initializer
+            spans.append((start, end))
+        arguments = direct_factory_arguments(expression, helper)
+        binding_argument = "AUTHORITY_SCOPES" if setting == "agent.authority-scopes" else json.dumps(binding)
+        if arguments is None or len(arguments) != 3 \
+                or normalized(arguments[0][0]) != "environment" \
+                or normalized(arguments[1][0]) != binding_argument \
+                or normalized(arguments[2][0]) != normalized(default_expression):
+            return None
+        if setting == "agent.authority-scopes":
+            constant = java_static_final_initializer(
+                configuration, "AgentAuthorityBudgetConfiguration", "AUTHORITY_SCOPES")
+            if constant is None or normalized(constant[0]) != json.dumps(binding):
+                return None
+            spans.append((constant[1], constant[2]))
+        candidate_ids = exact_ids(spans)
+        if candidate_ids is None or not candidate_ids or assigned & set(candidate_ids):
+            return None
+        assigned.update(candidate_ids)
+        default_ids = sorted(identifier for identifier in candidate_ids
+                             if normalized(discovered[identifier].expression)
+                             == normalized(default_expression))
+        canonical = canonical_default(default_expression)
+        if canonical is None:
+            return None
+        owner_path = AGENT_BUDGET_VECTOR_PATH if location == "vector" else AGENT_BUDGET_POLICY_PATH
+        owner_type = "AgentBudgetVector" if location == "vector" else "AgentAuthorityBudgetPolicy"
+        owner_field = source_field if location == "vector" else policy_field
+        if not java_type_declares_field(
+                vector if location == "vector" else policy, owner_type, owner_field):
+            return None
+        contracts.append({
+            "setting": setting, "owner": f"{owner_path.as_posix()}#{owner_type}",
+            "field": owner_field, "bindings": [binding], "helper": helper,
+            "defaultExpression": default_expression, "evaluatedDefault": canonical,
+            "candidateIds": candidate_ids, "defaultCandidateIds": default_ids,
+            "factoryExpression": expression,
+            "validation": validation_by_helper[helper],
+            "scope": "Packaged server agent authority and economic budget policy.",
+            "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+            "coverage": ("Exact startup composition, factory expression and typed constructor slot, shared parser and "
+                         "policy/vector validation, production budget-service consumption, and focused executable tests."),
+            "rationale": (f"{binding} is an operator-controlled deployment binding; its shipped fallback occupies "
+                          f"the exact typed {owner_field} slot."),
+        })
+
+    retained_partitions = [
+        {"semanticPartition": "agent-identity-and-scope-token-grammars", "status": "retained",
+         "classification": "protocol-or-format-invariant",
+         "rationale": "These regular expressions define the accepted identity and scope token grammar.",
+         "candidateIds": ["oc-d71318608e2888544703", "oc-e1d66b0de1616b9f6244"]},
+        {"semanticPartition": "agent-parser-cardinality-ceilings", "status": "retained",
+         "classification": "security-ceiling-or-default",
+         "rationale": "These fixed parser bounds limit environment token length and distinct scope cardinality.",
+         "candidateIds": ["oc-b99e8c5a730d48fa6bdb", "oc-cd6afcb87c61066decf5"]},
+        {"semanticPartition": "agent-scope-limit-diagnostic", "status": "retained",
+         "classification": "presentation-text",
+         "rationale": "This fixed cause-free diagnostic is operator-facing failure text, not an operating value.",
+         "candidateIds": ["oc-b60333a2740b5f904a72"]},
+    ]
+    retained_ids = {identifier for partition in retained_partitions
+                    for identifier in partition["candidateIds"]}
+    configuration_ids = {identifier for identifier, candidate in discovered.items()
+                         if candidate.path == AGENT_BUDGET_CONFIGURATION_PATH.as_posix()}
+    if len(contracts) != len(AGENT_BUDGET_SETTING_SPECS) \
+            or len({contract["setting"] for contract in contracts}) != len(contracts) \
+            or assigned & retained_ids or assigned | retained_ids != configuration_ids:
+        return None
+    if java_reachable_helper_methods(
+            configuration, "AgentAuthorityBudgetConfiguration", ("positive",)) != {"number"} \
+            or java_reachable_helper_methods(
+                configuration, "AgentAuthorityBudgetConfiguration", ("nonNegative",)) != {"number"}:
+        return None
+    if any(java_method_digest(configuration, "AgentAuthorityBudgetConfiguration", method) != digest
+           for method, digest in AGENT_BUDGET_METHOD_DIGESTS.items()):
+        return None
+    if java_span_digest(policy, java_compact_constructor_span(
+            policy, "AgentAuthorityBudgetPolicy")) != AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST:
+        return None
+    if _source_digest(vector) != AGENT_BUDGET_VECTOR_SOURCE_DIGEST:
+        return None
+    composition_span = java_method_span(composition, "RavenrootServerMain", "run")
+    composition_body = normalized(composition[slice(*composition_span)]) if composition_span else ""
+    if java_method_digest(composition, "RavenrootServerMain", "run") != AGENT_BUDGET_COMPOSITION_DIGEST \
+            or _source_digest(composition) != AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST \
+            or composition_body.count(
+                "AgentAuthorityBudgetConfiguration .fromEnvironment(System.getenv())") != 1:
+        return None
+    consumer_span = java_method_span(consumer, "Session", "reserve")
+    consumer_body = normalized(consumer[slice(*consumer_span)]) if consumer_span else ""
+    if java_method_digest(consumer, "Session", "reserve") != AGENT_BUDGET_CONSUMER_DIGEST \
+            or _source_digest(consumer) != AGENT_BUDGET_CONSUMER_SOURCE_DIGEST \
+            or consumer_body.count("long input = policy.maximumInputTokensPerTurn();") != 1 \
+            or consumer_body.count("remaining.vector().inputTokens() < input") != 1 \
+            or consumer_body.count("new AgentBudgetVector(1, input, output") != 1:
+        return None
+    policy_fields = {contract["field"] for contract in contracts
+                     if contract["owner"].endswith("#AgentAuthorityBudgetPolicy")}
+    if any(f"policy.{field}()" not in consumer for field in policy_fields) \
+            or "policy.rootMaxima()" not in consumer \
+            or any(f"root.{field}()" not in consumer for field in vector_components):
+        return None
+    if any(java_method_digest(tests, "AgentAuthorityBudgetConfigurationTest", method) != digest
+           for method, digest in AGENT_BUDGET_TEST_METHOD_DIGESTS.items()):
+        return None
+    expected_annotations = {
+        "shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs": ("@Test",),
+        "absentAndBlankNumericValuesUseTheSameDefaults": ("@Test",),
+        "malformedAndOverflowingNumbersHaveCauseFreeSettingOnlyDiagnostics":
+            ("@ParameterizedTest", '@MethodSource("numericNames")'),
+        "positiveBudgetsRejectZeroAndNegativeValues":
+            ("@ParameterizedTest", '@MethodSource("positiveNumericNames")'),
+        "assertSameConfiguredValues": (), "numericNames": (), "positiveNumericNames": (),
+    }
+    if not java_test_type_is_directly_runnable(tests, "AgentAuthorityBudgetConfigurationTest") \
+            or not java_has_exact_rate_test_imports(tests, "AgentAuthorityBudgetConfigurationTest") \
+            or any(java_method_annotations(tests, "AgentAuthorityBudgetConfigurationTest", method) != annotations
+                   for method, annotations in expected_annotations.items()):
+        return None
+    positive_names = java_direct_stream_string_return(
+        tests, "AgentAuthorityBudgetConfigurationTest", "positiveNumericNames")
+    if positive_names != tuple(spec[4] for spec in AGENT_BUDGET_SETTING_SPECS
+                               if spec[6] == "positive"):
+        return None
+    return {
+        "kind": "java-agent-budget-environment-family-v2",
+        "logicalSettingCount": len(contracts), "contracts": contracts,
+        "semanticPartitions": retained_partitions,
+        "candidateIds": sorted(assigned | retained_ids),
+        "sourceBodyDigests": {
+            **AGENT_BUDGET_METHOD_DIGESTS,
+            "AgentAuthorityBudgetPolicy.compactConstructor": AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST,
+            "RavenrootServerMain.run": AGENT_BUDGET_COMPOSITION_DIGEST,
+            "AgentAuthorityBudgetService.Session.reserve": AGENT_BUDGET_CONSUMER_DIGEST,
+        },
+        "sourceDigests": [
+            {"path": relative.as_posix(), "digest": _source_digest(source)}
+            for relative, source in (
+                (AGENT_BUDGET_CONFIGURATION_PATH, configuration), (AGENT_BUDGET_POLICY_PATH, policy),
+                (AGENT_BUDGET_VECTOR_PATH, vector), (AGENT_BUDGET_COMPOSITION_PATH, composition),
+                (AGENT_BUDGET_CONSUMER_PATH, consumer), (AGENT_BUDGET_TEST_PATH, tests))
+        ],
+        "testEvidence": [
+            {"path": AGENT_BUDGET_TEST_PATH.as_posix(), "type": "AgentAuthorityBudgetConfigurationTest",
+             "method": method, "methodDigest": digest}
+            for method, digest in AGENT_BUDGET_TEST_METHOD_DIGESTS.items()
+        ],
+    }
+
+
+def agent_budget_authority_errors(root: Path, authorities: object,
+                                  entries: dict[str, dict[str, object]],
+                                  discovered: dict[str, Candidate]) -> list[str]:
+    if not agent_budget_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["agent budget authority exists without its source family"])
+    expected = agent_budget_authority_from_source(root, discovered)
+    if expected is None:
+        return ["agent budget policy source family is incomplete, mis-slotted, or unsupported"]
+    errors: list[str] = []
+    if authorities != {AGENT_BUDGET_AUTHORITY_ID: expected}:
+        errors.append("agent budget settings require the exact mandatory source-derived authority")
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("agentBudgetAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("agent budget authority candidate partition is missing, duplicated, or foreign")
+    operators = {identifier: contract for contract in expected["contracts"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in expected["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None:
+            errors.append(f"{identifier}: mandatory agent budget source atom is absent")
+            continue
+        if entry.get("agentBudgetAuthority") != AGENT_BUDGET_AUTHORITY_ID:
+            errors.append(f"{identifier}: agent budget authority marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            expected_fields = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "setting": contract["setting"], "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["evaluatedDefault"],
+                "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+        else:
+            partition = retained[identifier]
+            expected_fields = {field: partition[field]
+                               for field in ("status", "classification", "rationale")}
+        for field, expected_value in expected_fields.items():
+            if entry.get(field) != expected_value:
+                errors.append(f"{identifier}: agent budget {field} authority has drifted")
+    return errors
+
+
+def jwk_policy_source_present(root: Path) -> bool:
+    """Keep the JWKS family mandatory while any defining source remains."""
+    return any((root / relative).exists() for relative in (
+        JWK_PROVIDER_PATH, JWK_CONFIGURATION_PATH, JWK_TEST_PATH,
+        JWK_CONFIGURATION_DOC_PATH, JWK_ENVIRONMENT_DOC_PATH,
+    ))
+
+
+def jwk_policy_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed JWKS cache, transport, payload, and HTTP policy from source."""
+    try:
+        provider = (root / JWK_PROVIDER_PATH).read_text(encoding="utf-8")
+        configuration = (root / JWK_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        tests = (root / JWK_TEST_PATH).read_text(encoding="utf-8")
+        configuration_doc = (root / JWK_CONFIGURATION_DOC_PATH).read_text(encoding="utf-8")
+        environment_doc = (root / JWK_ENVIRONMENT_DOC_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    if any(_source_digest(source) != JWK_SOURCE_DIGESTS[path] for path, source in (
+            (JWK_PROVIDER_PATH, provider), (JWK_CONFIGURATION_PATH, configuration),
+            (JWK_TEST_PATH, tests))):
+        return None
+    method_sources = {
+        "JwkSetProvider.current": (provider, "JwkSetProvider", "current"),
+        "JwkSetProvider.refresh": (provider, "JwkSetProvider", "refresh"),
+        "JwkSetProvider.requireRange": (provider, "JwkSetProvider", "requireRange"),
+        "TransportPolicy.defaults": (provider, "TransportPolicy", "defaults"),
+        "AuthenticationConfiguration.oidc":
+            (configuration, "AuthenticationConfiguration", "oidc"),
+        "AuthenticationConfiguration.jwksTransportPolicy":
+            (configuration, "AuthenticationConfiguration", "jwksTransportPolicy"),
+        "AuthenticationConfiguration.parseLong":
+            (configuration, "AuthenticationConfiguration", "parseLong"),
+    }
+    if any(java_method_digest(*method_sources[name]) != digest
+           for name, digest in JWK_METHOD_DIGESTS.items()
+           if name != "TransportPolicy.compactConstructor"):
+        return None
+    if java_span_digest(provider, java_compact_constructor_span(
+            provider, "TransportPolicy")) != JWK_METHOD_DIGESTS["TransportPolicy.compactConstructor"]:
+        return None
+    if java_record_components(provider, "TransportPolicy") != ("connectTimeout", "requestTimeout") \
+            or not java_type_declares_field(provider, "JwkSetProvider", "ttl") \
+            or not java_type_declares_field(provider, "TransportPolicy", "connectTimeout") \
+            or not java_type_declares_field(provider, "TransportPolicy", "requestTimeout"):
+        return None
+
+    def exact_ids(relative: Path, source: str,
+                  spans: list[tuple[int, int]]) -> list[str] | None:
+        selected = sorted(identifier for start, end in spans for identifier in
+                          all_candidate_ids_in_source_span(relative, source, start, end, discovered))
+        keys = Counter(
+            (symbol, kind, role, expression,
+             hashlib.sha256(evidence.encode("utf-8")).hexdigest())
+            for offset, symbol, kind, role, expression, evidence in code_candidates(
+                relative, source, "java")
+            if any(start <= offset < end for start, end in spans)
+        )
+        supplied = Counter(
+            (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+             candidate.evidence_digest)
+            for candidate in discovered.values()
+            if candidate.path == relative.as_posix()
+            and (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+                 candidate.evidence_digest) in keys
+        )
+        return selected if supplied == keys else None
+
+    def exact_statement(source: str, pattern: str) -> tuple[int, int] | None:
+        matches = list(re.finditer(pattern, source, flags=re.DOTALL))
+        return matches[0].span() if len(matches) == 1 else None
+
+    cache_initializer = java_method_local_initializer(
+        configuration, "AuthenticationConfiguration", "oidc", "cacheSeconds")
+    connect_initializer = java_method_local_initializer(
+        configuration, "AuthenticationConfiguration", "jwksTransportPolicy", "connectTimeoutSeconds")
+    request_initializer = java_method_local_initializer(
+        configuration, "AuthenticationConfiguration", "jwksTransportPolicy", "requestTimeoutSeconds")
+    initializers = {
+        "security.oidc.jwks-cache-seconds": cache_initializer,
+        "security.oidc.jwks-connect-timeout-seconds": connect_initializer,
+        "security.oidc.jwks-request-timeout-seconds": request_initializer,
+    }
+    argument_contracts = {
+        "security.oidc.jwks-cache-seconds": (
+            '"RAVENROOT_AUTH_JWKS_CACHE_SECONDS"', "300", "30", "3_600"),
+        "security.oidc.jwks-connect-timeout-seconds": (
+            '"RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS"',
+            "defaults.connectTimeout().toSeconds()", "1", "300"),
+        "security.oidc.jwks-request-timeout-seconds": (
+            '"RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS"',
+            "defaults.requestTimeout().toSeconds()", "1", "300"),
+    }
+    if any(initializer is None for initializer in initializers.values()):
+        return None
+    for setting, initializer in initializers.items():
+        assert initializer is not None
+        arguments = direct_factory_arguments(initializer[0], "parseLong")
+        expected = argument_contracts[setting]
+        if arguments is None or len(arguments) != 5 \
+                or normalized(arguments[0][0]) != "environment" \
+                or tuple(normalized(argument[0]) for argument in arguments[1:]) != expected:
+            return None
+
+    cache_assignment = exact_statement(
+        provider,
+        r'this\.ttl\s*=\s*requireRange\(ttl,\s*Duration\.ofSeconds\(30\),\s*'
+        r'Duration\.ofHours\(1\),\s*"JWKS cache TTL"\);')
+    connect_assignment = exact_statement(
+        provider,
+        r'connectTimeout\s*=\s*requireRange\(\s*connectTimeout,\s*MINIMUM_CONNECT_TIMEOUT,\s*'
+        r'MAXIMUM_CONNECT_TIMEOUT,\s*"JWKS connect timeout"\);')
+    request_assignment = exact_statement(
+        provider,
+        r'requestTimeout\s*=\s*requireRange\(\s*requestTimeout,\s*MINIMUM_REQUEST_TIMEOUT,\s*'
+        r'MAXIMUM_REQUEST_TIMEOUT,\s*"JWKS request timeout"\);')
+    if None in (cache_assignment, connect_assignment, request_assignment):
+        return None
+    default_components = java_record_components(provider, "TransportPolicy")
+    connect_default = java_constructor_component_call(
+        provider, "TransportPolicy", "defaults", "TransportPolicy", default_components, "connectTimeout")
+    request_default = java_constructor_component_call(
+        provider, "TransportPolicy", "defaults", "TransportPolicy", default_components, "requestTimeout")
+    if connect_default is None or normalized(connect_default[0]) != "Duration.ofSeconds(3)" \
+            or request_default is None or normalized(request_default[0]) != "Duration.ofSeconds(5)":
+        return None
+    connect_default_ids = exact_ids(
+        JWK_PROVIDER_PATH, provider, [(connect_default[1], connect_default[2])])
+    request_default_ids = exact_ids(
+        JWK_PROVIDER_PATH, provider, [(request_default[1], request_default[2])])
+    if connect_default_ids is None or len(connect_default_ids) != 1 \
+            or request_default_ids is None or len(request_default_ids) != 1:
+        return None
+    default_ids_by_setting = {
+        "security.oidc.jwks-cache-seconds": [],
+        "security.oidc.jwks-connect-timeout-seconds": connect_default_ids,
+        "security.oidc.jwks-request-timeout-seconds": request_default_ids,
+    }
+
+    constant_names = {
+        "security.oidc.jwks-connect-timeout-seconds":
+            ("MINIMUM_CONNECT_TIMEOUT", "MAXIMUM_CONNECT_TIMEOUT"),
+        "security.oidc.jwks-request-timeout-seconds":
+            ("MINIMUM_REQUEST_TIMEOUT", "MAXIMUM_REQUEST_TIMEOUT"),
+    }
+    setting_spans: dict[str, list[tuple[Path, str, tuple[int, int]]]] = {
+        setting: [(JWK_CONFIGURATION_PATH, configuration, (initializer[1], initializer[2]))]
+        for setting, initializer in initializers.items() if initializer is not None
+    }
+    setting_spans["security.oidc.jwks-cache-seconds"].append(
+        (JWK_PROVIDER_PATH, provider, cache_assignment))
+    for setting, assignment, default in (
+            ("security.oidc.jwks-connect-timeout-seconds", connect_assignment, connect_default),
+            ("security.oidc.jwks-request-timeout-seconds", request_assignment, request_default)):
+        setting_spans[setting].append((JWK_PROVIDER_PATH, provider, assignment))
+        setting_spans[setting].append((JWK_PROVIDER_PATH, provider, (default[1], default[2])))
+        for constant_name in constant_names[setting]:
+            constant = java_static_final_initializer(provider, "TransportPolicy", constant_name)
+            if constant is None:
+                return None
+            expected_expression = ("Duration.ofSeconds(1)" if constant_name.startswith("MINIMUM")
+                                   else "Duration.ofMinutes(5)")
+            if normalized(constant[0]) != expected_expression:
+                return None
+            setting_spans[setting].append((JWK_PROVIDER_PATH, provider, (constant[1], constant[2])))
+
+    setting_specs = {
+        "security.oidc.jwks-cache-seconds": {
+            "owner": f"{JWK_PROVIDER_PATH.as_posix()}#JwkSetProvider", "field": "ttl",
+            "binding": "RAVENROOT_AUTH_JWKS_CACHE_SECONDS", "default": "300",
+            "defaultExpression": "300", "status": "already-centralized",
+            "validation": "Whole seconds from 30 through 3600; the typed provider revalidates the same 30-second through one-hour range.",
+            "rationale": "The operator controls JWKS refresh cache lifetime; 300 seconds is the shipped fallback, while 30 seconds and one hour are validation endpoints.",
+        },
+        "security.oidc.jwks-connect-timeout-seconds": {
+            "owner": f"{JWK_PROVIDER_PATH.as_posix()}#TransportPolicy", "field": "connectTimeout",
+            "binding": "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS", "default": "3",
+            "defaultExpression": "Duration.ofSeconds(3)", "status": "converted",
+            "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before HttpClient construction.",
+            "rationale": "The operator controls the external JWKS TCP connection timeout; the former fixed three-second choice is now the shipped fallback.",
+        },
+        "security.oidc.jwks-request-timeout-seconds": {
+            "owner": f"{JWK_PROVIDER_PATH.as_posix()}#TransportPolicy", "field": "requestTimeout",
+            "binding": "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS", "default": "5",
+            "defaultExpression": "Duration.ofSeconds(5)", "status": "converted",
+            "validation": "Whole seconds from 1 through 300, revalidated by the typed transport policy before each HttpRequest is built.",
+            "rationale": "The operator controls the HttpRequest response timeout; streamed body admission remains governed by the separate payload ceiling, and five seconds is the shipped fallback.",
+        },
+    }
+    before_source = committed_source(root, JWK_CONVERSION_BEFORE_REVISION, JWK_PROVIDER_PATH.as_posix())
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+    if before_source is None \
+            or hashlib.sha256(before_source.encode("utf-8")).hexdigest() != JWK_CONVERSION_BEFORE_SOURCE_DIGEST \
+            or before_source.count(".connectTimeout(Duration.ofSeconds(3))") != 1 \
+            or before_source.count(".timeout(Duration.ofSeconds(5))") != 1 \
+            or not revision_is_ancestor(root, JWK_CONVERSION_BEFORE_REVISION, head):
+        return None
+    provider_compact = normalized(provider)
+    configuration_compact = normalized(configuration)
+    if provider_compact.count(".connectTimeout(transportPolicy.connectTimeout())") != 1 \
+            or provider_compact.count("HttpRequest.newBuilder(uri).timeout(requestTimeout)") != 1 \
+            or provider_compact.count("this.requestTimeout = transportPolicy.requestTimeout();") != 1 \
+            or configuration_compact.count(
+                "new JwkSetProvider(jwks, Duration.ofSeconds(cacheSeconds), transportPolicy)") != 1 \
+            or configuration_compact.count(
+                "JwkSetProvider.TransportPolicy transportPolicy = jwksTransportPolicy(environment);") != 1:
+        return None
+
+    contracts: list[dict[str, object]] = []
+    assigned: set[str] = set()
+    for setting, spec in setting_specs.items():
+        ids: list[str] = []
+        for relative, source, span in setting_spans[setting]:
+            selected = exact_ids(relative, source, [span])
+            if selected is None:
+                return None
+            ids.extend(selected)
+        candidate_ids = sorted(set(ids))
+        if not candidate_ids or len(candidate_ids) != len(ids) or assigned & set(candidate_ids):
+            return None
+        assigned.update(candidate_ids)
+        default_ids = default_ids_by_setting[setting]
+        conversion = None
+        if spec["status"] == "converted":
+            suffix = "connect" if spec["field"] == "connectTimeout" else "request"
+            conversion = {
+                "kind": "java-jwks-timeout-conversion-v1", "issue": "#321",
+                "beforeRevision": JWK_CONVERSION_BEFORE_REVISION,
+                "afterRevision": "e1e0d074387847712c55caf297cb8f56f0c1e80c",
+                "path": JWK_PROVIDER_PATH.as_posix(), "symbol": "JwkSetProvider",
+                "binding": spec["binding"],
+                "bindingSymbol": f"{JWK_CONFIGURATION_PATH.as_posix()}#jwksTransportPolicy",
+                "field": spec["field"],
+                "beforeExpression": f"Duration.ofSeconds({spec['default']})",
+                "afterExpression": ("transportPolicy.connectTimeout()" if suffix == "connect"
+                                    else "requestTimeout"),
+            }
+        contract = {
+            "setting": setting, "owner": spec["owner"], "field": spec["field"],
+            "bindings": [spec["binding"]], "default": spec["default"],
+            "defaultExpression": spec["defaultExpression"], "defaultCandidateIds": default_ids,
+            "status": spec["status"], "validation": spec["validation"],
+            "scope": "Packaged-server OIDC JWKS retrieval for one process lifetime.",
+            "pinning": "Parsed once while OIDC authentication is composed at packaged-server startup and retained by the provider instance.",
+            "coverage": "Exact environment parser arguments, typed owner slot and validation, startup composition, HTTP consumer, operator reference, and executable tests.",
+            "rationale": spec["rationale"], "candidateIds": candidate_ids,
+        }
+        if conversion is not None:
+            contract["conversion"] = conversion
+        contracts.append(contract)
+
+    retained_specs = (
+        ("jwks-response-payload-ceiling", "security-ceiling-or-default",
+         "The fixed 64 KiB response ceiling bounds untrusted JWKS bytes before parsing.",
+         ("MAX_JWKS_BYTES",)),
+        ("jwks-http-media-contract", "protocol-or-format-invariant",
+         "These exact HTTP header and JSON media values define JWKS request and response compatibility.",
+         ("ACCEPT_HEADER", "JSON_MEDIA_TYPE", "JWK_SET_MEDIA_TYPE")),
+    )
+    retained_partitions: list[dict[str, object]] = []
+    for partition, classification, rationale, names in retained_specs:
+        spans: list[tuple[int, int]] = []
+        for name in names:
+            constant = java_static_final_initializer(provider, "JwkSetProvider", name)
+            if constant is None:
+                return None
+            spans.append((constant[1], constant[2]))
+        ids = exact_ids(JWK_PROVIDER_PATH, provider, spans)
+        if ids is None or not ids or assigned & set(ids):
+            return None
+        assigned.update(ids)
+        retained_partitions.append({
+            "semanticPartition": partition, "status": "retained",
+            "classification": classification, "rationale": rationale, "candidateIds": ids,
+        })
+    sentinel = exact_statement(provider, r'input\.readNBytes\(MAX_JWKS_BYTES\s*\+\s*1\)')
+    if sentinel is None:
+        return None
+    sentinel_ids = exact_ids(JWK_PROVIDER_PATH, provider, [sentinel])
+    if sentinel_ids is None or len(sentinel_ids) != 1 or assigned & set(sentinel_ids):
+        return None
+    assigned.update(sentinel_ids)
+    retained_partitions.append({
+        "semanticPartition": "jwks-payload-overflow-sentinel", "status": "retained",
+        "classification": "derived",
+        "rationale": "The one extra byte is derived from the response ceiling so the consumer can detect an oversized body without admitting it.",
+        "candidateIds": sentinel_ids,
+    })
+    family_paths = {JWK_PROVIDER_PATH.as_posix(), JWK_CONFIGURATION_PATH.as_posix()}
+    expected_family = {
+        identifier for identifier, candidate in discovered.items()
+        if candidate.path == JWK_PROVIDER_PATH.as_posix()
+        or (candidate.path == JWK_CONFIGURATION_PATH.as_posix()
+            and candidate.role in {
+                "RAVENROOT_AUTH_JWKS_CACHE_SECONDS",
+                "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS",
+            })
+        or (candidate.path == JWK_CONFIGURATION_PATH.as_posix()
+            and candidate.symbol == "jwksTransportPolicy")
+    }
+    if assigned != expected_family:
+        return None
+    if not java_test_type_is_directly_runnable(tests, "AuthenticationConfigurationTest") \
+            or any(java_method_digest(tests, "AuthenticationConfigurationTest", method) != digest
+                   for method, digest in JWK_TEST_METHOD_DIGESTS.items()) \
+            or any(java_method_annotations(tests, "AuthenticationConfigurationTest", method) != ("@Test",)
+                   for method in JWK_TEST_METHOD_DIGESTS):
+        return None
+    configuration_row = ("| `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS`, "
+                         "`RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | "
+                         "whole seconds from `1` through `300`; `3`, `5` |")
+    if configuration_doc.count(configuration_row) != 1 \
+            or any(environment_doc.count(f"| `{binding}` | See the linked contract for exact type, default, and applicability. |") != 1
+                   for binding in ("RAVENROOT_AUTH_JWKS_CACHE_SECONDS",
+                                   "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                                   "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS")):
+        return None
+    return {
+        "kind": "java-jwks-retrieval-environment-family-v1",
+        "logicalSettingCount": len(contracts), "contracts": contracts,
+        "semanticPartitions": retained_partitions, "candidateIds": sorted(assigned),
+        "sourceDigests": [
+            {"path": path.as_posix(), "digest": _source_digest(source)}
+            for path, source in ((JWK_PROVIDER_PATH, provider),
+                                 (JWK_CONFIGURATION_PATH, configuration), (JWK_TEST_PATH, tests))
+        ],
+        "sourceBodyDigests": JWK_METHOD_DIGESTS,
+        "testEvidence": [
+            {"path": JWK_TEST_PATH.as_posix(), "type": "AuthenticationConfigurationTest",
+             "method": method, "methodDigest": digest}
+            for method, digest in JWK_TEST_METHOD_DIGESTS.items()
+        ],
+        "documentationEvidence": [
+            {"path": JWK_CONFIGURATION_DOC_PATH.as_posix(), "assertion": configuration_row},
+            *({"path": JWK_ENVIRONMENT_DOC_PATH.as_posix(), "assertion": binding}
+              for binding in ("RAVENROOT_AUTH_JWKS_CACHE_SECONDS",
+                              "RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS",
+                              "RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS")),
+        ],
+    }
+
+
+def jwk_policy_authority_errors(root: Path, authorities: object,
+                                entries: dict[str, dict[str, object]],
+                                discovered: dict[str, Candidate]) -> list[str]:
+    if not jwk_policy_source_present(root):
+        return ([] if authorities in (None, {})
+                else ["JWKS policy authority exists without its source family"])
+    expected = jwk_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["JWKS policy source family is incomplete, mis-slotted, or unsupported"]
+    errors: list[str] = []
+    if authorities != {JWK_POLICY_AUTHORITY_ID: expected}:
+        errors.append("JWKS settings require the exact mandatory source-derived authority")
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("jwkPolicyAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("JWKS authority candidate partition is missing, duplicated, or foreign")
+    operators = {identifier: contract for contract in expected["contracts"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in expected["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None:
+            errors.append(f"{identifier}: mandatory JWKS source atom is absent")
+            continue
+        if entry.get("jwkPolicyAuthority") != JWK_POLICY_AUTHORITY_ID:
+            errors.append(f"{identifier}: JWKS authority marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            expected_fields: dict[str, object] = {
+                "status": contract["status"], "classification": "operator-configurable",
+                "setting": contract["setting"], "owner": contract["owner"],
+                "field": contract["field"], "bindings": contract["bindings"],
+                "default": contract["default"], "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+            if "conversion" in contract:
+                expected_fields["conversion"] = contract["conversion"]
+        else:
+            partition = retained[identifier]
+            expected_fields = {field: partition[field]
+                               for field in ("status", "classification", "rationale")}
+        for field, expected_value in expected_fields.items():
+            if entry.get(field) != expected_value:
+                errors.append(f"{identifier}: JWKS {field} authority has drifted")
+    return errors
+
+
+def embed_enabled_source_present(root: Path) -> bool:
+    """Keep the packaged embed enablement authority mandatory with its source pipeline."""
+    return any((root / relative).exists() for relative in EMBED_SOURCE_DIGESTS)
+
+
+def embed_enabled_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive surviving enablement atoms and the shared typed startup sequence."""
+    try:
+        sources = {relative: (root / relative).read_text(encoding="utf-8")
+                   for relative in (*EMBED_SOURCE_DIGESTS, EMBED_CONFIGURATION_DOC_PATH)}
+    except (OSError, UnicodeError):
+        return None
+    if any(_source_digest(sources[path]) != digest
+           for path, digest in EMBED_SOURCE_DIGESTS.items()):
+        return None
+    method_sources = {
+        "EmbedBrowserConfiguration.fromEnvironment":
+            (sources[EMBED_CONFIGURATION_PATH], "EmbedBrowserConfiguration", "fromEnvironment"),
+        "EmbedBrowserConfiguration.enabledFromEnvironment":
+            (sources[EMBED_CONFIGURATION_PATH], "EmbedBrowserConfiguration",
+             "enabledFromEnvironment"),
+        "EmbedBrowserConfiguration.strictBoolean":
+            (sources[EMBED_CONFIGURATION_PATH], "EmbedBrowserConfiguration", "strictBoolean"),
+        "EmbedStartupCheck.evaluate":
+            (sources[EMBED_STARTUP_CHECK_PATH], "EmbedStartupCheck", "evaluate"),
+        "RavenrootServerMain.run":
+            (sources[EMBED_MAIN_PATH], "RavenrootServerMain", "run"),
+        "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
+            (sources[EMBED_MAIN_PATH], "RavenrootServerMain",
+             "refuseUnsupportablePackagedEmbed"),
+        "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
+            (sources[EMBED_REPLICA_CHECK_PATH], "ReplicaTopologyStartupCheck",
+             "replicaLocalAuthorities"),
+    }
+    if any(java_method_digest(*method_sources[name]) != digest
+           for name, digest in EMBED_METHOD_DIGESTS.items()):
+        return None
+    configuration = sources[EMBED_CONFIGURATION_PATH]
+    startup = sources[EMBED_STARTUP_CHECK_PATH]
+    main = sources[EMBED_MAIN_PATH]
+    replica = sources[EMBED_REPLICA_CHECK_PATH]
+    if not java_type_declares_field(configuration, "EmbedBrowserConfiguration", "enabled"):
+        return None
+    from_environment = java_method_span(
+        configuration, "EmbedBrowserConfiguration", "fromEnvironment")
+    enabled_from_environment = java_method_span(
+        configuration, "EmbedBrowserConfiguration", "enabledFromEnvironment")
+    strict_boolean = java_method_span(
+        configuration, "EmbedBrowserConfiguration", "strictBoolean")
+    startup_evaluate = java_method_span(startup, "EmbedStartupCheck", "evaluate")
+    main_run = java_method_span(main, "RavenrootServerMain", "run")
+    replica_authorities = java_method_span(
+        replica, "ReplicaTopologyStartupCheck", "replicaLocalAuthorities")
+    if None in (from_environment, enabled_from_environment, strict_boolean, startup_evaluate, main_run,
+                replica_authorities):
+        return None
+    assert from_environment is not None and enabled_from_environment is not None \
+        and strict_boolean is not None
+    assert startup_evaluate is not None and main_run is not None and replica_authorities is not None
+    from_source = normalized(configuration[slice(*from_environment)])
+    enabled_source = normalized(configuration[slice(*enabled_from_environment)])
+    strict_source = normalized(configuration[slice(*strict_boolean)])
+    startup_source = normalized(startup[slice(*startup_evaluate)])
+    main_source = normalized(main[slice(*main_run)])
+    replica_source = normalized(replica[slice(*replica_authorities)])
+    if from_source.count("if (!enabledFromEnvironment(environment)) return disabled();") != 1 \
+            or enabled_source.count(
+                'return strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false);') != 1 \
+            or strict_source.count("if (value == null) return fallback;") != 1 \
+            or strict_source.count('case "true" -> true;') != 1 \
+            or strict_source.count('case "false" -> false;') != 1 \
+            or startup_source.count(
+                "enabled = EmbedBrowserConfiguration.enabledFromEnvironment(environment);") != 1 \
+            or startup_source.count(
+                'catch (IllegalArgumentException invalid) { return new Refusal('
+                '"EMBED_CONFIGURATION_INVALID", "RAVENROOT_EMBED_ENABLED must be true or false");') != 1 \
+            or startup_source.count("if (!enabled) return null;") != 1 \
+            or main_source.count("refuseUnsupportablePackagedEmbed(System.getenv());") != 1 \
+            or main_source.count(
+                "EmbedBrowserConfiguration .enabledFromEnvironment(System.getenv())") != 1 \
+            or main_source.count("EmbedBrowserConfiguration.fromEnvironment( System.getenv(),") != 1 \
+            or replica_source.count(
+                "EmbedBrowserConfiguration.enabledFromEnvironment(environment)") != 1:
+        return None
+    if not (main_source.index("refuseUnsupportablePackagedEmbed(System.getenv());")
+            < main_source.index(
+                "EmbedBrowserConfiguration .enabledFromEnvironment(System.getenv())")
+            < main_source.index("EmbedBrowserConfiguration.fromEnvironment( System.getenv(),")):
+        return None
+
+    span_specs = (
+        (EMBED_CONFIGURATION_PATH, configuration, enabled_from_environment, 1),
+        (EMBED_STARTUP_CHECK_PATH, startup, startup_evaluate, 1),
+    )
+    candidate_ids: list[str] = []
+    for relative, source, span, count in span_specs:
+        selected = candidate_ids_in_source_span(
+            relative, source, span[0], span[1], "environment-binding",
+            "RAVENROOT_EMBED_ENABLED", discovered)
+        if len(selected) != count:
+            return None
+        candidate_ids.extend(selected)
+    if len(candidate_ids) != len(set(candidate_ids)):
+        return None
+    family_candidates = {
+        identifier for identifier, candidate in discovered.items()
+        if candidate.kind == "environment-binding"
+        and candidate.role == "RAVENROOT_EMBED_ENABLED"
+        and candidate.path in {path.as_posix() for path, *_rest in span_specs}
+    }
+    if set(candidate_ids) != family_candidates or len(candidate_ids) != 2:
+        return None
+
+    test_evidence: list[dict[str, str]] = []
+    for (path, type_symbol, method), digest in EMBED_TEST_METHOD_DIGESTS.items():
+        source = sources[path]
+        if not java_test_type_is_directly_runnable(source, type_symbol) \
+                or java_method_digest(source, type_symbol, method) != digest \
+                or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            return None
+        test_evidence.append({
+            "path": path.as_posix(), "type": type_symbol,
+            "method": method, "methodDigest": digest,
+        })
+    documentation_row = "| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |"
+    if sources[EMBED_CONFIGURATION_DOC_PATH].count(documentation_row) != 1:
+        return None
+    before_sources = {
+        path: committed_source(root, EMBED_CENTRALIZATION_BEFORE_REVISION, path.as_posix())
+        for path in (EMBED_CONFIGURATION_PATH, EMBED_STARTUP_CHECK_PATH,
+                     EMBED_MAIN_PATH, EMBED_REPLICA_CHECK_PATH)
+    }
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+    if any(source is None for source in before_sources.values()) \
+            or not revision_is_ancestor(
+                root, EMBED_CENTRALIZATION_BEFORE_REVISION,
+                EMBED_CENTRALIZATION_AFTER_REVISION) \
+            or not revision_is_ancestor(root, EMBED_CENTRALIZATION_AFTER_REVISION, head):
+        return None
+    before_configuration = normalized(before_sources[EMBED_CONFIGURATION_PATH] or "")
+    before_startup = normalized(before_sources[EMBED_STARTUP_CHECK_PATH] or "")
+    before_main = normalized(before_sources[EMBED_MAIN_PATH] or "")
+    before_replica = normalized(before_sources[EMBED_REPLICA_CHECK_PATH] or "")
+    if before_configuration.count(
+            'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)') != 1 \
+            or before_startup.count(
+                'String enabled = environment.get("RAVENROOT_EMBED_ENABLED");') != 1 \
+            or before_startup.count('if (!"true".equals(enabled))') != 1 \
+            or before_main.count(
+                '"true".equals(System.getenv("RAVENROOT_EMBED_ENABLED"))') != 1 \
+            or before_replica.count(
+                '"true".equals(environment.get("RAVENROOT_EMBED_ENABLED"))') != 1:
+        return None
+    centralization = {
+        "kind": "java-embed-enable-parser-centralization-v1", "issue": "#321",
+        "beforeRevision": EMBED_CENTRALIZATION_BEFORE_REVISION,
+        "afterRevision": EMBED_CENTRALIZATION_AFTER_REVISION,
+        "typedOwner": f"{EMBED_CONFIGURATION_PATH.as_posix()}#EmbedBrowserConfiguration",
+        "parser": "enabledFromEnvironment", "field": "enabled",
+        "removedDuplicateReaders": [
+            f"{EMBED_STARTUP_CHECK_PATH.as_posix()}#evaluate",
+            f"{EMBED_MAIN_PATH.as_posix()}#run",
+            f"{EMBED_REPLICA_CHECK_PATH.as_posix()}#replicaLocalAuthorities",
+        ],
+    }
+    metadata = {
+        "status": "already-centralized", "classification": "operator-configurable",
+        "embedEnabledAuthority": EMBED_ENABLED_AUTHORITY_ID,
+        "setting": "embed.enabled",
+        "owner": f"{EMBED_CONFIGURATION_PATH.as_posix()}#EmbedBrowserConfiguration",
+        "field": "enabled", "bindings": ["RAVENROOT_EMBED_ENABLED"],
+        "default": "false", "defaultEvidence": [],
+        "centralization": centralization,
+        "validation": "Absent defaults false; only exact lowercase true or false is accepted before composition.",
+        "scope": "Packaged server process during startup.",
+        "pinning": "Validated at the start of packaged-server run and read again only by later startup composition and topology checks in the same process environment.",
+        "coverage": "Typed strict parser, pre-composition startup refusal, registration-store and route composition, replica topology naming, operator reference, and runnable tests.",
+        "rationale": "The typed enabled field and its one shared parser own the false default and strict Boolean contract; every startup consumer calls that authority.",
+    }
+    return {
+        "kind": "java-embed-enabled-startup-environment-family-v1",
+        "contract": {**metadata, "candidateIds": sorted(candidate_ids)},
+        "candidateIds": sorted(candidate_ids),
+        "sourceDigests": [
+            {"path": path.as_posix(), "digest": digest}
+            for path, digest in EMBED_SOURCE_DIGESTS.items()
+        ],
+        "sourceBodyDigests": EMBED_METHOD_DIGESTS,
+        "testEvidence": test_evidence,
+        "documentationEvidence": [{
+            "path": EMBED_CONFIGURATION_DOC_PATH.as_posix(),
+            "assertion": documentation_row,
+        }],
+    }
+
+
+def embed_enabled_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    if not embed_enabled_source_present(root):
+        return ([] if authorities in (None, {})
+                and not any(entry.get("embedEnabledAuthority") is not None
+                            for entry in entries.values())
+                else ["embed enabled authority exists without its source pipeline"])
+    expected = embed_enabled_authority_from_source(root, discovered)
+    if expected is None:
+        return ["embed enabled source pipeline is incomplete, misordered, or unsupported"]
+    contract = expected["contract"]
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("embedEnabledAuthority") is not None}
+    errors: list[str] = []
+    if authorities != {EMBED_ENABLED_AUTHORITY_ID: expected}:
+        errors.append("embed enabled setting requires the exact mandatory source-derived authority")
+    if marked != expected_ids:
+        errors.append("embed enabled authority candidate partition is missing, duplicated, or foreign")
+    expected_fields = {key: value for key, value in contract.items() if key != "candidateIds"}
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None:
+            errors.append(f"{identifier}: mandatory embed enabled source atom is absent")
+            continue
+        for field, expected_value in expected_fields.items():
+            if entry.get(field) != expected_value:
+                errors.append(f"{identifier}: embed enabled {field} authority has drifted")
+    return errors
+
+
 def program_github_deployment_candidate(root: Path, candidate: Candidate) -> bool:
     paths = PROGRAM_GITHUB_PATHS
     if candidate.path not in {paths[key] for key in ("compose", "helmValues", "helmSchema", "helmDeployment", "kubernetes")}:
@@ -10605,7 +12139,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
   'RavenrootServerMain',
   'run',
-  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029'),
+  '1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -11573,6 +13107,10 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
     if setting in GRAPH_LIMIT_AUTHORITY_BY_SETTING:
         return ([] if contract.get("bindingAuthority") is None
                 else [f"{setting}: graph binding belongs to the closed graph family authority"])
+    if setting == "embed.enabled" \
+            and contract.get("embedEnabledAuthority") == EMBED_ENABLED_AUTHORITY_ID:
+        return ([] if contract.get("bindingAuthority") is None
+                else [f"{setting}: embed binding belongs to the closed embed enablement authority"])
     return environment_binding_authority_errors(
         root, setting, contract, setting_entries, entries, discovered, resolver_authorities,
     )
@@ -13641,7 +15179,12 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     not isinstance(binding, str) or not binding.strip() for binding in bindings):
                 errors.append(f"{identifier}: reviewed operator setting requires a string bindings array")
             default_evidence = entry.get("defaultEvidence")
-            if not isinstance(default_evidence, list) or not default_evidence or any(
+            agent_budget_evidence = entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID
+            jwk_policy_evidence = entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID
+            embed_enabled_evidence = entry.get("embedEnabledAuthority") == EMBED_ENABLED_AUTHORITY_ID
+            if not isinstance(default_evidence, list) \
+                    or (not default_evidence and not agent_budget_evidence and not jwk_policy_evidence
+                        and not embed_enabled_evidence) or any(
                     not isinstance(evidence_id, str) or not evidence_id.strip()
                     for evidence_id in default_evidence):
                 errors.append(f"{identifier}: reviewed operator setting requires defaultEvidence candidate ids")
@@ -13669,6 +15212,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     pass
                 elif entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
                     pass
+                elif entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID:
+                    pass
+                elif entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
+                    pass
                 elif entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
                     pass
                 elif current_source_owner(root, owner) is None:
@@ -13683,6 +15230,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if family is None or conversion != family["conversion"]:
                         errors.append(
                             f"{identifier}: converted assistant row must cite its exact family conversion")
+                    continue
+                if entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
                     continue
                 if setting == MANIFEST_PIN_ATTEMPTS_SETTING \
                         and isinstance(conversion, dict) \
@@ -13886,6 +15435,15 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(program_github_policy_authority_errors(
         root, document.get("programGithubPolicyAuthorities"), entries, discovered,
     ))
+    errors.extend(agent_budget_authority_errors(
+        root, document.get("agentBudgetAuthorities"), entries, discovered,
+    ))
+    errors.extend(jwk_policy_authority_errors(
+        root, document.get("jwkPolicyAuthorities"), entries, discovered,
+    ))
+    errors.extend(embed_enabled_authority_errors(
+        root, document.get("embedEnabledAuthorities"), entries, discovered,
+    ))
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
@@ -13914,7 +15472,16 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             continue
         if representative.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
             continue
+        if representative.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID:
+            continue
+        if representative.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
+            continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            continue
+        if representative.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID \
+                and representative.get("finalReviewGroup") == "embed-enabled-operator-setting":
+            # The final authority validates this setting's exact typed owner, strict parser,
+            # consumer roster, operator reference, and focused tests as one source-derived family.
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -13949,7 +15516,38 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     return errors
 
 
-def render_report(document: dict[str, object]) -> str:
+def remediation_owner(entry: dict[str, object]) -> str:
+    """Return the issue whose checked authority owns the active row."""
+    if entry.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID:
+        return "#321"
+    conversion = entry.get("conversion")
+    if isinstance(conversion, dict) and conversion.get("issue") in {
+            "#315", "#316", "#317", "#318", "#319", "#320"}:
+        return str(conversion["issue"])
+    migration = entry.get("identityMigration")
+    history = str(migration.get("history", "")) if isinstance(migration, dict) else ""
+    matched = re.search(r"issue-(31[5-9]|320)(?:-|$)", history)
+    if matched is not None:
+        return "#" + matched.group(1)
+    if entry.get("helmAuthority") == HELM_AUTHORITY_ID:
+        return "#317"
+    if entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+        return "#318"
+    if entry.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+        return "#319"
+    if entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID \
+            or entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+        return "#320"
+    if entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID \
+            or entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID \
+            or entry.get("embedEnabledAuthority") == EMBED_ENABLED_AUTHORITY_ID:
+        return "#321"
+    if entry.get("followUp") in {"#316", "#317", "#318", "#319", "#320", "#321"}:
+        return str(entry["followUp"])
+    return "Retained; no remediation required"
+
+
+def render_report(document: dict[str, object], root: Path = ROOT) -> str:
     entries = document["entries"]
     assert isinstance(entries, list)
     typed = [entry for entry in entries if isinstance(entry, dict)]
@@ -13960,6 +15558,7 @@ def render_report(document: dict[str, object]) -> str:
         str(entry.get("classification")) for entry in typed
         if entry.get("status") == "retained" and entry.get("classification") is not None)
     surfaces = Counter(str(entry.get("surface")) for entry in typed)
+    remediation_owners = Counter(remediation_owner(entry) for entry in typed)
     reviewed = len(typed) - statuses["pending-review"]
     operator_entries = [entry for entry in typed if entry.get("classification") == "operator-configurable"]
     operator_settings = {str(entry["setting"]) for entry in operator_entries if entry.get("setting")}
@@ -14044,9 +15643,24 @@ def render_report(document: dict[str, object]) -> str:
         f"Checked inventory-schema migrations: {len(migrations)}. Validation requires the recorded source",
         "revision to be present locally; CI must fetch that history before enabling this gate.", "",
         f"Checked source reconciliations: {len(reconciliations)}.", "",
-        "Surface counts are derived from the same inventory:", "",
+        "The following tables are exhaustive projections of the same active inventory; each includes",
+        f"zero-count or unclassified rows as needed and sums to {len(typed)} candidates.", "", "### Status counts", "",
+        "| Status | Candidates |", "|---|---:|",
     ]
-    lines.extend(f"- `{name}`: {count}" for name, count in sorted(surfaces.items()))
+    lines.extend(f"| {name} | {statuses[name]} |" for name in sorted(STATUSES))
+    lines.extend(("", "### Classification counts", "",
+                  "| Classification | Candidates |", "|---|---:|"))
+    lines.extend(f"| {name} | {classifications[name]} |" for name in sorted(CLASSIFICATIONS))
+    lines.append(f"| unclassified | {len(typed) - sum(classifications.values())} |")
+    lines.extend(("", "### Surface counts", "",
+                  "| Surface | Candidates |", "|---|---:|"))
+    lines.extend(f"| {name} | {count} |" for name, count in sorted(surfaces.items()))
+    lines.extend(("", "### Owning remediation counts", "",
+                  "Ownership is derived from each row's conversion, migration, or closed authority marker.",
+                  "Reviewed retained rows without a remediation marker are reported separately and are not",
+                  "assigned to an issue retroactively.", "",
+                  "| Owning remediation | Candidates |", "|---|---:|"))
+    lines.extend(f"| {name} | {count} |" for name, count in sorted(remediation_owners.items()))
     if reconciliations:
         latest = reconciliations[-1]
         mappings = latest.get("mappings", [])
@@ -14064,6 +15678,28 @@ def render_report(document: dict[str, object]) -> str:
                       f"| Approved retirements | {len(retirements)} |",
                       f"| Semantically classified additions | {len(additions)} |",
                       f"| Current candidates | {len(typed)} |"))
+    final_reference = document.get("finalReviewAuthority")
+    if isinstance(final_reference, dict):
+        authority_path = root / str(final_reference.get("path", ""))
+        try:
+            raw_authority = authority_path.read_bytes()
+            if hashlib.sha256(raw_authority).hexdigest() != final_reference.get("digest"):
+                raise ValueError("final review digest mismatch")
+            final_authority = json.loads(raw_authority)
+        except (OSError, ValueError, json.JSONDecodeError):
+            final_authority = {}
+        groups = final_authority.get("groups", []) if isinstance(final_authority, dict) else []
+        lines.extend(("", "## Final semantic review", "",
+                      "The #321 review is anchored to a committed inventory and records exact membership",
+                      "for every semantic group. Candidate and file digests make the compact grouping",
+                      "tamper-evident; new candidates receive no classification by similarity.", "",
+                      "| Group | Classification | Candidates | Decision |", "|---|---|---:|---|"))
+        for group in groups:
+            decision = str(group.get("semanticDecision", "")).replace("|", "\\|").replace("\n", " ")
+            metadata = group.get("metadata", {})
+            classification = metadata.get("classification", "") if isinstance(metadata, dict) else ""
+            lines.append(f"| {group.get('title', '')} | {classification} | "
+                         f"{group.get('candidateCount', 0)} | {decision} |")
     domain_map = document.get("remediationDomains", {})
     domains = domain_map.get("domains", []) if isinstance(domain_map, dict) else []
     lines.extend(("", "## Follow-up domain ownership", "",
@@ -14106,6 +15742,49 @@ def render_report(document: dict[str, object]) -> str:
                 coverage=entry.get("coverage", "")))
     else:
         lines.append("| _None reviewed yet_ |  |  |  |  |  |  |  |  |  |  |")
+    jwk_authorities = document.get("jwkPolicyAuthorities", {})
+    jwk_authority = (jwk_authorities.get(JWK_POLICY_AUTHORITY_ID)
+                     if isinstance(jwk_authorities, dict) else None)
+    jwk_contracts = jwk_authority.get("contracts", []) if isinstance(jwk_authority, dict) else []
+    jwk_partitions = (jwk_authority.get("semanticPartitions", [])
+                      if isinstance(jwk_authority, dict) else [])
+    lines.extend(("", "## Source-proven JWKS retrieval policy", "",
+                  "The closed family distinguishes the operator-selected cache and transport durations",
+                  "from the response admission ceiling, HTTP media contract, and overflow sentinel.", "",
+                  "| Setting | State | Typed owner | Field | Binding | Default | Candidates |",
+                  "|---|---|---|---|---|---|---:|"))
+    for contract in sorted(jwk_contracts, key=lambda item: str(item.get("setting", ""))):
+        bindings = ", ".join(f"`{item}`" for item in contract.get("bindings", []))
+        lines.append(f"| {contract.get('setting', '')} | {contract.get('status', '')} | "
+                     f"`{contract.get('owner', '')}` | `{contract.get('field', '')}` | {bindings} | "
+                     f"`{contract.get('defaultExpression', '')}` | {len(contract.get('candidateIds', []))} |")
+    lines.extend(("", "Retained JWKS atoms are reported by their exact source role:", "",
+                  "| Semantic partition | Classification | Candidates |", "|---|---|---:|"))
+    for partition in jwk_partitions:
+        lines.append(f"| {partition.get('semanticPartition', '')} | "
+                     f"{partition.get('classification', '')} | "
+                     f"{len(partition.get('candidateIds', []))} |")
+    embed_authorities = document.get("embedEnabledAuthorities", {})
+    embed_authority = (embed_authorities.get(EMBED_ENABLED_AUTHORITY_ID)
+                       if isinstance(embed_authorities, dict) else None)
+    embed_contract = (embed_authority.get("contract")
+                      if isinstance(embed_authority, dict) else None)
+    lines.extend(("", "## Source-proven embed enablement", "",
+                  "One strict typed parser owns the default-off setting. Packaged startup validates it",
+                  "before registration-store, route, and replica-topology consumers use the same parser.", "",
+                  "| Setting | State | Typed owner | Field | Binding | Default | Candidates |",
+                  "|---|---|---|---|---|---|---:|"))
+    if isinstance(embed_contract, dict):
+        bindings = ", ".join(f"`{item}`" for item in embed_contract.get("bindings", []))
+        state = str(embed_contract.get("status", ""))
+        if isinstance(embed_contract.get("centralization"), dict):
+            state += "; duplicate consumers centralized in #321"
+        lines.append(f"| {embed_contract.get('setting', '')} | {state} | "
+                     f"`{embed_contract.get('owner', '')}` | `{embed_contract.get('field', '')}` | "
+                     f"{bindings} | `{embed_contract.get('default', '')}` | "
+                     f"{len(embed_contract.get('candidateIds', []))} |")
+    else:
+        lines.append("| _No source-proven embed enablement policy_ |  |  |  |  |  |  |")
     persistence_authorities = document.get("persistencePolicyAuthorities", {})
     persistence_authority = (persistence_authorities.get(PERSISTENCE_POLICY_AUTHORITY_ID)
                              if isinstance(persistence_authorities, dict) else None)
@@ -14259,7 +15938,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
         report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
         inventory_temporary.write_text(
             json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        report_temporary.write_text(render_report(refreshed), encoding="utf-8")
+        report_temporary.write_text(render_report(refreshed, root), encoding="utf-8")
         inventory_temporary.replace(inventory_path)
         report_temporary.replace(report_path)
         return [], summary
@@ -14373,7 +16052,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
     if validation_errors:
         return validation_errors, {"added": added, "retired": len(removed),
                                    "preserved": len(merged) - added, "metadataUpdated": updated}
-    rendered = render_report(refreshed)
+    rendered = render_report(refreshed, root)
     inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
     report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
     inventory_temporary.write_text(json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -14402,7 +16081,7 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
     inventory_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     inventory_path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    report_path.write_text(render_report(document), encoding="utf-8")
+    report_path.write_text(render_report(document, root), encoding="utf-8")
 
 
 def check(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
@@ -14428,7 +16107,7 @@ def check(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPO
                 f"{hardcoded} confirmed-hardcoded candidate(s); "
                 "use --check-inventory only while completing reviewed remediation waves"
             )
-    expected = render_report(document)
+    expected = render_report(document, root)
     if not report_path.is_file() or report_path.read_text(encoding="utf-8") != expected:
         errors.append(f"generated audit report has drifted: {report_path.relative_to(root)}")
     return errors
@@ -14493,6 +16172,41 @@ def main(argv: list[str] | None = None) -> int:
     document = load_inventory(inventory)
     print(f"Operational configuration inventory is current ({len(document['entries'])} candidates).")
     return 0
+
+
+def final_review_candidate_semantic_errors(
+        root: Path, entry: dict[str, object], classification: object) -> list[str]:
+    """Reject lexical timing matches that are actually HTTP protocol status constants."""
+    if entry.get("surface") != "java" or not isinstance(entry.get("path"), str) \
+            or not isinstance(entry.get("line"), int) \
+            or not isinstance(entry.get("expression"), str):
+        return []
+    literal = str(entry["expression"]).replace("_", "")
+    if re.fullmatch(r"[0-9]+", literal) is None or not 100 <= int(literal) <= 599:
+        return []
+    relative = Path(str(entry["path"]))
+    source_path = root / relative
+    if relative.is_absolute() or ".." in relative.parts or not source_path.is_file():
+        return []
+    lines = source_path.read_text(encoding="utf-8").splitlines()
+    line_number_value = int(entry["line"])
+    if not 1 <= line_number_value <= len(lines):
+        return []
+    source_line = lines[line_number_value - 1]
+    escaped = re.escape(str(entry["expression"]))
+    is_status = re.search(
+        rf"\bstatusCode\s*\(\s*\)\s*(?:==|!=|<=|>=|<|>)\s*{escaped}\b",
+        source_line,
+    ) is not None or re.search(
+        rf"\b(?:empty|status|statusCode)\s*\(\s*{escaped}\s*\)",
+        source_line,
+    ) is not None
+    if is_status and classification != "protocol-or-format-invariant":
+        return [
+            f"final review candidate {entry.get('id')} is an HTTP status protocol constant, "
+            "not a security ceiling or timing default"
+        ]
+    return []
 
 
 if __name__ == "__main__":

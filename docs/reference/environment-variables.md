@@ -225,6 +225,8 @@ Detailed contract: [Identity and HTTP boundary](configuration.md#identity-and-br
 | `RAVENROOT_AUTH_CLOCK_SKEW_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_ISSUER` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_JWKS_URI` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_LOCAL_TOKEN` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_MODE` | See the linked contract for exact type, default, and applicability. |

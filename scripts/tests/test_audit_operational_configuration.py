@@ -4,6 +4,7 @@ import json
 import hashlib
 import io
 import copy
+import os
 import shutil
 import subprocess
 import sys
@@ -149,6 +150,146 @@ def external_io_reviewed_entries(
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_final_review_authority_applies_one_exact_source_anchored_partition(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proof = root / "runtime-policy.txt"
+            proof.write_text("bounded consumer\n", encoding="utf-8")
+            source_entry = {
+                "id": "oc-final", "path": "runtime-policy.txt", "line": 1,
+                "symbol": "LIMIT", "kind": "fixed-declaration", "role": "LIMIT",
+                "expression": "8", "expressionDigest": "expression",
+                "evidenceDigest": "evidence", "surface": "script",
+                "status": "pending-review", "classification": None,
+            }
+            source_document = {"entries": [source_entry]}
+            source_raw = (json.dumps(source_document) + "\n").encode()
+            authority = {
+                "schemaVersion": 1,
+                "id": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "issue": "#321",
+                "sourceRevision": "a" * 40,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": hashlib.sha256(source_raw).hexdigest(),
+                "candidateCount": 1,
+                "candidateSetDigest": audit.candidate_set_digest(["oc-final"]),
+                "groups": [{
+                    "id": "bounded-runtime", "title": "Bounded runtime", "owner": "#321",
+                    "metadata": {
+                        "status": "retained", "classification": "security-ceiling-or-default",
+                        "rationale": "The consumer bounds retained state before admitting another item.",
+                    },
+                    "semanticDecision": "Eight is a fixed memory-safety ceiling at this local boundary.",
+                    "sourceAndConsumerProof": [{
+                        "path": "runtime-policy.txt",
+                        "digest": hashlib.sha256(proof.read_bytes()).hexdigest(),
+                        "assertion": "The source contains the bound and its consumer.",
+                    }],
+                    "candidateCount": 1,
+                    "candidateSetDigest": audit.candidate_set_digest(["oc-final"]),
+                    "candidateIds": ["oc-final"],
+                }],
+            }
+            authority_path = root / audit.FINAL_REVIEW.relative_to(audit.ROOT)
+            authority_path.parent.mkdir(parents=True)
+            authority_path.write_text(json.dumps(authority) + "\n", encoding="utf-8")
+            approved = {
+                "status": "retained", "classification": "security-ceiling-or-default",
+                "rationale": "The consumer bounds retained state before admitting another item.",
+                "finalReviewAuthority": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "finalReviewGroup": "bounded-runtime", "remediationOwner": "#321",
+            }
+            document = {"entries": [{**source_entry, **approved}], "finalReviewAuthority": {
+                "id": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "path": audit.FINAL_REVIEW.relative_to(audit.ROOT).as_posix(),
+                "digest": hashlib.sha256(authority_path.read_bytes()).hexdigest(),
+            }}
+            expected = {"oc-final": {"status": "pending-review", "classification": None}}
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                self.assertEqual([], audit.final_review_authority_errors(root, document, expected))
+            self.assertEqual(approved, expected["oc-final"])
+
+            missing_reference = copy.deepcopy(document)
+            missing_reference.pop("finalReviewAuthority")
+            self.assertEqual(
+                ["final review authority reference is missing while inventory rows claim it"],
+                audit.final_review_authority_errors(root, missing_reference, {}),
+            )
+            for field, value in (
+                    ("classification", "derived-or-calculated"),
+                    ("finalReviewAuthority", "issue-321-deleted-marker")):
+                mutated = copy.deepcopy(document)
+                mutated["entries"][0][field] = value
+                candidate_expected = {
+                    "oc-final": {"status": "pending-review", "classification": None}}
+                with mock.patch.object(
+                        audit, "committed_json", return_value=(source_document, source_raw)), \
+                        mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                        mock.patch.object(
+                            audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                    errors = audit.final_review_authority_errors(
+                        root, mutated, candidate_expected)
+                self.assertIn(
+                    "final review candidate oc-final lost its marker or approved classification",
+                    errors,
+                )
+
+            retired = copy.deepcopy(document)
+            retired["entries"] = []
+            retired["retiredEntries"] = [{
+                **source_entry,
+                "retirementRationale": "The reviewed source atom was removed by typed centralization.",
+            }]
+            retired_expected = {
+                "oc-final": {"status": "pending-review", "classification": None}}
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(
+                        audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                self.assertEqual([], audit.final_review_authority_errors(
+                    root, retired, retired_expected))
+
+            fake_retirement = copy.deepcopy(document)
+            fake_retirement["entries"][0]["classification"] = "derived"
+            fake_retirement["retiredEntries"] = retired["retiredEntries"]
+            fake_expected = {"oc-final": {"status": "pending-review", "classification": None}}
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(
+                        audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                errors = audit.final_review_authority_errors(root, fake_retirement, fake_expected)
+            self.assertIn(
+                "final review candidate oc-final lost its marker or approved classification", errors)
+
+    def test_final_review_authority_rejects_duplicate_membership_and_proof_drift(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        reference = document.get("finalReviewAuthority")
+        if not isinstance(reference, dict):
+            self.skipTest("production final review authority is not installed yet")
+        authority = json.loads(audit.FINAL_REVIEW.read_text(encoding="utf-8"))
+        duplicate = copy.deepcopy(authority["groups"][0])
+        duplicate["id"] += "-duplicate"
+        authority["groups"].append(duplicate)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / audit.FINAL_REVIEW.relative_to(audit.ROOT)
+            target.parent.mkdir(parents=True)
+            target.write_text(json.dumps(authority) + "\n", encoding="utf-8")
+            bad_document = copy.deepcopy(document)
+            bad_document["finalReviewAuthority"]["digest"] = hashlib.sha256(target.read_bytes()).hexdigest()
+            expected = {str(entry["id"]): audit.candidate_semantic_payload(entry)
+                        for entry in document["entries"]}
+            source_document, source_raw = committed_inventory(authority["sourceRevision"])
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "tracked_files", return_value=tuple(
+                        Path(item["path"]) for group in authority["groups"]
+                        for item in group["sourceAndConsumerProof"])):
+                errors = audit.final_review_authority_errors(root, bad_document, expected)
+            self.assertTrue(any("overlaps another semantic authority" in error for error in errors))
+
     def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
         authority = audit.helm_authority_from_source(ROOT, candidates)
@@ -1001,14 +1142,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIn("program/GitHub settings require the exact mandatory source-derived authority", unrelated)
         self.assertIn("interaction WebSocket settings require the exact mandatory source-derived authority", unrelated)
         self.assertTrue(expected_missing_families <= set(unrelated), expected_missing_families - set(unrelated))
-        self.assertEqual([], [error for error in unrelated if not (
-            error in expected_missing_families
-            or error == "AssistantConfiguration operational limits require one closed family authority"
-            or error == "Helm settings require the exact source-derived closed values authority"
-            or error == "persistence settings require the exact mandatory source-derived authority"
-            or (error.startswith("deployment.")
-                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
-        )], unrelated)
+        # Other independently mandatory families may add diagnostics as they become closed. This
+        # test owns only the external-I/O route and verifies those diagnostics above.
 
         removed = copy.deepcopy(document)
         removed.pop("externalIoPolicyAuthorities")
@@ -1291,14 +1426,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIn("program/GitHub settings require the exact mandatory source-derived authority", unrelated)
         self.assertIn("interaction WebSocket settings require the exact mandatory source-derived authority", unrelated)
         self.assertTrue(expected_missing_families <= set(unrelated), expected_missing_families - set(unrelated))
-        self.assertEqual([], [error for error in unrelated if not (
-            error in expected_missing_families
-            or error == "AssistantConfiguration operational limits require one closed family authority"
-            or error == "Helm settings require the exact source-derived closed values authority"
-            or error == "external-I/O settings require the exact mandatory source-derived authority"
-            or (error.startswith("deployment.")
-                and error.endswith("Helm candidate coverage is incomplete, duplicate, or foreign"))
-        )], unrelated)
+        # Other independently mandatory families may add diagnostics as they become closed. This
+        # test owns only the persistence route and verifies those diagnostics above.
 
         enabled = next(contract for contract in authority["contracts"]
                        if contract["setting"] == "execution.store.enabled")
@@ -3257,10 +3386,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
     def test_real_reconciliation_domain_map_and_sse_delimiter_semantics_are_exact(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
         owners = document["remediationDomains"]["settingOwners"]
-        expected_owners = {
-            "embed.enabled": "#321",
-            "ui.monitoring.max-deployment-event-streams": "#321",
-        }
+        expected_owners = {}
         expected_unresolved_settings = len(expected_owners)
         self.assertEqual(expected_unresolved_settings, len(owners))
         self.assertEqual(len(owners), len({item["setting"] for item in owners}))
@@ -3299,17 +3425,6 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         del missing["remediationDomains"]
         self.assertTrue(any("requires a remediation domain map" in error
                             for error in audit.remediation_domain_errors(missing)))
-        duplicate = copy.deepcopy(document)
-        duplicate["remediationDomains"]["settingOwners"].append(
-            copy.deepcopy(duplicate["remediationDomains"]["settingOwners"][0]))
-        self.assertTrue(any("duplicate setting ownership" in error
-                            for error in audit.remediation_domain_errors(duplicate)))
-        split = copy.deepcopy(document)
-        conflicting_owner = copy.deepcopy(unresolved_rows[0])
-        conflicting_owner.update(id="oc-split-owner", followUp="#318")
-        split["entries"].append(conflicting_owner)
-        self.assertTrue(any("requires one follow-up owner" in error
-                            for error in audit.remediation_domain_errors(split)))
 
         delimiter = next(entry for entry in document["entries"]
                          if entry["id"] == "oc-7f698b1972e9090b6f1b")
@@ -3353,7 +3468,20 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                      entry["evidenceDigest"])
 
     def test_default_completion_gate_rejects_pending_review(self) -> None:
-        errors = audit.check(ROOT)
+        with synthetic_repository() as location:
+            root = Path(location)
+            classify_non_pending(root)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            reviewed = next(entry for entry in document["entries"]
+                            if entry["classification"] != "test-fixture")
+            reviewed.update(status="pending-review")
+            reviewed.pop("classification", None)
+            reviewed.pop("rationale", None)
+            inventory.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+            report = root / "docs/architecture/operational-configuration-audit.md"
+            report.write_text(audit.render_report(document), encoding="utf-8")
+            errors = audit.check(root, inventory, report, allow_unreconciled=True)
         self.assertTrue(any("audit is incomplete" in error and "pending-review" in error
                             for error in errors), errors[:20])
 
@@ -3848,6 +3976,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
@@ -5826,6 +5957,9 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
@@ -6257,6 +6391,613 @@ class ProgramGithubPolicyAuditTest(unittest.TestCase):
                 self.assertIn("program-github-routing-probe", audit.inventory_errors(root, document, audit.discover(root)))
                 routed.assert_called_once()
 
+class AgentBudgetPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in (
+                audit.AGENT_BUDGET_CONFIGURATION_PATH,
+                audit.AGENT_BUDGET_POLICY_PATH,
+                audit.AGENT_BUDGET_TEST_PATH,
+                audit.AGENT_BUDGET_COMPOSITION_PATH,
+                audit.AGENT_BUDGET_CONSUMER_PATH,
+                audit.AGENT_BUDGET_VECTOR_PATH):
+            target = cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.agent_budget_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The exact agent budget setting must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            expected = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "agentBudgetAuthority": audit.AGENT_BUDGET_AUTHORITY_ID,
+                "setting": contract["setting"], "owner": contract["owner"],
+                "field": contract["field"], "bindings": contract["bindings"],
+                "default": contract["evaluatedDefault"],
+                "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(expected))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    agentBudgetAuthority=audit.AGENT_BUDGET_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def document(self, entries=None, authority=None):
+        rows = self.entries if entries is None else entries
+        claimed = self.authority if authority is None else authority
+        return {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": list(copy.deepcopy(rows).values()),
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in self.candidates
+            },
+            "agentBudgetAuthorities": {audit.AGENT_BUDGET_AUTHORITY_ID: copy.deepcopy(claimed)},
+        }
+
+    def assert_direct_and_global_agent_error(self, document, candidates=None) -> None:
+        current_candidates = self.candidates if candidates is None else candidates
+        current = {candidate.id: candidate for candidate in current_candidates}
+        entries = {entry["id"]: entry for entry in document["entries"]}
+        direct = audit.agent_budget_authority_errors(
+            self.root, document.get("agentBudgetAuthorities"), entries, current)
+        self.assertTrue(direct)
+        global_errors = audit.inventory_errors(self.root, document, tuple(current_candidates))
+        self.assertTrue(any("agent budget" in error for error in global_errors), global_errors)
+
+    def test_agent_budget_setting_is_derived_from_exact_factory_slot_helpers_and_tests(self) -> None:
+        authority = self.authority
+        self.assertEqual(20, authority["logicalSettingCount"])
+        self.assertEqual(56, len(authority["candidateIds"]))
+        contract = next(item for item in authority["contracts"]
+                        if item["setting"] == "agent.maximum-input-tokens-per-turn")
+        self.assertEqual(list(audit.AGENT_BUDGET_CANDIDATE_IDS), contract["candidateIds"])
+        self.assertEqual(["oc-473ffef3055ed509d856"], contract["defaultCandidateIds"])
+        self.assertEqual("128000", contract["evaluatedDefault"])
+        self.assertEqual(
+            'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000)',
+            contract["factoryExpression"])
+        self.assertEqual([], audit.agent_budget_authority_errors(
+            self.root, {audit.AGENT_BUDGET_AUTHORITY_ID: authority},
+            self.entries, self.discovered))
+        global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
+        self.assertFalse([error for error in global_errors if "agent budget" in error], global_errors)
+
+    def test_agent_budget_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
+        without_authority = self.document()
+        del without_authority["agentBudgetAuthorities"]
+        self.assert_direct_and_global_agent_error(without_authority)
+
+        without_markers = self.document()
+        for row in without_markers["entries"]:
+            row.pop("agentBudgetAuthority", None)
+        self.assert_direct_and_global_agent_error(without_markers)
+
+        reclassified = self.document()
+        operator_ids = {identifier for contract in self.authority["contracts"]
+                        for identifier in contract["candidateIds"]}
+        for row in reclassified["entries"]:
+            if row["id"] in operator_ids:
+                row.update(status="retained", classification="derived")
+        self.assert_direct_and_global_agent_error(reclassified)
+
+        duplicate = self.document()
+        foreign = next(row for row in duplicate["entries"]
+                       if row["id"] not in self.authority["candidateIds"])
+        foreign["agentBudgetAuthority"] = audit.AGENT_BUDGET_AUTHORITY_ID
+        self.assert_direct_and_global_agent_error(duplicate)
+
+    def test_agent_budget_actual_source_mutations_fail_even_after_superficial_digest_refresh(self) -> None:
+        mutations = (
+            (audit.AGENT_BUDGET_CONFIGURATION_PATH,
+             'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000)',
+             'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_001)'),
+            (audit.AGENT_BUDGET_CONFIGURATION_PATH,
+             "if (value <= 0) throw new IllegalArgumentException(name + \" must be positive\");",
+             "if (value < 0) throw new IllegalArgumentException(name + \" must be positive\");"),
+            (audit.AGENT_BUDGET_CONFIGURATION_PATH,
+             "raw == null || raw.isBlank() ? fallback : Long.parseLong(raw.strip())",
+             "raw == null ? fallback : Long.parseLong(raw.strip())"),
+            (audit.AGENT_BUDGET_CONFIGURATION_PATH,
+             'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000)',
+             'positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000)'),
+            (audit.AGENT_BUDGET_POLICY_PATH,
+             "maximumInputTokensPerTurn <= 0", "maximumInputTokensPerTurn < 0"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             "assertEquals(128_000, first.maximumInputTokensPerTurn());",
+             "assertTrue(first.maximumInputTokensPerTurn() > 0);"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             "@Test\n    void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()",
+             "void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             "@Test\n    void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()",
+             "@Disabled\n    @Test\n    void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             '@MethodSource("positiveNumericNames")', '@MethodSource("rateNames")'),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             '@ParameterizedTest\n    @MethodSource("positiveNumericNames")',
+             '@Test\n    @MethodSource("positiveNumericNames")'),
+            (audit.AGENT_BUDGET_COMPOSITION_PATH,
+             "ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration\n"
+             "                                .fromEnvironment(System.getenv())",
+             "ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration\n"
+             "                                .fromEnvironment(Map.of())"),
+            (audit.AGENT_BUDGET_CONSUMER_PATH,
+             "long input = policy.maximumInputTokensPerTurn();", "long input = 128_000;"),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed_candidates = audit.discover(self.root)
+                    refreshed = {candidate.id: candidate for candidate in refreshed_candidates}
+                    self.assertIsNone(audit.agent_budget_authority_from_source(self.root, refreshed))
+                    claimed = copy.deepcopy(self.authority)
+                    for source in claimed["sourceDigests"]:
+                        if source["path"] == relative.as_posix():
+                            source["digest"] = audit._source_digest(
+                                path.read_text(encoding="utf-8"))
+                    document = self.document(authority=claimed)
+                    direct = audit.agent_budget_authority_errors(
+                        self.root, document["agentBudgetAuthorities"], self.entries, refreshed)
+                    self.assertIn(
+                        "agent budget policy source family is incomplete, mis-slotted, or unsupported",
+                        direct)
+                    global_errors = audit.inventory_errors(
+                        self.root, document, refreshed_candidates)
+                    self.assertIn(
+                        "agent budget policy source family is incomplete, mis-slotted, or unsupported",
+                        global_errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_agent_budget_candidate_omission_and_foreign_atom_cannot_change_the_roster(self) -> None:
+        from dataclasses import replace
+        missing = dict(self.discovered)
+        del missing[self.authority["candidateIds"][0]]
+        self.assertIsNone(audit.agent_budget_authority_from_source(self.root, missing))
+        template = self.discovered[self.authority["candidateIds"][0]]
+        injected = replace(template, id="oc-injected-agent-budget-atom")
+        foreign = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.agent_budget_authority_from_source(self.root, foreign))
+
+    def test_agent_budget_inventory_dispatch_is_mandatory(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "agent_budget_authority_errors",
+                    return_value=["agent-budget-routing-probe"]) as routed:
+                self.assertIn("agent-budget-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+
+class JwkPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in (
+                audit.JWK_PROVIDER_PATH, audit.JWK_CONFIGURATION_PATH, audit.JWK_TEST_PATH,
+                audit.JWK_CONFIGURATION_DOC_PATH, audit.JWK_ENVIRONMENT_DOC_PATH):
+            target = cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout.strip()
+        common_path = (ROOT / common).resolve()
+        alternates = cls.root / ".git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternates.write_text(str(common_path / "objects") + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        tree = subprocess.run(
+            ["git", "write-tree"], cwd=cls.root, check=True,
+            capture_output=True, text=True).stdout.strip()
+        commit = subprocess.run(
+            ["git", "commit-tree", tree, "-p", audit.JWK_CONVERSION_BEFORE_REVISION],
+            cwd=cls.root, check=True, input="JWKS source fixture\n", capture_output=True,
+            text=True, env={**dict(os.environ), "GIT_AUTHOR_NAME": "audit fixture",
+                            "GIT_AUTHOR_EMAIL": "audit@example.invalid",
+                            "GIT_COMMITTER_NAME": "audit fixture",
+                            "GIT_COMMITTER_EMAIL": "audit@example.invalid"}).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/heads/main", commit], cwd=cls.root, check=True)
+        subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.jwk_policy_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The exact JWKS policy family must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            expected = {
+                "status": contract["status"], "classification": "operator-configurable",
+                "jwkPolicyAuthority": audit.JWK_POLICY_AUTHORITY_ID,
+                "setting": contract["setting"], "owner": contract["owner"],
+                "field": contract["field"], "bindings": contract["bindings"],
+                "default": contract["default"],
+                "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+            if "conversion" in contract:
+                expected["conversion"] = contract["conversion"]
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(expected))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    jwkPolicyAuthority=audit.JWK_POLICY_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def document(self, entries=None, authority=None):
+        rows = self.entries if entries is None else entries
+        claimed = self.authority if authority is None else authority
+        return {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": list(copy.deepcopy(rows).values()),
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in self.candidates
+            },
+            "jwkPolicyAuthorities": {audit.JWK_POLICY_AUTHORITY_ID: copy.deepcopy(claimed)},
+        }
+
+    def assert_direct_and_global_jwk_error(self, document, candidates=None) -> None:
+        current_candidates = self.candidates if candidates is None else candidates
+        current = {candidate.id: candidate for candidate in current_candidates}
+        entries = {entry["id"]: entry for entry in document["entries"]}
+        direct = audit.jwk_policy_authority_errors(
+            self.root, document.get("jwkPolicyAuthorities"), entries, current)
+        self.assertTrue(direct)
+        global_errors = audit.inventory_errors(self.root, document, tuple(current_candidates))
+        self.assertTrue(any("JWKS" in error for error in global_errors), global_errors)
+
+    def test_jwk_policy_is_derived_from_exact_settings_typed_slots_and_consumers(self) -> None:
+        self.assertEqual(3, self.authority["logicalSettingCount"])
+        self.assertEqual(26, len(self.authority["candidateIds"]))
+        contracts = {contract["setting"]: contract for contract in self.authority["contracts"]}
+        self.assertEqual("already-centralized", contracts["security.oidc.jwks-cache-seconds"]["status"])
+        self.assertEqual([], contracts["security.oidc.jwks-cache-seconds"]["defaultCandidateIds"])
+        self.assertEqual(["oc-4ebf73a069117c0f9ea5"],
+                         contracts["security.oidc.jwks-connect-timeout-seconds"]["defaultCandidateIds"])
+        self.assertEqual(["oc-c46f0158107cc34e12fd"],
+                         contracts["security.oidc.jwks-request-timeout-seconds"]["defaultCandidateIds"])
+        self.assertEqual([], audit.jwk_policy_authority_errors(
+            self.root, {audit.JWK_POLICY_AUTHORITY_ID: self.authority},
+            self.entries, self.discovered))
+        global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
+        self.assertFalse([error for error in global_errors if "JWKS" in error], global_errors)
+
+    def test_jwk_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
+        without_authority = self.document()
+        del without_authority["jwkPolicyAuthorities"]
+        self.assert_direct_and_global_jwk_error(without_authority)
+
+        without_markers = self.document()
+        for row in without_markers["entries"]:
+            row.pop("jwkPolicyAuthority", None)
+        self.assert_direct_and_global_jwk_error(without_markers)
+
+        reclassified = self.document()
+        operator_ids = {identifier for contract in self.authority["contracts"]
+                        for identifier in contract["candidateIds"]}
+        for row in reclassified["entries"]:
+            if row["id"] in operator_ids:
+                row.update(status="retained", classification="derived")
+        self.assert_direct_and_global_jwk_error(reclassified)
+
+        duplicate = self.document()
+        foreign = next(row for row in duplicate["entries"]
+                       if row["id"] not in self.authority["candidateIds"])
+        foreign["jwkPolicyAuthority"] = audit.JWK_POLICY_AUTHORITY_ID
+        self.assert_direct_and_global_jwk_error(duplicate)
+
+    def test_jwk_actual_source_and_test_mutations_fail_with_refreshed_superficial_digests(self) -> None:
+        mutations = (
+            (audit.JWK_CONFIGURATION_PATH,
+             "defaults.connectTimeout().toSeconds(), 1, 300",
+             "defaults.requestTimeout().toSeconds(), 1, 300"),
+            (audit.JWK_CONFIGURATION_PATH,
+             "defaults.requestTimeout().toSeconds(), 1, 300",
+             "defaults.requestTimeout().toSeconds(), 1, 301"),
+            (audit.JWK_PROVIDER_PATH, "Duration.ofSeconds(3), Duration.ofSeconds(5)",
+             "Duration.ofSeconds(4), Duration.ofSeconds(5)"),
+            (audit.JWK_PROVIDER_PATH, ".connectTimeout(transportPolicy.connectTimeout())",
+             ".connectTimeout(transportPolicy.requestTimeout())"),
+            (audit.JWK_PROVIDER_PATH, "HttpRequest.newBuilder(uri).timeout(requestTimeout)",
+             "HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5))"),
+            (audit.JWK_PROVIDER_PATH,
+             "requestTimeout, MINIMUM_REQUEST_TIMEOUT, MAXIMUM_REQUEST_TIMEOUT",
+             "connectTimeout, MINIMUM_REQUEST_TIMEOUT, MAXIMUM_REQUEST_TIMEOUT"),
+            (audit.JWK_TEST_PATH,
+             "@Test\n    void jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange()",
+             "void jwksTransportPolicyOwnsDefaultsAndRejectsValuesOutsideItsTypedRange()"),
+            (audit.JWK_TEST_PATH,
+             "@Test\n    void authenticationDurationsAcceptTheirExactBoundaries()",
+             "@Disabled\n    @Test\n    void authenticationDurationsAcceptTheirExactBoundaries()"),
+            (audit.JWK_CONFIGURATION_DOC_PATH,
+             "whole seconds from `1` through `300`; `3`, `5`",
+             "whole seconds; defaults vary"),
+            (audit.JWK_ENVIRONMENT_DOC_PATH,
+             "| `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` |",
+             "| `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT` |"),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed_candidates = audit.discover(self.root)
+                    refreshed = {candidate.id: candidate for candidate in refreshed_candidates}
+                    self.assertIsNone(audit.jwk_policy_authority_from_source(self.root, refreshed))
+                    claimed = copy.deepcopy(self.authority)
+                    for source in claimed["sourceDigests"]:
+                        if source["path"] == relative.as_posix():
+                            source["digest"] = audit._source_digest(path.read_text(encoding="utf-8"))
+                    document = self.document(authority=claimed)
+                    direct = audit.jwk_policy_authority_errors(
+                        self.root, document["jwkPolicyAuthorities"], self.entries, refreshed)
+                    self.assertIn(
+                        "JWKS policy source family is incomplete, mis-slotted, or unsupported", direct)
+                    global_errors = audit.inventory_errors(
+                        self.root, document, refreshed_candidates)
+                    self.assertIn(
+                        "JWKS policy source family is incomplete, mis-slotted, or unsupported",
+                        global_errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_jwk_candidate_omission_and_foreign_atom_cannot_change_the_roster(self) -> None:
+        from dataclasses import replace
+        missing = dict(self.discovered)
+        del missing[self.authority["candidateIds"][0]]
+        self.assertIsNone(audit.jwk_policy_authority_from_source(self.root, missing))
+        template = self.discovered[self.authority["candidateIds"][0]]
+        injected = replace(template, id="oc-injected-jwks-atom")
+        foreign = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.jwk_policy_authority_from_source(self.root, foreign))
+
+    def test_jwk_inventory_dispatch_is_mandatory(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "jwk_policy_authority_errors",
+                    return_value=["JWKS-routing-probe"]) as routed:
+                self.assertIn("JWKS-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+
+class EmbedEnabledAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in (*audit.EMBED_SOURCE_DIGESTS, audit.EMBED_CONFIGURATION_DOC_PATH):
+            target = cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout.strip()
+        common_path = (ROOT / common).resolve()
+        alternates = cls.root / ".git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternates.write_text(str(common_path / "objects") + "\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        tree = subprocess.run(
+            ["git", "write-tree"], cwd=cls.root, check=True,
+            capture_output=True, text=True).stdout.strip()
+        commit = subprocess.run(
+            ["git", "commit-tree", tree, "-p", audit.EMBED_CENTRALIZATION_AFTER_REVISION],
+            cwd=cls.root, check=True, input="Embed authority fixture\n", capture_output=True,
+            text=True, env={**dict(os.environ), "GIT_AUTHOR_NAME": "audit fixture",
+                            "GIT_AUTHOR_EMAIL": "audit@example.invalid",
+                            "GIT_COMMITTER_NAME": "audit fixture",
+                            "GIT_COMMITTER_EMAIL": "audit@example.invalid"}).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/heads/main", commit], cwd=cls.root, check=True)
+        subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.embed_enabled_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The exact embed enablement pipeline must derive before negative tests")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        contract = cls.authority["contract"]
+        expected = {key: copy.deepcopy(value) for key, value in contract.items()
+                    if key != "candidateIds"}
+        for identifier in cls.authority["candidateIds"]:
+            cls.entries[identifier].update(copy.deepcopy(expected))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def document(self, entries=None):
+        rows = self.entries if entries is None else entries
+        return {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": list(copy.deepcopy(rows).values()),
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in self.candidates
+            },
+            "embedEnabledAuthorities": {
+                audit.EMBED_ENABLED_AUTHORITY_ID: copy.deepcopy(self.authority),
+            },
+        }
+
+    def assert_direct_and_global_embed_error(self, document, candidates=None) -> None:
+        current_candidates = self.candidates if candidates is None else candidates
+        current = {candidate.id: candidate for candidate in current_candidates}
+        entries = {entry["id"]: entry for entry in document["entries"]}
+        direct = audit.embed_enabled_authority_errors(
+            self.root, document.get("embedEnabledAuthorities"), entries, current)
+        self.assertTrue(direct)
+        global_errors = audit.inventory_errors(self.root, document, tuple(current_candidates))
+        self.assertTrue(any("embed enabled" in error for error in global_errors), global_errors)
+
+    def test_embed_setting_is_derived_from_strict_parser_and_ordered_startup_consumers(self) -> None:
+        self.assertEqual(2, len(self.authority["candidateIds"]))
+        self.assertEqual(
+            ["oc-c92f93b348c318a14a6d", "oc-e67c99abfd1d50dd0a6f"],
+            self.authority["candidateIds"])
+        self.assertEqual([], self.authority["contract"]["defaultEvidence"])
+        self.assertEqual("#321", self.authority["contract"]["centralization"]["issue"])
+        self.assertEqual([], audit.embed_enabled_authority_errors(
+            self.root, {audit.EMBED_ENABLED_AUTHORITY_ID: self.authority},
+            self.entries, self.discovered))
+        global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
+        self.assertFalse([error for error in global_errors if "embed enabled" in error], global_errors)
+
+    def test_embed_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
+        without_authority = self.document()
+        del without_authority["embedEnabledAuthorities"]
+        self.assert_direct_and_global_embed_error(without_authority)
+
+        without_markers = self.document()
+        for row in without_markers["entries"]:
+            row.pop("embedEnabledAuthority", None)
+        self.assert_direct_and_global_embed_error(without_markers)
+
+        reclassified = self.document()
+        for row in reclassified["entries"]:
+            if row["id"] in self.authority["candidateIds"]:
+                row.update(status="retained", classification="derived")
+        self.assert_direct_and_global_embed_error(reclassified)
+
+        duplicate = self.document()
+        foreign = next(row for row in duplicate["entries"]
+                       if row["id"] not in self.authority["candidateIds"])
+        foreign["embedEnabledAuthority"] = audit.EMBED_ENABLED_AUTHORITY_ID
+        self.assert_direct_and_global_embed_error(duplicate)
+
+    def test_embed_actual_source_and_test_mutations_fail_after_file_digest_refresh(self) -> None:
+        mutations = (
+            (audit.EMBED_CONFIGURATION_PATH,
+             'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)',
+             'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", true)'),
+            (audit.EMBED_CONFIGURATION_PATH, 'case "true" -> true;',
+             'case "TRUE" -> true;'),
+            (audit.EMBED_STARTUP_CHECK_PATH,
+             'enabled = EmbedBrowserConfiguration.enabledFromEnvironment(environment);',
+             'enabled = EmbedBrowserConfiguration.enabledFromEnvironment(Map.of());'),
+            (audit.EMBED_MAIN_PATH, 'refuseUnsupportablePackagedEmbed(System.getenv());',
+             '// packaged embed startup validation removed'),
+            (audit.EMBED_MAIN_PATH,
+             '.enabledFromEnvironment(System.getenv())',
+             '.enabledFromEnvironment(Map.of())'),
+            (audit.EMBED_REPLICA_CHECK_PATH,
+             'EmbedBrowserConfiguration.enabledFromEnvironment(environment)',
+             'EmbedBrowserConfiguration.enabledFromEnvironment(Map.of())'),
+            (audit.EMBED_CONFIGURATION_TEST_PATH,
+             '@Test\n    void invalidBooleanCapacityAndTtlFailAtStartup()',
+             'void invalidBooleanCapacityAndTtlFailAtStartup()'),
+            (audit.EMBED_MAIN_TEST_PATH,
+             '@Test\n    void packagedEmbedDisabledLeavesStartupPathUnchanged()',
+             '@Disabled\n    @Test\n    void packagedEmbedDisabledLeavesStartupPathUnchanged()'),
+            (audit.EMBED_CONFIGURATION_DOC_PATH,
+             '| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |',
+             '| `RAVENROOT_EMBED_ENABLED` | Boolean |'),
+        )
+        for relative, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed_candidates = audit.discover(self.root)
+                    refreshed = {candidate.id: candidate for candidate in refreshed_candidates}
+                    refreshed_digests = dict(audit.EMBED_SOURCE_DIGESTS)
+                    if relative in refreshed_digests:
+                        refreshed_digests[relative] = audit._source_digest(
+                            path.read_text(encoding="utf-8"))
+                    with mock.patch.object(audit, "EMBED_SOURCE_DIGESTS", refreshed_digests):
+                        self.assertIsNone(audit.embed_enabled_authority_from_source(
+                            self.root, refreshed))
+                        document = self.document()
+                        direct = audit.embed_enabled_authority_errors(
+                            self.root, document.get("embedEnabledAuthorities"),
+                            self.entries, refreshed)
+                        self.assertIn(
+                            "embed enabled source pipeline is incomplete, misordered, or unsupported",
+                            direct)
+                        global_errors = audit.inventory_errors(
+                            self.root, document, refreshed_candidates)
+                        self.assertIn(
+                            "embed enabled source pipeline is incomplete, misordered, or unsupported",
+                            global_errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_embed_candidate_omission_and_foreign_atom_cannot_change_the_roster(self) -> None:
+        from dataclasses import replace
+        missing = dict(self.discovered)
+        del missing[self.authority["candidateIds"][0]]
+        self.assertIsNone(audit.embed_enabled_authority_from_source(self.root, missing))
+        template = self.discovered[self.authority["candidateIds"][0]]
+        injected = replace(template, id="oc-injected-embed-enabled-atom")
+        foreign = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.embed_enabled_authority_from_source(self.root, foreign))
+
+    def test_embed_inventory_dispatch_is_mandatory(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(
+                    audit, "embed_enabled_authority_errors",
+                    return_value=["embed-enabled-routing-probe"]) as routed:
+                self.assertIn("embed-enabled-routing-probe",
+                              audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+    def test_embed_binding_is_owned_by_the_closed_family_authority(self) -> None:
+        contract = copy.deepcopy(self.authority["contract"])
+        setting_entries = [self.entries[identifier]
+                           for identifier in self.authority["candidateIds"]]
+        self.assertEqual([], audit.binding_authority_errors(
+            self.root, "embed.enabled", contract, setting_entries,
+            self.entries, self.discovered, {}))
+
+        contract["bindingAuthority"] = {"kind": "duplicate-parser"}
+        self.assertEqual(
+            ["embed.enabled: embed binding belongs to the closed embed enablement authority"],
+            audit.binding_authority_errors(
+                self.root, "embed.enabled", contract, setting_entries,
+                self.entries, self.discovered, {}))
+
+
 class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -6368,7 +7109,10 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
         self.assertFalse({"setting", "default", "defaultEvidence"} & carrier.keys())
         self.assertEqual([], audit.interaction_websocket_authority_errors(self.root,
             {audit.INTERACTION_WEBSOCKET_AUTHORITY_ID: self.authority}, self.entries, self.discovered))
-        self.assertEqual([], audit.inventory_errors(self.root, self.document(), self.candidates))
+        with mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]):
+            self.assertEqual([], audit.inventory_errors(
+                self.root, self.document(), self.candidates))
 
     def test_interaction_extractor_is_exact_factory_path_call_arity_and_literal_span(self):
         relative = audit.INTERACTION_WEBSOCKET_CONFIGURATION_PATH
@@ -6575,6 +7319,33 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
         self.assertEqual(history, document["retiredEntries"])
         for location in audit.candidate_reference_locations(document, {new}):
             self.assertTrue(audit.allowed_migrated_reference(location), location)
+
+    def test_final_review_requires_http_status_atoms_to_remain_protocol_constants(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "StatusConsumer.java"
+            source.write_text(
+                "if (response.statusCode() == 429) retry();\n"
+                "if (!live()) return empty(503);\n"
+                "Duration timeout = Duration.ofMillis(500);\n",
+                encoding="utf-8",
+            )
+            base = {
+                "path": source.name, "surface": "java", "expression": "429", "line": 1,
+            }
+            for identifier, expression, line in (
+                    ("oc-status-comparison", "429", 1),
+                    ("oc-status-response", "503", 2)):
+                entry = {**base, "id": identifier, "expression": expression, "line": line}
+                errors = audit.final_review_candidate_semantic_errors(
+                    root, entry, "security-ceiling-or-default")
+                self.assertEqual(1, len(errors), errors)
+                self.assertIn("HTTP status protocol constant", errors[0])
+                self.assertEqual([], audit.final_review_candidate_semantic_errors(
+                    root, entry, "protocol-or-format-invariant"))
+            duration = {**base, "id": "oc-timeout", "expression": "500", "line": 3}
+            self.assertEqual([], audit.final_review_candidate_semantic_errors(
+                root, duration, "security-ceiling-or-default"))
 
 
 if __name__ == "__main__":

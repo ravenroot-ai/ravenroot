@@ -208,6 +208,7 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_AUTH_ISSUER`, `RAVENROOT_AUTH_AUDIENCE`, `RAVENROOT_AUTH_JWKS_URI` | required nonblank OIDC values in `oidc` mode |
 | `RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM` | claim name; `token_kind` |
 | `RAVENROOT_AUTH_CLOCK_SKEW_SECONDS`, `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | whole seconds; `30`, `300` |
+| `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS`, `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | whole seconds from `1` through `300`; `3`, `5` |
 | `RAVENROOT_BROWSER_ALLOWED_ORIGINS` | comma-separated exact origins; defaults to loopback `http://127.0.0.1:<port>` and `http://localhost:<port>` |
 | `RAVENROOT_CONTAINER_LOOPBACK_ONLY`, `RAVENROOT_LOCAL_HOST_BIND_ADDRESS` | explicit container-proxy proof; `false` and absent. The latter must be exactly `127.0.0.1` when used. |
 | `RAVENROOT_TRUSTED_TLS_TERMINATOR` | strict Boolean; `false` |

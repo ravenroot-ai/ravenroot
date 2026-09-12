@@ -137,6 +137,22 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
                 with self.subTest(job=job):
                     self.assertIn("needs.release-classification.outputs.tier == 'full'", block)
 
+    def test_operational_configuration_gate_runs_with_complete_history_on_both_tiers(self) -> None:
+        for job in ("fast-tooling-contracts", "full-python-contracts"):
+            with self.subTest(job=job):
+                block = self.jobs[job]
+                self.assertIn("fetch-depth: 0", block)
+                self.assertEqual(
+                    1,
+                    block.count(
+                        "python3 -m unittest scripts.tests.test_audit_operational_configuration"
+                    ),
+                )
+                self.assertEqual(
+                    1,
+                    block.count("python3 scripts/audit_operational_configuration.py --check"),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

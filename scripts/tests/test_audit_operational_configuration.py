@@ -6378,7 +6378,9 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
         for relative in (
                 audit.AGENT_BUDGET_CONFIGURATION_PATH,
                 audit.AGENT_BUDGET_POLICY_PATH,
-                audit.AGENT_BUDGET_TEST_PATH):
+                audit.AGENT_BUDGET_TEST_PATH,
+                audit.AGENT_BUDGET_COMPOSITION_PATH,
+                audit.AGENT_BUDGET_CONSUMER_PATH):
             target = cls.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, target)
@@ -6485,6 +6487,24 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
             (audit.AGENT_BUDGET_TEST_PATH,
              "assertEquals(128_000, first.maximumInputTokensPerTurn());",
              "assertTrue(first.maximumInputTokensPerTurn() > 0);"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             "@Test\n    void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()",
+             "void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             "@Test\n    void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()",
+             "@Disabled\n    @Test\n    void shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs()"),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             '@MethodSource("positiveNumericNames")', '@MethodSource("rateNames")'),
+            (audit.AGENT_BUDGET_TEST_PATH,
+             '@ParameterizedTest\n    @MethodSource("positiveNumericNames")',
+             '@Test\n    @MethodSource("positiveNumericNames")'),
+            (audit.AGENT_BUDGET_COMPOSITION_PATH,
+             "ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration\n"
+             "                                .fromEnvironment(System.getenv())",
+             "ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration\n"
+             "                                .fromEnvironment(Map.of())"),
+            (audit.AGENT_BUDGET_CONSUMER_PATH,
+             "long input = policy.maximumInputTokensPerTurn();", "long input = 128_000;"),
         )
         for relative, before, after in mutations:
             path = self.root / relative

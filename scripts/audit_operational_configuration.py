@@ -45,6 +45,10 @@ AGENT_BUDGET_POLICY_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java")
 AGENT_BUDGET_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java")
+AGENT_BUDGET_COMPOSITION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+AGENT_BUDGET_CONSUMER_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java")
 AGENT_BUDGET_CANDIDATE_IDS = (
     "oc-2d29419d18f18da74d3c",
     "oc-473ffef3055ed509d856",
@@ -57,6 +61,10 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 }
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
+AGENT_BUDGET_COMPOSITION_DIGEST = \
+    "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"
+AGENT_BUDGET_CONSUMER_DIGEST = \
+    "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_TEST_METHOD_DIGESTS = {
     "shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs":
         "c92a7682f6a8af357c428d64a123342d3cf334830a821a9562d8a65fc12008e4",
@@ -10471,6 +10479,7 @@ def agent_budget_policy_source_present(root: Path) -> bool:
     """Keep the family mandatory when any defining, owning, or test source remains."""
     return any((root / relative).exists() for relative in (
         AGENT_BUDGET_CONFIGURATION_PATH, AGENT_BUDGET_POLICY_PATH, AGENT_BUDGET_TEST_PATH,
+        AGENT_BUDGET_COMPOSITION_PATH, AGENT_BUDGET_CONSUMER_PATH,
     ))
 
 
@@ -10486,6 +10495,8 @@ def agent_budget_authority_from_source(
         configuration = (root / AGENT_BUDGET_CONFIGURATION_PATH).read_text(encoding="utf-8")
         policy = (root / AGENT_BUDGET_POLICY_PATH).read_text(encoding="utf-8")
         tests = (root / AGENT_BUDGET_TEST_PATH).read_text(encoding="utf-8")
+        composition = (root / AGENT_BUDGET_COMPOSITION_PATH).read_text(encoding="utf-8")
+        consumer = (root / AGENT_BUDGET_CONSUMER_PATH).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return None
     components = java_record_components(policy, "AgentAuthorityBudgetPolicy")
@@ -10551,8 +10562,39 @@ def agent_budget_authority_from_source(
             policy, java_compact_constructor_span(policy, "AgentAuthorityBudgetPolicy")) \
             != AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST:
         return None
+    composition_span = java_method_span(composition, "RavenrootServerMain", "run")
+    composition_body = normalized(composition[slice(*composition_span)]) \
+        if composition_span is not None else ""
+    if java_method_digest(composition, "RavenrootServerMain", "run") \
+            != AGENT_BUDGET_COMPOSITION_DIGEST \
+            or composition_body.count(
+                "AgentAuthorityBudgetConfiguration .fromEnvironment(System.getenv())") != 1:
+        return None
+    consumer_span = java_method_span(consumer, "Session", "reserve")
+    consumer_body = normalized(consumer[slice(*consumer_span)]) \
+        if consumer_span is not None else ""
+    if java_method_digest(consumer, "Session", "reserve") != AGENT_BUDGET_CONSUMER_DIGEST \
+            or consumer_body.count("long input = policy.maximumInputTokensPerTurn();") != 1 \
+            or consumer_body.count("remaining.vector().inputTokens() < input") != 1 \
+            or consumer_body.count("new AgentBudgetVector(1, input, output") != 1:
+        return None
     if any(java_method_digest(tests, "AgentAuthorityBudgetConfigurationTest", method) != digest
            for method, digest in AGENT_BUDGET_TEST_METHOD_DIGESTS.items()):
+        return None
+    expected_annotations = {
+        "shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs": ("@Test",),
+        "absentAndBlankNumericValuesUseTheSameDefaults": ("@Test",),
+        "malformedAndOverflowingNumbersHaveCauseFreeSettingOnlyDiagnostics":
+            ("@ParameterizedTest", '@MethodSource("numericNames")'),
+        "positiveBudgetsRejectZeroAndNegativeValues":
+            ("@ParameterizedTest", '@MethodSource("positiveNumericNames")'),
+        "assertSameConfiguredValues": (), "numericNames": (), "positiveNumericNames": (),
+    }
+    if not java_test_type_is_directly_runnable(tests, "AgentAuthorityBudgetConfigurationTest") \
+            or not java_has_exact_rate_test_imports(tests, "AgentAuthorityBudgetConfigurationTest") \
+            or any(java_method_annotations(
+                tests, "AgentAuthorityBudgetConfigurationTest", method) != annotations
+                for method, annotations in expected_annotations.items()):
         return None
     positive_names = java_direct_stream_string_return(
         tests, "AgentAuthorityBudgetConfigurationTest", "positiveNumericNames")
@@ -10597,6 +10639,8 @@ def agent_budget_authority_from_source(
         "sourceBodyDigests": {
             **AGENT_BUDGET_METHOD_DIGESTS,
             "AgentAuthorityBudgetPolicy.compactConstructor": AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST,
+            "RavenrootServerMain.run": AGENT_BUDGET_COMPOSITION_DIGEST,
+            "AgentAuthorityBudgetService.Session.reserve": AGENT_BUDGET_CONSUMER_DIGEST,
         },
         "sourceDigests": [
             {"path": relative.as_posix(), "digest": _source_digest(source)}
@@ -10604,6 +10648,8 @@ def agent_budget_authority_from_source(
                 (AGENT_BUDGET_CONFIGURATION_PATH, configuration),
                 (AGENT_BUDGET_POLICY_PATH, policy),
                 (AGENT_BUDGET_TEST_PATH, tests),
+                (AGENT_BUDGET_COMPOSITION_PATH, composition),
+                (AGENT_BUDGET_CONSUMER_PATH, consumer),
             )
         ],
         "testEvidence": [

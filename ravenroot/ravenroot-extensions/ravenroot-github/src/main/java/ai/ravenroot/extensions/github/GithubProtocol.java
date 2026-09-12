@@ -2,8 +2,23 @@ package ai.ravenroot.extensions.github;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+/** Published GitHub HTTP constants; these are wire vocabulary rather than operator settings. */
 final class GithubProtocol {
+    static final String API_VERSION = "2022-11-28";
+    static final String ACCEPT = "accept";
+    static final String CONTENT_TYPE = "content-type";
+    static final String API_VERSION_HEADER = "x-github-api-version";
+    static final String USER_AGENT = "user-agent";
+    static final String USER_AGENT_VALUE = "ravenroot-github/1";
+    static final String JSON = "application/json";
+    static final String GITHUB_JSON = "application/vnd.github+json";
+    static final String SIGNATURE = "x-hub-signature-256";
+    static final String DELIVERY = "x-github-delivery";
+    static final String EVENT = "x-github-event";
+    static final Set<String> WEBHOOK_HEADERS = Set.of(SIGNATURE, DELIVERY, EVENT);
+
     private GithubProtocol() { }
 
     static Map<String, Object> object(GithubApi.Response response) {

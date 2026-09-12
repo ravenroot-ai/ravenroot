@@ -206,6 +206,7 @@ public final class AuthorizedRavenrootApplication {
  */
     public GeneratedArtifact createProgramArtifact(RequestContext context, String language, String source,
                                                    Map<String, String> metadata) {
+        delegate.programAuthoringLimits().requireSource(source);
         require(context, AuthorizationAction.ARTIFACT_CREATE, collection("program-artifacts", context));
         var ownedMetadata = new LinkedHashMap<>(Objects.requireNonNull(metadata, "metadata"));
         if (ownedMetadata.keySet().stream().anyMatch(key -> key.startsWith("ravenroot.security.")
@@ -230,6 +231,7 @@ public final class AuthorizedRavenrootApplication {
  */
     public CompletionStage<ai.ravenroot.api.programming.ProgramBuildResult> buildProgramArtifact(
             RequestContext context, String nodeId, String language, String source, Object testPayload) {
+        delegate.programAuthoringLimits().requireSource(source);
         require(context, AuthorizationAction.ARTIFACT_CREATE, collection("program-artifacts", context));
         var trusted = Map.of(
                 OWNER_TENANT_METADATA, context.tenantId(),
@@ -249,6 +251,10 @@ public final class AuthorizedRavenrootApplication {
  */
     public CompletionStage<ai.ravenroot.api.programming.ProgramBuildSnapshot> startProgramBuild(
             RequestContext context, List<ai.ravenroot.api.programming.ProgramBuildRequest> programs) {
+        if (programs == null) throw new IllegalArgumentException("programs are required");
+        delegate.programAuthoringLimits().requireProgramCount(programs.size());
+        programs.forEach(program -> delegate.programAuthoringLimits().requireSource(
+                Objects.requireNonNull(program, "program").source()));
         require(context, AuthorizationAction.ARTIFACT_CREATE, collection("program-artifacts", context));
         var trusted = Map.of(
                 OWNER_TENANT_METADATA, context.tenantId(),
@@ -281,9 +287,8 @@ public final class AuthorizedRavenrootApplication {
  */
     public List<GeneratedArtifact> approveProgramArtifacts(
             RequestContext context, List<String> artifactIds, String reason) {
-        if (artifactIds == null || artifactIds.isEmpty() || artifactIds.size() > 256) {
-            throw new IllegalArgumentException("one to 256 artifact ids are required");
-        }
+        if (artifactIds == null) throw new IllegalArgumentException("artifact ids are required");
+        delegate.programAuthoringLimits().requireProgramCount(artifactIds.size());
         var approved = new java.util.ArrayList<GeneratedArtifact>(artifactIds.size());
         for (String id : artifactIds.stream().distinct().toList()) {
             GeneratedArtifact artifact = approveProgramArtifact(context, id, reason);

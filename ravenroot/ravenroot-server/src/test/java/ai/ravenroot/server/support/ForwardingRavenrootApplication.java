@@ -31,6 +31,9 @@ public class ForwardingRavenrootApplication implements RavenrootApplication {
     }
 
     protected final RavenrootApplication delegate() { return delegate; }
+    @Override public ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
+        return delegate.programAuthoringLimits();
+    }
     @Override public ApplicationStatus status() { return delegate.status(); }
     @Override public RuntimeSnapshot runtimeSnapshot() { return delegate.runtimeSnapshot(); }
     @Override public List<NodeTypeDescriptor> nodeTypes() { return delegate.nodeTypes(); }

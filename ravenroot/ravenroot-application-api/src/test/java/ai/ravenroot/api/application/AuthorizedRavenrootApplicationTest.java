@@ -204,6 +204,26 @@ class AuthorizedRavenrootApplicationTest {
     }
 
     @Test
+    void programAuthoringLimitsRefuseBeforeAuthorizationAuditOrDelegateSideEffects() {
+        var raw = new FakeApplication();
+        raw.programLimits = new ai.ravenroot.api.programming.ProgramAuthoringLimits(4, 8, 1);
+        var audit = new ArrayList<ai.ravenroot.api.security.AuthorizationAuditEvent>();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(audit::add),
+                event -> { }, true);
+        var developer = context("tenant-a", Role.DEVELOPER, "ravenroot.artifact.manage");
+
+        assertThrows(IllegalArgumentException.class, () -> facade.createProgramArtifact(
+                developer, "javascript", "€€", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> facade.startProgramBuild(developer, List.of(
+                new ai.ravenroot.api.programming.ProgramBuildRequest("a", "javascript", "a", Map.of()),
+                new ai.ravenroot.api.programming.ProgramBuildRequest("b", "javascript", "b", Map.of()))));
+        assertThrows(IllegalArgumentException.class, () -> facade.approveProgramArtifacts(
+                developer, List.of("a", "b"), "reason"));
+        assertEquals(0, raw.createCalls);
+        assertTrue(audit.isEmpty());
+    }
+
+    @Test
     void preventsDeveloperFromEscalatingIntoApproval() {
         var raw = new FakeApplication();
         raw.artifacts.add(artifact("owned",
@@ -950,6 +970,8 @@ class AuthorizedRavenrootApplicationTest {
     }
 
     private static final class FakeApplication implements RavenrootApplication {
+        private ai.ravenroot.api.programming.ProgramAuthoringLimits programLimits =
+                ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
         private final List<GeneratedArtifact> artifacts = new ArrayList<>();
         private final List<ExecutionEvent> events = new ArrayList<>();
         private final List<Consumer<ExecutionEvent>> listeners = new ArrayList<>();
@@ -957,6 +979,10 @@ class AuthorizedRavenrootApplicationTest {
         /** Every tenant id the facade asked this delegate about, in order. */
         private final List<String> observedResultTenants = new ArrayList<>();
         private final List<String> observedSourceSessionTenants = new ArrayList<>();
+
+        @Override public ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
+            return programLimits;
+        }
 
         @Override
         public SourceSessionStatus startSourceSession(ai.ravenroot.api.security.SecurityContext security,

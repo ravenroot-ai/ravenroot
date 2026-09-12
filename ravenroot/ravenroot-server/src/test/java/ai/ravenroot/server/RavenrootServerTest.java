@@ -13,6 +13,7 @@ import ai.ravenroot.core.security.OutboundHttpPolicy;
 import ai.ravenroot.api.programming.GeneratedArtifact;
 import ai.ravenroot.api.programming.ProgramAdmission;
 import ai.ravenroot.api.programming.ProgramLanguageDescriptor;
+import ai.ravenroot.api.programming.ProgramAuthoringLimits;
 import ai.ravenroot.api.programming.ProgramRequest;
 import ai.ravenroot.api.programming.ProgramRuntime;
 import ai.ravenroot.api.security.ToolDecision;
@@ -267,6 +268,29 @@ class RavenrootServerTest {
             // on this response already uses -- \n, not a raw newline that would break the envelope.
             assertTrue(response.body().contains("def call(payload)\\n  payload\\nend"), response.body());
             assertFalse(response.body().contains("\r"), "no raw control byte reaches the wire");
+        }
+    }
+
+    @Test
+    void configuredProgramSourceByteLimitRejectsBeforeArtifactCreation() throws Exception {
+        var delegate = new DefaultRavenrootApplication(null, new ExecutionMonitor());
+        var application = new ForwardingRavenrootApplication(delegate) {
+            @Override public ProgramAuthoringLimits programAuthoringLimits() {
+                return new ProgramAuthoringLimits(4, 256, 1);
+            }
+        };
+        try (var server = testServer(application, null)) {
+            server.start();
+            var response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port()
+                                    + "/v1/program-artifacts?language=javascript"))
+                    .POST(HttpRequest.BodyPublishers.ofString("€€", StandardCharsets.UTF_8)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(413, response.statusCode());
+            assertTrue(response.body().contains("\"code\":\"PROGRAM_SOURCE_TOO_LARGE\""), response.body());
+            assertTrue(delegate.programArtifacts().isEmpty(),
+                    "the UTF-8 source limit must be enforced before artifact creation");
         }
     }
 
@@ -789,7 +813,9 @@ class RavenrootServerTest {
                             URI.create("http://localhost:" + server.port() + "/v1/configuration")).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(200, configuration.statusCode());
-            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length
+            assertEquals("{\"schemaVersion\":2,\"graphDocumentMaxBytes\":" + exact.length
+                            + ",\"programAuthoring\":{\"maxSourceBytes\":1048576,"
+                            + "\"maxBuildRequestBytes\":10485760,\"maxProgramsPerBuild\":256}"
                             + ",\"workspace\":{\"tenantId\":\"local\"}}",
                     configuration.body());
             assertEquals("private, no-store", configuration.headers().firstValue("Cache-Control").orElseThrow());

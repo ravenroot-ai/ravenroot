@@ -931,7 +931,6 @@ let runtimeConfiguration = null;
 let runtimeConnectionGeneration = 0;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
-const PROGRAM_BUILD_BATCH_LIMIT = 256;
 const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;
 const PROGRAM_OUTPUT_DISPLAY_LIMIT = 8 * 1024;
 const PROGRAM_WORKSPACE_PROPERTY_NAMES = new Set(['language', 'source', 'testPayload', 'artifactId']);
@@ -7836,6 +7835,14 @@ function programBuildPlan(owner) {
   return { nodes, programs, signature: JSON.stringify(programs) };
 }
 
+function currentProgramAuthoringLimits() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient
+      || !runtimeConfiguration.configuration?.programAuthoring) {
+    throw new Error('Program authoring is unavailable until the connected service returns valid configuration');
+  }
+  return runtimeConfiguration.configuration.programAuthoring;
+}
+
 function resetProgramGeneration(owner, state, plan) {
   state.phases.clear();
   state.activeBuildId = null;
@@ -8025,8 +8032,10 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   if (state.settledGeneration === generation) {
     return plan.nodes.every(node => state.phases.get(node.id)?.phase === 'READY');
   }
-  if (plan.programs.length > PROGRAM_BUILD_BATCH_LIMIT) {
-    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${PROGRAM_BUILD_BATCH_LIMIT}`;
+  const authoringLimits = currentProgramAuthoringLimits();
+  const batchLimit = authoringLimits.maxProgramsPerBuild;
+  if (plan.programs.length > batchLimit) {
+    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${batchLimit}`;
     plan.nodes.forEach(node => programPhase(owner, node.id, {
       phase: '', ready: false, reused: false, transportError: true,
       diagnostic: message, detail: `Readiness request failed · ${message}`,
@@ -8037,7 +8046,7 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   }
   return startProgramReadinessFlight(owner, plan, generation, {
     automatic,
-    start: client => client.buildProgramArtifacts(plan.programs),
+    start: client => client.buildProgramArtifacts(plan.programs, authoringLimits),
   });
 }
 
@@ -8241,7 +8250,8 @@ function bindProgramWorkspace(form, model) {
         propertyTypes: { ...(model?.propertyTypes || {}) },
       };
       const client = runtimeClient;
-      const started = await client.buildProgramArtifacts([programBuildSubmission(draft)]);
+      const started = await client.buildProgramArtifacts(
+        [programBuildSubmission(draft)], currentProgramAuthoringLimits());
       const settled = await observeProgramBuildSnapshots(client, started, {
         current: () => runtimeClient === client && panel.isConnected,
         onSnapshot: snapshot => {

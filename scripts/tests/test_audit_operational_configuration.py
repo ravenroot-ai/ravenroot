@@ -238,7 +238,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
                          audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                          *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                         authority["timeoutRuntime"]["path"]}:
+                         *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}:
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / path, target)
@@ -268,7 +268,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         required = {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
                     audit.HELM_VALUES_PATH, audit.HELM_SCHEMA_PATH,
                     *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                    authority["timeoutRuntime"]["path"]}
+                    *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}
         for before, after in chart_mutations:
             with self.subTest(chart_mutation=before):
                 with tempfile.TemporaryDirectory() as location:
@@ -357,8 +357,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ("scripts/tests/test_helm_values_contract.sh",
              "securityContext.readOnlyRootFilesystem=false \\",
              "securityContext.readOnlyRootFilesystem=not-a-boolean \\",),
-            (authority["timeoutRuntime"]["path"],
-             'Duration timeout = Duration.ofMillis(', '// Duration timeout = Duration.ofMillis('),
+            (authority["timeoutRuntime"]["resolverPath"],
+             'int timeout = integer(', '// int timeout = integer('),
             (authority["timeoutRuntime"]["path"],
              'static GraalVmProgramRuntime fromEnvironment(java.util.Map<String, String> environment)',
              'static GraalVmProgramRuntime fromChangedEnvironment(java.util.Map<String, String> environment)'),
@@ -371,7 +371,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 audit.HELM_VALUES_PATH,
                                 audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                                authority["timeoutRuntime"]["path"]}
+                                *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}
                     for path in required:
                         target = root / path
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -394,7 +394,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 audit.HELM_VALUES_PATH,
                                 audit.HELM_SCHEMA_PATH,
                                 *audit.HELM_TEMPLATE_PATHS, *audit.HELM_TEST_ROLES,
-                                authority["timeoutRuntime"]["path"]}
+                                *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}
                     for path in required:
                         target = root / path
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -409,7 +409,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             for path in {audit.HELM_CHART_PATH, audit.HELM_RELEASE_CONTRACT_PATH,
                          audit.HELM_VALUES_PATH,
                          *audit.HELM_TEMPLATE_PATHS,
-                         *audit.HELM_TEST_ROLES, authority["timeoutRuntime"]["path"]}:
+                         *audit.HELM_TEST_ROLES, *authority["timeoutRuntime"].get("sourcePaths", [authority["timeoutRuntime"]["path"]])}:
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / path, target)
@@ -941,6 +941,31 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(audit.external_io_policy_authority_errors(
             ROOT, missing_partition, entries, discovered))
 
+    def missing_program_and_interaction_fixture_diagnostics(self, candidates):
+        discovered = {candidate.id: candidate for candidate in candidates}
+        program = audit.program_github_policy_authority_from_source(ROOT, discovered)
+        interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
+        self.assertIsNotNone(program)
+        self.assertIsNotNone(interaction)
+        self.assertEqual(1227, len(program["candidateIds"]))
+        self.assertEqual(164, len(interaction["candidateIds"]))
+        self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
+        expected = {
+            "program/GitHub settings require the exact mandatory source-derived authority",
+            "program/GitHub authority candidate partition is missing, duplicated, or foreign",
+            "interaction WebSocket settings require the exact mandatory source-derived authority",
+            "interaction WebSocket candidate partition is missing, duplicated, or foreign",
+        }
+        expected.update(f"{identifier}: mandatory program/GitHub candidate requires resolved semantic review"
+                        for identifier in program["candidateIds"])
+        # Candidate.inventory_entry retains test fixtures; their only missing row metadata is the
+        # interaction marker. Production rows are still pending in these deliberately partial docs.
+        expected.update(
+            f"{identifier}: interaction WebSocket marker has drifted" if discovered[identifier].fixture
+            else f"{identifier}: mandatory interaction WebSocket candidate requires resolved semantic review"
+            for identifier in interaction["candidateIds"])
+        return expected
+
     def test_inventory_routes_mandatory_external_io_authority_without_markers(self) -> None:
         candidates = audit.discover(ROOT)
         discovered = {candidate.id: candidate for candidate in candidates}
@@ -972,8 +997,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual([], target_errors)
         self.assertTrue(errors, "the synthetic document deliberately omits unrelated authorities")
         unrelated = [error for error in errors if error not in target_errors]
+        expected_missing_families = self.missing_program_and_interaction_fixture_diagnostics(candidates)
+        self.assertIn("program/GitHub settings require the exact mandatory source-derived authority", unrelated)
+        self.assertIn("interaction WebSocket settings require the exact mandatory source-derived authority", unrelated)
+        self.assertTrue(expected_missing_families <= set(unrelated), expected_missing_families - set(unrelated))
         self.assertEqual([], [error for error in unrelated if not (
-            error == "AssistantConfiguration operational limits require one closed family authority"
+            error in expected_missing_families
+            or error == "AssistantConfiguration operational limits require one closed family authority"
             or error == "Helm settings require the exact source-derived closed values authority"
             or error == "persistence settings require the exact mandatory source-derived authority"
             or (error.startswith("deployment.")
@@ -1257,8 +1287,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "external-I/O settings require the exact mandatory source-derived authority",
             unrelated,
         )
+        expected_missing_families = self.missing_program_and_interaction_fixture_diagnostics(candidates)
+        self.assertIn("program/GitHub settings require the exact mandatory source-derived authority", unrelated)
+        self.assertIn("interaction WebSocket settings require the exact mandatory source-derived authority", unrelated)
+        self.assertTrue(expected_missing_families <= set(unrelated), expected_missing_families - set(unrelated))
         self.assertEqual([], [error for error in unrelated if not (
-            error == "AssistantConfiguration operational limits require one closed family authority"
+            error in expected_missing_families
+            or error == "AssistantConfiguration operational limits require one closed family authority"
             or error == "Helm settings require the exact source-derived closed values authority"
             or error == "external-I/O settings require the exact mandatory source-derived authority"
             or (error.startswith("deployment.")
@@ -3806,12 +3841,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         }
 
     def graph_limit_inventory_errors(self, document, candidates):
-        # This fixture intentionally contains only graph rows. The separately mandatory assistant,
-        # Helm, persistence and external-I/O authorities have unmocked general-entrypoint tests.
+        # Only graph rows are present. Other mandatory families remain unmocked in their dedicated
+        # direct/global tests; this scope isolates graph metadata rather than hiding their diagnostics.
         with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]):
+                mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -5782,11 +5819,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             },
         }
         def errors(value):
-            # These two unresolved rows contain no assistant, Helm, persistence or external-I/O family.
+            # These two synthetic unresolved rows contain none of the separately mandatory families.
+            # Their real direct/global tests stay unmocked; only this unresolved-state unit is isolated.
             with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))
@@ -5916,6 +5956,625 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:
             audit.main(["--accept-retired-pending"])
         self.assertEqual(2, failure.exception.code)
+
+
+class ProgramGithubPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in audit.PROGRAM_GITHUB_REQUIRED_PATHS:
+            destination = cls.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.program_github_policy_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The actual supported source must derive before any negative test")
+        cls.entries = {candidate.id: {**candidate.source_fields(), "status": "pending-review",
+                                     "classification": None} for candidate in cls.candidates}
+        for contract in cls.authority["contracts"] + cls.authority["bindingCarriers"]:
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(
+                    status="already-centralized", classification="operator-configurable",
+                    programGithubPolicyAuthority=audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID,
+                    setting=contract["setting"], owner=contract["owner"], field=contract["field"],
+                    bindings=contract["bindings"], defaultEvidence=contract["defaultCandidateIds"],
+                    default=contract["defaultExpression"], scope=contract["scope"], pinning=contract["pinning"],
+                    validation=contract["validation"], coverage=contract["coverage"])
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(status=partition["status"], classification=partition["classification"],
+                    programGithubPolicyAuthority=audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def test_program_github_all_59_fields_are_closed_and_scanner_blind_fields_are_not_invented(self) -> None:
+        authority = self.authority
+        self.assertEqual(59, len(authority["contracts"]))
+        self.assertEqual(50, sum(item["setting"].startswith("github.") for item in authority["contracts"]))
+        self.assertEqual(1, len(authority["bindingCarriers"]))
+        self.assertTrue(any(not item["candidateIds"] for item in authority["contracts"]),
+                        "A scanner-blind field must have structural proof, never fabricated literal IDs")
+        all_ids = [identifier for item in authority["contracts"] + authority["bindingCarriers"]
+                   + authority["semanticPartitions"] for identifier in item["candidateIds"]]
+        self.assertEqual(len(all_ids), len(set(all_ids)))
+        self.assertEqual(set(all_ids), audit.program_github_policy_cohort_candidate_ids(self.root, self.discovered))
+        self.assertEqual([], audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority}, self.entries, self.discovered))
+
+    def test_program_github_missing_markers_whole_family_or_scanner_blind_contract_cannot_opt_out(self) -> None:
+        for authorities in (None, {}, {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: {}}):
+            with self.subTest(authorities=authorities):
+                self.assertTrue(audit.program_github_policy_authority_errors(
+                    self.root, authorities, self.entries, self.discovered))
+        changed = copy.deepcopy(self.authority)
+        changed["contracts"] = [item for item in changed["contracts"] if item["candidateIds"]]
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: changed}, self.entries, self.discovered))
+        entries = copy.deepcopy(self.entries)
+        for row in entries.values(): row.pop("programGithubPolicyAuthority", None)
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+
+    def test_program_github_entry_relabel_foreign_setting_pending_and_omission_refuse(self) -> None:
+        identifier = next(item["candidateIds"][0] for item in self.authority["contracts"] if item["candidateIds"])
+        for change in ({"classification": "derived", "status": "retained"}, {"setting": "foreign.setting"},
+                       {"status": "pending-review", "classification": None}, {"authorityStatus": "unresolved"},
+                       {"owner": "foreign/File.java#Owner"}, {"bindings": ["RAVENROOT_FOREIGN"]},
+                       {"defaultEvidence": ["oc-not-an-actual-source-id"]}):
+            with self.subTest(change=change):
+                entries = copy.deepcopy(self.entries); entries[identifier].update(change)
+                self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+                    {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+        entries = copy.deepcopy(self.entries); del entries[identifier]
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+        retained_id = self.authority["semanticPartitions"][0]["candidateIds"][0]
+        entries = copy.deepcopy(self.entries)
+        entries[retained_id]["classification"] = "security-ceiling-or-default" if entries[retained_id]["classification"] != "security-ceiling-or-default" else "derived"
+        self.assertTrue(audit.program_github_policy_authority_errors(self.root,
+            {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}, entries, self.discovered))
+
+    def test_program_github_current_cohort_omission_or_extra_candidate_refuses(self) -> None:
+        from dataclasses import replace
+        identifier = self.authority["candidateIds"][0]
+        changed = dict(self.discovered); del changed[identifier]
+        self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, changed))
+        source = next(item for item in self.candidates if item.path == audit.PROGRAM_GITHUB_PATHS["graal"])
+        extra = replace(source, id="oc-injected-unreviewed", role="NEW_UNREVIEWED_SETTING", expression="123")
+        changed = {**self.discovered, extra.id: extra}
+        self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, changed))
+        excluded = set(audit.PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS)
+        self.assertFalse(excluded & set(self.authority["candidateIds"]))
+        self.assertNotIn(extra.id, excluded)
+
+    def test_program_github_actual_source_mutations_cannot_be_blessed_by_metadata_refresh(self) -> None:
+        mutations = (
+            ("graal", "return value != null ? value : environment.get(variable);", "return environment.get(variable);"),
+            ("graal", "if (standard != null)", "if (standard != null && !standard.isBlank())"),
+            ("graal", "!(properties.get(name) instanceof String)", "false"),
+            ("authoring", "source.getBytes(StandardCharsets.UTF_8).length > maxSourceBytes", "source.length() > maxSourceBytes"),
+            ("authoring", "count > maxProgramsPerBuild", "count > HARD_MAX_PROGRAMS_PER_BUILD"),
+            ("selector", "if (properties.containsKey(PROPERTY))", "if (false)"),
+            ("runtime", "policyFor(configuration.javaExecutable(), configuration.timeout(), configuration.maxHeapMegabytes())",
+                         "policyFor(configuration.javaExecutable(), Duration.ofMillis(5000), 64)"),
+            ("runtime", "policy.deadline().toMillis()", "5000"),
+            ("launcher", 'if (placement.hasOverride()) throw new IOException("SANDBOX_RESOURCE_CACHE_UNSUPPORTED");', "if (false) throw new IOException(\"SANDBOX_RESOURCE_CACHE_UNSUPPORTED\");"),
+            ("process", "builder.environment().clear();", ""),
+            ("process", "verifyPlacement(placement);", ""),
+            ("github", 'profiles.get(tenantId + "\\u0000" + name)', 'profiles.get(name)'),
+            ("profile", 'Map.entry("name", name)', 'Map.entry("credentialReference", credentialReference)'),
+            ("store", "beforePrune != null && !profileContractDigest.equals(beforePrune.profileContractDigest())", "false"),
+            ("store", 'statement.execute("BEGIN IMMEDIATE")', 'statement.execute("BEGIN")'),
+            ("core", "programAuthoringLimits.requireSource(source);", ""),
+            ("authorized", "delegate.programAuthoringLimits().requireProgramCount(artifactIds.size());", ""),
+            ("server", "input.readNBytes(programAuthoringLimits.maxBuildRequestBytes() + 1)", "input.readNBytes(10485760 + 1)"),
+            ("manifest", "was.programRuntimeDigest(), programRuntimeDigest", "was.programRuntimeDigest(), was.programRuntimeDigest()"),
+            ("client", "value?.schemaVersion === 1 && value?.programAuthoring === undefined", "value.schemaVersion === 1"),
+            ("ui", "const batchLimit = authoringLimits.maxProgramsPerBuild;", "const batchLimit = 256;"),
+        )
+        for key, before, after in mutations:
+            path = self.root / audit.PROGRAM_GITHUB_PATHS[key]
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=path, before=before):
+                self.assertIn(before, original, "Mutation must alter the actual accepted executable source")
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, refreshed))
+                    errors = audit.program_github_policy_authority_errors(self.root, {}, {}, refreshed)
+                    self.assertTrue(any("source family" in error for error in errors), errors)
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_program_github_source_or_decisive_assertion_deletion_refuses(self) -> None:
+        path = self.root / audit.PROGRAM_GITHUB_PATHS["authoring"]
+        original = path.read_text(encoding="utf-8")
+        try:
+            path.unlink()
+            self.assertTrue(audit.program_github_policy_source_present(self.root))
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            path.write_text(original, encoding="utf-8")
+        relative, _, _, _ = audit.PROGRAM_GITHUB_TEST_PROOFS[0]
+        path = self.root / relative; original = path.read_text(encoding="utf-8")
+        try:
+            self.assertIn("assert", original)
+            path.write_text(original.replace("assert", "removedAssert", 1), encoding="utf-8")
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_program_github_live_references_remap_without_rewriting_history_or_prose(self) -> None:
+        old, new = 'oc-reviewed-old', 'oc-reviewed-new'
+        authority = {"candidateIds": [old], "contracts": [{"candidateIds": [old], "defaultCandidateIds": [old], "rationale": old}],
+                     "bindingCarriers": [{"candidateIds": [old], "defaultCandidateIds": [old]}],
+                     "semanticPartitions": [{"candidateIds": [old], "rationale": old}]}
+        history = [{"candidateIds": [old], "source": old}]
+        document = {"programGithubPolicyAuthorities": {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: authority},
+                    "reconciliationHistory": copy.deepcopy(history), "retiredEntries": copy.deepcopy(history)}
+        audit.remap_declared_candidate_references(document, {old: new})
+        self.assertEqual([new], authority["candidateIds"])
+        for field in ("contracts", "bindingCarriers", "semanticPartitions"):
+            self.assertEqual([new], authority[field][0]["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["defaultCandidateIds"])
+        self.assertEqual([new], authority["bindingCarriers"][0]["defaultCandidateIds"])
+        self.assertEqual(old, authority["contracts"][0]["rationale"])
+        self.assertEqual(old, authority["semanticPartitions"][0]["rationale"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        self.assertEqual(history, document["retiredEntries"])
+
+    def test_program_github_closed_deployment_mirrors_and_client_consumer_refuse_bypass(self) -> None:
+        mutations = (
+            ("compose", "RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES:-}", "RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES:-1024}"),
+            ("helmSchema", '"maximum": 1048576', '"maximum": 1048577'),
+            ("helmDeployment", '.Values.programAuthoring.maxSourceBytes', '.Values.programAuthoring.maxBuildRequestBytes'),
+            ("helmValues", 'programAuthoring:\n  maxSourceBytes: ""', 'programAuthoring:\n  maxSourceBytes: 1048576'),
+            ("client", "programs.length > authoring.maxProgramsPerBuild", "programs.length > 256"),
+            ("client", "new TextEncoder().encode(source).byteLength > authoring.maxSourceBytes", "source.length > authoring.maxSourceBytes"),
+        )
+        for key, before, after in mutations:
+            path = self.root / audit.PROGRAM_GITHUB_PATHS[key]
+            original = path.read_text()
+            with self.subTest(key=key):
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after, 1))
+                    self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+                finally:
+                    path.write_text(original)
+
+    def program_github_inventory_document(self, entries: dict[str, dict[str, object]]) -> dict[str, object]:
+        return {"schemaVersion": audit.SCHEMA_VERSION, "entries": list(entries.values()),
+                "evidenceRecords": {candidate.evidence_digest: candidate.evidence for candidate in self.candidates},
+                "programGithubPolicyAuthorities": {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}}
+
+    def test_program_github_exact_contract_prose_refuses_each_fictional_field_in_both_routes(self) -> None:
+        contract = next(item for item in self.authority["contracts"] if len(item["candidateIds"]) > 1)
+        identifiers = contract["candidateIds"]
+        self.assertGreater(len(identifiers), 1)
+        authorities = {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: self.authority}
+        self.assertEqual([], audit.program_github_policy_authority_errors(
+            self.root, authorities, self.entries, self.discovered))
+        baseline = audit.inventory_errors(self.root, self.program_github_inventory_document(self.entries), self.candidates)
+        self.assertFalse([error for error in baseline if "program/GitHub" in error], baseline)
+        # This fixture copies the program composition root but deliberately omits the listener
+        # family. Its new mandatory diagnostic remains visible; the program route is unmocked.
+        self.assertIn("interaction WebSocket source family is incomplete, unpartitioned, or unsupported", baseline)
+        for field in ("default", "scope", "pinning", "validation", "coverage"):
+            with self.subTest(field=field):
+                entries = copy.deepcopy(self.entries)
+                # Keep all rows mutually consistent: only the independent contract can reject this claim.
+                for identifier in identifiers:
+                    entries[identifier][field] = "fictional but nonempty " + field
+                self.assertEqual(1, len({entries[identifier][field] for identifier in identifiers}))
+                direct = audit.program_github_policy_authority_errors(
+                    self.root, authorities, entries, self.discovered)
+                global_errors = audit.inventory_errors(
+                    self.root, self.program_github_inventory_document(entries), self.candidates)
+                for identifier in identifiers:
+                    expected = f"{identifier}: program/GitHub {field} authority has drifted"
+                    self.assertIn(expected, direct)
+                    self.assertIn(expected, global_errors)
+
+    def test_program_github_release_asset_verification_cannot_be_blessed_by_digest_refresh(self) -> None:
+        path = self.root / audit.PROGRAM_GITHUB_PATHS["release"]
+        original = path.read_text(encoding="utf-8")
+        before = "if digest(downloaded) != digest(local):"
+        self.assertEqual(1, original.count(before))
+        try:
+            path.write_text(original.replace(before, "if digest(downloaded) == digest(local):"), encoding="utf-8")
+            refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+            document = self.program_github_inventory_document(copy.deepcopy(self.entries))
+            claimed = copy.deepcopy(self.authority)
+            for item in claimed["sourceDigests"]:
+                if item["path"] == audit.PROGRAM_GITHUB_PATHS["release"]:
+                    item["digest"] = audit._source_digest(path.read_text(encoding="utf-8"))
+            self.assertNotEqual(self.authority["sourceDigests"], claimed["sourceDigests"])
+            document["programGithubPolicyAuthorities"] = {audit.PROGRAM_GITHUB_POLICY_AUTHORITY_ID: claimed}
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, refreshed))
+            self.assertTrue(any("source family" in error for error in audit.program_github_policy_authority_errors(
+                self.root, document["programGithubPolicyAuthorities"], self.entries, refreshed)))
+            self.assertTrue(any("program/GitHub policy source family" in error for error in audit.inventory_errors(
+                self.root, document, tuple(refreshed.values()))))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_program_github_build_envelope_and_non_source_guard_bypasses_refuse(self) -> None:
+        path = self.root / audit.PROGRAM_GITHUB_PATHS["submission"]
+        original = path.read_text(encoding="utf-8")
+        mutations = (
+            ("PayloadJson.read(body, buildEnvelopeLimits(limits, authoring))", "PayloadJson.read(body, limits)"),
+            ("enforceGenericTextLimitsOutsideProgramSource(root, limits);", ""),
+            ('if (!"source".equals(field.getKey()))', 'if (false)'),
+        )
+        for before, after in mutations:
+            with self.subTest(before=before):
+                self.assertEqual(1, original.count(before))
+                try:
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
+                    self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+        helper_path = self.root / "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java"
+        helper_source = helper_path.read_text(encoding="utf-8")
+        helper_span = audit.java_method_span(helper_source, "ProgramBuildSubmissionTest", "assertPayloadReason")
+        self.assertIsNotNone(helper_span)
+        start, end = helper_span
+        try:
+            helper_path.write_text(helper_source[:start] + helper_source[start:end].replace("assertThrows", "removedAssertThrows", 1)
+                                   + helper_source[end:], encoding="utf-8")
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            helper_path.write_text(helper_source, encoding="utf-8")
+        relative = "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ContentAddressedProgramBuildHttpIntegrationTest.java"
+        path = self.root / relative
+        original = path.read_text(encoding="utf-8")
+        span = audit.java_method_span(original, "ContentAddressedProgramBuildHttpIntegrationTest",
+                                      "buildRouteMakesTheSelectedRequestAndUtf8SourceCeilingsReachable")
+        self.assertIsNotNone(span)
+        start, end = span
+        body = original[start:end]
+        self.assertIn("assert", body)
+        try:
+            path.write_text(original[:start] + body.replace("assert", "removedAssert", 1) + original[end:], encoding="utf-8")
+            self.assertIsNone(audit.program_github_policy_authority_from_source(self.root, self.discovered))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_program_github_inventory_dispatch_is_mandatory_without_markers(self) -> None:
+        with synthetic_repository() as directory:
+            root = Path(directory)
+            document = json.loads((root / "scripts/operational-configuration-inventory.json").read_text())
+            with mock.patch.object(audit, "program_github_policy_authority_errors", return_value=["program-github-routing-probe"]) as routed:
+                self.assertIn("program-github-routing-probe", audit.inventory_errors(root, document, audit.discover(root)))
+                routed.assert_called_once()
+
+class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name)
+        for relative in audit.INTERACTION_WEBSOCKET_REQUIRED_PATHS:
+            target = cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        cls.candidates = audit.discover(cls.root)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.authority = audit.interaction_websocket_authority_from_source(cls.root, cls.discovered)
+        if cls.authority is None:
+            raise AssertionError("The exact supported interaction source must derive before any mutation")
+        cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
+        for contract in cls.authority["contracts"]:
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(
+                    status="already-centralized", classification="operator-configurable",
+                    interactionWebSocketAuthority=audit.INTERACTION_WEBSOCKET_AUTHORITY_ID,
+                    **{key: copy.deepcopy(contract[key]) for key in (
+                        "setting", "owner", "field", "bindings", "bindingAuthority", "defaultAuthority",
+                        "validation", "scope", "pinning", "coverage")},
+                    default=contract["defaultExpression"], defaultEvidence=contract["defaultCandidateIds"],
+                    rationale="The exact typed interaction factory consumes this field and its source-proven fallback.")
+        for group in cls.authority["semanticPartitions"] + cls.authority["bindingCarriers"]:
+            for identifier in group["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=group["status"], classification=group["classification"],
+                    interactionWebSocketAuthority=audit.INTERACTION_WEBSOCKET_AUTHORITY_ID,
+                    rationale=group.get("rationale", "The fixed property prefix is a non-setting protocol binding carrier."))
+                for key in ("retainedAuthority", "bindingCarrier"):
+                    if key in group:
+                        cls.entries[identifier][key] = copy.deepcopy(group[key])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temporary.cleanup()
+
+    def document(self, entries=None, authority=None):
+        return {"schemaVersion": audit.SCHEMA_VERSION, "reconciliationRequired": False,
+                "entries": list((self.entries if entries is None else entries).values()),
+                "retiredEntries": [], "migrationHistory": [], "reconciliationHistory": [],
+                "evidenceRecords": {candidate.evidence_digest: candidate.evidence for candidate in self.candidates},
+                "interactionWebSocketAuthorities": {audit.INTERACTION_WEBSOCKET_AUTHORITY_ID:
+                    self.authority if authority is None else authority}}
+
+    def both_routes_refuse(self, entries, authority=None):
+        authority = self.authority if authority is None else authority
+        direct = audit.interaction_websocket_authority_errors(self.root,
+            {audit.INTERACTION_WEBSOCKET_AUTHORITY_ID: authority}, entries, self.discovered)
+        global_errors = audit.inventory_errors(self.root, self.document(entries, authority), self.candidates)
+        self.assertTrue(direct)
+        for diagnostic in direct:
+            self.assertIn(diagnostic, global_errors)
+        return direct
+
+    def source_mutation_refuses(self, relative, before, after):
+        path = self.root / relative
+        original = path.read_text(encoding="utf-8")
+        self.assertIn(before, original, f"Actual executable mutation target is required: {relative}")
+        try:
+            path.write_text(original.replace(before, after, 1), encoding="utf-8")
+            refreshed = {item.id: item for item in audit.discover(self.root)}
+            claimed = copy.deepcopy(self.authority)
+            for item in claimed["sourceDigests"]:
+                item["digest"] = audit._source_digest((self.root / item["path"]).read_text(encoding="utf-8"))
+            self.assertIsNone(audit.interaction_websocket_authority_from_source(self.root, refreshed))
+            expected = "interaction WebSocket source family is incomplete, unpartitioned, or unsupported"
+            direct = audit.interaction_websocket_authority_errors(self.root,
+                {audit.INTERACTION_WEBSOCKET_AUTHORITY_ID: claimed}, self.entries, refreshed)
+            self.assertEqual([expected], direct)
+            self.assertIn(expected, audit.inventory_errors(self.root, self.document(authority=claimed), tuple(refreshed.values())))
+        finally:
+            path.write_text(original, encoding="utf-8")
+
+    def test_interaction_exact_21_defaults_20_new_atoms_and_non_setting_carrier(self):
+        self.assertEqual(21, len(self.authority["contracts"]))
+        self.assertEqual(84, sum(len(contract["candidateIds"]) for contract in self.authority["contracts"]))
+        self.assertEqual(1, len(self.authority["bindingCarriers"]))
+        self.assertEqual(79, sum(len(group["candidateIds"]) for group in self.authority["semanticPartitions"]))
+        ids = [identifier for group in self.authority["contracts"] + self.authority["bindingCarriers"]
+               + self.authority["semanticPartitions"] for identifier in group["candidateIds"]]
+        self.assertEqual(164, len(ids))
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(set(ids), audit.interaction_websocket_cohort_candidate_ids(self.root, self.discovered))
+        source = (self.root / audit.INTERACTION_WEBSOCKET_CONFIGURATION_PATH).read_text()
+        calls = audit.interaction_websocket_default_calls(source)
+        self.assertEqual(21, len(calls))
+        new = [item for item in self.candidates if item.role.startswith("interaction-websocket-default:")]
+        self.assertEqual(20, len(new))
+        for contract in self.authority["contracts"]:
+            with self.subTest(setting=contract["setting"]):
+                self.assertEqual(1, len(contract["defaultCandidateIds"]))
+                default = self.discovered[contract["defaultCandidateIds"][0]]
+                suffix = contract["bindingAuthority"]["suffix"]
+                self.assertEqual(calls[suffix]["expression"], default.expression)
+                self.assertEqual(calls[suffix]["evaluated"], contract["evaluatedDefault"])
+                self.assertEqual([default.id], self.entries[contract["candidateIds"][0]]["defaultEvidence"])
+                if suffix == "port":
+                    self.assertEqual("oc-884995f478d5726b523e", default.id)
+                    self.assertEqual("operational-declaration", default.kind)
+                else:
+                    self.assertEqual("interaction-websocket-default:" + suffix, default.role)
+        carrier = self.entries[self.authority["bindingCarriers"][0]["candidateIds"][0]]
+        self.assertEqual("protocol-or-format-invariant", carrier["classification"])
+        self.assertFalse({"setting", "default", "defaultEvidence"} & carrier.keys())
+        self.assertEqual([], audit.interaction_websocket_authority_errors(self.root,
+            {audit.INTERACTION_WEBSOCKET_AUTHORITY_ID: self.authority}, self.entries, self.discovered))
+        self.assertEqual([], audit.inventory_errors(self.root, self.document(), self.candidates))
+
+    def test_interaction_extractor_is_exact_factory_path_call_arity_and_literal_span(self):
+        relative = audit.INTERACTION_WEBSOCKET_CONFIGURATION_PATH
+        source = (self.root / relative).read_text()
+        self.assertEqual([], audit.interaction_websocket_default_candidates(Path("other/InteractionWebSocketConfiguration.java"), source))
+        for before, after in (
+            ("from(Properties properties,", "from(OtherProperties properties,"),
+            ('integer(properties, environment, "max-connections", 256)', 'integer(properties, environment, "max-connections", 256, 1)'),
+            ('integer(properties, environment, "max-connections", 256)', 'integer(properties, environment, dynamicName, 256)'),
+            ('integer(properties, environment, "max-connections", 256)', 'integer(properties, environment, "unreviewed", 256)'),
+            ('integer(properties, environment, "max-connections", 256)', 'integer(properties, environment, "max-connections", unsafe())'),
+            ('bool(properties, environment, "enabled", false)', 'other(properties, environment, "enabled", false)'),
+        ):
+            with self.subTest(before=before):
+                self.assertIn(before, source)
+                changed = source.replace(before, after, 1)
+                self.assertIsNone(audit.interaction_websocket_default_calls(changed))
+                self.assertEqual([], audit.interaction_websocket_default_candidates(relative, changed))
+        outside = source.rsplit("}", 1)[0] + '''
+            private static int unrelated(Properties properties, Map<String, String> environment) {
+                return integer(properties, environment, "max-connections", 999);
+            }
+        }
+        '''
+        self.assertEqual(audit.interaction_websocket_default_calls(source), audit.interaction_websocket_default_calls(outside))
+        changed = source.replace("512 * 1_024", "524288", 1)
+        old = [c for _, c in audit.java_source_candidates(relative, source) if c.role == "interaction-websocket-default:max-message-bytes"][0]
+        new = [c for _, c in audit.java_source_candidates(relative, changed) if c.role == old.role][0]
+        self.assertNotEqual(old.id, new.id)
+        self.assertNotEqual(old.evidence_digest, new.evidence_digest)
+        self.assertEqual(audit.interaction_websocket_default_calls(source)["max-message-bytes"]["evaluated"],
+                         audit.interaction_websocket_default_calls(changed)["max-message-bytes"]["evaluated"])
+
+    def test_interaction_all_contract_metadata_and_truthful_default_evidence_are_exact(self):
+        contract = self.authority["contracts"][0]
+        for field in ("setting", "owner", "field", "bindings", "default", "defaultEvidence", "bindingAuthority",
+                      "defaultAuthority", "validation", "scope", "pinning", "coverage"):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(self.entries)
+                for identifier in contract["candidateIds"]:
+                    changed[identifier][field] = "fictional consistent value"
+                errors = self.both_routes_refuse(changed)
+                for identifier in contract["candidateIds"]:
+                    self.assertIn(f"{identifier}: interaction WebSocket {field} authority has drifted", errors)
+        for evidence in ([], contract["candidateIds"], self.authority["bindingCarriers"][0]["candidateIds"],
+                         self.authority["contracts"][1]["defaultCandidateIds"]):
+            with self.subTest(defaultEvidence=evidence):
+                changed = copy.deepcopy(self.entries)
+                for identifier in contract["candidateIds"]: changed[identifier]["defaultEvidence"] = evidence
+                self.both_routes_refuse(changed)
+        carrier_id = self.authority["bindingCarriers"][0]["candidateIds"][0]
+        for field in ("setting", "default", "defaultEvidence", "bindingCarrier"):
+            changed = copy.deepcopy(self.entries); changed[carrier_id][field] = "fictional value"
+            self.both_routes_refuse(changed)
+
+    def test_interaction_mandatory_metadata_and_candidate_partitions_cannot_opt_out(self):
+        for field in ("contracts", "bindingCarriers", "semanticPartitions", "candidateIds"):
+            changed = copy.deepcopy(self.authority); changed[field] = []
+            self.both_routes_refuse(self.entries, changed)
+        converted = copy.deepcopy(self.entries)
+        converted_id = self.authority["contracts"][0]["candidateIds"][0]
+        converted[converted_id]["status"] = "converted"
+        converted_errors = self.both_routes_refuse(converted)
+        self.assertIn(f"{converted_id}: interaction WebSocket operator classification has drifted",
+                      converted_errors)
+        for change in ("unmark-all", "foreign-marker", "remove-row", "operator-relabel", "retained-relabel"):
+            with self.subTest(change=change):
+                entries = copy.deepcopy(self.entries)
+                identifier = self.authority["contracts"][0]["candidateIds"][0]
+                if change == "unmark-all":
+                    for row in entries.values(): row.pop("interactionWebSocketAuthority", None)
+                elif change == "foreign-marker": entries[identifier]["interactionWebSocketAuthority"] = "foreign"
+                elif change == "remove-row": del entries[identifier]
+                elif change == "operator-relabel": entries[identifier].update(status="retained", classification="derived")
+                else:
+                    identifier = self.authority["semanticPartitions"][0]["candidateIds"][0]
+                    entries[identifier]["classification"] = ("derived" if entries[identifier]["classification"] != "derived"
+                        else "protocol-or-format-invariant")
+                self.both_routes_refuse(entries)
+        document = self.document(); document.pop("interactionWebSocketAuthorities")
+        self.assertIn("interaction WebSocket settings require the exact mandatory source-derived authority",
+                      audit.inventory_errors(self.root, document, self.candidates))
+        from dataclasses import replace
+        candidate = self.discovered[self.authority["contracts"][0]["candidateIds"][0]]
+        extra = replace(candidate, id="oc-injected-interaction-row", role="UNREVIEWED_BOUND", expression="123")
+        discovered = {**self.discovered, extra.id: extra}
+        self.assertIsNone(audit.interaction_websocket_authority_from_source(self.root, discovered))
+        self.assertIn("interaction WebSocket source family is incomplete, unpartitioned, or unsupported",
+                      audit.inventory_errors(self.root, self.document(), tuple(discovered.values())))
+
+    def test_interaction_named_binding_map_and_each_shared_helper_refuse_source_drift(self):
+        config = audit.INTERACTION_WEBSOCKET_CONFIGURATION_PATH
+        mutations = (
+            ('Map.entry("enabled", "RAVENROOT_WEBSOCKET_ENABLED")', 'Map.entry("enabled", "RAVENROOT_WEBSOCKET_PORT")'),
+            ('Map.entry("enabled", "RAVENROOT_WEBSOCKET_ENABLED"),', ''),
+            ('Map.entry("enabled", "RAVENROOT_WEBSOCKET_ENABLED"),', 'Map.entry("enabled", "RAVENROOT_WEBSOCKET_ENABLED"), Map.entry("unknown", "RAVENROOT_UNKNOWN"),'),
+            ('property != null && !property.isBlank()', 'property != null'),
+            ('return property.trim();', 'return property;'),
+            ('env == null || env.isBlank() ? fallback : env.trim()', 'env == null ? fallback : env'),
+            ('Integer.parseInt(value(', 'Integer.parseUnsignedInt(value('),
+            ('"true".equalsIgnoreCase(text)', '"yes".equalsIgnoreCase(text)'),
+            ('return Duration.ofSeconds(integer(', 'return Duration.ofMillis(integer('),
+            ('return Duration.ofMillis(integer(', 'return Duration.ofSeconds(integer('),
+            ('value < minimum || value > maximum', 'value < minimum'),
+            ('value.compareTo(Duration.ofSeconds(maximum)) > 0', 'false'),
+            ('value.compareTo(Duration.ofMillis(maximum)) > 0', 'false'),
+            ('enabled && "disabled".equals(mode)', 'false'),
+            ('512 * 1_024', '524288'),
+            ('"max-connections", 256)', '"max-connections", 257)'),
+        )
+        for before, after in mutations:
+            with self.subTest(before=before): self.source_mutation_refuses(config, before, after)
+
+    def test_interaction_all_cross_field_bounds_and_compact_constructor_are_sealed(self):
+        config = audit.INTERACTION_WEBSOCKET_CONFIGURATION_PATH
+        for before, after in (
+            ('maxPendingAuthentication, 1, maxConnections', 'maxPendingAuthentication, 1, 256'),
+            ('1, maxPendingAuthentication);', '1, 32);'),
+            ('maxQueuedIncomingBytes, maxMessageBytes,', 'maxQueuedIncomingBytes, 524288,'),
+            ('1_024, maxMessageBytes);', '1_024, 524288);'),
+            ('maxQueuedOutgoingBytes, maxOutgoingFrameBytes,', 'maxQueuedOutgoingBytes, 65536,'),
+            ('requireBetween("maxConnections", maxConnections, 1, 100_000);', ''),
+            ('Objects.requireNonNull(bindAddress, "bindAddress");', ''),
+        ):
+            with self.subTest(before=before): self.source_mutation_refuses(config, before, after)
+
+    def test_interaction_main_enabled_authentication_and_listener_lifecycle_are_sealed(self):
+        main = audit.INTERACTION_WEBSOCKET_MAIN_PATH
+        server = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java"
+        for path, before, after in (
+            (main, 'if (interactionWebSockets.enabled())', 'if (true)'),
+            (main, 'if (interactionWebSockets.enabled())', 'if (false)'),
+            (main, 'if (interactionWebSockets.enabled())', ''),
+            (main, 'interactionWebSockets.requireAuthenticatedMode(authentication.mode());', ''),
+            (main, 'InteractionWebSocketConfiguration.from(\n                System.getProperties(), System.getenv())', 'InteractionWebSocketConfiguration.from(\n                new java.util.Properties(), System.getenv())'),
+            (server, 'interactionWebSockets.start();', ''),
+            (server, 'interactionWebSockets.close();', ''),
+            (server, 'if (interactionWebSockets != null) interactionWebSockets.close();', ''),
+        ):
+            with self.subTest(path=path, before=before): self.source_mutation_refuses(path, before, after)
+
+    def test_interaction_actual_listener_budget_consumers_and_wire_limits_are_sealed(self):
+        server = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java"
+        for before, after in (
+            ('configuration.maxPendingAuthentication()', '32'),
+            ('configuration.maxBackendOperations()', '128'),
+            ('configuration.maxConnections()', '256'),
+            ('configuration.maxMessageBytes()', '524288'),
+            ('configuration.maxOutgoingFrameBytes()', '65536'),
+            ('configuration.maxQueuedOutgoingFrames()', '64'),
+            ('configuration.maxQueuedIncomingBytes()', '1048576'),
+            ('configuration.maxQueuedOutgoingBytes()', '1048576'),
+            ('configuration.maxUnacknowledgedEvents()', '64'),
+            ('configuration.authenticationDeadline()', 'java.time.Duration.ofSeconds(5)'),
+            ('configuration.shutdownTimeout()', 'java.time.Duration.ofSeconds(5)'),
+        ):
+            with self.subTest(before=before): self.source_mutation_refuses(server, before, after)
+        protocol = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java"
+        self.source_mutation_refuses(protocol, 'new PayloadLimits(maxBytes, 4, 32, 128,', 'new PayloadLimits(maxBytes, 40, 32, 128,')
+
+    def test_interaction_source_deletion_and_test_helper_bypasses_cannot_opt_out(self):
+        saved = {path: (self.root / path).read_bytes() for path in audit.INTERACTION_WEBSOCKET_PRODUCTION_PATHS}
+        try:
+            for path in saved: (self.root / path).unlink()
+            self.assertTrue(audit.interaction_websocket_source_present(self.root), "The existing Main consumer keeps the family mandatory")
+            expected = "interaction WebSocket source family is incomplete, unpartitioned, or unsupported"
+            self.assertIn(expected, audit.interaction_websocket_authority_errors(self.root, None, self.entries, self.discovered))
+            self.assertIn(expected, audit.inventory_errors(self.root, self.document(), self.candidates))
+        finally:
+            for path, raw in saved.items(): (self.root / path).write_bytes(raw)
+        tests = "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java"
+        self.source_mutation_refuses(tests, 'assertFalse(configuration.enabled());', '')
+        self.source_mutation_refuses(tests, 'boundary.read().apply(configuration(boundary.values()))', 'configuration(boundary.values()).maxConnections()')
+        self.source_mutation_refuses(tests, 'return List.of(', 'return java.util.Collections.emptyList(); /* disabled helper */ //')
+        lifecycle = "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java"
+        self.source_mutation_refuses(lifecycle, 'assertFalse(canConnect(loopback, interactionPort)', 'assertTrue(canConnect(loopback, interactionPort)')
+
+    def test_interaction_publication_is_exact_and_precedes_the_outbound_prefix(self):
+        published = {identifier for group in self.authority["semanticPartitions"]
+                     if group["classification"] == "published-contract-description" for identifier in group["candidateIds"]}
+        self.assertEqual(42, len(published))
+        self.assertTrue(published <= audit.environment_reference_description_candidate_ids(self.root, iter(self.candidates)))
+        publisher = audit.ENVIRONMENT_REFERENCE_PATH.as_posix()
+        self.source_mutation_refuses(publisher, 'if name in INTERACTION_WEBSOCKET_VARIABLES:', 'if False:')
+        self.source_mutation_refuses(publisher, '"RAVENROOT_WEBSOCKET_ENABLED",', '"RAVENROOT_WEBSOCKET_UNREVIEWED",')
+
+    def test_interaction_live_references_remap_without_modifying_history_or_prose(self):
+        old, new = "oc-live-before", "oc-live-after"
+        authority = {"candidateIds": [old], "contracts": [{"candidateIds": [old], "defaultCandidateIds": [old], "rationale": old}],
+                     "bindingCarriers": [{"candidateIds": [old], "bindingCarrier": {"description": old}}],
+                     "semanticPartitions": [{"candidateIds": [old], "rationale": old}]}
+        history = [{"candidateIds": [old], "source": old}]
+        document = {"interactionWebSocketAuthorities": {audit.INTERACTION_WEBSOCKET_AUTHORITY_ID: authority},
+                    "reconciliationHistory": copy.deepcopy(history), "retiredEntries": copy.deepcopy(history)}
+        audit.remap_declared_candidate_references(document, {old: new})
+        self.assertEqual([new], authority["candidateIds"])
+        for field in ("contracts", "bindingCarriers", "semanticPartitions"):
+            self.assertEqual([new], authority[field][0]["candidateIds"])
+        self.assertEqual([new], authority["contracts"][0]["defaultCandidateIds"])
+        self.assertEqual(old, authority["contracts"][0]["rationale"])
+        self.assertEqual(old, authority["bindingCarriers"][0]["bindingCarrier"]["description"])
+        self.assertEqual(old, authority["semanticPartitions"][0]["rationale"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        self.assertEqual(history, document["retiredEntries"])
+        for location in audit.candidate_reference_locations(document, {new}):
+            self.assertTrue(audit.allowed_migrated_reference(location), location)
 
 
 if __name__ == "__main__":

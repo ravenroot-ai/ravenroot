@@ -14,7 +14,7 @@ import java.util.UUID;
 
 /** Bundle-owned durable reconciliation journal with one expiring writer lease per operation. */
 final class SqliteGithubOperationStore implements GithubOperationStore {
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
     private final GithubConfiguration.StorePolicy policy;
     private final Clock clock;
     private final String url;
@@ -34,13 +34,19 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
     }
 
     @Override public synchronized Lease begin(String tenant, String profile, String kind, String key,
-                                               String requestDigest, long deadlineEpochMs, BeginPolicy beginPolicy) {
+                                               String requestDigest, String profileContractDigest,
+                                               long deadlineEpochMs, BeginPolicy beginPolicy) {
         safe(tenant, 160); safe(profile, 64); safe(kind, 64); safe(key, 256); digest(requestDigest);
+        digest(profileContractDigest);
         java.util.Objects.requireNonNull(beginPolicy);
         long now = clock.millis();
         String leaseOwner = UUID.randomUUID().toString();
         try (Connection connection = open()) {
             beginImmediate(connection);
+            Record beforePrune = read(connection, tenant, profile, kind, key, now).orElse(null);
+            if (beforePrune != null && !profileContractDigest.equals(beforePrune.profileContractDigest())) {
+                rollback(connection); throw new GithubException(GithubException.Code.CONFIGURATION);
+            }
             prune(connection, tenant, profile, now);
             Record existing = read(connection, tenant, profile, kind, key, now).orElse(null);
             boolean rollover = existing != null && existing.terminal() && !"AMBIGUOUS".equals(existing.state())
@@ -75,14 +81,15 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
                 }
                 try (PreparedStatement insert = connection.prepareStatement("""
                         INSERT INTO github_operations
-                        (tenant_id,profile_name,kind,operation_key,request_digest,state,generation,attempts,
+                        (tenant_id,profile_name,kind,operation_key,request_digest,profile_contract_digest,state,generation,attempts,
                          deadline_ms,remote_id,detail_digest,result_json,lease_owner,lease_until_ms,updated_ms)
-                        VALUES(?,?,?,?,?,'RUNNING',?,0,?,'','','',?,?,?)
+                        VALUES(?,?,?,?,?,?,'RUNNING',?,0,?,'','','',?,?,?)
                         """)) {
                     bindKey(insert, tenant, profile, kind, key); insert.setString(5, requestDigest);
-                    insert.setLong(6, Math.max(0, beginPolicy.expectedGeneration()));
-                    insert.setLong(7, deadlineEpochMs); insert.setString(8, leaseOwner);
-                    insert.setLong(9, now + policy.leaseMs()); insert.setLong(10, now); insert.executeUpdate();
+                    insert.setString(6, profileContractDigest);
+                    insert.setLong(7, Math.max(0, beginPolicy.expectedGeneration()));
+                    insert.setLong(8, deadlineEpochMs); insert.setString(9, leaseOwner);
+                    insert.setLong(10, now + policy.leaseMs()); insert.setLong(11, now); insert.executeUpdate();
                 }
             } else if (rollover) {
                 try (PreparedStatement update = connection.prepareStatement("""
@@ -315,9 +322,37 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
                           binding_digest TEXT NOT NULL, updated_ms INTEGER NOT NULL,
                           PRIMARY KEY (tenant_id,profile_name,delivery_id))
                         """);
-                statement.executeUpdate("PRAGMA user_version=" + SCHEMA_VERSION);
+                statement.executeUpdate("PRAGMA user_version=2");
+            }
+            if (version < 3) {
+                beginImmediate(connection);
+                try {
+                    int column = profileContractDigestColumn(connection);
+                    if (column < 0) throw unavailable();
+                    if (column == 0) statement.executeUpdate(
+                            "ALTER TABLE github_operations ADD COLUMN profile_contract_digest TEXT NOT NULL DEFAULT ''");
+                    statement.executeUpdate("PRAGMA user_version=" + SCHEMA_VERSION);
+                    commit(connection);
+                } catch (RuntimeException | SQLException failure) {
+                    rollback(connection);
+                    throw failure;
+                }
             }
         } catch (SQLException failure) { throw unavailable(); }
+    }
+
+    /** 0 absent, 1 exact schema, -1 present with an unsafe shape. */
+    private static int profileContractDigestColumn(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet columns = statement.executeQuery("PRAGMA table_info(github_operations)")) {
+            while (columns.next()) {
+                if (!"profile_contract_digest".equals(columns.getString("name"))) continue;
+                return "TEXT".equalsIgnoreCase(columns.getString("type"))
+                        && columns.getInt("notnull") == 1
+                        && "''".equals(columns.getString("dflt_value")) ? 1 : -1;
+            }
+            return 0;
+        }
     }
 
     private Connection open() throws SQLException {
@@ -390,18 +425,19 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
                                   String key, long now) throws SQLException {
         try (PreparedStatement select = connection.prepareStatement("""
                 SELECT state,generation,attempts,deadline_ms,remote_id,detail_digest,result_json,request_digest,
+                       profile_contract_digest,
                        lease_owner,lease_until_ms,updated_ms FROM github_operations
                 WHERE tenant_id=? AND profile_name=? AND kind=? AND operation_key=?
                 """)) {
             bindKey(select, tenant, profile, kind, key);
             try (ResultSet result = select.executeQuery()) {
                 if (!result.next()) return Optional.empty();
-                String leaseOwner = result.getString(9); long leaseUntil = result.getLong(10);
+                String leaseOwner = result.getString(10); long leaseUntil = result.getLong(11);
                 boolean expired = !leaseOwner.isEmpty() && leaseUntil <= now;
                 boolean owned = leaseOwner.isEmpty() || expired;
                 return Optional.of(new Record(result.getString(1), result.getLong(2), result.getLong(3),
                         result.getLong(4), result.getString(5), result.getString(6), result.getString(7),
-                        result.getString(8), owned, expired, result.getLong(11)));
+                        result.getString(8), result.getString(9), owned, expired, result.getLong(12)));
             }
         }
     }

@@ -69,6 +69,8 @@ public interface ExecutionStore extends AutoCloseable {
      * Whether this view routes every managed mutation through the format-3 manifest authority.
      * Raw adapters return {@code false}; a composition boundary may return {@code true} only when it
      * also refuses unsupported atomic adapter seams instead of falling back to raw mutations.
+     *
+     * @return whether managed persistence authority protects every managed mutation
      */
     default boolean protectsManagedPersistence() {
         return false;
@@ -170,6 +172,10 @@ public interface ExecutionStore extends AutoCloseable {
      * validate the authority and require its capacity to equal the adapter's immutable live
      * capacity. Implementations that cannot provide those guarantees must retain the default
      * fail-closed response.</p>
+     *
+     * @param batch atomic set of managed persistence changes
+     * @param authority exact manifest and persistence capacity authorizing the batch
+     * @return updated durable aggregate after the authorized batch commits
      */
     default CompletionStage<StoredProcessInstance> applyManaged(
             ExecutionBatch batch, ExecutionPersistenceAuthority authority) {
@@ -204,6 +210,12 @@ public interface ExecutionStore extends AutoCloseable {
     /**
      * Claims one managed execution only after atomically validating the exact manifest authority
      * for {@code key} and its equality with the adapter's immutable live capacity.
+     *
+     * @param key tenant-scoped execution to claim
+     * @param workerId stable identity of the claiming worker
+     * @param ttl duration for which the lease remains valid
+     * @param authority exact manifest and persistence capacity authorizing the claim
+     * @return acquired lease, or empty when another worker owns the execution
      */
     default CompletionStage<LeaseHandle> claimManaged(ExecutionKey key, String workerId, Duration ttl,
                                                       ExecutionPersistenceAuthority authority) {
@@ -280,6 +292,13 @@ public interface ExecutionStore extends AutoCloseable {
      * <p>Every map key must belong to {@code tenantId}. The adapter revalidates each authority in
      * the claim transaction. An empty map means that no key is eligible and must return an empty
      * result; it must never fall through to an unfiltered claim.</p>
+     *
+     * @param tenantId tenant whose verified executions may be claimed
+     * @param workerId stable identity of the claiming worker
+     * @param limit maximum work items to claim
+     * @param leaseTtl duration for which each new lease remains valid
+     * @param verified exact persistence authority for every eligible execution key
+     * @return claimed work among the verified executions
      */
     default CompletionStage<List<PendingWork>> claimPendingWorkAmong(
             String tenantId, String workerId, int limit, Duration leaseTtl,
@@ -313,6 +332,13 @@ public interface ExecutionStore extends AutoCloseable {
      * Atomically claims due timers only among the explicitly verified execution keys, with the
      * same tenant, authority-revalidation, and empty-map semantics as
      * {@link #claimPendingWorkAmong(String, String, int, Duration, Map)}.
+     *
+     * @param tenantId tenant whose verified timers may be claimed
+     * @param workerId stable identity of the claiming worker
+     * @param limit maximum due timers to claim
+     * @param leaseTtl duration for which each new lease remains valid
+     * @param verified exact persistence authority for every eligible execution key
+     * @return claimed due timers among the verified executions
      */
     default CompletionStage<List<PendingWork.TimerDue>> claimDueTimersAmong(
             String tenantId, String workerId, int limit, Duration leaseTtl,
@@ -327,6 +353,14 @@ public interface ExecutionStore extends AutoCloseable {
      * {@link ManagedClaimCandidatePage#nextAfter()} means the scan reached the end. Keys that appear
      * after a page is read wait for a later sweep, and a subsequent atomic {@code claim*Among} call
      * rechecks authority, eligibility, lease, and timer conditions.
+     *
+     * @param tenantId tenant whose execution keys are scanned
+     * @param workerId stable identity of the worker that will claim candidates
+     * @param limit maximum candidate keys returned in one page
+     * @param leaseTtl requested lease duration used to prefilter candidates
+     * @param timersOnly whether only executions with due timers are eligible
+     * @param after cursor naming the last process UUID inspected, or empty for the first page
+     * @return deterministic page of candidate keys and its continuation cursor
      */
     default CompletionStage<ManagedClaimCandidatePage> managedClaimCandidates(
             String tenantId, String workerId, int limit, Duration leaseTtl,
@@ -1181,6 +1215,10 @@ public interface ExecutionStore extends AutoCloseable {
      * Records against the immutable payload limit accepted for this execution. Adapters that can
      * honor historical pins override this method; an older adapter fails closed when its current
      * limit differs rather than silently substituting it.
+     *
+     * @param result execution result to store
+     * @param resolvedMaximumPayloadBytes payload ceiling pinned for the execution
+     * @return stored execution result after enforcing the pinned ceiling
      */
     default CompletionStage<DurableExecutionResult> recordExecutionResult(
             DurableExecutionResult result, int resolvedMaximumPayloadBytes) {

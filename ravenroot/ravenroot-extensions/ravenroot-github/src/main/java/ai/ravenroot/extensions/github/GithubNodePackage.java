@@ -16,7 +16,7 @@ public final class GithubNodePackage implements NodePackage, IngressAuthorityCon
     private final List<NodeBehavior> behaviors;
 
     public GithubNodePackage() {
-        this.runtime = new GithubRuntime(GithubConfiguration::fromEnvironment);
+        this.runtime = new GithubRuntime(GithubConfiguration::fromSystem);
         this.behaviors = behaviors(runtime);
     }
 

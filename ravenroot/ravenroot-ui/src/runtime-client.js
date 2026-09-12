@@ -12,15 +12,37 @@ const MAX_RETRY_DELAY_MS = 30_000;
 const HUMAN_TASK_DECISION_OUTCOMES = new Set(['APPLIED', 'ALREADY_APPLIED']);
 
 export const MAX_GRAPH_DOCUMENT_BYTES = 256 * 1024 * 1024;
+const LEGACY_PROGRAM_AUTHORING = Object.freeze({
+  maxSourceBytes: 1024 * 1024,
+  maxBuildRequestBytes: 10 * 1024 * 1024,
+  maxProgramsPerBuild: 256,
+});
+
+function validProgramAuthoring(authoring) {
+  return authoring && typeof authoring === 'object' && !Array.isArray(authoring)
+    && Number.isSafeInteger(authoring.maxSourceBytes)
+    && authoring.maxSourceBytes >= 1
+    && authoring.maxSourceBytes <= LEGACY_PROGRAM_AUTHORING.maxSourceBytes
+    && Number.isSafeInteger(authoring.maxBuildRequestBytes)
+    && authoring.maxBuildRequestBytes >= authoring.maxSourceBytes
+    && authoring.maxBuildRequestBytes <= LEGACY_PROGRAM_AUTHORING.maxBuildRequestBytes
+    && Number.isSafeInteger(authoring.maxProgramsPerBuild)
+    && authoring.maxProgramsPerBuild >= 1
+    && authoring.maxProgramsPerBuild <= LEGACY_PROGRAM_AUTHORING.maxProgramsPerBuild;
+}
 
 /** Validate the versioned operator-owned limits exposed by the connected runtime. */
 export function validateRuntimeConfiguration(value) {
+  const legacy = value?.schemaVersion === 1 && value?.programAuthoring === undefined;
+  const authoring = legacy ? LEGACY_PROGRAM_AUTHORING : value?.programAuthoring;
   if (!value || typeof value !== 'object' || Array.isArray(value)
-      || value.schemaVersion !== 1
+      || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
+      || (value.schemaVersion === 1 && !legacy)
       || !Number.isSafeInteger(value.graphDocumentMaxBytes)
       || value.graphDocumentMaxBytes < 1
-      || value.graphDocumentMaxBytes > MAX_GRAPH_DOCUMENT_BYTES) {
-    throw new Error('Runtime configuration is not a valid schema version 1 document');
+      || value.graphDocumentMaxBytes > MAX_GRAPH_DOCUMENT_BYTES
+      || !validProgramAuthoring(authoring)) {
+    throw new Error('Runtime configuration is not a supported versioned document');
   }
   let workspace = null;
   if (value.workspace !== undefined) {
@@ -33,8 +55,13 @@ export function validateRuntimeConfiguration(value) {
   }
   const humanTasks = value.humanTasks == null ? null : validateHumanTaskCapability(value.humanTasks);
   return {
-    schemaVersion: 1,
+    schemaVersion: value.schemaVersion,
     graphDocumentMaxBytes: value.graphDocumentMaxBytes,
+    programAuthoring: Object.freeze({
+      maxSourceBytes: authoring.maxSourceBytes,
+      maxBuildRequestBytes: authoring.maxBuildRequestBytes,
+      maxProgramsPerBuild: authoring.maxProgramsPerBuild,
+    }),
     workspace,
     ...(humanTasks ? { humanTasks } : {}),
   };
@@ -613,9 +640,13 @@ export class RavenrootRuntimeClient {
   }
 
   /** Starts or rejoins one durable server-owned graph readiness operation. */
-  async buildProgramArtifacts(programs) {
-    if (!Array.isArray(programs) || programs.length < 1 || programs.length > 256) {
-      throw new Error('Program build requires between 1 and 256 programs');
+  async buildProgramArtifacts(programs, authoring = LEGACY_PROGRAM_AUTHORING) {
+    if (!validProgramAuthoring(authoring)) {
+      throw new Error('Program build requires valid authoring limits');
+    }
+    if (!Array.isArray(programs) || programs.length < 1
+        || programs.length > authoring.maxProgramsPerBuild) {
+      throw new Error(`Program build requires between 1 and ${authoring.maxProgramsPerBuild} programs`);
     }
     const submission = programs.map((program, index) => {
       const nodeId = String(program?.nodeId ?? '');
@@ -623,12 +654,19 @@ export class RavenrootRuntimeClient {
       const source = String(program?.source ?? '');
       const testPayload = String(program?.testPayload ?? 'test payload');
       if (!nodeId || !language) throw new Error(`Program build entry ${index + 1} requires nodeId and language`);
+      if (new TextEncoder().encode(source).byteLength > authoring.maxSourceBytes) {
+        throw new Error(`Program build entry ${index + 1} exceeds the configured source byte limit`);
+      }
       return { nodeId, language, source, testPayload };
     });
+    const body = JSON.stringify({ programs: submission });
+    if (new TextEncoder().encode(body).byteLength > authoring.maxBuildRequestBytes) {
+      throw new Error('Program build request exceeds the configured byte limit');
+    }
     const result = await this.#json('/v1/program-artifacts/build', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ programs: submission }),
+      body,
     });
     return validateProgramBuildSnapshot(result);
   }

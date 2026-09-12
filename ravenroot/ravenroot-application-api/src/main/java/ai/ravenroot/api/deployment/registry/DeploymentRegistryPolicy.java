@@ -23,6 +23,7 @@ public record DeploymentRegistryPolicy(Duration commandRetention,
             Duration.ofDays(7),
             new DeploymentRegistry.Limits(100, Duration.ofMinutes(5), Duration.ofSeconds(5)));
 
+    /** Validates and retains one immutable registry policy. */
     public DeploymentRegistryPolicy {
         Objects.requireNonNull(commandRetention, "commandRetention");
         Objects.requireNonNull(limits, "limits");
@@ -31,7 +32,12 @@ public record DeploymentRegistryPolicy(Duration commandRetention,
         }
     }
 
-    /** A copy with an explicitly selected durable command-retention window. */
+    /**
+     * A copy with an explicitly selected durable command-retention window.
+     *
+     * @param retention command replay-retention window for the copy
+     * @return a validated policy using the selected retention and current limits
+     */
     public DeploymentRegistryPolicy withCommandRetention(Duration retention) {
         return new DeploymentRegistryPolicy(retention, limits);
     }
@@ -39,6 +45,8 @@ public record DeploymentRegistryPolicy(Duration commandRetention,
     /**
      * Reference-adapter limits. Its clock is the caller's clock, so its correct skew allowance is
      * zero while the page and lease bounds remain the shared defaults.
+     *
+     * @return reference-adapter limits with zero clock-skew allowance
      */
     public static DeploymentRegistry.Limits inMemoryLimits() {
         return new DeploymentRegistry.Limits(DEFAULTS.limits().maximumPageSize(),

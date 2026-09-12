@@ -192,13 +192,21 @@ describe('versioned execution stream normalization', () => {
 });
 
 describe('runtime configuration client', () => {
+  const programAuthoring = Object.freeze({
+    maxSourceBytes: 1024 * 1024,
+    maxBuildRequestBytes: 10 * 1024 * 1024,
+    maxProgramsPerBuild: 256,
+  });
+  const configured = (graphDocumentMaxBytes, extra = {}) => ({
+    schemaVersion: 2, graphDocumentMaxBytes, programAuthoring, ...extra,
+  });
   it.each([
     1024,
     20 * 1024 * 1024,
     MAX_GRAPH_DOCUMENT_BYTES,
   ])('accepts a positive safe byte limit within the supported ceiling: %s', graphDocumentMaxBytes => {
-    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes })).toEqual({
-      schemaVersion: 1, graphDocumentMaxBytes, workspace: null,
+    expect(validateRuntimeConfiguration(configured(graphDocumentMaxBytes))).toEqual({
+      schemaVersion: 2, graphDocumentMaxBytes, programAuthoring, workspace: null,
     });
   });
 
@@ -213,13 +221,23 @@ describe('runtime configuration client', () => {
     { schemaVersion: 1, graphDocumentMaxBytes: '1024' },
     { schemaVersion: 1, graphDocumentMaxBytes: MAX_GRAPH_DOCUMENT_BYTES + 1 },
     { schemaVersion: 1, graphDocumentMaxBytes: Number.MAX_SAFE_INTEGER + 1 },
+    configured(1024, { programAuthoring: { ...programAuthoring, maxSourceBytes: 1024 * 1024 + 1 } }),
+    configured(1024, { programAuthoring: { ...programAuthoring, maxBuildRequestBytes: 10 * 1024 * 1024 + 1 } }),
+    configured(1024, { programAuthoring: { ...programAuthoring, maxProgramsPerBuild: 257 } }),
+    configured(1024, { programAuthoring: { ...programAuthoring, maxSourceBytes: 8, maxBuildRequestBytes: 7 } }),
   ])('rejects a malformed or unsupported configuration: %j', configuration => {
     expect(() => validateRuntimeConfiguration(configuration))
-      .toThrow('Runtime configuration is not a valid schema version 1 document');
+      .toThrow('Runtime configuration is not a supported versioned document');
+  });
+
+  it('projects schema version 1 onto the frozen legacy authoring limits', () => {
+    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096 }))
+      .toEqual({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
+        programAuthoring, workspace: null });
   });
 
   it('loads authenticated configuration from the connected service origin', async () => {
-    const configuration = { schemaVersion: 1, graphDocumentMaxBytes: 4096 };
+    const configuration = configured(4096);
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true, status: 200, text: async () => JSON.stringify(configuration),
     });
@@ -238,11 +256,11 @@ describe('runtime configuration client', () => {
 
   it('retains the exact opaque workspace tenant and rejects malformed scope', () => {
     const tenantId = ' tenant/\n"opaque" ';
-    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
-      workspace: { tenantId } }).workspace).toEqual({ tenantId });
+    expect(validateRuntimeConfiguration(configured(4096,
+      { workspace: { tenantId } })).workspace).toEqual({ tenantId });
     for (const workspace of [{}, { tenantId: '' }, { tenantId: 42 }, { tenantId: 'a', extra: true }]) {
-      expect(() => validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
-        workspace })).toThrow(/workspace scope is malformed/);
+      expect(() => validateRuntimeConfiguration(configured(4096,
+        { workspace }))).toThrow(/workspace scope is malformed/);
     }
   });
 
@@ -251,10 +269,9 @@ describe('runtime configuration client', () => {
       confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
       commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
       attentionPageSize: 25, attentionPageSizeMax: 1000 };
-    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
-      humanTasks })).toMatchObject({ humanTasks });
-    expect(() => validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
-      humanTasks: { ...humanTasks, attentionPollMillis: undefined } })).toThrow(/poll interval/);
+    expect(validateRuntimeConfiguration(configured(4096, { humanTasks }))).toMatchObject({ humanTasks });
+    expect(() => validateRuntimeConfiguration(configured(4096,
+      { humanTasks: { ...humanTasks, attentionPollMillis: undefined } }))).toThrow(/poll interval/);
   });
 });
 
@@ -1559,6 +1576,26 @@ describe('Ravenroot runtime client security boundary', () => {
     }));
 
     await expect(client.buildProgramArtifacts(programs)).rejects.toThrow(/1 and 256/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('applies the connected source, request, and batch limits before making a request', async () => {
+    const fetchImpl = vi.fn();
+    const client = new RavenrootRuntimeClient('', { fetchImpl });
+    const limits = { maxSourceBytes: 4, maxBuildRequestBytes: 128, maxProgramsPerBuild: 1 };
+    await expect(client.buildProgramArtifacts([
+      { nodeId: 'a', language: 'js', source: 'a' },
+      { nodeId: 'b', language: 'js', source: 'b' },
+    ], limits)).rejects.toThrow(/1 and 1/);
+    await expect(client.buildProgramArtifacts([
+      { nodeId: 'a', language: 'js', source: '€€' },
+    ], limits)).rejects.toThrow(/source byte limit/);
+    await expect(client.buildProgramArtifacts([
+      { nodeId: 'a'.repeat(200), language: 'js', source: 'ok' },
+    ], limits)).rejects.toThrow(/request exceeds/);
+    await expect(client.buildProgramArtifacts([
+      { nodeId: 'a', language: 'js', source: 'ok' },
+    ], { ...limits, maxProgramsPerBuild: 257 })).rejects.toThrow(/valid authoring limits/);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

@@ -231,6 +231,14 @@ spec:
               value: ""
             - name: RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS
               value: ""
+            # Empty values preserve ProgramAuthoringLimits' typed compatibility defaults. A
+            # deployment overlay may narrow these without rebuilding the image.
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES
+              value: ""
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES
+              value: ""
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD
+              value: ""
             # A local SQLite store is a single-pod durability mode. The main database and its WAL
             # sidecars share this RWO PVC with the audit trail; neither may fall back to read-only
             # image layers or the tmpfs below.

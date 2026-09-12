@@ -125,11 +125,11 @@ public final class RavenrootServerMain {
         // bound it checks against is the store's own, readable only once the store is open.
         executionOwnershipConfiguration.requireCompatible(managedExecutionStore);
         var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
-        ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
-            case "graalvm" -> GraalVmProgramRuntime.fromEnvironment();
-            case "disabled" -> new DisabledProgramRuntime();
-            default -> throw new IllegalArgumentException("Unknown program runtime: "
-                    + System.getenv("RAVENROOT_PROGRAM_RUNTIME"));
+        var programRuntimeConfiguration = ProgramRuntimeConfiguration.resolve(
+                System.getProperties(), System.getenv());
+        ProgramRuntime programRuntime = switch (programRuntimeConfiguration.runtime()) {
+            case GRAALVM -> GraalVmProgramRuntime.fromEnvironment(System.getProperties(), System.getenv());
+            case DISABLED -> new DisabledProgramRuntime();
         };
         // Reading the mode and announcing it are the same call, deliberately -- see
         // artifactProvenance. Refused values throw from here, before the HTTP listener exists and
@@ -270,6 +270,8 @@ public final class RavenrootServerMain {
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
         var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
+        var programAuthoringLimits = ai.ravenroot.api.programming.ProgramAuthoringLimits.resolve(
+                System.getProperties(), System.getenv());
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 executionIdentities, executionStore,
@@ -277,7 +279,7 @@ public final class RavenrootServerMain {
                 executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
                 graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore(),
                 executionRuntime.applicationRunnerShutdownStepBound(),
-                executionOwnershipConfiguration.runtimeOwnership());
+                executionOwnershipConfiguration.runtimeOwnership(), programAuthoringLimits);
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
         // two composition sites was updated and the other was not, and the refusals that followed

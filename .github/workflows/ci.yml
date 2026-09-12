@@ -455,7 +455,7 @@ jobs:
         working-directory: ravenroot/ravenroot-ui
         run: npm run build
       - name: Archive the verified UI
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ravenroot-ui
           path: ravenroot/ravenroot-ui/dist
@@ -521,7 +521,7 @@ jobs:
       # real restart evidence. The UUID keeps repeated harness invocations separate.
       - name: Archive Human Task confirmation browser evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: human-task-confirmation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -534,7 +534,7 @@ jobs:
         run: npx playwright test --reporter=list,html
       - name: Archive Playwright diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: |
@@ -588,7 +588,7 @@ jobs:
             cp -R "$artifact/$version" "$destination/$version"
           done
       - name: Archive the backend build outputs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ravenroot-backend-build
           path: ci-artifacts/backend
@@ -717,7 +717,7 @@ jobs:
           done
           ./plugin.sh check-published ci-artifacts/plugins
       - name: Archive the staged plugin set
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ravenroot-plugins
           path: ci-artifacts/plugins
@@ -754,7 +754,7 @@ jobs:
       - name: Verify the API documentation checker
         run: python3 -m unittest scripts.tests.test_verify_api_docs -v
       - name: Archive generated API documentation
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ravenroot-public-api-docs
           path: |

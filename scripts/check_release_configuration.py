@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.central_registry import PUBLISHABLE_ARTIFACTS, publishable_artifacts
 from scripts.check_extension_pack import check_pack
+from scripts.ci_required import POLICY_JOBS, job_blocks
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,10 +132,20 @@ def check_workflows() -> None:
     ci = workflows["ci.yml"]
     if "secrets." in ci or "packages: write" in ci or "environment:\n      name: release" in ci:
         raise ValueError("ordinary CI must not possess release credentials or package authority")
-    if ci.count("python3 -m unittest scripts.tests.test_release_registries") != 2:
-        raise ValueError("OCI, Central, and GitHub Release reconciliation tests must run in both CI tiers")
-    if ci.count("python3 -m unittest scripts.tests.test_extension_pack") != 2:
-        raise ValueError("the extension-pack membership contract must run in both CI tiers")
+    # These two contracts used to be asserted by counting their occurrences, because the same
+    # commands were duplicated into the fast and full tiers. The fast tier is gone: every event that
+    # carries a functional tier now runs `full-python-contracts`, and `ci-required` refuses to pass
+    # while that job is skipped. So require them where they actually have to be, rather than twice.
+    contracts_job = "full-python-contracts"
+    if contracts_job not in POLICY_JOBS:
+        raise ValueError(f"{contracts_job} must be required by every functional tier")
+    block = job_blocks(ci).get(contracts_job, "")
+    if "python3 -m unittest scripts.tests.test_release_registries" not in block:
+        raise ValueError(
+            f"OCI, Central, and GitHub Release reconciliation tests must run in {contracts_job}"
+        )
+    if "python3 -m unittest scripts.tests.test_extension_pack" not in block:
+        raise ValueError(f"the extension-pack membership contract must run in {contracts_job}")
 
     authorize = workflows["authorize-release.yml"]
     if "secrets." in authorize or "environment:" in authorize or "pull_request_target" in authorize:

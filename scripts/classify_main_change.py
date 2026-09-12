@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Classify a CI event without trusting mutable pull-request prose."""
+"""Classify a CI event without trusting mutable pull-request prose.
+
+`dev` is the verification point and `main` is a promotion. Every functional check therefore belongs
+on a pull request into `dev`, where a failure names the single pull request that caused it, and the
+`dev` to `main` promotion carries only the security gate and the two checks that make the release
+classification real. The tier this module returns is what encodes that: `full` runs the functional
+suite, `promotion` deliberately runs none of it, and `docs` covers a content-only push to `main`.
+"""
 
 from __future__ import annotations
 
@@ -77,14 +84,42 @@ def parse_labels(raw_labels: str) -> set[str]:
     return labels
 
 
+# The only tier a manual dispatch may request. Dispatch exists to verify a review candidate on the
+# exact commit about to be reviewed, and the result lands on that commit, where a pull request into
+# `dev` reads it. A caller able to choose a lighter tier could make `ci-required` pass on a
+# work-branch commit without the functional suite ever running on it.
+DISPATCHABLE_TIERS = {"full"}
+
+
 def classify(
-    *, event_name: str, base_ref: str, ref_name: str, labels: set[str], paths: list[str]
+    *,
+    event_name: str,
+    base_ref: str,
+    ref_name: str,
+    labels: set[str],
+    paths: list[str],
+    dispatch_tier: str = "",
 ) -> dict[str, str]:
     """Return the CI tier and release intent for one event."""
     docs_only = documentation_only(paths)
 
+    if event_name == "workflow_dispatch":
+        requested = dispatch_tier or "full"
+        if requested not in DISPATCHABLE_TIERS:
+            raise ClassificationError(
+                f"A dispatched run may request only: {', '.join(sorted(DISPATCHABLE_TIERS))}. "
+                f"Refusing {requested!r}: any lighter tier would let ci-required pass on this commit "
+                "without the full tier."
+            )
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+
+    # A merge-group commit is `dev` plus the queued pull request: the integration, tested before the
+    # queue advances `dev` to exactly this commit.
+    if event_name == "merge_group":
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+
     if event_name == "pull_request" and base_ref == "dev":
-        return {"tier": "fast", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":
         selected = sorted(RELEASE_LABELS.intersection(labels))
@@ -105,8 +140,11 @@ def classify(
                 "A documentation-only pull request to main must use release:none; "
                 "it must not advance the product version."
             )
+        # The promotion re-verifies nothing: the behaviour was already verified commit by commit on
+        # the pull requests into `dev`. What remains here is the security gate, `main-source-policy`
+        # and this job, so no tier-gated functional job may run for either release intent.
         return {
-            "tier": "docs" if intent == "none" else "full",
+            "tier": "promotion",
             "release_intent": intent,
             "docs_only": str(docs_only).lower(),
         }
@@ -148,6 +186,7 @@ def main() -> int:
             ref_name=os.environ.get("REF_NAME", ""),
             labels=parse_labels(os.environ.get("PR_LABELS", "[]")),
             paths=paths,
+            dispatch_tier=os.environ.get("DISPATCH_TIER", ""),
         )
     except (ClassificationError, subprocess.CalledProcessError) as exc:
         print(f"Release classification failed: {exc}", file=sys.stderr)

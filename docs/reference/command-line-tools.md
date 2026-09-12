@@ -91,6 +91,7 @@ Purpose: prepare and verify a source development checkout. It is not a release i
 | `setup` | Default. Build the editor, install required reactor modules to the local Maven repository, build every checkout adapter, verify the development harness, and prepare the sandbox supervisor. `--with-tests` runs reactor and adapter suites too. `--skip-ui` keeps an already-built editor. |
 | `check` | Report prepared and missing components without building. It may repair only the supervisor executable bit. |
 | `bench` | Start the loopback development bench after `setup`, deriving the exact model-provider egress values without replacing operator-provided environment values. The bench and its model node are never release artifacts. |
+| `verify-supervisor` | Verify only the sandbox supervisor: its executable bit, its capability probe, and that `compose.yaml` names the same container path in both the variable and the mount. Exit non-zero when any fails. It never repairs the executable bit, so continuous integration reports that fault rather than absorbing it. |
 | `help` | Print the maintained help text. |
 
 `setup` exits 0 when every component is ready, 1 after a build or final supervisor readiness failure,

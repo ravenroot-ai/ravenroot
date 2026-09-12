@@ -223,8 +223,13 @@ def check_promotion(*, base: str, head: str, labels: set[str]) -> dict[str, str]
     if label_intent != immutable_intent:
         raise ReleaseContractError(
             f"release:{label_intent} does not match the content, which carries release:{immutable_intent} "
-            f"({old_version} -> {new_version}). Prepare the release with "
-            f"`scripts/prepare_release.py --intent {label_intent}` on dev first."
+            f"({old_version} -> {new_version}). "
+            + (
+                "release:none carries no version change: the promotion must contain documentation and "
+                "public content only."
+                if label_intent == "none"
+                else f"Prepare the release with `scripts/prepare_release.py --intent {label_intent}` on dev first."
+            )
         )
     if immutable_intent != "none":
         require_release_notes(new_version)

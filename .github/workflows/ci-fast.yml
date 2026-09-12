@@ -1,0 +1,129 @@
+name: Fast feedback
+
+# Quick feedback to whoever is working on a branch. This is advice, not a gate: the full tier in
+# ci.yml, dispatched on the review candidate and run again on the merge-group commit, is what
+# verifies a change before it reaches `dev`.
+#
+# This workflow must never publish a check context named `ci-required`, as a success or as a skipped
+# job. Check runs belong to the commit, and GitHub counts a skipped job as passed for a required
+# check, so a fast run publishing that name would let a pull request into `dev` with this head merge
+# without the full tier ever running on it. Its aggregator is `ci-fast` instead, and
+# scripts/ci_required.py refuses any workflow other than ci.yml that defines `ci-required`.
+
+on:
+  push:
+    branches: ['feature/**']
+
+permissions:
+  contents: read
+
+# A burst of pushes collapses to one run for the latest commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The policy, Python and shell contracts of the full tier, in one job: they are quick, and on a
+  # 20-runner ceiling a work-branch push should hold as few runners as it can. A test keeps these
+  # command lists equal to the full tier's, so the feedback cannot quietly diverge from the gate.
+  fast-policy:
+    name: fast-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Validate source bytes and Maven argLine composition
+        run: |
+          python3 scripts/check_no_raw_control_bytes.py
+          python3 scripts/check_argline.py
+      - name: Validate the Compose definition
+        run: docker compose --file compose.yaml config --quiet
+      - name: Verify the sandbox supervisor wiring
+        run: ./dev.sh verify-supervisor
+      - name: Check whitespace
+        run: git diff --check HEAD^
+      - name: Verify Python tooling contracts
+        run: |
+          python3 -m unittest scripts.tests.test_check_argline
+          python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_dependabot_routing
+          python3 -m unittest scripts.tests.test_check_public_docs
+          python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_ci_required
+          python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_extension_pack
+          python3 -m unittest scripts.tests.test_release_contract
+          python3 -m unittest scripts.tests.test_release_registries
+          python3 -m unittest scripts.tests.test_verify_api_docs
+          python3 scripts/check_release_configuration.py
+      - name: Verify developer and platform shell contracts
+        run: |
+          ./scripts/tests/test_dev.sh
+          ./scripts/tests/test_plugin.sh
+          ./scripts/tests/test_service.sh
+          ./scripts/tests/test_execution_store_platform.sh
+          ./scripts/tests/test_execution_store_platform_regression.sh
+          ./scripts/tests/test_human_task_platform_configuration.sh
+
+  fast-ui:
+    name: fast-ui
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ravenroot/ravenroot-ui
+        run: npm ci
+      - name: Run the UI unit suite
+        working-directory: ravenroot/ravenroot-ui
+        run: npm test
+      - name: Build the UI
+        working-directory: ravenroot/ravenroot-ui
+        run: npm run build
+
+  fast-backend:
+    name: fast-backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: |
+            ravenroot/pom.xml
+            ravenroot/**/pom.xml
+      - name: Compile the backend without executing tests
+        working-directory: ravenroot
+        run: mvn -B --no-transfer-progress -DskipTests clean install
+
+  ci-fast:
+    name: ci-fast
+    if: always()
+    needs:
+      - fast-policy
+      - fast-ui
+      - fast-backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require every fast job, and that none of them can stand in for ci-required
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_required.py --fast

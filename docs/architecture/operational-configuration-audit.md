@@ -36,22 +36,22 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 19623 |
+| Atomic operational candidates discovered | 19665 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 19623 |
+| Reviewed | 19665 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
-| Unique confirmed operator-configurable parameters | 222 |
+| Unique confirmed operator-configurable parameters | 223 |
 | Unique parameters converted to centralized configuration | 14 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1847 |
-| Retained protocol or format invariants | 8181 |
+| Retained security ceilings or defaults | 1846 |
+| Retained protocol or format invariants | 8179 |
 | Retained published contract descriptions | 424 |
 | Retained presentation text | 476 |
 | Retained derived values | 1001 |
-| Test fixtures | 6427 |
+| Test fixtures | 6469 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 1587.
@@ -62,34 +62,34 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 15.
+Checked source reconciliations: 16.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 19623 candidates.
+zero-count or unclassified rows as needed and sums to 19665 candidates.
 
 ### Status counts
 
 | Status | Candidates |
 |---|---:|
-| already-centralized | 1224 |
+| already-centralized | 1227 |
 | confirmed-hardcoded | 0 |
 | converted | 43 |
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 18356 |
+| retained | 18395 |
 
 ### Classification counts
 
 | Classification | Candidates |
 |---|---:|
 | derived | 1001 |
-| operator-configurable | 1267 |
+| operator-configurable | 1270 |
 | presentation-text | 476 |
-| protocol-or-format-invariant | 8181 |
+| protocol-or-format-invariant | 8179 |
 | published-contract-description | 424 |
-| security-ceiling-or-default | 1847 |
-| test-fixture | 6427 |
+| security-ceiling-or-default | 1846 |
+| test-fixture | 6469 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -100,7 +100,7 @@ zero-count or unclassified rows as needed and sums to 19623 candidates.
 | deployment-example | 20 |
 | java | 6318 |
 | script | 1906 |
-| test-fixture | 6427 |
+| test-fixture | 6469 |
 | ui | 2910 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1541 |
 | #321 | 8650 |
-| Retained; no remediation required | 8381 |
+| Retained; no remediation required | 8423 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 19587 |
-| Unchanged identities | 19587 |
-| Approved identity migrations | 0 |
+| Source inventory candidates | 19623 |
+| Unchanged identities | 19621 |
+| Approved identity migrations | 2 |
 | Approved retirements | 0 |
-| Semantically classified additions | 36 |
-| Current candidates | 19623 |
+| Semantically classified additions | 42 |
+| Current candidates | 19665 |
 
 ## Final semantic review
 
@@ -142,6 +142,7 @@ tamper-evident; new candidates receive no classification by similarity.
 
 | Group | Classification | Candidates | Decision |
 |---|---|---:|---|
+| Agent Maximum Input Tokens Per Turn Setting | operator-configurable | 3 | These three atoms are the exact binding name, environment-binding candidate, and integer fallback in one typed constructor argument. The source-derived family validates their slot, parser helpers, policy constraint, evaluated default, and decisive tests. |
 | Deployment Container Runtime Defaults | security-ceiling-or-default | 6 | Image build metadata and healthcheck command tokens are partitioned separately from numeric runtime choices. |
 | Deployment Container Security Identity | security-ceiling-or-default | 8 | Docker and Kubernetes use the same numeric identity; changing it is a coordinated image/filesystem security change. |
 | Deployment Empty Environment Carriers | protocol-or-format-invariant | 81 | The empty scalar contains no operating value; adjacent environment names identify the external contract. |
@@ -176,10 +177,10 @@ tamper-evident; new candidates receive no classification by similarity.
 | Java Server Component Defaults | security-ceiling-or-default | 3 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Server Derived Arithmetic | derived | 9 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Server Diagnostic Presentation | presentation-text | 10 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
-| Java Server Environment Binding Identities | protocol-or-format-invariant | 116 | Each candidate is a literal key at a server environment lookup boundary; typed setting authorities remain independently enforced. |
-| Java Server Protocol Storage And Domain Invariants | protocol-or-format-invariant | 346 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Environment Binding Identities | protocol-or-format-invariant | 115 | Each candidate is a literal key at a server environment lookup boundary; typed setting authorities remain independently enforced. |
+| Java Server Protocol Storage And Domain Invariants | protocol-or-format-invariant | 345 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Server Resource And Safety Bounds | security-ceiling-or-default | 113 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
-| Java Server Timing And Lifecycle Defaults | security-ceiling-or-default | 38 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Timing And Lifecycle Defaults | security-ceiling-or-default | 37 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Supporting Runtime Derived Arithmetic | derived | 1 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Supporting Runtime Protocol Storage And Domain Invariants | protocol-or-format-invariant | 86 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
 | Java Supporting Runtime Resource And Safety Bounds | security-ceiling-or-default | 4 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
@@ -222,6 +223,7 @@ in this table.
 
 | Setting | State | Owner | Field | Bindings | Default | Source facts | Validation | Scope | Pinning | Coverage |
 |---|---|---|---|---|---|---|---|---|---|---|
+| agent.maximum-input-tokens-per-turn | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy` | `maximumInputTokensPerTurn` | `RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN` | 128000 | `oc-2d29419d18f18da74d3c`: "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"<br>`oc-473ffef3055ed509d856`: 128_000<br>`oc-defbd8454b4343da9a9f`: RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN | Absent or blank uses 128000; otherwise a stripped base-10 long is required, and zero, negative, malformed, and overflowing values are rejected with setting-only diagnostics. | Packaged server agent authority budget. | Resolved from the process environment when the packaged server policy is composed at startup. | Exact environment lookup and fallback atom, positive parser helper chain, typed record constructor slot and validation, and focused default/blank/invalid-value tests. |
 | assistant.max-output-tokens | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java#AssistantConfiguration` | `maxOutputTokens` | `RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS` | 16000 | `oc-2c4bbdd57604fd78dbf3`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-484c25f0c3d9b6b16236`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-4cd3bde4a0b79ab0e741`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-61eb43e339c721d02480`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-62bdf0bc0cb716967ee0`: 16_000<br>`oc-8ccd1c20fd386c5792e9`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-9ce845ddad4d370c0fea`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-9dd33668018c3323aa55`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS<br>`oc-d9b7d98ceffd46508500`: "RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS"<br>`oc-fc3388341b2bf435a413`: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS | whole integer from 1 to 16000; malformed values are cause-free | each provider request in one AssistantService instance | live process-startup configuration; not durably persisted | Java, Compose, example override, Helm, and raw Kubernetes source-backed |
 | assistant.max-tool-iterations | converted | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java#AssistantConfiguration` | `maxToolIterations` | `RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS` | 8 | `oc-204a79be857f7607f762`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-2e52c70f352d2e3eb4e3`: 8<br>`oc-347073cd488f32a1d991`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-59a0a70633d45f581dad`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-6934edb38978d01e4d9f`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-7b13284f663abf57c7c3`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-85c60b2dd282a18e3976`: "RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS"<br>`oc-8ba13ddfb783b7a25ba3`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-ef32017e4b12993a69bc`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS<br>`oc-fb3d5eb248905bd08b70`: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS | whole integer from 1 to 8; malformed values are cause-free | one provider loop for one AssistantService request | live process-startup configuration; not durably persisted | Java, Compose, example override, Helm, and raw Kubernetes source-backed |
 | builtin-http.allowed-hosts | already-centralized | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/OutboundHttpPolicy.java#OutboundHttpPolicy` | `allowedHosts` | `RAVENROOT_HTTP_ALLOWED_HOSTS` | deny all when absent | `oc-6d43d979c592f3e0c1e2`: RAVENROOT_HTTP_ALLOWED_HOSTS | The typed policy validates the value before external I/O is admitted. | Built-in HTTP deployment policy; destination reach remains live. | Host and port authorization stay live; request and response byte limits are pinned. | Source-derived owner, default, binding, consumer and test evidence. |
@@ -8270,9 +8272,9 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-8d6c003df6bea95567fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:43` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-b6151a5e37f092a298da` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:43` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-e865215bbc38d0f2fb47` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:44` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
-| `oc-2d29419d18f18da74d3c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:49` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-473ffef3055ed509d856` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:49` `fromEnvironment` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-defbd8454b4343da9a9f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:49` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |
+| `oc-2d29419d18f18da74d3c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:49` `fromEnvironment` | java | already-centralized | operator-configurable | The per-turn input-token budget is an operator-controlled deployment setting. Its 128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal. |
+| `oc-473ffef3055ed509d856` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:49` `fromEnvironment` | java | already-centralized | operator-configurable | The per-turn input-token budget is an operator-controlled deployment setting. Its 128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal. |
+| `oc-defbd8454b4343da9a9f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:49` `fromEnvironment` | java | already-centralized | operator-configurable | The per-turn input-token budget is an operator-controlled deployment setting. Its 128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal. |
 | `oc-4b06a68e342789f2bfcf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:50` `fromEnvironment` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-af46f52e960ab1a91ca6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:50` `fromEnvironment` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-b589877f7f08f75f5a26` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java:50` `fromEnvironment` | java | retained | protocol-or-format-invariant | These are exact packaged-server environment names, not their values or fallback choices. |

@@ -9,6 +9,56 @@
   "candidateSetDigest": "b3d7d89dbd2476d5278d26139d9afc20459cf855d5ea6beec6299f4016d00690",
   "groups": [
     {
+      "id": "agent-maximum-input-tokens-per-turn-setting",
+      "title": "Agent Maximum Input Tokens Per Turn Setting",
+      "owner": "#321",
+      "metadata": {
+        "status": "already-centralized",
+        "classification": "operator-configurable",
+        "agentBudgetAuthority": "agent-authority-budget-environment-v1",
+        "setting": "agent.maximum-input-tokens-per-turn",
+        "owner": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy",
+        "field": "maximumInputTokensPerTurn",
+        "bindings": [
+          "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"
+        ],
+        "default": "128000",
+        "defaultEvidence": [
+          "oc-473ffef3055ed509d856"
+        ],
+        "validation": "Absent or blank uses 128000; otherwise a stripped base-10 long is required, and zero, negative, malformed, and overflowing values are rejected with setting-only diagnostics.",
+        "scope": "Packaged server agent authority budget.",
+        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+        "coverage": "Exact environment lookup and fallback atom, positive parser helper chain, typed record constructor slot and validation, and focused default/blank/invalid-value tests.",
+        "rationale": "The per-turn input-token budget is an operator-controlled deployment setting. Its 128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal."
+      },
+      "semanticDecision": "These three atoms are the exact binding name, environment-binding candidate, and integer fallback in one typed constructor argument. The source-derived family validates their slot, parser helpers, policy constraint, evaluated default, and decisive tests.",
+      "sourceAndConsumerProof": [
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The fromEnvironment factory places the exact binding and fallback in the maximumInputTokensPerTurn constructor slot and routes it through positive and number."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
+          "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
+          "assertion": "The typed AgentAuthorityBudgetPolicy component and compact constructor reject nonpositive per-turn input-token budgets."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",
+          "digest": "ee109378bc41b4234c0032dd76ff78e79440eb8ede993dd6cb521e4312050917",
+          "assertion": "Focused tests prove the exact shipped default, absent/blank equivalence, malformed and overflow rejection, positive bounds, and the complete positive-setting roster."
+        }
+      ],
+      "candidateCount": 3,
+      "candidateSetDigest": "1ecebb34bbed4a50f126b284c4f65ceea97b8b9e8f7b399888f75aab8c59eca3",
+      "candidateIds": [
+        "oc-2d29419d18f18da74d3c",
+        "oc-473ffef3055ed509d856",
+        "oc-defbd8454b4343da9a9f"
+      ]
+    },
+    {
       "id": "deployment-container-runtime-defaults",
       "title": "Deployment Container Runtime Defaults",
       "owner": "#321",
@@ -4496,8 +4546,8 @@
           "assertion": "Operator reference publishes supported server bindings."
         }
       ],
-      "candidateCount": 116,
-      "candidateSetDigest": "5911e616ad0bd9eb3152466b8e29446c109b00693b322bb0a1fe6edba24350e1",
+      "candidateCount": 115,
+      "candidateSetDigest": "0c049aa99a8d989614c42f29522f0ec8bdd4225f796ed5e00f5fe516769006f7",
       "candidateIds": [
         "oc-02c9cb904b5be6dd406c",
         "oc-0930812e4cd42bfba63c",
@@ -4599,7 +4649,6 @@
         "oc-da1bb23ab088c0e0183d",
         "oc-dc0fdec2c20ddead6353",
         "oc-dd23882f9ddd4014661c",
-        "oc-defbd8454b4343da9a9f",
         "oc-df872039f372cfbfc2f8",
         "oc-dfda42f89b3231338c65",
         "oc-e29357e3867ba5dd0961",
@@ -4639,8 +4688,8 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 346,
-      "candidateSetDigest": "57c8fdf14a7990d7bf5c32181baccbdec03fc3f6818d2e31ca68398cc221abe0",
+      "candidateCount": 345,
+      "candidateSetDigest": "06f13a3128de458c3218866c78b25055a4d43167d0c766c07666109b186d2b82",
       "candidateIds": [
         "oc-00733076b1001148a226",
         "oc-0093d6bdc1b62d30edc9",
@@ -4709,7 +4758,6 @@
         "oc-2b568adf35a313880232",
         "oc-2bd378d757baa2e6c626",
         "oc-2ca87a6c1e871b9a8095",
-        "oc-2d29419d18f18da74d3c",
         "oc-2d457e4e1ef5c574650c",
         "oc-2e3637bf72858440f502",
         "oc-2f42a81d2aa6173adb07",
@@ -5152,8 +5200,8 @@
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
-      "candidateCount": 38,
-      "candidateSetDigest": "cbf72afedfc97aa7056cbe198f0f13f35f3918ed4d69565ec2107da6378c717d",
+      "candidateCount": 37,
+      "candidateSetDigest": "65349ac9d354f3a5ef49768741053db62235acfa0eee4a2a7ba87aa6052d33ae",
       "candidateIds": [
         "oc-0067c29a9b072e2c7201",
         "oc-09f18a2c3fdb11586b07",
@@ -5166,7 +5214,6 @@
         "oc-351943d622744f1a9b37",
         "oc-38fae1f8e9c909fd83b9",
         "oc-3c0130c650d3cce583fb",
-        "oc-473ffef3055ed509d856",
         "oc-4aeeae3f84fb5cda7587",
         "oc-4b06a68e342789f2bfcf",
         "oc-52d6c43c77559992cecb",

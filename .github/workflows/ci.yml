@@ -179,6 +179,9 @@ jobs:
           HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
           DISPATCH_TIER: ${{ inputs.tier }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
         run: python3 scripts/classify_main_change.py
       # Authorization refuses a promotion whose version is not the one its label authorizes, but only
       # after the merge, which leaves a promotion on `main` and a release that never starts. The same
@@ -926,16 +929,36 @@ jobs:
       - full-runtime-container-smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.merge_sha || github.sha }}
+      # A promotion runs no functional job, so its ci-required may be green only if the full tier
+      # already passed on this exact commit — on the push to dev, in the merge queue, or on a
+      # dispatched run. Collect those runs; scripts/ci_required.py refuses without one. #301 merged
+      # on another run's green while nothing checked that it was a full run of this commit.
+      - name: Collect the full-tier evidence a promotion rests on
+        if: needs.release-classification.outputs.tier == 'promotion'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$PROMOTED_SHA&per_page=100"
+          > "$RUNNER_TEMP/promotion-evidence.json"
       - name: Require every job this event demanded
         env:
           CI_TIER: ${{ needs.release-classification.outputs.tier }}
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           REF_NAME: ${{ github.ref_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          PROMOTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PROMOTION_EVIDENCE: ${{ runner.temp }}/promotion-evidence.json
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 scripts/ci_required.py

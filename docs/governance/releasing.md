@@ -44,6 +44,11 @@ label against the changed paths before any merge is allowed.
 | `release:minor` | Backward-compatible feature or incompatible `0.x` change | Promotion | Minor increment and publication |
 | `release:major` | Stable-series incompatible change | Promotion | Major increment and publication |
 
+The promotion tier belongs to the internal `dev` branch alone. A protected `hotfix/*` branch never
+passed through `dev`, so a pull request from one runs the complete functional suite; a pull request
+into `main` from any other head is refused by `release-classification`, as `main-source-policy`
+refuses it.
+
 `release:none` is deliberately fail-closed. Every changed path must be in the reviewed documentation
 and public-content allowlist. Product source, build configuration, deployment configuration, workflow
 automation, release metadata, and non-documentation change fragments make that label invalid. A
@@ -82,7 +87,10 @@ verified, commit by commit, on the branch where a fix is cheap, so the promotion
 - `main-source-policy`, a structural gate that refuses a promotion from a fork or from any branch
   that is not `dev` or a protected `hotfix/*`;
 - `release-classification`, which produces the tier and enforces the mandatory `release:*` label;
-- `ci-required`, the single aggregating context both rulesets require.
+- `ci-required`, the single aggregating context both rulesets require. On a promotion it runs no
+  functional job, so it is green only when a complete `ci.yml` run — on the push to `dev`, in the
+  merge queue, or dispatched — has already passed on exactly the promoted commit. Its green is
+  borrowed from a run that verified this commit, never from whichever run happens to be green.
 
 Code scanning runs on `main` alone by deliberate decision. Static analysis costs time on every pull
 request and raises a genuine finding rarely, so it is analysed at the moment of a real release, where
@@ -95,7 +103,8 @@ left unobserved. It also checks the tier against the event independently of the 
 event headed for `dev` can never be vouched for on a lighter tier. A green `ci-required` therefore
 means the jobs the event required actually ran.
 
-Only `.github/workflows/ci.yml` may publish `ci-required`, and only a full-tier run may satisfy it. A
+Only `.github/workflows/ci.yml` may publish `ci-required`, and it is green only on a commit the full
+tier has passed — in that run, or, for a promotion, in the full run on the same commit it verifies. A
 check run belongs to the commit rather than to the event that produced it, and a skipped job counts
 as passed for a required check. The fast feedback workflow therefore publishes its own `ci-fast`
 context, and `scripts/ci_required.py` refuses any other workflow that defines `ci-required`.
@@ -377,9 +386,11 @@ and [artifact attestations](https://docs.github.com/actions/how-tos/secure-your-
 
 ## Synchronizing after a release
 
-After a normal release or content-only promotion, fast-forward `dev` to the resulting `main` merge
-commit before integrating more work. This gives both branches the same public boundary without
-replaying commits.
+After a normal release or content-only promotion, bring the resulting `main` merge commit into `dev`
+before integrating more work. No ruleset allows a direct push, so this is a pull request into `dev`
+whose merge changes no content — the diff between `dev` and its head is empty — and the release
+automation opens and merges it as soon as the promotion merges. It gives both branches the same
+public boundary, and it is what lets the next release find the last release tag from `dev`.
 
 For an urgent correction:
 

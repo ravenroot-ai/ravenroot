@@ -39,9 +39,11 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+WORKFLOW_PATH = ".github/workflows/ci.yml"
 WORKFLOW_DIRECTORY = WORKFLOW.parent
 FAST_WORKFLOW = WORKFLOW_DIRECTORY / "ci-fast.yml"
 
@@ -100,7 +102,10 @@ REQUIRED_BY_TIER = {
 # pushed; pull requests by their base. Anything not listed is refused.
 ALLOWED_TIERS_BY_EVENT = {
     ("pull_request", "dev"): frozenset({"full"}),
-    ("pull_request", "main"): frozenset({"promotion"}),
+    # A pull request into main is keyed by its head as well: only this repository's `dev` is a
+    # promotion, a `hotfix/*` runs the full tier, and any other head is not part of the model.
+    ("pull_request", "main", "dev"): frozenset({"promotion"}),
+    ("pull_request", "main", "hotfix"): frozenset({"full"}),
     ("push", "dev"): frozenset({"full"}),
     ("push", "main"): frozenset({"full", "docs"}),
     ("workflow_dispatch", ""): frozenset({"full"}),
@@ -346,8 +351,15 @@ def verify_fast_results(results: dict[str, str]) -> list[str]:
     return problems
 
 
-def event_key(event_name: str, base_ref: str, ref_name: str) -> tuple[str, str]:
+def event_key(
+    event_name: str, base_ref: str, ref_name: str,
+    head_ref: str = "", head_repository: str = "", repository: str = "",
+) -> tuple[str, ...]:
     """Key an event the way ALLOWED_TIERS_BY_EVENT does."""
+    if event_name == "pull_request" and base_ref == "main":
+        same = bool(repository) and head_repository == repository
+        head = "dev" if same and head_ref == "dev" else "hotfix" if same and head_ref.startswith("hotfix/") else "other"
+        return (event_name, base_ref, head)
     if event_name == "pull_request":
         return (event_name, base_ref)
     if event_name == "push":
@@ -355,9 +367,12 @@ def event_key(event_name: str, base_ref: str, ref_name: str) -> tuple[str, str]:
     return (event_name, "")
 
 
-def verify_event(event_name: str, base_ref: str, ref_name: str, tier: str) -> list[str]:
+def verify_event(
+    event_name: str, base_ref: str, ref_name: str, tier: str,
+    head_ref: str = "", head_repository: str = "", repository: str = "",
+) -> list[str]:
     """Refuse a tier the event is not allowed to carry, or an event the model does not know."""
-    key = event_key(event_name, base_ref, ref_name)
+    key = event_key(event_name, base_ref, ref_name, head_ref, head_repository, repository)
     allowed = ALLOWED_TIERS_BY_EVENT.get(key)
     if allowed is None:
         return [
@@ -371,6 +386,34 @@ def verify_event(event_name: str, base_ref: str, ref_name: str, tier: str) -> li
             "does not settle that in favour of the lighter tier."
         ]
     return []
+
+
+# The runs whose success on a commit proves the full tier passed on it. A pull-request run on the
+# promotion itself does not count: on the promotion tier it runs no functional job.
+FULL_TIER_EVENTS = frozenset({"push", "merge_group", "workflow_dispatch"})
+
+
+def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[str]:
+    """Refuse a promotion unless a full-tier ci.yml run passed on exactly the promoted commit.
+
+    The promotion re-runs nothing, so its green is borrowed: it has to be borrowed from a run that
+    verified this commit, not from whichever run happens to be green. That is what #301 lacked — it
+    merged on a green ci-required from another run while the checks of its own head disagreed.
+    """
+    if not sha or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return ["the promoted commit is unknown, so no evidence can be bound to it"]
+    runs = (payload or {}).get("workflow_runs")
+    if not isinstance(runs, list):
+        return ["no workflow-run evidence was collected for the promoted commit"]
+    for run in runs:
+        if (run.get("path") == WORKFLOW_PATH and run.get("head_sha") == sha
+                and run.get("event") in FULL_TIER_EVENTS and run.get("conclusion") == "success"):
+            return []
+    return [
+        f"no full-tier ci.yml run has passed on {sha} (push to dev, merge queue or dispatch). "
+        "A promotion re-runs no functional job, so it may be green only on a full run of this exact "
+        "commit; re-run this check once that run has passed."
+    ]
 
 
 def verify_results(tier: str, results: dict[str, str]) -> list[str]:
@@ -472,8 +515,17 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.get("BASE_REF", ""),
             os.environ.get("REF_NAME", ""),
             tier,
+            os.environ.get("HEAD_REF", ""),
+            os.environ.get("HEAD_REPOSITORY", ""),
+            os.environ.get("REPOSITORY", ""),
         )
     )
+    if tier == "promotion":
+        try:
+            evidence = json.loads(Path(os.environ.get("PROMOTION_EVIDENCE", "")).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            evidence = None
+        problems.extend(verify_promotion_evidence(evidence, os.environ.get("PROMOTED_SHA", "")))
     problems.extend(verify_workflow(WORKFLOW.read_text(encoding="utf-8")))
     problems.extend(verify_results(tier, results))
 

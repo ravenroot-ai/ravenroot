@@ -99,6 +99,9 @@ def classify(
     labels: set[str],
     paths: list[str],
     dispatch_tier: str = "",
+    head_ref: str = "",
+    head_repository: str = "",
+    repository: str = "",
 ) -> dict[str, str]:
     """Return the CI tier and release intent for one event."""
     docs_only = documentation_only(paths)
@@ -140,14 +143,23 @@ def classify(
                 "A documentation-only pull request to main must use release:none; "
                 "it must not advance the product version."
             )
-        # The promotion re-verifies nothing: the behaviour was already verified commit by commit on
-        # the pull requests into `dev`. What remains here is the security gate, `main-source-policy`
-        # and this job, so no tier-gated functional job may run for either release intent.
-        return {
-            "tier": "promotion",
-            "release_intent": intent,
-            "docs_only": str(docs_only).lower(),
-        }
+        # Only `dev` of this repository is a promotion. Its content was verified on `dev`, so the
+        # promotion re-runs no functional job — and ci-required, on this tier, still refuses unless
+        # a full-tier run passed on this exact commit. A `hotfix/*` branch never passed through
+        # `dev`, so it runs the full tier. Anything else targeting `main` is refused here, as
+        # `main-source-policy` refuses it: a promotion tier granted to an arbitrary head would give
+        # that commit a green ci-required with no functional job behind it.
+        same_repository = bool(repository) and head_repository == repository
+        if same_repository and head_ref == "dev":
+            tier = "promotion"
+        elif same_repository and head_ref.startswith("hotfix/"):
+            tier = "full"
+        else:
+            raise ClassificationError(
+                f"A pull request into main must come from dev or a hotfix/* branch of {repository or 'this repository'}; "
+                f"refusing head {head_repository or '?'}:{head_ref or '?'}."
+            )
+        return {"tier": tier, "release_intent": intent, "docs_only": str(docs_only).lower()}
 
     if event_name == "push" and ref_name == "main" and docs_only:
         return {"tier": "docs", "release_intent": "none", "docs_only": "true"}
@@ -187,6 +199,9 @@ def main() -> int:
             labels=parse_labels(os.environ.get("PR_LABELS", "[]")),
             paths=paths,
             dispatch_tier=os.environ.get("DISPATCH_TIER", ""),
+            head_ref=os.environ.get("HEAD_REF", ""),
+            head_repository=os.environ.get("HEAD_REPOSITORY", ""),
+            repository=os.environ.get("REPOSITORY", ""),
         )
     except (ClassificationError, subprocess.CalledProcessError) as exc:
         print(f"Release classification failed: {exc}", file=sys.stderr)

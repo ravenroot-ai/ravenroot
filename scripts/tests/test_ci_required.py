@@ -15,6 +15,7 @@ from scripts.ci_required import (
     WORKFLOW_DIRECTORY,
     job_blocks,
     verify_event,
+    verify_promotion_evidence,
     verify_fast_results,
     verify_fast_workflow,
     verify_single_publisher,
@@ -109,6 +110,35 @@ class VerifyResultsTest(unittest.TestCase):
         """Criterion 1, as far as a unit test can carry it; the pull request demonstrates the rest."""
         for job in ("full-ui-e2e", "full-ui-e2e-shard", "full-ui-e2e-harness", "full-ui-audit"):
             self.assertIn(job, REQUIRED_BY_TIER["full"])
+
+
+class PromotionEvidenceTest(unittest.TestCase):
+    SHA = "9e75c71c061bdc7390dace58be761d21db4b4ad3"
+
+    def run_of(self, event, conclusion="success", sha=None, path=".github/workflows/ci.yml"):
+        return {"event": event, "conclusion": conclusion, "head_sha": sha or self.SHA, "path": path}
+
+    def test_a_full_run_that_passed_on_the_commit_is_evidence(self) -> None:
+        for event in ("push", "merge_group", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertEqual(verify_promotion_evidence({"workflow_runs": [self.run_of(event)]}, self.SHA), [])
+
+    def test_the_301_case_is_refused(self) -> None:
+        """Only pull-request runs, or a full run of another commit: nothing verified this one."""
+        for runs in (
+            [self.run_of("pull_request")],
+            [self.run_of("push", sha="0" * 40)],
+            [self.run_of("push", conclusion="failure")],
+            [self.run_of("workflow_dispatch", conclusion=None)],
+            [self.run_of("push", path=".github/workflows/ci-fast.yml")],
+            [],
+        ):
+            with self.subTest(runs=runs):
+                self.assertTrue(verify_promotion_evidence({"workflow_runs": runs}, self.SHA))
+
+    def test_missing_or_unbound_evidence_is_refused(self) -> None:
+        self.assertTrue(verify_promotion_evidence(None, self.SHA))
+        self.assertTrue(verify_promotion_evidence({"workflow_runs": [self.run_of("push")]}, ""))
 
 
 class ParseResultsTest(unittest.TestCase):
@@ -224,11 +254,25 @@ class VerifyEventTest(unittest.TestCase):
     """The tier is checked against the event, independently of the classifier that produced it."""
 
     def test_every_modelled_event_accepts_its_tiers(self) -> None:
-        for (event, ref), tiers in ALLOWED_TIERS_BY_EVENT.items():
+        repo = "ravenroot-ai/ravenroot"
+        for key, tiers in ALLOWED_TIERS_BY_EVENT.items():
+            event, ref, head = (*key, None)[:3]
+            head_ref = {"dev": "dev", "hotfix": "hotfix/x"}.get(head, "")
             for tier in tiers:
-                with self.subTest(event=event, ref=ref, tier=tier):
+                with self.subTest(key=key, tier=tier):
                     base, pushed = (ref, "x") if event == "pull_request" else ("", ref or "x")
-                    self.assertEqual(verify_event(event, base, pushed, tier), [])
+                    self.assertEqual(verify_event(event, base, pushed, tier, head_ref, repo, repo), [])
+
+    def test_the_promotion_is_granted_to_this_repositorys_dev_alone(self) -> None:
+        """Independently of the classifier: a promotion from any other head is refused."""
+        repo = "ravenroot-ai/ravenroot"
+        self.assertEqual(verify_event("pull_request", "main", "x", "promotion", "dev", repo, repo), [])
+        self.assertEqual(verify_event("pull_request", "main", "x", "full", "hotfix/cve", repo, repo), [])
+        for head_ref, head_repository in (("feature/x", repo), ("dev", "fork/ravenroot"), ("hotfix/x", "fork/ravenroot")):
+            with self.subTest(head=f"{head_repository}:{head_ref}"):
+                self.assertTrue(verify_event("pull_request", "main", "x", "promotion", head_ref, head_repository, repo))
+        self.assertTrue(verify_event("pull_request", "main", "x", "promotion", "hotfix/cve", repo, repo),
+                        "a hotfix never passed through dev: it may not borrow a promotion's green")
 
     def test_an_event_headed_for_dev_never_accepts_a_lighter_tier(self) -> None:
         for event, base, ref in (

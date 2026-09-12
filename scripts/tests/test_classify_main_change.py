@@ -39,6 +39,10 @@ class ParseLabelsTest(unittest.TestCase):
             parse_labels('{}')
 
 
+REPOSITORY = "ravenroot-ai/ravenroot"
+PROMOTION_HEAD = {"head_ref": "dev", "head_repository": REPOSITORY, "repository": REPOSITORY}
+
+
 class ClassifyTest(unittest.TestCase):
     def test_pull_request_to_dev_is_full(self):
         """`dev` is the verification point, so its pull requests carry the whole functional suite."""
@@ -56,6 +60,7 @@ class ClassifyTest(unittest.TestCase):
                     event_name="pull_request",
                     base_ref="main",
                     ref_name="dev",
+                    **PROMOTION_HEAD,
                     labels=labels,
                     paths=["README.md"],
                 )
@@ -66,6 +71,7 @@ class ClassifyTest(unittest.TestCase):
                 event_name="pull_request",
                 base_ref="main",
                 ref_name="dev",
+                **PROMOTION_HEAD,
                 labels={"release:none"},
                 paths=["README.md", "docs/index.md"],
             ),
@@ -79,6 +85,7 @@ class ClassifyTest(unittest.TestCase):
                     event_name="pull_request",
                     base_ref="main",
                     ref_name="dev",
+                    **PROMOTION_HEAD,
                     labels={"release:none"},
                     paths=[path],
                 )
@@ -89,6 +96,7 @@ class ClassifyTest(unittest.TestCase):
                 event_name="pull_request",
                 base_ref="main",
                 ref_name="dev",
+                **PROMOTION_HEAD,
                 labels={"release:patch"},
                 paths=["docs/index.md"],
             )
@@ -101,11 +109,26 @@ class ClassifyTest(unittest.TestCase):
                     event_name="pull_request",
                     base_ref="main",
                     ref_name="dev",
+                    **PROMOTION_HEAD,
                     labels={label},
                     paths=["ravenroot/pom.xml", "docs/index.md"],
                 )
                 self.assertEqual(result["tier"], "promotion")
                 self.assertEqual(result["release_intent"], intent)
+
+    def test_only_this_repositorys_dev_is_a_promotion(self):
+        """Antares's finding on #313: the promotion tier went to any head into main."""
+        def into_main(head_ref, head_repository):
+            return classify(event_name="pull_request", base_ref="main", ref_name="x", labels={"release:patch"},
+                            paths=["ravenroot/pom.xml"], head_ref=head_ref, head_repository=head_repository,
+                            repository=REPOSITORY)
+        self.assertEqual(into_main("dev", REPOSITORY)["tier"], "promotion")
+        self.assertEqual(into_main("hotfix/cve", REPOSITORY)["tier"], "full",
+                         "a hotfix never passed through dev, so it is verified in full")
+        for head_ref, head_repository in (("feature/x", REPOSITORY), ("dev", "fork/ravenroot"), ("", "")):
+            with self.subTest(head=f"{head_repository}:{head_ref}"):
+                with self.assertRaises(ClassificationError):
+                    into_main(head_ref, head_repository)
 
     def test_push_to_main_infers_docs_tier_from_paths(self):
         result = classify(

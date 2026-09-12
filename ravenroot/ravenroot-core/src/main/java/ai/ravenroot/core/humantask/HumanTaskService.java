@@ -45,6 +45,7 @@ import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
 import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
+import ai.ravenroot.core.runtime.GraphRunner;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -105,7 +106,8 @@ public final class HumanTaskService {
     }
 
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
-        return bindLive(key, recorder, null);
+        return bindLive(key, recorder,
+                (java.util.function.Function<NodeMessage, GraphExecutionBudgetSnapshot>) null);
     }
 
     /** Binds the recorder and trusted graph-budget source used by durable production re-entry. */
@@ -118,7 +120,23 @@ public final class HumanTaskService {
                 || !key.processInstanceId().equals(recorder.processInstanceId())) {
             throw new IllegalArgumentException("recorder belongs to a different execution");
         }
-        var binding = new LiveBinding(recorder, budgetSnapshot);
+        var binding = new LiveBinding(recorder, budgetSnapshot, null);
+        if (liveRecorders.putIfAbsent(key, binding) != null) {
+            throw new IllegalStateException("a live recorder is already bound for this execution");
+        }
+        return () -> liveRecorders.remove(key, binding);
+    }
+
+    /** Binds the runner that owns both the graph budget and pending join-arrival checkpoint. */
+    public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder, GraphRunner runner) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(recorder, "recorder");
+        Objects.requireNonNull(runner, "runner");
+        if (!key.tenantId().equals(recorder.tenantId())
+                || !key.processInstanceId().equals(recorder.processInstanceId())) {
+            throw new IllegalArgumentException("recorder belongs to a different execution");
+        }
+        var binding = new LiveBinding(recorder, runner::continuationBudget, runner);
         if (liveRecorders.putIfAbsent(key, binding) != null) {
             throw new IllegalStateException("a live recorder is already bound for this execution");
         }
@@ -148,7 +166,10 @@ public final class HumanTaskService {
         Instant now = clock.instant();
         int continuationVersion = 1;
         byte[] continuation = new byte[0];
-        if (binding.budgetSnapshot() != null) {
+        if (binding.runner() != null) {
+            continuation = binding.runner().humanTaskContinuation(message, 1, new byte[0]);
+            continuationVersion = GraphExecutionContinuationCheckpoint.VERSION;
+        } else if (binding.budgetSnapshot() != null) {
             continuation = GraphExecutionContinuationCheckpoint.write(
                     1, new byte[0], binding.budgetSnapshot().apply(message));
             continuationVersion = GraphExecutionContinuationCheckpoint.VERSION;
@@ -201,7 +222,8 @@ public final class HumanTaskService {
 
     private record LiveBinding(ExecutionRecorder recorder,
                                java.util.function.Function<NodeMessage,
-                                       GraphExecutionBudgetSnapshot> budgetSnapshot) { }
+                                       GraphExecutionBudgetSnapshot> budgetSnapshot,
+                               GraphRunner runner) { }
 
     public HumanTaskPage inbox(RequestContext context, HumanTaskQuery query) {
         Objects.requireNonNull(context, "context");

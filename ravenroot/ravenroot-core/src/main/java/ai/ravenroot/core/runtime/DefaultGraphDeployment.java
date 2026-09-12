@@ -2219,7 +2219,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             budgetBinding = agentBudgets == null || recorder == null
                     ? null : agentBudgets.bindLive(key, recorder);
             humanTaskBinding = humanTasks == null || recorder == null
-                    ? null : humanTasks.bindLive(key, recorder, activeRunner::continuationBudget);
+                    ? null : humanTasks.bindLive(key, recorder, activeRunner);
             CompletionStage<GraphExecutionResult> execution = activeRunner.execute(security,
                     processInstanceId, traversalId, payload, graphVersion, executionContextDeploymentId,
                     traversalId.toString(), recorder, executionOperationalPolicy,

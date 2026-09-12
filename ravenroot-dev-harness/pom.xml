@@ -61,7 +61,7 @@
 
     <groupId>ai.ravenroot.devharness</groupId>
     <artifactId>ravenroot-dev-harness</artifactId>
-    <version>0.1.0-alpha.1</version>
+    <version>0.2.0-alpha.1</version>
     <name>Ravenroot Development Harness (never published)</name>
     <description>
         Source-only local bench that starts Ravenroot with an llm-prompt node it supplies itself and
@@ -74,7 +74,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <ravenroot.version>0.1.0-alpha.1</ravenroot.version>
+        <ravenroot.version>0.2.0-alpha.1</ravenroot.version>
         <junit.version>6.1.2</junit.version>
 
         <!--

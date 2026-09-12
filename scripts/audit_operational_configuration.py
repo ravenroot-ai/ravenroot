@@ -18,7 +18,7 @@ import json
 import re
 import subprocess
 import sys
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -699,6 +699,7 @@ def surface(relative: Path) -> str | None:
     return None
 
 
+@lru_cache(maxsize=256)
 def strip_c_comments(text: str) -> str:
     """Remove // and /* */ comments while preserving strings and newlines."""
     out: list[str] = []
@@ -760,6 +761,7 @@ def strip_c_comments(text: str) -> str:
     return "".join(out)
 
 
+@lru_cache(maxsize=256)
 def strip_c_comments_and_literals(text: str) -> str:
     """Mask comments and quoted literals while preserving offsets and newlines."""
     without_comments = strip_c_comments(text)
@@ -802,6 +804,7 @@ def strip_c_comments_and_literals(text: str) -> str:
     return "".join(out)
 
 
+@lru_cache(maxsize=512)
 def java_type_span(source: str, symbol: str) -> tuple[int, int] | None:
     """Return one Java type declaration span, ignoring declaration-shaped text in literals/comments."""
     code = strip_c_comments_and_literals(source)
@@ -923,6 +926,7 @@ def line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+@lru_cache(maxsize=256)
 def symbol_markers(code: str, suffix: str) -> tuple[tuple[int, str], ...]:
     """Index declaration starts once; candidate lookup must stay linearithmic on large files."""
     markers: list[tuple[int, str]] = [(0, "module")]
@@ -1206,14 +1210,14 @@ def json_schema_reference_candidates(text: str) -> list[tuple[int, str, str, str
     return rows
 
 
-def discover(root: Path) -> tuple[Candidate, ...]:
+_DISCOVERY_CACHE_LIMIT = 8
+_discovery_cache: OrderedDict[tuple[Path, str], tuple[Candidate, ...]] = OrderedDict()
+
+
+def _discover_sources(
+        sources: tuple[tuple[Path, str, str], ...]) -> tuple[Candidate, ...]:
     provisional: list[tuple[str, int, str, str, str, str, str, str, bool]] = []
-    for relative in tracked_files(root):
-        surface_name = surface(relative)
-        if surface_name is None or (relative.suffix not in SOURCE_SUFFIXES
-                                    and not relative.name.startswith("Dockerfile")):
-            continue
-        text = (root / relative).read_text(encoding="utf-8", errors="strict")
+    for relative, surface_name, text in sources:
         if relative.suffix in {".java", ".js", ".mjs", ".ts"}:
             found = code_candidates(relative, text, surface_name)
         else:
@@ -1239,6 +1243,38 @@ def discover(root: Path) -> tuple[Candidate, ...]:
         candidates.append(Candidate(identifier, path, line, symbol_name, kind, role, expression, digest,
                                     evidence, evidence_digest, surface_name, fixture))
     return tuple(candidates)
+
+
+def discover(root: Path) -> tuple[Candidate, ...]:
+    """Discover candidates, reusing only an identical immutable source snapshot."""
+    digest = hashlib.sha256()
+    sources: list[tuple[Path, str, str]] = []
+    for relative in tracked_files(root):
+        surface_name = surface(relative)
+        if surface_name is None or (relative.suffix not in SOURCE_SUFFIXES
+                                    and not relative.name.startswith("Dockerfile")):
+            continue
+        text = (root / relative).read_text(encoding="utf-8", errors="strict")
+        encoded_path = relative.as_posix().encode("utf-8")
+        encoded_text = text.encode("utf-8")
+        digest.update(len(encoded_path).to_bytes(8, "big"))
+        digest.update(encoded_path)
+        digest.update(len(encoded_text).to_bytes(8, "big"))
+        digest.update(encoded_text)
+        sources.append((relative, surface_name, text))
+
+    key = (root.resolve(), digest.hexdigest())
+    cached = _discovery_cache.get(key)
+    if cached is not None:
+        _discovery_cache.move_to_end(key)
+        return cached
+
+    candidates = _discover_sources(tuple(sources))
+    _discovery_cache[key] = candidates
+    _discovery_cache.move_to_end(key)
+    while len(_discovery_cache) > _DISCOVERY_CACHE_LIMIT:
+        _discovery_cache.popitem(last=False)
+    return candidates
 
 
 def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = False,
@@ -1508,7 +1544,8 @@ def matching_delimiter(code: str, opening: int, left: str, right: str) -> int | 
     return None
 
 
-def java_brace_depths(code: str) -> list[int]:
+@lru_cache(maxsize=256)
+def java_brace_depths(code: str) -> tuple[int, ...]:
     """Return the brace depth immediately before each character in masked Java source."""
     depths: list[int] = []
     depth = 0
@@ -1518,7 +1555,7 @@ def java_brace_depths(code: str) -> list[int]:
             depth += 1
         elif char == "}":
             depth -= 1
-    return depths
+    return tuple(depths)
 
 
 def java_method_span(source: str, type_symbol: str, method: str) -> tuple[int, int] | None:
@@ -13535,6 +13572,7 @@ ASSISTANT_CARRIER_PATHS = {
 }
 
 
+@lru_cache(maxsize=64)
 def java_source_candidates(relative: Path, source: str) -> tuple[tuple[int, Candidate], ...]:
     """Reproduce stable candidate IDs and retain offsets for one Java source."""
     provisional = [

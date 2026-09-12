@@ -161,6 +161,22 @@ record BranchId(String nodeId, int childOrdinal, int lap) implements Comparable<
         return lapIn(branchKey) == 0 ? branchKey : branchKey.substring(0, branchKey.lastIndexOf(LAP_SEPARATOR));
     }
 
+    /** Reconstructs the stable stored form used by durable continuation checkpoints. */
+    static BranchId parse(String value) {
+        int lap = lapIn(value);
+        String branch = branchIn(value);
+        int separator = branch.lastIndexOf(CHILD_SEPARATOR);
+        if (separator > 0 && separator < branch.length() - 1) {
+            try {
+                return new BranchId(branch.substring(0, separator),
+                        Integer.parseInt(branch.substring(separator + 1)), lap);
+            } catch (NumberFormatException ignored) {
+                // A node id may contain '#'; without a numeric suffix it is the whole branch id.
+            }
+        }
+        return new BranchId(branch, NO_CHILD, lap);
+    }
+
     @Override
     public int compareTo(BranchId other) {
         int byNode = nodeId.compareTo(Objects.requireNonNull(other, "other").nodeId);

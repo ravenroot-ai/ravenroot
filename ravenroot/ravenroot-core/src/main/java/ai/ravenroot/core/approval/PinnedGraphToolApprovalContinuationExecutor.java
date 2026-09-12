@@ -347,7 +347,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             try {
                 approvalBinding = bindLive(new ExecutionKey(
                         continuation.requester().tenantId(), continuation.processInstanceId()), recorder,
-                        runner::continuationBudget);
+                        runner);
                 budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(new ExecutionKey(
                         continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
             } catch (RuntimeException bindingFailure) {
@@ -487,12 +487,13 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     }
 
     private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder,
-                                   java.util.function.Function<NodeMessage,
-                                           ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot> budget) {
+                                   GraphRunner runner) {
+        var budget = (java.util.function.Function<NodeMessage,
+                ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot>) runner::continuationBudget;
         AutoCloseable approvalBinding = approvals.bindLive(key, recorder, budget);
         if (humanTasks == null) return approvalBinding;
         try {
-            AutoCloseable taskBinding = humanTasks.bindLive(key, recorder, budget);
+            AutoCloseable taskBinding = humanTasks.bindLive(key, recorder, runner);
             return () -> {
                 try {
                     closeBinding(taskBinding);

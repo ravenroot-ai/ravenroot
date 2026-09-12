@@ -163,6 +163,18 @@ jobs:
           HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
         run: python3 scripts/classify_main_change.py
+      # Authorization refuses a promotion whose version is not the one its label authorizes, but only
+      # after the merge, which leaves a promotion on `main` and a release that never starts. The same
+      # rule runs here, on the merge the pull request would produce, while it can still be refused.
+      - name: Refuse a promotion whose version does not match its release label
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
+        run: |
+          set -euo pipefail
+          git fetch --force --quiet --tags origin
+          python3 scripts/release_contract.py check-promotion \
+            --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS"
 
   fast-product-build:
     name: fast-product-build
@@ -228,8 +240,8 @@ jobs:
       - name: Verify the sample project
         run: mvn -B --no-transfer-progress -f ravenroot-sample/pom.xml verify
 
-  fast-tooling-contracts:
-    name: fast-tooling-contracts
+  fast-python-tooling-contracts:
+    name: fast-python-tooling-contracts
     needs: [release-classification]
     if: needs.release-classification.outputs.tier == 'fast'
     runs-on: ubuntu-24.04
@@ -256,6 +268,19 @@ jobs:
           python3 -m unittest scripts.tests.test_verify_api_docs
           python3 scripts/audit_operational_configuration.py --check
           python3 scripts/check_release_configuration.py
+
+  fast-shell-tooling-contracts:
+    name: fast-shell-tooling-contracts
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Verify shell tooling contracts
         run: |
           ./scripts/tests/test_dev.sh
@@ -268,6 +293,30 @@ jobs:
         run: docker compose --file compose.yaml config --quiet
       - name: Check whitespace
         run: git diff --check HEAD^
+
+  fast-tooling-contracts:
+    name: fast-tooling-contracts
+    needs:
+      - release-classification
+      - fast-python-tooling-contracts
+      - fast-shell-tooling-contracts
+    if: always() && needs.release-classification.outputs.tier == 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+    steps:
+      - name: Require both tooling contract jobs to pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          for job in fast-python-tooling-contracts fast-shell-tooling-contracts; do
+            result=$(jq --raw-output --arg job "$job" '.[$job].result' <<<"$NEEDS_JSON")
+            if [ "$result" != success ]; then
+              echo "$job: expected success, got $result" >&2
+              exit 1
+            fi
+          done
 
   full-docs-policy:
     name: full-docs-policy

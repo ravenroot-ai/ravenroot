@@ -126,6 +126,51 @@ class HumanTaskRestartIntegrationTest {
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] PARALLEL_JOIN_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <key id="responseSchema" for="node" attr.name="responseSchema" attr.type="string"/>
+              <key id="responseSchemaVersion" for="node" attr.name="responseSchemaVersion" attr.type="string"/>
+              <key id="authorizedRoles" for="node" attr.name="authorizedRoles" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="parallel-human-join" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="log"><data key="kind">BEHAVIOR</data><data key="behavior">parallel-log</data></node>
+                <node id="classify"><data key="kind">BEHAVIOR</data><data key="behavior">classify</data></node>
+                <node id="decision"><data key="kind">BEHAVIOR</data><data key="behavior">decision</data></node>
+                <node id="human-task"><data key="kind">BEHAVIOR</data><data key="behavior">human-task</data>
+                  <data key="title">Approve parallel work</data>
+                  <data key="responseSchema">release.decision</data>
+                  <data key="responseSchemaVersion">1</data>
+                  <data key="authorizedRoles">APPROVER</data></node>
+                <node id="join"><data key="kind">BEHAVIOR</data><data key="behavior">capture</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-log" source="start" target="log"/>
+                <edge id="start-classify" source="start" target="classify"/>
+                <edge id="log-join" source="log" target="join"/>
+                <edge id="classify-decision" source="classify" target="decision"/>
+                <edge id="decision-human" source="decision" target="human-task"/>
+                <edge id="human-join" source="human-task" target="join"><data key="edge-outcome">resolved</data></edge>
+                <edge id="join-end" source="join" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] PARALLEL_LEAF_GRAPH = new String(PARALLEL_JOIN_GRAPH, StandardCharsets.UTF_8)
+            .replace("<graph id=\"parallel-human-join\"", "<graph id=\"parallel-human-leaf\"")
+            .replace("<node id=\"join\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">capture</data></node>",
+                    "<node id=\"capture\"><data key=\"kind\">BEHAVIOR</data>"
+                            + "<data key=\"behavior\">capture</data></node>")
+            .replace("<edge id=\"log-join\" source=\"log\" target=\"join\"/>", "")
+            .replace("<edge id=\"human-join\" source=\"human-task\" target=\"join\">"
+                            + "<data key=\"edge-outcome\">resolved</data></edge>",
+                    "<edge id=\"human-capture\" source=\"human-task\" target=\"capture\">"
+                            + "<data key=\"edge-outcome\">resolved</data></edge>")
+            .replace("<edge id=\"join-end\" source=\"join\" target=\"end\"/>",
+                    "<edge id=\"capture-end\" source=\"capture\" target=\"end\"/>")
+            .getBytes(StandardCharsets.UTF_8);
     private static final byte[] HUMAN_RETRY_GRAPH = new String(GRAPH, StandardCharsets.UTF_8)
             .replace("<graph id=\"human-restart\"", "<key id=\"retry-max\" for=\"node\" "
                     + "attr.name=\"retry.maxAttempts\" attr.type=\"string\"/>\n"
@@ -554,6 +599,207 @@ class HumanTaskRestartIntegrationTest {
             assertEquals(HumanTaskStatus.RESOLVED,
                     store.loadHumanTask(TENANT, taskId).toCompletableFuture().join()
                             .orElseThrow().status());
+        }
+    }
+
+    /**
+     * Production reproduction: a sibling already parked at an all-branches join must not turn the
+     * durable Human Task boundary into JOIN_FAILED/QUORUM_UNREACHABLE, and its payload must survive
+     * the restart so the Human Task outcome satisfies the join exactly once.
+     * Observed before the fix: "log arrives at end while Human Task suspends; JOIN_FAILED
+     * reason=QUORUM_UNREACHABLE arrived=[record-copy-1] failed=[human-task-1] outstanding=[], then
+     * JoinFailureException; task stays WAITING and confirmation HTTP 500."
+     */
+    @Test
+    void durableHumanTaskPreservesParallelAllBranchesJoinAcrossRestart(@TempDir Path directory)
+            throws Exception {
+        Path database = directory.resolve("parallel-human-join.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var initialEvents = new java.util.concurrent.CopyOnWriteArrayList<
+                ai.ravenroot.api.application.ExecutionEvent>();
+        String pin;
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(PARALLEL_JOIN_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, traversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            var monitor = new ExecutionMonitor();
+            monitor.subscribe(initialEvents::add);
+            BehaviorRegistry behaviors = standard(tasks)
+                    .register("parallel-log", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(Map.of("branch", "log"))))
+                    .register("classify", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("decision", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("capture", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())));
+
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(PARALLEL_JOIN_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, monitor, ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "parallel-live", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder, runner)) {
+                ExecutionException suspended = assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), traversal,
+                                Map.of("input", "value"), pin, null, null, recorder)
+                                .toCompletableFuture().get(10, TimeUnit.SECONDS));
+                assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+            }
+            assertEquals(TraversalStatus.WAITING,
+                    store.load(key).toCompletableFuture().join().state().traversals().get(traversal).status());
+            assertEquals(0, initialEvents.stream().filter(event ->
+                    event.type() == ai.ravenroot.api.application.ExecutionEventType.JOIN_FAILED).count(),
+                    "a durable Human Task is pending, never a failed join branch");
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK)) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            DurableHumanTask task = onlyTask(tasks);
+            tasks.resolve(approver(), task.request().taskId(), task.generation(), response());
+        }
+
+        var captures = new AtomicInteger();
+        var observed = new AtomicReference<Object>();
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks)
+                    .register("parallel-log", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("classify", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("decision", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("capture", message -> {
+                        captures.incrementAndGet();
+                        observed.set(message.payload());
+                        return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                    });
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "parallel-recovery", TTL);
+            assertTrue(continuation.supports(onlyTask(tasks)), "parallel continuation must be supported");
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "parallel-recovery",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> parallelOutcomes = recovery.sweepOnce();
+            assertEquals(1, dispatched(parallelOutcomes), parallelOutcomes.toString());
+            assertEquals(1, captures.get(), "the shared join must fire exactly once after re-entry");
+            assertInstanceOf(List.class, observed.get(), "the join must retain both branch payloads");
+            assertEquals(2, ((List<?>) observed.get()).size());
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+            assertTrue(recovery.sweepOnce().isEmpty());
+            assertEquals(1, captures.get());
+        }
+    }
+
+    /**
+     * A completed independent sibling must not let the original traversal complete past its wait.
+     * Observed before the fix: "independent leaf source -> log alongside source -> classify ->
+     * decision -> human-task; durable wait commits then Illegal traversal transition: WAITING ->
+     * COMPLETED; task stays WAITING and confirmation HTTP 500."
+     */
+    @Test
+    void durableHumanTaskPreservesIndependentLeafAcrossRestart(@TempDir Path directory) throws Exception {
+        Path database = directory.resolve("parallel-human-leaf.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var logs = new AtomicInteger();
+        String pin;
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(PARALLEL_LEAF_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, traversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks)
+                    .register("parallel-log", message -> {
+                        logs.incrementAndGet();
+                        return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                    })
+                    .register("classify", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("decision", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("capture", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())));
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(PARALLEL_LEAF_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "leaf-live", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder, runner)) {
+                ExecutionException suspended = assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), traversal,
+                                Map.of("input", "value"), pin, null, null, recorder)
+                                .toCompletableFuture().get(10, TimeUnit.SECONDS));
+                assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+            }
+            assertEquals(1, logs.get());
+            assertEquals(TraversalStatus.WAITING,
+                    store.load(key).toCompletableFuture().join().state().traversals().get(traversal).status());
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK)) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            DurableHumanTask task = onlyTask(tasks);
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    tasks.resolve(approver(), task.request().taskId(), task.generation(), response()).code());
+        }
+
+        var captures = new AtomicInteger();
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks)
+                    .register("parallel-log", message -> {
+                        logs.incrementAndGet();
+                        return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                    })
+                    .register("classify", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("decision", message -> CompletableFuture.completedFuture(
+                            NodeResult.continueWith(message.payload())))
+                    .register("capture", message -> {
+                        captures.incrementAndGet();
+                        return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                    });
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "leaf-recovery", TTL);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "leaf-recovery",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+            assertEquals(1, dispatched(outcomes), outcomes.toString());
+            assertEquals(1, captures.get());
+            assertEquals(1, logs.get(), "the completed independent leaf must not be replayed");
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+            assertTrue(recovery.sweepOnce().isEmpty());
         }
     }
 

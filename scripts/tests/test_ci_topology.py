@@ -82,6 +82,28 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertNotIn("npm test", self.jobs["full-ui-build"])
         self.assertNotIn("npm run build", self.jobs["full-ui-e2e"])
 
+    def test_fast_tooling_contracts_are_parallel_and_fail_closed(self) -> None:
+        python_job = self.jobs["fast-python-tooling-contracts"]
+        shell_job = self.jobs["fast-shell-tooling-contracts"]
+        aggregate = self.jobs["fast-tooling-contracts"]
+
+        self.assertEqual(declared_needs(python_job), {"release-classification"})
+        self.assertEqual(declared_needs(shell_job), {"release-classification"})
+        self.assertIn("Verify Python tooling contracts", python_job)
+        self.assertNotIn("Verify shell tooling contracts", python_job)
+        self.assertIn("Verify shell tooling contracts", shell_job)
+        self.assertNotIn("Verify Python tooling contracts", shell_job)
+        self.assertEqual(declared_needs(aggregate), {
+            "release-classification",
+            "fast-python-tooling-contracts",
+            "fast-shell-tooling-contracts",
+        })
+        self.assertIn("if: always() && needs.release-classification.outputs.tier == 'fast'", aggregate)
+        for child in ("fast-python-tooling-contracts", "fast-shell-tooling-contracts"):
+            with self.subTest(child=child):
+                self.assertIn(child, aggregate)
+        self.assertIn('if [ "$result" != success ]', aggregate)
+
     def test_verified_artifact_dependencies_are_explicit(self) -> None:
         artifact_consumers = {
             "full-ui-e2e": {"full-ui-build"},

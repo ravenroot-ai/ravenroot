@@ -136,6 +136,23 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             full |= commands(self.jobs[job])
         self.assertEqual(commands(fast), full)
 
+    def test_operational_configuration_gate_runs_with_complete_history_on_both_tiers(self) -> None:
+        fast = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))
+        for job, block in (("fast-policy", fast["fast-policy"]),
+                           ("full-python-contracts", self.jobs["full-python-contracts"])):
+            with self.subTest(job=job):
+                self.assertIn("fetch-depth: 0", block)
+                self.assertEqual(
+                    1,
+                    block.count(
+                        "python3 -m unittest scripts.tests.test_audit_operational_configuration"
+                    ),
+                )
+                self.assertEqual(
+                    1,
+                    block.count("python3 scripts/audit_operational_configuration.py --check"),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

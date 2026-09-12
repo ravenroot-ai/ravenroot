@@ -29,11 +29,14 @@ jobs:
   fast-policy:
     name: fast-policy
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The operational configuration audit alone takes about ten minutes.
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Full history: the attribution check reads the branch's commits, and the operational
+          # inventory verifies committed migration and reconciliation evidence.
           fetch-depth: 0
       - name: Validate source bytes and Maven argLine composition
         run: |
@@ -59,10 +62,12 @@ jobs:
           python3 -m unittest scripts.tests.test_ci_required
           python3 -m unittest scripts.tests.test_check_commit_attribution
           python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
+          python3 scripts/audit_operational_configuration.py --check
           python3 scripts/check_release_configuration.py
       - name: Verify developer and platform shell contracts
         run: |

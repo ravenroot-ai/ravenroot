@@ -220,6 +220,31 @@ class RavenrootServerMainLifecycleTest {
         assertEquals(-1, exitStatus.get());
     }
 
+    @Test
+    void packagedEmbedInvalidFlagRefusesWithoutEchoingItsValue() throws Exception {
+        var bound = new AtomicBoolean();
+        var exitStatus = new AtomicInteger(-1);
+        var output = new ByteArrayOutputStream();
+        PrintStream previous = System.err;
+        try (var captured = new PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setErr(captured);
+            RavenrootServerMain.launch(() -> {
+                RavenrootServerMain.refuseUnsupportablePackagedEmbed(
+                        Map.of("RAVENROOT_EMBED_ENABLED", "TRUE-secret-canary"));
+                bound.set(true);
+            }, exitStatus::set);
+        } finally {
+            System.setErr(previous);
+        }
+        assertEquals(1, exitStatus.get());
+        assertEquals(false, bound.get());
+        assertEquals("{\"event\":\"startup_refused\","
+                        + "\"code\":\"EMBED_CONFIGURATION_INVALID\","
+                        + "\"detail\":\"RAVENROOT_EMBED_ENABLED must be true or false\"}"
+                        + System.lineSeparator(),
+                output.toString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     private record RecordingOwner(ArrayList<String> order) implements AutoCloseable {
         @Override
         public void close() {

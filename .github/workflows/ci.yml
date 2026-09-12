@@ -163,6 +163,18 @@ jobs:
           HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
         run: python3 scripts/classify_main_change.py
+      # Authorization refuses a promotion whose version is not the one its label authorizes, but only
+      # after the merge, which leaves a promotion on `main` and a release that never starts. The same
+      # rule runs here, on the merge the pull request would produce, while it can still be refused.
+      - name: Refuse a promotion whose version does not match its release label
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
+        run: |
+          set -euo pipefail
+          git fetch --force --quiet --tags origin
+          python3 scripts/release_contract.py check-promotion \
+            --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS"
 
   fast-product-build:
     name: fast-product-build

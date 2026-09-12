@@ -13,7 +13,9 @@ from scripts.ci_required import (
     FAST_GATE_JOB,
     FAST_JOBS,
     FAST_WORKFLOW,
+    CLASSIFICATION_GUARD,
     ROUTED_INPUT_BINDINGS,
+    ROUTING_GUARD,
     WORKFLOW_DIRECTORY,
     job_blocks,
     verify_event,
@@ -155,25 +157,39 @@ class PromotionEvidenceTest(unittest.TestCase):
 
 
 class DispatchRoutingTest(unittest.TestCase):
-    def classification(self) -> str:
-        return job_blocks(WORKFLOW.read_text(encoding="utf-8"))["release-classification"]
+    def setUp(self) -> None:
+        self.contents = WORKFLOW.read_text(encoding="utf-8")
+        blocks = job_blocks(self.contents)
+        self.classification, self.gate = blocks["release-classification"], blocks[GATE_JOB]
 
-    def test_the_workflow_hands_every_routing_input_to_the_classifier(self) -> None:
-        self.assertEqual(verify_dispatch_routing(self.classification()), [])
+    def test_both_guards_run_before_any_checkout(self) -> None:
+        self.assertEqual(verify_dispatch_routing(self.classification, self.gate), [])
+        self.assertEqual(verify_workflow(self.contents), [])
+
+    def test_a_missing_or_displaced_guard_is_refused(self) -> None:
+        """A guard after the checkout would run from the tree merge_sha names."""
+        for guard in (ROUTING_GUARD, CLASSIFICATION_GUARD):
+            with self.subTest(guard=guard.splitlines()[0]):
+                removed = self.contents.replace(guard, "", 1)
+                self.assertTrue(verify_workflow(removed))
+        checkout = "      - name: Check out repository history\n"
+        displaced = self.classification.replace(ROUTING_GUARD, "", 1).replace(checkout, checkout + ROUTING_GUARD, 1)
+        self.assertTrue(verify_dispatch_routing(displaced, self.gate))
+        weakened = self.classification.replace("inputs.merge_sha }}\n", "}}\n", 1)
+        self.assertTrue(verify_dispatch_routing(weakened, self.gate))
 
     def test_an_unwired_routing_input_is_refused(self) -> None:
-        contents = WORKFLOW.read_text(encoding="utf-8")
         for binding in ROUTED_INPUT_BINDINGS:
             with self.subTest(binding=binding):
-                self.assertTrue(verify_dispatch_routing(self.classification().replace(binding, "")))
-                self.assertTrue(any(binding in problem for problem in verify_workflow(contents.replace(binding, ""))))
+                self.assertTrue(any(binding in problem for problem in verify_workflow(self.contents.replace(binding, ""))))
 
     def test_the_bindings_are_the_classifier_s_and_the_workflow_s_inputs(self) -> None:
         bound = {line.split(": ", 1)[0]: line.split("inputs.", 1)[1].rstrip(" }") for line in ROUTED_INPUT_BINDINGS}
         self.assertEqual(bound, {variable: name for name, variable in ROUTED_INPUTS.items()})
-        triggers = WORKFLOW.read_text(encoding="utf-8").split("\njobs:\n", 1)[0]
+        triggers = self.contents.split("\njobs:\n", 1)[0]
         for name in ROUTED_INPUTS:
             self.assertIn(f"\n      {name}:\n", triggers)
+            self.assertIn(f"${{{{ inputs.{name} }}}}", ROUTING_GUARD)
 
 
 class ParseResultsTest(unittest.TestCase):

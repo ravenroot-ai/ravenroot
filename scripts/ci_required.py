@@ -231,7 +231,7 @@ def verify_workflow(contents: str) -> list[str]:
             problems.append(f"{job}: listed in the {GATE_JOB} `needs` list but not in the topology.")
 
     problems.extend(verify_triggers(contents))
-    problems.extend(verify_dispatch_routing(blocks.get(CLASSIFICATION_JOB, "")))
+    problems.extend(verify_dispatch_routing(blocks.get(CLASSIFICATION_JOB, ""), blocks.get(GATE_JOB, "")))
 
     shard_block = blocks.get("full-ui-e2e-shard", "")
     expected_matrix = "shard: [" + ", ".join(str(index) for index in range(1, E2E_SHARDS + 1)) + "]"
@@ -292,25 +292,58 @@ ROUTED_INPUT_BINDINGS = (
     "ROUTED_HEAD_SHA: ${{ inputs.head_sha }}",
     "ROUTED_MERGE_SHA: ${{ inputs.merge_sha }}",
 )
+# The first step of release-classification, before any checkout.
+ROUTING_GUARD = (
+    "      - name: Refuse routing inputs on a dispatch without a routing run\n"
+    "        if: github.event_name == 'workflow_dispatch' && inputs.routing_run_id == ''\n"
+    "        env:\n"
+    "          ROUTED_INPUTS: ${{ inputs.routed_pr_number }}${{ inputs.base_sha }}${{ inputs.head_sha }}"
+    "${{ inputs.merge_sha }}\n"
+    "        run: |\n"
+    "          if [ -n \"$ROUTED_INPUTS\" ]; then\n"
+)
+# The first step of ci-required, before its checkout.
+CLASSIFICATION_GUARD = (
+    "      - name: Refuse before running checked-out code unless the classification passed\n"
+    "        env:\n"
+    "          CLASSIFICATION: ${{ needs.release-classification.result }}\n"
+    "        run: |\n"
+    "          if [ \"$CLASSIFICATION\" != success ]; then\n"
+)
 
 
-def verify_dispatch_routing(classification: str) -> list[str]:
-    """Keep the classifier able to refuse routing inputs on a dispatch that has no routing run.
+def first_step(block: str) -> str:
+    match = re.search(r"(?ms)^    steps:\n(?:      #[^\n]*\n)*(      - .*?)(?=^      - |\Z)", block)
+    return match.group(1) if match else ""
+
+
+def verify_dispatch_routing(classification: str, gate: str) -> list[str]:
+    """Keep a dispatch from recording a result on a commit other than the one it tested.
 
     Every job checks out `merge_sha` when it is set, and the run is recorded on the dispatched
-    branch's commit. The classifier refuses that combination without `routing_run_id`, but only if
-    the classify step hands it the inputs; unwired, a dispatch could record a full-tier success on a
-    commit it never tested, which a promotion then reads as its evidence.
+    branch's commit; a promotion reads that record as its evidence. The refusal therefore runs from
+    the workflow of the dispatched ref, before any checkout: a check inside the checked-out tree —
+    the classifier, or this script — would be chosen by the very input it has to refuse. For the
+    same reason ci-required runs nothing from its checkout unless the classification passed.
     """
+    problems: list[str] = []
+    if not first_step(classification).startswith(ROUTING_GUARD):
+        problems.append(
+            f"{CLASSIFICATION_JOB}: its first step, before any checkout, must refuse routing inputs on a "
+            "dispatch without routing_run_id. A check in the checked-out tree would be chosen by merge_sha."
+        )
+    if not first_step(gate).startswith(CLASSIFICATION_GUARD):
+        problems.append(
+            f"{GATE_JOB}: its first step, before the checkout, must fail unless {CLASSIFICATION_JOB} "
+            "passed; otherwise a tree the dispatcher named could publish a green ci-required."
+        )
     step = re.search(r"(?ms)^      - name: Classify the CI and release tier\n.*?(?=^      - |\Z)", classification)
-    if not step:
-        return [f"{CLASSIFICATION_JOB}: the `Classify the CI and release tier` step is missing."]
-    return [
-        f"{CLASSIFICATION_JOB}: the classify step must pass `{binding}`, or a dispatch could test a "
-        "commit other than the one its result is recorded on."
+    problems.extend(
+        f"{CLASSIFICATION_JOB}: the classify step must pass `{binding}` to the classifier."
         for binding in ROUTED_INPUT_BINDINGS
-        if binding not in step.group(0)
-    ]
+        if not step or binding not in step.group(0)
+    )
+    return problems
 
 
 def verify_single_publisher(directory: Path) -> list[str]:

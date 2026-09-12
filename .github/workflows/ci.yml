@@ -117,6 +117,20 @@ jobs:
       release-intent: ${{ steps.classify.outputs.release_intent }}
       docs-only: ${{ steps.classify.outputs.docs_only }}
     steps:
+      # Every job checks out `merge_sha` when it is set, while the run is recorded on the dispatched
+      # branch's commit; a promotion reads exactly that record as its evidence. Only a validated
+      # Dependabot routing may redirect the checkout. This runs before any checkout, from the workflow
+      # of the dispatched ref: a check inside the checked-out tree would be chosen by the very input it
+      # has to refuse.
+      - name: Refuse routing inputs on a dispatch without a routing run
+        if: github.event_name == 'workflow_dispatch' && inputs.routing_run_id == ''
+        env:
+          ROUTED_INPUTS: ${{ inputs.routed_pr_number }}${{ inputs.base_sha }}${{ inputs.head_sha }}${{ inputs.merge_sha }}
+        run: |
+          if [ -n "$ROUTED_INPUTS" ]; then
+            echo "A dispatch without routing_run_id must not set routed_pr_number, base_sha, head_sha or merge_sha." >&2
+            exit 1
+          fi
       - name: Check out repository history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -947,6 +961,17 @@ jobs:
       actions: read
       contents: read
     steps:
+      # The checkout below may be a commit the dispatcher named. Until release-classification has
+      # passed — and with it the routing checks — nothing from that tree may run here, or it could
+      # publish a green ci-required on this commit.
+      - name: Refuse before running checked-out code unless the classification passed
+        env:
+          CLASSIFICATION: ${{ needs.release-classification.result }}
+        run: |
+          if [ "$CLASSIFICATION" != success ]; then
+            echo "release-classification reported '$CLASSIFICATION'; ci-required cannot pass." >&2
+            exit 1
+          fi
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

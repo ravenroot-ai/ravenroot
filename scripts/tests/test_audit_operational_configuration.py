@@ -149,6 +149,93 @@ def external_io_reviewed_entries(
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_final_review_authority_applies_one_exact_source_anchored_partition(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proof = root / "runtime-policy.txt"
+            proof.write_text("bounded consumer\n", encoding="utf-8")
+            source_entry = {
+                "id": "oc-final", "path": "runtime-policy.txt", "line": 1,
+                "symbol": "LIMIT", "kind": "fixed-declaration", "role": "LIMIT",
+                "expression": "8", "expressionDigest": "expression",
+                "evidenceDigest": "evidence", "surface": "script",
+                "status": "pending-review", "classification": None,
+            }
+            source_document = {"entries": [source_entry]}
+            source_raw = (json.dumps(source_document) + "\n").encode()
+            authority = {
+                "schemaVersion": 1,
+                "id": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "issue": "#321",
+                "sourceRevision": "a" * 40,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": hashlib.sha256(source_raw).hexdigest(),
+                "candidateCount": 1,
+                "candidateSetDigest": audit.candidate_set_digest(["oc-final"]),
+                "groups": [{
+                    "id": "bounded-runtime", "title": "Bounded runtime", "owner": "#321",
+                    "metadata": {
+                        "status": "retained", "classification": "security-ceiling-or-default",
+                        "rationale": "The consumer bounds retained state before admitting another item.",
+                    },
+                    "semanticDecision": "Eight is a fixed memory-safety ceiling at this local boundary.",
+                    "sourceAndConsumerProof": [{
+                        "path": "runtime-policy.txt",
+                        "digest": hashlib.sha256(proof.read_bytes()).hexdigest(),
+                        "assertion": "The source contains the bound and its consumer.",
+                    }],
+                    "candidateCount": 1,
+                    "candidateSetDigest": audit.candidate_set_digest(["oc-final"]),
+                    "candidateIds": ["oc-final"],
+                }],
+            }
+            authority_path = root / audit.FINAL_REVIEW.relative_to(audit.ROOT)
+            authority_path.parent.mkdir(parents=True)
+            authority_path.write_text(json.dumps(authority) + "\n", encoding="utf-8")
+            document = {"finalReviewAuthority": {
+                "id": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "path": audit.FINAL_REVIEW.relative_to(audit.ROOT).as_posix(),
+                "digest": hashlib.sha256(authority_path.read_bytes()).hexdigest(),
+            }}
+            expected = {"oc-final": {"status": "pending-review", "classification": None}}
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                self.assertEqual([], audit.final_review_authority_errors(root, document, expected))
+            self.assertEqual({
+                "status": "retained", "classification": "security-ceiling-or-default",
+                "rationale": "The consumer bounds retained state before admitting another item.",
+                "finalReviewAuthority": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "finalReviewGroup": "bounded-runtime", "remediationOwner": "#321",
+            }, expected["oc-final"])
+
+    def test_final_review_authority_rejects_duplicate_membership_and_proof_drift(self) -> None:
+        document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))
+        reference = document.get("finalReviewAuthority")
+        if not isinstance(reference, dict):
+            self.skipTest("production final review authority is not installed yet")
+        authority = json.loads(audit.FINAL_REVIEW.read_text(encoding="utf-8"))
+        duplicate = copy.deepcopy(authority["groups"][0])
+        duplicate["id"] += "-duplicate"
+        authority["groups"].append(duplicate)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / audit.FINAL_REVIEW.relative_to(audit.ROOT)
+            target.parent.mkdir(parents=True)
+            target.write_text(json.dumps(authority) + "\n", encoding="utf-8")
+            bad_document = copy.deepcopy(document)
+            bad_document["finalReviewAuthority"]["digest"] = hashlib.sha256(target.read_bytes()).hexdigest()
+            expected = {str(entry["id"]): audit.candidate_semantic_payload(entry)
+                        for entry in document["entries"]}
+            source_document, source_raw = committed_inventory(authority["sourceRevision"])
+            with mock.patch.object(audit, "committed_json", return_value=(source_document, source_raw)), \
+                    mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "tracked_files", return_value=tuple(
+                        Path(item["path"]) for group in authority["groups"]
+                        for item in group["sourceAndConsumerProof"])):
+                errors = audit.final_review_authority_errors(root, bad_document, expected)
+            self.assertTrue(any("overlaps another semantic authority" in error for error in errors))
+
     def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
         authority = audit.helm_authority_from_source(ROOT, candidates)

@@ -36,6 +36,8 @@ except ModuleNotFoundError:  # Imported as scripts.audit_operational_configurati
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "scripts" / "operational-configuration-inventory.json"
 REPORT = ROOT / "docs" / "architecture" / "operational-configuration-audit.md"
+FINAL_REVIEW = ROOT / "docs" / "architecture" / "operational-configuration-final-review.json"
+FINAL_REVIEW_AUTHORITY_ID = "issue-321-final-semantic-review-v1"
 
 SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
@@ -71,6 +73,19 @@ TESTKIT_MODULES = {
     "ravenroot-persistence-testkit",
     "ravenroot-sandbox-supervisor-testkit",
 }
+VERIFICATION_FIXTURE_SCRIPTS = frozenset({
+    "scripts/measure-e2e-stability.sh",
+    "scripts/verify-empty-plugins-parity-ci.sh",
+    "scripts/verify-empty-plugins-parity.py",
+    "scripts/verify-empty-plugins-parity.sh",
+    "scripts/verify-extension-pack-consumer.sh",
+    "scripts/verify-mail-imap-consumer-container.sh",
+    "scripts/verify-mail-imap-mutations-container.sh",
+    "scripts/verify-plugin-activation-on-compose.sh",
+    "scripts/verify-plugin-activation-on-image.sh",
+    "scripts/verify-plugin-palette-ui.sh",
+    "scripts/verify-plugins-dir-confinement.sh",
+})
 EXCLUDED_PARTS = {"target", "node_modules", "dist", ".git"}
 SOURCE_SUFFIXES = {".java", ".js", ".mjs", ".ts", ".py", ".sh", ".yaml", ".yml", ".json"}
 
@@ -459,7 +474,8 @@ def surface(relative: Path) -> str | None:
         return "deployment"
     if relative.suffix == ".sh":
         if text.startswith("scripts/tests/") or "/e2e/" in text or "/src/test/" in text \
-                or text == "scripts/verify-source-session-editor-activity.sh":
+                or text == "scripts/verify-source-session-editor-activity.sh" \
+                or text in VERIFICATION_FIXTURE_SCRIPTS:
             return "test-fixture"
         return "script"
     # Documented runnable configuration is a deployment surface, not ordinary prose.
@@ -471,7 +487,8 @@ def surface(relative: Path) -> str | None:
     if text.startswith("ravenroot/ravenroot-ui/src/") or text.startswith("ravenroot/ravenroot-ui/public/"):
         return "ui"
     if text.startswith("scripts/"):
-        if text.startswith("scripts/tests/") or text.startswith("scripts/fixtures/"):
+        if text.startswith("scripts/tests/") or text.startswith("scripts/fixtures/") \
+                or text in VERIFICATION_FIXTURE_SCRIPTS:
             return "test-fixture"
         return "script"
     if "/src/test/" in text or "/e2e/" in text or "/test/" in text:
@@ -2639,6 +2656,221 @@ def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
             if key not in SOURCE_METADATA_FIELDS and key not in {"retirement", "identityMigration"}}
 
 
+def final_review_authority_errors(
+        root: Path, document: dict[str, object],
+        expected_metadata: dict[str, dict[str, object]]) -> list[str]:
+    """Apply the exact, source-anchored final-review partition without weakening row review.
+
+    Earlier issues recorded one semantic history object per changed row.  The final review covers
+    thousands of still-pending lexical atoms, so #321 records explicit candidate membership once in
+    a separate authority.  Counts and digests make each group closed, while the inventory row keeps
+    the group link and resulting metadata.  New candidates can never inherit a group by filename,
+    symbol, or a classifier heuristic.
+    """
+    reference = document.get("finalReviewAuthority")
+    if reference is None:
+        return []
+    expected_reference_fields = {"id", "path", "digest"}
+    if not isinstance(reference, dict) or set(reference) != expected_reference_fields \
+            or reference.get("id") != FINAL_REVIEW_AUTHORITY_ID \
+            or reference.get("path") != FINAL_REVIEW.relative_to(ROOT).as_posix() \
+            or not isinstance(reference.get("digest"), str):
+        return ["finalReviewAuthority has an unsupported or incomplete reference"]
+    authority_path = root / str(reference["path"])
+    try:
+        raw = authority_path.read_bytes()
+        authority = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return ["final review authority cannot be read as JSON"]
+    if hashlib.sha256(raw).hexdigest() != reference["digest"]:
+        return ["final review authority digest has drifted"]
+    required_authority_fields = {
+        "schemaVersion", "id", "issue", "sourceRevision", "sourceInventoryPath",
+        "sourceInventoryDigest", "candidateCount", "candidateSetDigest", "groups",
+    }
+    if not isinstance(authority, dict) or set(authority) != required_authority_fields \
+            or authority.get("schemaVersion") != 1 \
+            or authority.get("id") != FINAL_REVIEW_AUTHORITY_ID \
+            or authority.get("issue") != "#321" \
+            or not isinstance(authority.get("sourceRevision"), str) \
+            or re.fullmatch(r"[0-9a-f]{40}", str(authority.get("sourceRevision"))) is None \
+            or authority.get("sourceInventoryPath") != INVENTORY.relative_to(ROOT).as_posix() \
+            or not isinstance(authority.get("groups"), list) or not authority["groups"]:
+        return ["final review authority has an unsupported or incomplete shape"]
+    source_document, source_raw = committed_json(
+        root, str(authority["sourceRevision"]), str(authority["sourceInventoryPath"]))
+    if source_document is None or source_raw is None \
+            or hashlib.sha256(source_raw).hexdigest() != authority.get("sourceInventoryDigest"):
+        return ["final review authority is not anchored to its exact committed inventory"]
+    if not revision_is_ancestor(root, str(authority["sourceRevision"]), "HEAD"):
+        return ["final review source revision is not an ancestor of the checked-out HEAD"]
+    source_entries = {
+        str(entry["id"]): entry for entry in source_document.get("entries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+    reviewable = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("status") in {"pending-review", "deferred"}
+    }
+    errors: list[str] = []
+    if authority.get("candidateCount") != len(reviewable) \
+            or authority.get("candidateSetDigest") != candidate_set_digest(reviewable):
+        errors.append("final review authority candidate roster has drifted from its committed source")
+    assigned: set[str] = set()
+    group_ids: set[str] = set()
+    group_members: dict[str, set[str]] = {}
+    group_fields = {
+        "id", "title", "owner", "metadata", "semanticDecision",
+        "sourceAndConsumerProof", "candidateCount",
+        "candidateSetDigest", "candidateIds",
+    }
+    tracked = set(tracked_files(root))
+    for raw_group in authority["groups"]:
+        identifier = raw_group.get("id") if isinstance(raw_group, dict) else None
+        if not isinstance(raw_group, dict) or set(raw_group) != group_fields \
+                or not isinstance(identifier, str) or not identifier or identifier in group_ids:
+            errors.append("final review authority contains an invalid or duplicate group")
+            continue
+        group_ids.add(identifier)
+        candidates = raw_group.get("candidateIds")
+        proof = raw_group.get("sourceAndConsumerProof")
+        decision = raw_group.get("semanticDecision")
+        metadata = raw_group.get("metadata")
+        classification = metadata.get("classification") if isinstance(metadata, dict) else None
+        status = metadata.get("status") if isinstance(metadata, dict) else None
+        rationale = metadata.get("rationale") if isinstance(metadata, dict) else None
+        if raw_group.get("owner") != "#321" \
+                or status not in {"retained", "already-centralized", "converted"} \
+                or classification not in CLASSIFICATIONS \
+                or status not in CLASSIFICATION_STATUSES.get(str(classification), set()) \
+                or not isinstance(rationale, str) or not rationale.strip() \
+                or not isinstance(metadata, dict) \
+                or not isinstance(decision, str) or not decision.strip() \
+                or not isinstance(candidates, list) or candidates != sorted(candidates) \
+                or len(candidates) != len(set(candidates)) \
+                or raw_group.get("candidateCount") != len(candidates) \
+                or raw_group.get("candidateSetDigest") != candidate_set_digest(candidates) \
+                or not isinstance(proof, list) or not proof:
+            errors.append(f"final review group {identifier} has incomplete decision evidence")
+            continue
+        for item in proof:
+            if not isinstance(item, dict) or set(item) != {"path", "digest", "assertion"} \
+                    or not isinstance(item.get("path"), str) \
+                    or not isinstance(item.get("digest"), str) \
+                    or not isinstance(item.get("assertion"), str) or not item["assertion"].strip():
+                errors.append(f"final review group {identifier} has invalid source proof")
+                continue
+            relative = Path(str(item["path"]))
+            proof_path = root / relative
+            if relative.is_absolute() or ".." in relative.parts or relative not in tracked \
+                    or not proof_path.is_file() \
+                    or hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]:
+                errors.append(f"final review group {identifier} source proof has drifted: {item['path']}")
+        foreign = set(str(candidate) for candidate in candidates) - reviewable
+        overlap = assigned & set(str(candidate) for candidate in candidates)
+        if foreign:
+            errors.append(f"final review group {identifier} contains non-reviewable candidates")
+        if overlap:
+            errors.append(f"final review group {identifier} overlaps another semantic authority")
+        for candidate in candidates:
+            candidate_id = str(candidate)
+            if candidate_id not in expected_metadata:
+                continue
+            expected_metadata[candidate_id] = {
+                **metadata,
+                "finalReviewAuthority": FINAL_REVIEW_AUTHORITY_ID,
+                "finalReviewGroup": identifier,
+                "remediationOwner": "#321",
+            }
+        assigned.update(str(candidate) for candidate in candidates)
+        group_members[identifier] = set(str(candidate) for candidate in candidates)
+    if assigned != reviewable:
+        errors.append("final review groups do not exactly partition the committed pending and deferred cohort")
+    if authority.get("candidateCount") != len(reviewable) \
+            or authority.get("candidateSetDigest") != candidate_set_digest(reviewable):
+        errors.append("final review authority cohort count or digest has drifted")
+    fixture_ids = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("path") in VERIFICATION_FIXTURE_SCRIPTS and identifier in reviewable
+    }
+    if "executable-verification-fixtures" in group_members:
+        if group_members["executable-verification-fixtures"] != fixture_ids:
+            errors.append("executable verification fixture group is not the exact eleven-script roster")
+        for relative in VERIFICATION_FIXTURE_SCRIPTS:
+            fixture = root / relative
+            try:
+                executable = bool(fixture.stat().st_mode & 0o111)
+                shebang = fixture.read_bytes().startswith(b"#!")
+            except OSError:
+                executable = shebang = False
+            if not executable or not shebang:
+                errors.append(f"verification fixture is not executable with an interpreter: {relative}")
+    catalog_path = "ravenroot/ravenroot-ui/src/ui-text.js"
+    catalog_entries = {
+        identifier: entry for identifier, entry in source_entries.items()
+        if entry.get("path") == catalog_path and identifier in reviewable
+    }
+    if catalog_entries and {"ui-message-catalog-keys", "ui-message-catalog-copy"} <= group_members.keys():
+        catalog_source = (root / catalog_path).read_text(encoding="utf-8")
+        catalog_keys = set(re.findall(r"(?m)^\s*['\"]([^'\"]+)['\"]\s*:", catalog_source))
+        key_ids: set[str] = set()
+        for identifier, entry in catalog_entries.items():
+            try:
+                value = ast.literal_eval(str(entry.get("expression", "")))
+            except (SyntaxError, ValueError):
+                value = None
+            if value in catalog_keys:
+                key_ids.add(identifier)
+        if group_members["ui-message-catalog-keys"] != key_ids \
+                or group_members["ui-message-catalog-copy"] != set(catalog_entries) - key_ids:
+            errors.append("UI message catalog keys and copy are not the exact structural partition")
+    stream_ids = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("path") == "ravenroot/ravenroot-ui/src/monitoring-runtime-state.js"
+        and entry.get("role") in {"MAX_EVENT_STREAMS", "MAX_DEPLOYMENT_EVENT_STREAMS"}
+        and identifier in reviewable
+    }
+    if "ui-event-replay-safety-bounds" in group_members \
+            and group_members["ui-event-replay-safety-bounds"] != stream_ids:
+        errors.append("UI event replay safety group is not the exact traversal/deployment bound pair")
+    embed_ids = {
+        identifier for identifier, entry in source_entries.items()
+        if entry.get("role") == "RAVENROOT_EMBED_ENABLED" and identifier in reviewable
+    }
+    embed_group = "embed-enabled-operator-setting"
+    if embed_group in group_members:
+        if group_members[embed_group] != embed_ids or len(embed_ids) != 5:
+            errors.append("embed enabled authority is not the exact five-consumer binding roster")
+        expected_embed = {
+            "status": "already-centralized", "classification": "operator-configurable",
+            "setting": "embed.enabled",
+            "owner": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java#EmbedBrowserConfiguration",
+            "field": "enabled", "bindings": ["RAVENROOT_EMBED_ENABLED"],
+            "default": "false", "defaultEvidence": sorted(embed_ids),
+            "validation": "Absent defaults false; only exact lowercase true or false is accepted before composition.",
+            "scope": "Packaged server process at startup.",
+            "pinning": "Read once before opening embed registration storage and composing browser routes.",
+            "coverage": "Typed configuration, packaged startup refusal, replica guard, server composition, operator reference, and focused tests.",
+            "rationale": "The typed EmbedBrowserConfiguration.enabled field owns the strict startup setting; the remaining reads consume the already-validated process environment.",
+        }
+        raw_group = next(group for group in authority["groups"]
+                         if isinstance(group, dict) and group.get("id") == embed_group)
+        if raw_group.get("metadata") != expected_embed:
+            errors.append("embed enabled authority metadata has drifted")
+        embed_configuration = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedBrowserConfiguration.java").read_text(encoding="utf-8")
+        startup = (root / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java").read_text(encoding="utf-8")
+        reference = (root / "docs/reference/configuration.md").read_text(encoding="utf-8")
+        if "record EmbedBrowserConfiguration(boolean enabled" not in embed_configuration \
+                or 'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)' not in embed_configuration \
+                or 'case "true" -> true;' not in embed_configuration \
+                or 'case "false" -> false;' not in embed_configuration \
+                or 'String enabled = environment.get("RAVENROOT_EMBED_ENABLED");' not in startup \
+                or '"RAVENROOT_EMBED_ENABLED must be true or false"' not in startup \
+                or "| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |" not in reference:
+            errors.append("embed enabled typed owner, strict parser, startup refusal, or reference has drifted")
+    return errors
+
+
 def catalog_property_key(source: str | None, line: object) -> str | None:
     if source is None or not isinstance(line, int):
         return None
@@ -3344,6 +3576,7 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
             errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
             continue
         expected_metadata[identifier] = dict(review["afterMetadata"])
+    errors.extend(final_review_authority_errors(root, document, expected_metadata))
     for identifier, expected in expected_metadata.items():
         target = active.get(identifier)
         if target is None or candidate_semantic_payload(target) != expected:
@@ -13916,6 +14149,11 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
             continue
+        if representative.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID \
+                and representative.get("finalReviewGroup") == "embed-enabled-operator-setting":
+            # The final authority validates this setting's exact typed owner, strict parser,
+            # consumer roster, operator reference, and focused tests as one source-derived family.
+            continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
             evidenced_bindings = {str(entry.get("expression")) for entry in setting_entries
@@ -13949,7 +14187,34 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     return errors
 
 
-def render_report(document: dict[str, object]) -> str:
+def remediation_owner(entry: dict[str, object]) -> str:
+    """Return the issue whose checked authority owns the active row."""
+    if entry.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID:
+        return "#321"
+    conversion = entry.get("conversion")
+    if isinstance(conversion, dict) and conversion.get("issue") in {
+            "#315", "#316", "#317", "#318", "#319", "#320"}:
+        return str(conversion["issue"])
+    migration = entry.get("identityMigration")
+    history = str(migration.get("history", "")) if isinstance(migration, dict) else ""
+    matched = re.search(r"issue-(31[5-9]|320)(?:-|$)", history)
+    if matched is not None:
+        return "#" + matched.group(1)
+    if entry.get("helmAuthority") == HELM_AUTHORITY_ID:
+        return "#317"
+    if entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
+        return "#318"
+    if entry.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+        return "#319"
+    if entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID \
+            or entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+        return "#320"
+    if entry.get("followUp") in {"#316", "#317", "#318", "#319", "#320", "#321"}:
+        return str(entry["followUp"])
+    return "Retained; no remediation required"
+
+
+def render_report(document: dict[str, object], root: Path = ROOT) -> str:
     entries = document["entries"]
     assert isinstance(entries, list)
     typed = [entry for entry in entries if isinstance(entry, dict)]
@@ -13960,6 +14225,7 @@ def render_report(document: dict[str, object]) -> str:
         str(entry.get("classification")) for entry in typed
         if entry.get("status") == "retained" and entry.get("classification") is not None)
     surfaces = Counter(str(entry.get("surface")) for entry in typed)
+    remediation_owners = Counter(remediation_owner(entry) for entry in typed)
     reviewed = len(typed) - statuses["pending-review"]
     operator_entries = [entry for entry in typed if entry.get("classification") == "operator-configurable"]
     operator_settings = {str(entry["setting"]) for entry in operator_entries if entry.get("setting")}
@@ -14044,9 +14310,24 @@ def render_report(document: dict[str, object]) -> str:
         f"Checked inventory-schema migrations: {len(migrations)}. Validation requires the recorded source",
         "revision to be present locally; CI must fetch that history before enabling this gate.", "",
         f"Checked source reconciliations: {len(reconciliations)}.", "",
-        "Surface counts are derived from the same inventory:", "",
+        "The following tables are exhaustive projections of the same active inventory; each includes",
+        f"zero-count or unclassified rows as needed and sums to {len(typed)} candidates.", "", "### Status counts", "",
+        "| Status | Candidates |", "|---|---:|",
     ]
-    lines.extend(f"- `{name}`: {count}" for name, count in sorted(surfaces.items()))
+    lines.extend(f"| {name} | {statuses[name]} |" for name in sorted(STATUSES))
+    lines.extend(("", "### Classification counts", "",
+                  "| Classification | Candidates |", "|---|---:|"))
+    lines.extend(f"| {name} | {classifications[name]} |" for name in sorted(CLASSIFICATIONS))
+    lines.append(f"| unclassified | {len(typed) - sum(classifications.values())} |")
+    lines.extend(("", "### Surface counts", "",
+                  "| Surface | Candidates |", "|---|---:|"))
+    lines.extend(f"| {name} | {count} |" for name, count in sorted(surfaces.items()))
+    lines.extend(("", "### Owning remediation counts", "",
+                  "Ownership is derived from each row's conversion, migration, or closed authority marker.",
+                  "Reviewed retained rows without a remediation marker are reported separately and are not",
+                  "assigned to an issue retroactively.", "",
+                  "| Owning remediation | Candidates |", "|---|---:|"))
+    lines.extend(f"| {name} | {count} |" for name, count in sorted(remediation_owners.items()))
     if reconciliations:
         latest = reconciliations[-1]
         mappings = latest.get("mappings", [])
@@ -14064,6 +14345,28 @@ def render_report(document: dict[str, object]) -> str:
                       f"| Approved retirements | {len(retirements)} |",
                       f"| Semantically classified additions | {len(additions)} |",
                       f"| Current candidates | {len(typed)} |"))
+    final_reference = document.get("finalReviewAuthority")
+    if isinstance(final_reference, dict):
+        authority_path = root / str(final_reference.get("path", ""))
+        try:
+            raw_authority = authority_path.read_bytes()
+            if hashlib.sha256(raw_authority).hexdigest() != final_reference.get("digest"):
+                raise ValueError("final review digest mismatch")
+            final_authority = json.loads(raw_authority)
+        except (OSError, ValueError, json.JSONDecodeError):
+            final_authority = {}
+        groups = final_authority.get("groups", []) if isinstance(final_authority, dict) else []
+        lines.extend(("", "## Final semantic review", "",
+                      "The #321 review is anchored to a committed inventory and records exact membership",
+                      "for every semantic group. Candidate and file digests make the compact grouping",
+                      "tamper-evident; new candidates receive no classification by similarity.", "",
+                      "| Group | Classification | Candidates | Decision |", "|---|---|---:|---|"))
+        for group in groups:
+            decision = str(group.get("semanticDecision", "")).replace("|", "\\|").replace("\n", " ")
+            metadata = group.get("metadata", {})
+            classification = metadata.get("classification", "") if isinstance(metadata, dict) else ""
+            lines.append(f"| {group.get('title', '')} | {classification} | "
+                         f"{group.get('candidateCount', 0)} | {decision} |")
     domain_map = document.get("remediationDomains", {})
     domains = domain_map.get("domains", []) if isinstance(domain_map, dict) else []
     lines.extend(("", "## Follow-up domain ownership", "",
@@ -14259,7 +14562,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
         report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
         inventory_temporary.write_text(
             json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        report_temporary.write_text(render_report(refreshed), encoding="utf-8")
+        report_temporary.write_text(render_report(refreshed, root), encoding="utf-8")
         inventory_temporary.replace(inventory_path)
         report_temporary.replace(report_path)
         return [], summary
@@ -14373,7 +14676,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
     if validation_errors:
         return validation_errors, {"added": added, "retired": len(removed),
                                    "preserved": len(merged) - added, "metadataUpdated": updated}
-    rendered = render_report(refreshed)
+    rendered = render_report(refreshed, root)
     inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
     report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
     inventory_temporary.write_text(json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -14402,7 +14705,7 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
     inventory_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     inventory_path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    report_path.write_text(render_report(document), encoding="utf-8")
+    report_path.write_text(render_report(document, root), encoding="utf-8")
 
 
 def check(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
@@ -14428,7 +14731,7 @@ def check(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPO
                 f"{hardcoded} confirmed-hardcoded candidate(s); "
                 "use --check-inventory only while completing reviewed remediation waves"
             )
-    expected = render_report(document)
+    expected = render_report(document, root)
     if not report_path.is_file() or report_path.read_text(encoding="utf-8") != expected:
         errors.append(f"generated audit report has drifted: {report_path.relative_to(root)}")
     return errors

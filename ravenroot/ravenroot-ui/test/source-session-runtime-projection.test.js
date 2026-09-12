@@ -139,6 +139,33 @@ describe('the monitoring projection outlives one traversal when it is bound to a
     resetMonitoringRuntimeState(state, null);
     expect(state.deploymentId).toBeNull();
   });
+
+  it('bounds deployment replay cursors while retaining the newest 256 process streams', () => {
+    const state = createMonitoringRuntimeState();
+    bindMonitoringRuntimeStateToDeployment(state, 'session-a');
+    const knownEdgeIds = new Set(['e1']);
+
+    for (let index = 0; index < 257; index += 1) {
+      expect(observeEdgeTraversal(state, {
+        ...admission({ processInstanceId: `process-${index}`, sequence: 1 }),
+        type: 'EDGE_TRAVERSED', edgeId: 'e1',
+      }, { now: 1_000 + index, knownEdgeIds }).changed).toBe(true);
+    }
+
+    expect(state.seen.size).toBe(256);
+    expect(state.seen.has('process-0')).toBe(false);
+    expect(state.seen.has('process-256')).toBe(true);
+    expect(observeEdgeTraversal(state, {
+      ...admission({ processInstanceId: 'process-256', sequence: 1 }),
+      type: 'EDGE_TRAVERSED', edgeId: 'e1',
+    }, { now: 2_000, knownEdgeIds })).toMatchObject({ changed: false, reason: 'duplicate' });
+    expect(observeEdgeTraversal(state, {
+      ...admission({ processInstanceId: 'process-0', sequence: 1 }),
+      type: 'EDGE_TRAVERSED', edgeId: 'e1',
+    }, { now: 2_001, knownEdgeIds })).toMatchObject({ changed: true });
+    expect(state.seen.has('process-1')).toBe(false);
+    expect(state.seen.has('process-0')).toBe(true);
+  });
 });
 
 describe('what a node colour means when several traversals occupy the graph', () => {

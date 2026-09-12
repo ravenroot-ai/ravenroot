@@ -2702,7 +2702,10 @@ def final_review_authority_errors(
     if source_document is None or source_raw is None \
             or hashlib.sha256(source_raw).hexdigest() != authority.get("sourceInventoryDigest"):
         return ["final review authority is not anchored to its exact committed inventory"]
-    if not revision_is_ancestor(root, str(authority["sourceRevision"]), "HEAD"):
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+    if not revision_is_ancestor(root, str(authority["sourceRevision"]), head):
         return ["final review source revision is not an ancestor of the checked-out HEAD"]
     source_entries = {
         str(entry["id"]): entry for entry in source_document.get("entries", [])

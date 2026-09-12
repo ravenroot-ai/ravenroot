@@ -2669,7 +2669,11 @@ def final_review_authority_errors(
     """
     reference = document.get("finalReviewAuthority")
     if reference is None:
-        return []
+        claimed = any(isinstance(entry, dict)
+                      and entry.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID
+                      for entry in document.get("entries", []))
+        return (["final review authority reference is missing while inventory rows claim it"]
+                if claimed else [])
     expected_reference_fields = {"id", "path", "digest"}
     if not isinstance(reference, dict) or set(reference) != expected_reference_fields \
             or reference.get("id") != FINAL_REVIEW_AUTHORITY_ID \
@@ -2792,6 +2796,14 @@ def final_review_authority_errors(
     if authority.get("candidateCount") != len(reviewable) \
             or authority.get("candidateSetDigest") != candidate_set_digest(reviewable):
         errors.append("final review authority cohort count or digest has drifted")
+    active_entries = {
+        str(entry["id"]): entry for entry in document.get("entries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+    for identifier in assigned:
+        active = active_entries.get(identifier)
+        if active is None or candidate_semantic_payload(active) != expected_metadata.get(identifier):
+            errors.append(f"final review candidate {identifier} lost its marker or approved classification")
     fixture_ids = {
         identifier for identifier, entry in source_entries.items()
         if entry.get("path") in VERIFICATION_FIXTURE_SCRIPTS and identifier in reviewable

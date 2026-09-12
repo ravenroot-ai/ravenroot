@@ -192,7 +192,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             authority_path = root / audit.FINAL_REVIEW.relative_to(audit.ROOT)
             authority_path.parent.mkdir(parents=True)
             authority_path.write_text(json.dumps(authority) + "\n", encoding="utf-8")
-            document = {"finalReviewAuthority": {
+            approved = {
+                "status": "retained", "classification": "security-ceiling-or-default",
+                "rationale": "The consumer bounds retained state before admitting another item.",
+                "finalReviewAuthority": audit.FINAL_REVIEW_AUTHORITY_ID,
+                "finalReviewGroup": "bounded-runtime", "remediationOwner": "#321",
+            }
+            document = {"entries": [{**source_entry, **approved}], "finalReviewAuthority": {
                 "id": audit.FINAL_REVIEW_AUTHORITY_ID,
                 "path": audit.FINAL_REVIEW.relative_to(audit.ROOT).as_posix(),
                 "digest": hashlib.sha256(authority_path.read_bytes()).hexdigest(),
@@ -202,12 +208,32 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
                     mock.patch.object(audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
                 self.assertEqual([], audit.final_review_authority_errors(root, document, expected))
-            self.assertEqual({
-                "status": "retained", "classification": "security-ceiling-or-default",
-                "rationale": "The consumer bounds retained state before admitting another item.",
-                "finalReviewAuthority": audit.FINAL_REVIEW_AUTHORITY_ID,
-                "finalReviewGroup": "bounded-runtime", "remediationOwner": "#321",
-            }, expected["oc-final"])
+            self.assertEqual(approved, expected["oc-final"])
+
+            missing_reference = copy.deepcopy(document)
+            missing_reference.pop("finalReviewAuthority")
+            self.assertEqual(
+                ["final review authority reference is missing while inventory rows claim it"],
+                audit.final_review_authority_errors(root, missing_reference, {}),
+            )
+            for field, value in (
+                    ("classification", "derived-or-calculated"),
+                    ("finalReviewAuthority", "issue-321-deleted-marker")):
+                mutated = copy.deepcopy(document)
+                mutated["entries"][0][field] = value
+                candidate_expected = {
+                    "oc-final": {"status": "pending-review", "classification": None}}
+                with mock.patch.object(
+                        audit, "committed_json", return_value=(source_document, source_raw)), \
+                        mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                        mock.patch.object(
+                            audit, "tracked_files", return_value=(Path("runtime-policy.txt"),)):
+                    errors = audit.final_review_authority_errors(
+                        root, mutated, candidate_expected)
+                self.assertIn(
+                    "final review candidate oc-final lost its marker or approved classification",
+                    errors,
+                )
 
     def test_final_review_authority_rejects_duplicate_membership_and_proof_drift(self) -> None:
         document = json.loads(audit.INVENTORY.read_text(encoding="utf-8"))

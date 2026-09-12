@@ -6380,7 +6380,8 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
                 audit.AGENT_BUDGET_POLICY_PATH,
                 audit.AGENT_BUDGET_TEST_PATH,
                 audit.AGENT_BUDGET_COMPOSITION_PATH,
-                audit.AGENT_BUDGET_CONSUMER_PATH):
+                audit.AGENT_BUDGET_CONSUMER_PATH,
+                audit.AGENT_BUDGET_VECTOR_PATH):
             target = cls.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, target)
@@ -6392,19 +6393,26 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
         if cls.authority is None:
             raise AssertionError("The exact agent budget setting must derive before negative tests")
         cls.entries = {candidate.id: candidate.inventory_entry() for candidate in cls.candidates}
-        expected = {
-            "status": "already-centralized", "classification": "operator-configurable",
-            "agentBudgetAuthority": audit.AGENT_BUDGET_AUTHORITY_ID,
-            "setting": cls.authority["setting"], "owner": cls.authority["owner"],
-            "field": cls.authority["field"], "bindings": cls.authority["bindings"],
-            "default": str(cls.authority["evaluatedDefault"]["value"]),
-            "defaultEvidence": cls.authority["defaultCandidateIds"],
-            "validation": cls.authority["validation"], "scope": cls.authority["scope"],
-            "pinning": cls.authority["pinning"], "coverage": cls.authority["coverage"],
-            "rationale": cls.authority["rationale"],
-        }
-        for identifier in cls.authority["candidateIds"]:
-            cls.entries[identifier].update(copy.deepcopy(expected))
+        for contract in cls.authority["contracts"]:
+            expected = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "agentBudgetAuthority": audit.AGENT_BUDGET_AUTHORITY_ID,
+                "setting": contract["setting"], "owner": contract["owner"],
+                "field": contract["field"], "bindings": contract["bindings"],
+                "default": contract["evaluatedDefault"],
+                "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+            for identifier in contract["candidateIds"]:
+                cls.entries[identifier].update(copy.deepcopy(expected))
+        for partition in cls.authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                cls.entries[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"],
+                    agentBudgetAuthority=audit.AGENT_BUDGET_AUTHORITY_ID)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -6434,12 +6442,16 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
 
     def test_agent_budget_setting_is_derived_from_exact_factory_slot_helpers_and_tests(self) -> None:
         authority = self.authority
-        self.assertEqual(list(audit.AGENT_BUDGET_CANDIDATE_IDS), authority["candidateIds"])
-        self.assertEqual(["oc-473ffef3055ed509d856"], authority["defaultCandidateIds"])
-        self.assertEqual({"kind": "integer", "value": 128000}, authority["evaluatedDefault"])
+        self.assertEqual(20, authority["logicalSettingCount"])
+        self.assertEqual(56, len(authority["candidateIds"]))
+        contract = next(item for item in authority["contracts"]
+                        if item["setting"] == "agent.maximum-input-tokens-per-turn")
+        self.assertEqual(list(audit.AGENT_BUDGET_CANDIDATE_IDS), contract["candidateIds"])
+        self.assertEqual(["oc-473ffef3055ed509d856"], contract["defaultCandidateIds"])
+        self.assertEqual("128000", contract["evaluatedDefault"])
         self.assertEqual(
             'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000)',
-            authority["factoryArgument"])
+            contract["factoryExpression"])
         self.assertEqual([], audit.agent_budget_authority_errors(
             self.root, {audit.AGENT_BUDGET_AUTHORITY_ID: authority},
             self.entries, self.discovered))
@@ -6457,8 +6469,10 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
         self.assert_direct_and_global_agent_error(without_markers)
 
         reclassified = self.document()
+        operator_ids = {identifier for contract in self.authority["contracts"]
+                        for identifier in contract["candidateIds"]}
         for row in reclassified["entries"]:
-            if row["id"] in self.authority["candidateIds"]:
+            if row["id"] in operator_ids:
                 row.update(status="retained", classification="derived")
         self.assert_direct_and_global_agent_error(reclassified)
 

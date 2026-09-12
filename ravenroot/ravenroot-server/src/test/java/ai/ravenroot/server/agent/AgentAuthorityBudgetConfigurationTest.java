@@ -25,12 +25,18 @@ class AgentAuthorityBudgetConfigurationTest {
         var first = AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of());
 
         assertEquals("ravenroot-server", first.runtimeInstanceId());
+        assertEquals("server-finite-v1", first.policyVersion());
         assertEquals("builtin-conservative-v1", first.rateCardVersion());
         assertEquals("USD", first.currency());
+        assertEquals(java.time.Duration.ofSeconds(3_600), first.rootLifetime());
+        assertEquals(new ai.ravenroot.api.persistence.AgentBudgetVector(
+                1_024, 20_000_000, 2_000_000, 3_600_000, 100_000_000,
+                4_096, 8, 64, 16), first.rootMaxima());
         assertEquals(128_000, first.maximumInputTokensPerTurn());
+        assertEquals(32_000, first.maximumOutputTokensPerTurn());
         assertEquals(10, first.inputTokenRateMicros());
         assertEquals(30, first.outputTokenRateMicros());
-        assertTrue(first.rootMaxima().turns() > 0);
+        assertEquals(Set.of(), first.dataScopes());
         assertEquals(Set.of("runtime:delegate"), first.authorityScopes());
         assertTrue(first.bootEpoch() >= 0);
     }

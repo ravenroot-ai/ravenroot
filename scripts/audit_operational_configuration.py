@@ -49,6 +49,8 @@ AGENT_BUDGET_COMPOSITION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
 AGENT_BUDGET_CONSUMER_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java")
+AGENT_BUDGET_VECTOR_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java")
 AGENT_BUDGET_CANDIDATE_IDS = (
     "oc-2d29419d18f18da74d3c",
     "oc-473ffef3055ed509d856",
@@ -58,6 +60,10 @@ AGENT_BUDGET_METHOD_DIGESTS = {
     "fromEnvironment": "9cf80fd044370a3b05ac4c016c91f549e7fdbbcad1ded9c5d764687c8697f4a6",
     "positive": "d80613da351478a33247ab8eb1e32227f329ee2c86fa6055dc69bd2c9a8eb325",
     "number": "e8d2aa2d22d3e52953d9272074c77534e3a084ff31ace7eab2237da38f8810b5",
+    "nonNegative": "0b2580caa63933c025d7e67a820ff78fe51e317874dd77ece70d8cbbc8cc8086",
+    "identity": "0a3831c20293ebab20d5d618aa2772b5fcc5511ef7ad60273710093e715e7d78",
+    "currency": "826e1d36fdd50775c95d308fb71c28c317dfbdd511da70956eb6ad0354094234",
+    "tokens": "ae19a9065c06212980f0ed4537338c27860f3c16d79fa10dadf112880c8dc183",
 }
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
@@ -65,9 +71,15 @@ AGENT_BUDGET_COMPOSITION_DIGEST = \
     "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
+AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
+    "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5"
+AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
+    "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
+AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
+    "58266e95c9784456124f7e8c481538bd0ff296cf1b1ba755453e631252480697"
 AGENT_BUDGET_TEST_METHOD_DIGESTS = {
     "shippedDefaultsAreFinitePinnedAndUseDistinctBootEpochs":
-        "c92a7682f6a8af357c428d64a123342d3cf334830a821a9562d8a65fc12008e4",
+        "26f10518f0277cd3f1901ab637cb5f762afc2dde2760f184d7bcf12b69f0a745",
     "absentAndBlankNumericValuesUseTheSameDefaults":
         "75e7fc12bafc1093eb95370641e0b309a366be900383a7456f02ccac6d2abbba",
     "malformedAndOverflowingNumbersHaveCauseFreeSettingOnlyDiagnostics":
@@ -79,6 +91,48 @@ AGENT_BUDGET_TEST_METHOD_DIGESTS = {
     "numericNames": "e48b2b346f5877e06cb3792f693e6c07b674b361c02fe84bd8f80eaf4bac1bf7",
     "positiveNumericNames": "bdd007eac80d84b840eeb37774e3184d0620810d0d62993840fb9077faae3ea3",
 }
+AGENT_BUDGET_SETTING_SPECS = (
+    ("agent.runtime-instance", "local", "runtime", "runtimeInstanceId",
+     "RAVENROOT_AGENT_RUNTIME_INSTANCE", '"ravenroot-server"', "identity"),
+    ("agent.policy-version", "local", "policy", "policyVersion",
+     "RAVENROOT_AGENT_POLICY_VERSION", '"server-finite-v1"', "identity"),
+    ("agent.rate-card-version", "local", "rateCard", "rateCardVersion",
+     "RAVENROOT_AGENT_RATE_CARD_VERSION", '"builtin-conservative-v1"', "identity"),
+    ("agent.cost-currency", "local", "currency", "currency",
+     "RAVENROOT_AGENT_COST_CURRENCY", '"USD"', "currency"),
+    ("agent.root-lifetime-seconds", "local", "lifetime", "rootLifetime",
+     "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", "3_600", "positive"),
+    ("agent.max-turns", "vector", "turns", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TURNS", "1_024", "positive"),
+    ("agent.max-input-tokens", "vector", "inputTokens", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_INPUT_TOKENS", "20_000_000", "positive"),
+    ("agent.max-output-tokens", "vector", "outputTokens", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS", "2_000_000", "positive"),
+    ("agent.max-elapsed-millis", "vector", "elapsedMillis", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS", "3_600_000", "positive"),
+    ("agent.max-cost-micros", "vector", "costMicros", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_COST_MICROS", "100_000_000", "positive"),
+    ("agent.max-tool-calls", "vector", "toolCalls", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TOOL_CALLS", "4_096", "positive"),
+    ("agent.max-delegation-depth", "vector", "delegationDepth", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH", "8", "positive"),
+    ("agent.max-team-cumulative", "vector", "teamCumulative", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", "64", "positive"),
+    ("agent.max-team-active", "vector", "teamActive", "rootMaxima",
+     "RAVENROOT_AGENT_MAX_TEAM_ACTIVE", "16", "positive"),
+    ("agent.data-scopes", "local", "dataScopes", "dataScopes",
+     "RAVENROOT_AGENT_DATA_SCOPES", "Set.of()", "tokens"),
+    ("agent.authority-scopes", "local", "authorityScopes", "authorityScopes",
+     "RAVENROOT_AGENT_AUTHORITY_SCOPES", 'Set.of("runtime:delegate")', "tokens"),
+    ("agent.maximum-input-tokens-per-turn", "policy", "maximumInputTokensPerTurn",
+     "maximumInputTokensPerTurn", "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", "128_000", "positive"),
+    ("agent.maximum-output-tokens-per-turn", "policy", "maximumOutputTokensPerTurn",
+     "maximumOutputTokensPerTurn", "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", "32_000", "positive"),
+    ("agent.input-token-rate-micros", "policy", "inputTokenRateMicros", "inputTokenRateMicros",
+     "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", "10", "nonNegative"),
+    ("agent.output-token-rate-micros", "policy", "outputTokenRateMicros", "outputTokenRateMicros",
+     "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", "30", "nonNegative"),
+)
 
 SCHEMA_VERSION = 5
 CLASSIFICATIONS = {
@@ -1432,6 +1486,34 @@ def java_constructor_component_call(source: str, type_symbol: str, method: str,
     arguments, opening, closing = found[0]
     argument, start, end = arguments[components.index(component)]
     return argument, base + start, base + end
+
+
+def java_method_local_initializer(source: str, type_symbol: str, method: str,
+                                  variable: str) -> tuple[str, int, int] | None:
+    """Return one direct local initializer from an unambiguous Java method."""
+    method_span = java_method_span(source, type_symbol, method)
+    if method_span is None:
+        return None
+    base, limit = method_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    matches = list(re.finditer(
+        rf"\b(?:String|long|Set\s*<\s*String\s*>)\s+{re.escape(variable)}\s*=", code))
+    if len(matches) != 1:
+        return None
+    start = matches[0].end()
+    round_depth = square_depth = brace_depth = 0
+    for end in range(start, len(code)):
+        char = code[end]
+        if char == "(": round_depth += 1
+        elif char == ")": round_depth -= 1
+        elif char == "[": square_depth += 1
+        elif char == "]": square_depth -= 1
+        elif char == "{": brace_depth += 1
+        elif char == "}": brace_depth -= 1
+        elif char == ";" and round_depth == square_depth == brace_depth == 0:
+            return normalized(actual[start:end]), base + start, base + end
+    return None
 
 
 def java_invocation_arguments(source: str, type_symbol: str, method: str,
@@ -3087,6 +3169,10 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
     if len(path) == 4 and path[0] == "agentBudgetAuthorities" \
             and path[2] in {"candidateIds", "defaultCandidateIds"}:
         return path[3].isdigit()
+    if len(path) == 6 and path[0] == "agentBudgetAuthorities" \
+            and path[2] in {"contracts", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
     if len(path) == 4 and path[0] == "interactionWebSocketAuthorities" and path[2] == "candidateIds":
         return path[3].isdigit()
     if len(path) == 6 and path[0] == "interactionWebSocketAuthorities" \
@@ -3261,6 +3347,13 @@ def remap_declared_candidate_references(document: dict[str, object],
             if isinstance(authority, dict):
                 remap_list(authority, "candidateIds")
                 remap_list(authority, "defaultCandidateIds")
+                for field in ("contracts", "semanticPartitions"):
+                    rows = authority.get(field)
+                    if isinstance(rows, list):
+                        for row in rows:
+                            if isinstance(row, dict):
+                                remap_list(row, "candidateIds")
+                                remap_list(row, "defaultCandidateIds")
 
     interaction_authorities = document.get("interactionWebSocketAuthorities")
     if isinstance(interaction_authorities, dict):
@@ -10479,104 +10572,217 @@ def agent_budget_policy_source_present(root: Path) -> bool:
     """Keep the family mandatory when any defining, owning, or test source remains."""
     return any((root / relative).exists() for relative in (
         AGENT_BUDGET_CONFIGURATION_PATH, AGENT_BUDGET_POLICY_PATH, AGENT_BUDGET_TEST_PATH,
-        AGENT_BUDGET_COMPOSITION_PATH, AGENT_BUDGET_CONSUMER_PATH,
+        AGENT_BUDGET_COMPOSITION_PATH, AGENT_BUDGET_CONSUMER_PATH, AGENT_BUDGET_VECTOR_PATH,
     ))
 
 
 def agent_budget_authority_from_source(
         root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
-    """Derive one operator setting from its exact factory argument and typed policy slot.
-
-    The fixed executable digests are reviewed source evidence, rather than values copied from the
-    inventory. A source change must receive a new review even when a caller refreshes file digests
-    or rewrites the claimed authority alongside it.
-    """
+    """Derive the complete packaged agent policy family from exact typed source positions."""
     try:
         configuration = (root / AGENT_BUDGET_CONFIGURATION_PATH).read_text(encoding="utf-8")
         policy = (root / AGENT_BUDGET_POLICY_PATH).read_text(encoding="utf-8")
         tests = (root / AGENT_BUDGET_TEST_PATH).read_text(encoding="utf-8")
         composition = (root / AGENT_BUDGET_COMPOSITION_PATH).read_text(encoding="utf-8")
         consumer = (root / AGENT_BUDGET_CONSUMER_PATH).read_text(encoding="utf-8")
+        vector = (root / AGENT_BUDGET_VECTOR_PATH).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return None
-    components = java_record_components(policy, "AgentAuthorityBudgetPolicy")
-    expected_components = (
+    policy_components = java_record_components(policy, "AgentAuthorityBudgetPolicy")
+    expected_policy_components = (
         "runtimeInstanceId", "bootEpoch", "policyVersion", "rateCardVersion", "currency",
         "rootLifetime", "rootMaxima", "maximumInputTokensPerTurn",
         "maximumOutputTokensPerTurn", "inputTokenRateMicros", "outputTokenRateMicros",
         "dataScopes", "authorityScopes",
     )
-    if components != expected_components:
+    vector_components = java_record_components(vector, "AgentBudgetVector")
+    if policy_components != expected_policy_components or vector_components != (
+            "turns", "inputTokens", "outputTokens", "elapsedMillis", "costMicros", "toolCalls",
+            "delegationDepth", "teamCumulative", "teamActive"):
         return None
-    argument = java_constructor_component_call(
-        configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment",
-        "AgentAuthorityBudgetPolicy", components, "maximumInputTokensPerTurn",
-    )
-    expected_argument = (
-        'positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000)'
-    )
-    if argument is None or normalized(argument[0]) != expected_argument:
+    policy_slots = {
+        component: java_constructor_component_call(
+            configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment",
+            "AgentAuthorityBudgetPolicy", policy_components, component)
+        for component in policy_components
+    }
+    if any(policy_slots[component] is None for component in policy_components):
         return None
-    candidate_ids = all_candidate_ids_in_source_span(
-        AGENT_BUDGET_CONFIGURATION_PATH, configuration, argument[1], argument[2], discovered)
-    if candidate_ids != list(AGENT_BUDGET_CANDIDATE_IDS):
+    if normalized(policy_slots["rootMaxima"][0]) != "maxima":
         return None
-    span_keys = Counter(
-        (symbol, kind, role, expression, hashlib.sha256(evidence.encode("utf-8")).hexdigest())
-        for offset, symbol, kind, role, expression, evidence in code_candidates(
-            AGENT_BUDGET_CONFIGURATION_PATH, configuration, "java")
-        if argument[1] <= offset < argument[2]
-    )
-    discovered_span_keys = Counter(
-        (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
-         candidate.evidence_digest)
-        for candidate in discovered.values()
-        if candidate.path == AGENT_BUDGET_CONFIGURATION_PATH.as_posix()
-        and (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
-             candidate.evidence_digest) in span_keys
-    )
-    if discovered_span_keys != span_keys:
+
+    def exact_ids(spans: list[tuple[int, int]]) -> list[str] | None:
+        selected = sorted(identifier for start, end in spans for identifier in
+                          all_candidate_ids_in_source_span(
+                              AGENT_BUDGET_CONFIGURATION_PATH, configuration,
+                              start, end, discovered))
+        keys = Counter(
+            (symbol, kind, role, expression,
+             hashlib.sha256(evidence.encode("utf-8")).hexdigest())
+            for offset, symbol, kind, role, expression, evidence in code_candidates(
+                AGENT_BUDGET_CONFIGURATION_PATH, configuration, "java")
+            if any(start <= offset < end for start, end in spans)
+        )
+        supplied = Counter(
+            (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+             candidate.evidence_digest)
+            for candidate in discovered.values()
+            if candidate.path == AGENT_BUDGET_CONFIGURATION_PATH.as_posix()
+            and (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+                 candidate.evidence_digest) in keys
+        )
+        return selected if supplied == keys else None
+
+    def canonical_default(expression: str) -> str | None:
+        evaluated = evaluated_java_default(expression, False)
+        if evaluated is not None:
+            return str(evaluated["value"])
+        if expression.startswith('"'):
+            try:
+                value = json.loads(expression)
+            except json.JSONDecodeError:
+                return None
+            return value if isinstance(value, str) else None
+        if normalized(expression) == "Set.of()":
+            return "empty set"
+        if normalized(expression) == 'Set.of("runtime:delegate")':
+            return "runtime:delegate"
         return None
-    candidates = [discovered.get(identifier) for identifier in candidate_ids]
-    if any(candidate is None for candidate in candidates):
-        return None
-    binding_ids = [candidate.id for candidate in candidates
-                   if candidate is not None and candidate.kind == "environment-binding"
-                   and candidate.expression == "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"]
-    default_ids = [candidate.id for candidate in candidates
-                   if candidate is not None and candidate.expression == "128_000"]
-    binding_literal_ids = [candidate.id for candidate in candidates
-                           if candidate is not None
-                           and candidate.expression == '"RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"']
-    if binding_ids != ["oc-defbd8454b4343da9a9f"] \
-            or default_ids != ["oc-473ffef3055ed509d856"] \
-            or binding_literal_ids != ["oc-2d29419d18f18da74d3c"]:
+
+    validation_by_helper = {
+        "identity": "Absent or blank uses the shipped identity; otherwise a stripped 1..128 character identity token is required.",
+        "currency": "Absent or blank uses USD; otherwise the stripped value is uppercased with Locale.ROOT and must be three letters.",
+        "positive": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long greater than zero is required, with cause-free setting-only diagnostics.",
+        "nonNegative": "Absent or blank uses the shipped integer; otherwise a stripped base-10 long at least zero is required, with cause-free setting-only diagnostics.",
+        "tokens": "Absence uses the shipped set; explicit blank selects an empty set; comma-separated stripped tokens are syntax-checked, deduplicated, and bounded.",
+    }
+    contracts: list[dict[str, object]] = []
+    assigned: set[str] = set()
+    for setting, location, source_field, policy_field, binding, default_expression, helper in AGENT_BUDGET_SETTING_SPECS:
+        spans: list[tuple[int, int]] = []
+        if location == "local":
+            initializer = java_method_local_initializer(
+                configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment", source_field)
+            expected_policy_argument = ("Duration.ofSeconds(lifetime)"
+                                        if policy_field == "rootLifetime" else source_field)
+            slot = policy_slots[policy_field]
+            if initializer is None or slot is None or normalized(slot[0]) != expected_policy_argument:
+                return None
+            expression, start, end = initializer
+            spans.append((start, end))
+        elif location == "vector":
+            initializer = java_constructor_component_call(
+                configuration, "AgentAuthorityBudgetConfiguration", "fromEnvironment",
+                "AgentBudgetVector", vector_components, source_field)
+            if initializer is None:
+                return None
+            expression, start, end = initializer
+            spans.append((start, end))
+        else:
+            initializer = policy_slots[policy_field]
+            if initializer is None:
+                return None
+            expression, start, end = initializer
+            spans.append((start, end))
+        arguments = direct_factory_arguments(expression, helper)
+        binding_argument = "AUTHORITY_SCOPES" if setting == "agent.authority-scopes" else json.dumps(binding)
+        if arguments is None or len(arguments) != 3 \
+                or normalized(arguments[0][0]) != "environment" \
+                or normalized(arguments[1][0]) != binding_argument \
+                or normalized(arguments[2][0]) != normalized(default_expression):
+            return None
+        if setting == "agent.authority-scopes":
+            constant = java_static_final_initializer(
+                configuration, "AgentAuthorityBudgetConfiguration", "AUTHORITY_SCOPES")
+            if constant is None or normalized(constant[0]) != json.dumps(binding):
+                return None
+            spans.append((constant[1], constant[2]))
+        candidate_ids = exact_ids(spans)
+        if candidate_ids is None or not candidate_ids or assigned & set(candidate_ids):
+            return None
+        assigned.update(candidate_ids)
+        default_ids = sorted(identifier for identifier in candidate_ids
+                             if normalized(discovered[identifier].expression)
+                             == normalized(default_expression))
+        canonical = canonical_default(default_expression)
+        if canonical is None:
+            return None
+        owner_path = AGENT_BUDGET_VECTOR_PATH if location == "vector" else AGENT_BUDGET_POLICY_PATH
+        owner_type = "AgentBudgetVector" if location == "vector" else "AgentAuthorityBudgetPolicy"
+        owner_field = source_field if location == "vector" else policy_field
+        if not java_type_declares_field(
+                vector if location == "vector" else policy, owner_type, owner_field):
+            return None
+        contracts.append({
+            "setting": setting, "owner": f"{owner_path.as_posix()}#{owner_type}",
+            "field": owner_field, "bindings": [binding], "helper": helper,
+            "defaultExpression": default_expression, "evaluatedDefault": canonical,
+            "candidateIds": candidate_ids, "defaultCandidateIds": default_ids,
+            "factoryExpression": expression,
+            "validation": validation_by_helper[helper],
+            "scope": "Packaged server agent authority and economic budget policy.",
+            "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
+            "coverage": ("Exact startup composition, factory expression and typed constructor slot, shared parser and "
+                         "policy/vector validation, production budget-service consumption, and focused executable tests."),
+            "rationale": (f"{binding} is an operator-controlled deployment binding; its shipped fallback occupies "
+                          f"the exact typed {owner_field} slot."),
+        })
+
+    retained_partitions = [
+        {"semanticPartition": "agent-identity-and-scope-token-grammars", "status": "retained",
+         "classification": "protocol-or-format-invariant",
+         "rationale": "These regular expressions define the accepted identity and scope token grammar.",
+         "candidateIds": ["oc-d71318608e2888544703", "oc-e1d66b0de1616b9f6244"]},
+        {"semanticPartition": "agent-parser-cardinality-ceilings", "status": "retained",
+         "classification": "security-ceiling-or-default",
+         "rationale": "These fixed parser bounds limit environment token length and distinct scope cardinality.",
+         "candidateIds": ["oc-b99e8c5a730d48fa6bdb", "oc-cd6afcb87c61066decf5"]},
+        {"semanticPartition": "agent-scope-limit-diagnostic", "status": "retained",
+         "classification": "presentation-text",
+         "rationale": "This fixed cause-free diagnostic is operator-facing failure text, not an operating value.",
+         "candidateIds": ["oc-b60333a2740b5f904a72"]},
+    ]
+    retained_ids = {identifier for partition in retained_partitions
+                    for identifier in partition["candidateIds"]}
+    configuration_ids = {identifier for identifier, candidate in discovered.items()
+                         if candidate.path == AGENT_BUDGET_CONFIGURATION_PATH.as_posix()}
+    if len(contracts) != len(AGENT_BUDGET_SETTING_SPECS) \
+            or len({contract["setting"] for contract in contracts}) != len(contracts) \
+            or assigned & retained_ids or assigned | retained_ids != configuration_ids:
         return None
     if java_reachable_helper_methods(
-            configuration, "AgentAuthorityBudgetConfiguration", ("positive",)) != {"number"}:
+            configuration, "AgentAuthorityBudgetConfiguration", ("positive",)) != {"number"} \
+            or java_reachable_helper_methods(
+                configuration, "AgentAuthorityBudgetConfiguration", ("nonNegative",)) != {"number"}:
         return None
     if any(java_method_digest(configuration, "AgentAuthorityBudgetConfiguration", method) != digest
            for method, digest in AGENT_BUDGET_METHOD_DIGESTS.items()):
         return None
-    if java_span_digest(
-            policy, java_compact_constructor_span(policy, "AgentAuthorityBudgetPolicy")) \
-            != AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST:
+    if java_span_digest(policy, java_compact_constructor_span(
+            policy, "AgentAuthorityBudgetPolicy")) != AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST:
+        return None
+    if _source_digest(vector) != AGENT_BUDGET_VECTOR_SOURCE_DIGEST:
         return None
     composition_span = java_method_span(composition, "RavenrootServerMain", "run")
-    composition_body = normalized(composition[slice(*composition_span)]) \
-        if composition_span is not None else ""
-    if java_method_digest(composition, "RavenrootServerMain", "run") \
-            != AGENT_BUDGET_COMPOSITION_DIGEST \
+    composition_body = normalized(composition[slice(*composition_span)]) if composition_span else ""
+    if java_method_digest(composition, "RavenrootServerMain", "run") != AGENT_BUDGET_COMPOSITION_DIGEST \
+            or _source_digest(composition) != AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST \
             or composition_body.count(
                 "AgentAuthorityBudgetConfiguration .fromEnvironment(System.getenv())") != 1:
         return None
     consumer_span = java_method_span(consumer, "Session", "reserve")
-    consumer_body = normalized(consumer[slice(*consumer_span)]) \
-        if consumer_span is not None else ""
+    consumer_body = normalized(consumer[slice(*consumer_span)]) if consumer_span else ""
     if java_method_digest(consumer, "Session", "reserve") != AGENT_BUDGET_CONSUMER_DIGEST \
+            or _source_digest(consumer) != AGENT_BUDGET_CONSUMER_SOURCE_DIGEST \
             or consumer_body.count("long input = policy.maximumInputTokensPerTurn();") != 1 \
             or consumer_body.count("remaining.vector().inputTokens() < input") != 1 \
             or consumer_body.count("new AgentBudgetVector(1, input, output") != 1:
+        return None
+    policy_fields = {contract["field"] for contract in contracts
+                     if contract["owner"].endswith("#AgentAuthorityBudgetPolicy")}
+    if any(f"policy.{field}()" not in consumer for field in policy_fields) \
+            or "policy.rootMaxima()" not in consumer \
+            or any(f"root.{field}()" not in consumer for field in vector_components):
         return None
     if any(java_method_digest(tests, "AgentAuthorityBudgetConfigurationTest", method) != digest
            for method, digest in AGENT_BUDGET_TEST_METHOD_DIGESTS.items()):
@@ -10592,51 +10798,19 @@ def agent_budget_authority_from_source(
     }
     if not java_test_type_is_directly_runnable(tests, "AgentAuthorityBudgetConfigurationTest") \
             or not java_has_exact_rate_test_imports(tests, "AgentAuthorityBudgetConfigurationTest") \
-            or any(java_method_annotations(
-                tests, "AgentAuthorityBudgetConfigurationTest", method) != annotations
-                for method, annotations in expected_annotations.items()):
+            or any(java_method_annotations(tests, "AgentAuthorityBudgetConfigurationTest", method) != annotations
+                   for method, annotations in expected_annotations.items()):
         return None
     positive_names = java_direct_stream_string_return(
         tests, "AgentAuthorityBudgetConfigurationTest", "positiveNumericNames")
-    if positive_names != (
-            "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", "RAVENROOT_AGENT_MAX_TURNS",
-            "RAVENROOT_AGENT_MAX_INPUT_TOKENS", "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS",
-            "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS", "RAVENROOT_AGENT_MAX_COST_MICROS",
-            "RAVENROOT_AGENT_MAX_TOOL_CALLS", "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH",
-            "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", "RAVENROOT_AGENT_MAX_TEAM_ACTIVE",
-            "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN",
-            "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN"):
+    if positive_names != tuple(spec[4] for spec in AGENT_BUDGET_SETTING_SPECS
+                               if spec[6] == "positive"):
         return None
-    evaluated = evaluated_java_default("128_000", False)
-    if evaluated != {"kind": "integer", "value": 128000}:
-        return None
-    owner = f"{AGENT_BUDGET_POLICY_PATH.as_posix()}#AgentAuthorityBudgetPolicy"
     return {
-        "kind": "java-agent-budget-environment-setting-v1",
-        "setting": "agent.maximum-input-tokens-per-turn",
-        "owner": owner,
-        "field": "maximumInputTokensPerTurn",
-        "bindings": ["RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN"],
-        "defaultExpression": "128_000",
-        "evaluatedDefault": evaluated,
-        "candidateIds": candidate_ids,
-        "defaultCandidateIds": default_ids,
-        "factoryArgument": argument[0],
-        "validation": (
-            "Absent or blank uses 128000; otherwise a stripped base-10 long is required, and "
-            "zero, negative, malformed, and overflowing values are rejected with setting-only diagnostics."
-        ),
-        "scope": "Packaged server agent authority budget.",
-        "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
-        "coverage": (
-            "Exact startup composition, environment lookup and fallback atom, positive parser helper "
-            "chain, typed record constructor slot and validation, model-reservation consumer, and "
-            "focused default/blank/invalid-value tests."
-        ),
-        "rationale": (
-            "The per-turn input-token budget is an operator-controlled deployment setting. Its "
-            "128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal."
-        ),
+        "kind": "java-agent-budget-environment-family-v2",
+        "logicalSettingCount": len(contracts), "contracts": contracts,
+        "semanticPartitions": retained_partitions,
+        "candidateIds": sorted(assigned | retained_ids),
         "sourceBodyDigests": {
             **AGENT_BUDGET_METHOD_DIGESTS,
             "AgentAuthorityBudgetPolicy.compactConstructor": AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST,
@@ -10646,12 +10820,9 @@ def agent_budget_authority_from_source(
         "sourceDigests": [
             {"path": relative.as_posix(), "digest": _source_digest(source)}
             for relative, source in (
-                (AGENT_BUDGET_CONFIGURATION_PATH, configuration),
-                (AGENT_BUDGET_POLICY_PATH, policy),
-                (AGENT_BUDGET_TEST_PATH, tests),
-                (AGENT_BUDGET_COMPOSITION_PATH, composition),
-                (AGENT_BUDGET_CONSUMER_PATH, consumer),
-            )
+                (AGENT_BUDGET_CONFIGURATION_PATH, configuration), (AGENT_BUDGET_POLICY_PATH, policy),
+                (AGENT_BUDGET_VECTOR_PATH, vector), (AGENT_BUDGET_COMPOSITION_PATH, composition),
+                (AGENT_BUDGET_CONSUMER_PATH, consumer), (AGENT_BUDGET_TEST_PATH, tests))
         ],
         "testEvidence": [
             {"path": AGENT_BUDGET_TEST_PATH.as_posix(), "type": "AgentAuthorityBudgetConfigurationTest",
@@ -10672,26 +10843,38 @@ def agent_budget_authority_errors(root: Path, authorities: object,
         return ["agent budget policy source family is incomplete, mis-slotted, or unsupported"]
     errors: list[str] = []
     if authorities != {AGENT_BUDGET_AUTHORITY_ID: expected}:
-        errors.append("agent budget setting requires the exact mandatory source-derived authority")
+        errors.append("agent budget settings require the exact mandatory source-derived authority")
     expected_ids = set(expected["candidateIds"])
     marked = {identifier for identifier, entry in entries.items()
               if entry.get("agentBudgetAuthority") is not None}
     if marked != expected_ids:
         errors.append("agent budget authority candidate partition is missing, duplicated, or foreign")
-    expected_fields = {
-        "status": "already-centralized", "classification": "operator-configurable",
-        "agentBudgetAuthority": AGENT_BUDGET_AUTHORITY_ID,
-        "setting": expected["setting"], "owner": expected["owner"], "field": expected["field"],
-        "bindings": expected["bindings"], "default": str(expected["evaluatedDefault"]["value"]),
-        "defaultEvidence": expected["defaultCandidateIds"], "validation": expected["validation"],
-        "scope": expected["scope"], "pinning": expected["pinning"],
-        "coverage": expected["coverage"], "rationale": expected["rationale"],
-    }
+    operators = {identifier: contract for contract in expected["contracts"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: partition for partition in expected["semanticPartitions"]
+                for identifier in partition["candidateIds"]}
     for identifier in expected_ids:
         entry = entries.get(identifier)
         if entry is None:
             errors.append(f"{identifier}: mandatory agent budget source atom is absent")
             continue
+        if entry.get("agentBudgetAuthority") != AGENT_BUDGET_AUTHORITY_ID:
+            errors.append(f"{identifier}: agent budget authority marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            expected_fields = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "setting": contract["setting"], "owner": contract["owner"], "field": contract["field"],
+                "bindings": contract["bindings"], "default": contract["evaluatedDefault"],
+                "defaultEvidence": contract["defaultCandidateIds"],
+                "validation": contract["validation"], "scope": contract["scope"],
+                "pinning": contract["pinning"], "coverage": contract["coverage"],
+                "rationale": contract["rationale"],
+            }
+        else:
+            partition = retained[identifier]
+            expected_fields = {field: partition[field]
+                               for field in ("status", "classification", "rationale")}
         for field, expected_value in expected_fields.items():
             if entry.get(field) != expected_value:
                 errors.append(f"{identifier}: agent budget {field} authority has drifted")
@@ -14202,7 +14385,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     not isinstance(binding, str) or not binding.strip() for binding in bindings):
                 errors.append(f"{identifier}: reviewed operator setting requires a string bindings array")
             default_evidence = entry.get("defaultEvidence")
-            if not isinstance(default_evidence, list) or not default_evidence or any(
+            agent_budget_evidence = entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID
+            if not isinstance(default_evidence, list) or (not default_evidence and not agent_budget_evidence) or any(
                     not isinstance(evidence_id, str) or not evidence_id.strip()
                     for evidence_id in default_evidence):
                 errors.append(f"{identifier}: reviewed operator setting requires defaultEvidence candidate ids")

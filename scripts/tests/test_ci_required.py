@@ -6,15 +6,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.classify_main_change import ROUTED_INPUTS
 from scripts.ci_required import (
     ALLOWED_TIERS_BY_EVENT,
     CLASSIFICATION_JOB,
     FAST_GATE_JOB,
     FAST_JOBS,
     FAST_WORKFLOW,
+    ROUTED_INPUT_BINDINGS,
     WORKFLOW_DIRECTORY,
     job_blocks,
     verify_event,
+    verify_dispatch_routing,
     verify_promotion_evidence,
     verify_fast_results,
     verify_fast_workflow,
@@ -115,13 +118,23 @@ class VerifyResultsTest(unittest.TestCase):
 class PromotionEvidenceTest(unittest.TestCase):
     SHA = "9e75c71c061bdc7390dace58be761d21db4b4ad3"
 
-    def run_of(self, event, conclusion="success", sha=None, path=".github/workflows/ci.yml"):
-        return {"event": event, "conclusion": conclusion, "head_sha": sha or self.SHA, "path": path}
+    def run_of(self, event, conclusion="success", sha=None, path=".github/workflows/ci.yml", branch="dev"):
+        return {"event": event, "conclusion": conclusion, "head_sha": sha or self.SHA, "path": path,
+                "head_branch": branch}
 
     def test_a_full_run_that_passed_on_the_commit_is_evidence(self) -> None:
-        for event in ("push", "merge_group", "workflow_dispatch"):
+        for event, branch in (("push", "dev"), ("merge_group", "gh-readonly-queue/dev/pr-313-191accac"),
+                              ("workflow_dispatch", "dev")):
             with self.subTest(event=event):
-                self.assertEqual(verify_promotion_evidence({"workflow_runs": [self.run_of(event)]}, self.SHA), [])
+                self.assertEqual(
+                    verify_promotion_evidence({"workflow_runs": [self.run_of(event, branch=branch)]}, self.SHA), [])
+
+    def test_only_a_run_on_dev_or_its_queue_is_evidence(self) -> None:
+        """A dispatch elsewhere can test another commit than the one it is recorded on (routing inputs)."""
+        for branch in ("feature/issue_310", "dependabot/maven/x", "main", "gh-readonly-queue/main/pr-1-a", None):
+            with self.subTest(branch=branch):
+                runs = [self.run_of("workflow_dispatch", branch=branch)]
+                self.assertTrue(verify_promotion_evidence({"workflow_runs": runs}, self.SHA))
 
     def test_the_301_case_is_refused(self) -> None:
         """Only pull-request runs, or a full run of another commit: nothing verified this one."""
@@ -139,6 +152,28 @@ class PromotionEvidenceTest(unittest.TestCase):
     def test_missing_or_unbound_evidence_is_refused(self) -> None:
         self.assertTrue(verify_promotion_evidence(None, self.SHA))
         self.assertTrue(verify_promotion_evidence({"workflow_runs": [self.run_of("push")]}, ""))
+
+
+class DispatchRoutingTest(unittest.TestCase):
+    def classification(self) -> str:
+        return job_blocks(WORKFLOW.read_text(encoding="utf-8"))["release-classification"]
+
+    def test_the_workflow_hands_every_routing_input_to_the_classifier(self) -> None:
+        self.assertEqual(verify_dispatch_routing(self.classification()), [])
+
+    def test_an_unwired_routing_input_is_refused(self) -> None:
+        contents = WORKFLOW.read_text(encoding="utf-8")
+        for binding in ROUTED_INPUT_BINDINGS:
+            with self.subTest(binding=binding):
+                self.assertTrue(verify_dispatch_routing(self.classification().replace(binding, "")))
+                self.assertTrue(any(binding in problem for problem in verify_workflow(contents.replace(binding, ""))))
+
+    def test_the_bindings_are_the_classifier_s_and_the_workflow_s_inputs(self) -> None:
+        bound = {line.split(": ", 1)[0]: line.split("inputs.", 1)[1].rstrip(" }") for line in ROUTED_INPUT_BINDINGS}
+        self.assertEqual(bound, {variable: name for name, variable in ROUTED_INPUTS.items()})
+        triggers = WORKFLOW.read_text(encoding="utf-8").split("\njobs:\n", 1)[0]
+        for name in ROUTED_INPUTS:
+            self.assertIn(f"\n      {name}:\n", triggers)
 
 
 class ParseResultsTest(unittest.TestCase):

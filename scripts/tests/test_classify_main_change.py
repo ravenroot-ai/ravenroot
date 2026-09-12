@@ -1,6 +1,7 @@
 import unittest
 
 from scripts.classify_main_change import (
+    ROUTED_INPUTS,
     ClassificationError,
     classify,
     documentation_only,
@@ -175,6 +176,20 @@ class ClassifyTest(unittest.TestCase):
                 with self.assertRaises(ClassificationError):
                     classify(event_name="workflow_dispatch", base_ref="", ref_name="feature/x",
                              labels=set(), paths=[], dispatch_tier=requested)
+
+    def test_a_dispatch_without_routing_may_not_redirect_the_checkout(self):
+        """Every job checks out `merge_sha` when set; the result would land on a commit it never tested."""
+        unrouted = {name: "" for name in ROUTED_INPUTS}
+        self.assertEqual(
+            classify(event_name="workflow_dispatch", base_ref="", ref_name="dev", labels=set(), paths=[],
+                     routed_inputs=unrouted)["tier"],
+            "full",
+        )
+        for name in ROUTED_INPUTS:
+            with self.subTest(input=name):
+                with self.assertRaises(ClassificationError):
+                    classify(event_name="workflow_dispatch", base_ref="", ref_name="dev", labels=set(), paths=[],
+                             routed_inputs={**unrouted, name: "9e75c71c061bdc7390dace58be761d21db4b4ad3"})
 
     def test_push_to_dev_and_manual_dispatch_are_full(self):
         for event_name, ref_name in (("push", "dev"), ("workflow_dispatch", "main")):

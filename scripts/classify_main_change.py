@@ -90,6 +90,14 @@ def parse_labels(raw_labels: str) -> set[str]:
 # work-branch commit without the functional suite ever running on it.
 DISPATCHABLE_TIERS = {"full"}
 
+# The Dependabot routing inputs of ci.yml's dispatch, by the variable the classify step passes each in.
+ROUTED_INPUTS = {
+    "routed_pr_number": "ROUTED_PR_NUMBER",
+    "base_sha": "ROUTED_BASE_SHA",
+    "head_sha": "ROUTED_HEAD_SHA",
+    "merge_sha": "ROUTED_MERGE_SHA",
+}
+
 
 def classify(
     *,
@@ -102,6 +110,7 @@ def classify(
     head_ref: str = "",
     head_repository: str = "",
     repository: str = "",
+    routed_inputs: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Return the CI tier and release intent for one event."""
     docs_only = documentation_only(paths)
@@ -113,6 +122,17 @@ def classify(
                 f"A dispatched run may request only: {', '.join(sorted(DISPATCHABLE_TIERS))}. "
                 f"Refusing {requested!r}: any lighter tier would let ci-required pass on this commit "
                 "without the full tier."
+            )
+        # A routed Dependabot run reaches this classifier as `pull_request`, after its routing run was
+        # validated. Here the routing is absent, so its inputs must be too: every job checks out
+        # `merge_sha` when it is set, while the run is recorded on the dispatched branch's commit.
+        # Accepting it would record a full-tier success on a commit this run never tested — and a
+        # promotion reads exactly that success as its evidence.
+        supplied = sorted(name for name, value in (routed_inputs or {}).items() if value)
+        if supplied:
+            raise ClassificationError(
+                f"A dispatched run without routing_run_id must not set {', '.join(supplied)}: the run "
+                "would test another commit while its result is recorded on this one."
             )
         return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
@@ -202,6 +222,7 @@ def main() -> int:
             head_ref=os.environ.get("HEAD_REF", ""),
             head_repository=os.environ.get("HEAD_REPOSITORY", ""),
             repository=os.environ.get("REPOSITORY", ""),
+            routed_inputs={name: os.environ.get(variable, "") for name, variable in ROUTED_INPUTS.items()},
         )
     except (ClassificationError, subprocess.CalledProcessError) as exc:
         print(f"Release classification failed: {exc}", file=sys.stderr)

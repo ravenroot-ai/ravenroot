@@ -182,6 +182,11 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
+          # Refused on a dispatch without routing_run_id; see ROUTED_INPUTS in the classifier.
+          ROUTED_PR_NUMBER: ${{ inputs.routed_pr_number }}
+          ROUTED_BASE_SHA: ${{ inputs.base_sha }}
+          ROUTED_HEAD_SHA: ${{ inputs.head_sha }}
+          ROUTED_MERGE_SHA: ${{ inputs.merge_sha }}
         run: python3 scripts/classify_main_change.py
       # Authorization refuses a promotion whose version is not the one its label authorizes, but only
       # after the merge, which leaves a promotion on `main` and a release that never starts. The same

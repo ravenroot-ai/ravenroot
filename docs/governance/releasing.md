@@ -88,9 +88,11 @@ verified, commit by commit, on the branch where a fix is cheap, so the promotion
   that is not `dev` or a protected `hotfix/*`;
 - `release-classification`, which produces the tier and enforces the mandatory `release:*` label;
 - `ci-required`, the single aggregating context both rulesets require. On a promotion it runs no
-  functional job, so it is green only when a complete `ci.yml` run — on the push to `dev`, in the
-  merge queue, or dispatched — has already passed on exactly the promoted commit. Its green is
-  borrowed from a run that verified this commit, never from whichever run happens to be green.
+  functional job, so it is green only when a complete `ci.yml` run on `dev` — its push, its merge
+  queue, or a dispatch on `dev` — has already passed on exactly the promoted commit. Its green is
+  borrowed from a run that verified this commit, never from whichever run happens to be green. A
+  dispatch may not redirect its checkout to another commit unless it is a validated Dependabot
+  routing, so such a run always tested the commit it is recorded on.
 
 Code scanning runs on `main` alone by deliberate decision. Static analysis costs time on every pull
 request and raises a genuine finding rarely, so it is analysed at the moment of a real release, where
@@ -388,8 +390,8 @@ and [artifact attestations](https://docs.github.com/actions/how-tos/secure-your-
 
 After a normal release or content-only promotion, bring the resulting `main` merge commit into `dev`
 before integrating more work. No ruleset allows a direct push, so this is a pull request into `dev`
-whose merge changes no content — the diff between `dev` and its head is empty — and the release
-automation opens and merges it as soon as the promotion merges. It gives both branches the same
+whose merge changes no content — the diff between `dev` and its head is empty — opened and merged
+as soon as the promotion merges, like any other pull request into `dev`. It gives both branches the same
 public boundary, and it is what lets the next release find the last release tag from `dev`.
 
 For an urgent correction:

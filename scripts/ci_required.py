@@ -231,6 +231,7 @@ def verify_workflow(contents: str) -> list[str]:
             problems.append(f"{job}: listed in the {GATE_JOB} `needs` list but not in the topology.")
 
     problems.extend(verify_triggers(contents))
+    problems.extend(verify_dispatch_routing(blocks.get(CLASSIFICATION_JOB, "")))
 
     shard_block = blocks.get("full-ui-e2e-shard", "")
     expected_matrix = "shard: [" + ", ".join(str(index) for index in range(1, E2E_SHARDS + 1)) + "]"
@@ -282,6 +283,34 @@ def verify_triggers(contents: str) -> list[str]:
             "let ci-required pass on a work-branch commit without the full tier."
         )
     return problems
+
+
+# Each Dependabot routing input of the dispatch, as the classify step must hand it to the classifier.
+ROUTED_INPUT_BINDINGS = (
+    "ROUTED_PR_NUMBER: ${{ inputs.routed_pr_number }}",
+    "ROUTED_BASE_SHA: ${{ inputs.base_sha }}",
+    "ROUTED_HEAD_SHA: ${{ inputs.head_sha }}",
+    "ROUTED_MERGE_SHA: ${{ inputs.merge_sha }}",
+)
+
+
+def verify_dispatch_routing(classification: str) -> list[str]:
+    """Keep the classifier able to refuse routing inputs on a dispatch that has no routing run.
+
+    Every job checks out `merge_sha` when it is set, and the run is recorded on the dispatched
+    branch's commit. The classifier refuses that combination without `routing_run_id`, but only if
+    the classify step hands it the inputs; unwired, a dispatch could record a full-tier success on a
+    commit it never tested, which a promotion then reads as its evidence.
+    """
+    step = re.search(r"(?ms)^      - name: Classify the CI and release tier\n.*?(?=^      - |\Z)", classification)
+    if not step:
+        return [f"{CLASSIFICATION_JOB}: the `Classify the CI and release tier` step is missing."]
+    return [
+        f"{CLASSIFICATION_JOB}: the classify step must pass `{binding}`, or a dispatch could test a "
+        "commit other than the one its result is recorded on."
+        for binding in ROUTED_INPUT_BINDINGS
+        if binding not in step.group(0)
+    ]
 
 
 def verify_single_publisher(directory: Path) -> list[str]:
@@ -393,8 +422,13 @@ def verify_event(
 FULL_TIER_EVENTS = frozenset({"push", "merge_group", "workflow_dispatch"})
 
 
+def is_integration_branch(branch: Any) -> bool:
+    """`dev`, or a merge-queue branch for `dev`: where the promoted commit was verified."""
+    return branch == "dev" or (isinstance(branch, str) and branch.startswith("gh-readonly-queue/dev/"))
+
+
 def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[str]:
-    """Refuse a promotion unless a full-tier ci.yml run passed on exactly the promoted commit.
+    """Refuse a promotion unless a full-tier ci.yml run on dev passed on exactly the promoted commit.
 
     The promotion re-runs nothing, so its green is borrowed: it has to be borrowed from a run that
     verified this commit, not from whichever run happens to be green. That is what #301 lacked — it
@@ -407,10 +441,11 @@ def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[
         return ["no workflow-run evidence was collected for the promoted commit"]
     for run in runs:
         if (run.get("path") == WORKFLOW_PATH and run.get("head_sha") == sha
-                and run.get("event") in FULL_TIER_EVENTS and run.get("conclusion") == "success"):
+                and run.get("event") in FULL_TIER_EVENTS and run.get("conclusion") == "success"
+                and is_integration_branch(run.get("head_branch"))):
             return []
     return [
-        f"no full-tier ci.yml run has passed on {sha} (push to dev, merge queue or dispatch). "
+        f"no full-tier ci.yml run on dev has passed on {sha} (push, merge queue or dispatch). "
         "A promotion re-runs no functional job, so it may be green only on a full run of this exact "
         "commit; re-run this check once that run has passed."
     ]

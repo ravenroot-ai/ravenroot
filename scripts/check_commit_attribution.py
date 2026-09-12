@@ -37,7 +37,7 @@ TOOL_ADDRESS = re.compile(
     re.IGNORECASE,
 )
 CO_AUTHOR = re.compile(r"(?im)^co-authored-by:\s*(?P<who>.+)$")
-FOOTER = re.compile(r"(?im)^.*generated (?:with|by) \[?(?:claude|codex|chatgpt|copilot)")
+FOOTER = re.compile(r"(?im)^[^\w\n]*generated (?:with|by) \[?(?:claude|codex|chatgpt|copilot)\b")
 SEPARATOR = "\x1e"
 
 

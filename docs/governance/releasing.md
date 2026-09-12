@@ -72,11 +72,13 @@ private project-management material are outside the public repository boundary.
 When the changes accumulated on `dev` form a coherent release, prepare a pull request from the
 repository's `dev` branch to `main`. The release pull request:
 
-1. selects the version from the highest-impact unconsumed change fragment;
-2. updates the authoritative product version and every derived release surface consistently;
-3. assembles and removes the consumed fragments;
-4. updates the changelog and GitHub release notes, including compatibility boundaries, migrations,
-   operator actions, and security notices;
+1. takes its version from its `release:*` label, which authorizes the increment;
+2. carries the preparation `scripts/prepare_release.py` produced from that label on `dev`: every
+   version surface moved consistently, the release notes assembled, the consumed fragments removed;
+3. is refused before merge if the version and the label disagree;
+4. carries release notes stating compatibility boundaries, migrations, operator actions, security
+   notices and known issues — written in the change fragments the notes are assembled from, which is
+   where each of them has to be recorded;
 5. contains no development-only version such as `SNAPSHOT` in a published coordinate;
 6. passes the complete test, compatibility, packaging, documentation, and release-readiness gates;
 7. proves that the requested version is greater than the latest release and that its tag does not
@@ -198,14 +200,23 @@ gpg --verify artifact.jar.asc artifact.jar
 
 ### Maintainer procedure
 
-1. On `dev`, choose the version from the highest-impact unconsumed fragment. Update the root Maven
-   version, every child POM, the UI package and lockfile versions, and both Helm version fields. Run
-   `python3 scripts/check_product_version.py`.
-2. Assemble the changelog and commit reviewed GitHub Release notes at
-   `docs/releases/v<version>.md`; remove only the fragments consumed by that release.
-3. Open the internal `dev` to `main` pull request. Apply exactly one of `release:patch`,
-   `release:minor`, or `release:major`. The first `0.1.0-alpha.1` promotion uses `release:minor`.
-   Never add an automated or post-merge version-bump commit.
+1. Apply exactly one of `release:patch`, `release:minor`, or `release:major` to the internal `dev`
+   to `main` pull request. **The label is the instruction to increment the version**: it authorizes
+   the bump, and nothing else needs to confirm it. The first `0.1.0-alpha.1` promotion used
+   `release:minor`.
+2. The bump is produced on `dev` from that label by
+   `python3 scripts/prepare_release.py --intent <patch|minor|major>`, and merged through an ordinary
+   pull request into `dev`, verified and reviewed like any other change. The script moves every
+   version surface — the root and child Maven POMs, the UI package and lockfile, both Helm version
+   fields, and the install coordinates derived from them — from the latest release to the version the
+   label authorizes; assembles `docs/releases/v<version>.md` from the unconsumed change fragments; and
+   removes exactly those fragments. It refuses a second run, a checkout whose version is not the latest
+   release, an unknown fragment kind, and a release with nothing to consume.
+3. The promotion is refused **before it merges** if its version is not the transition its label
+   authorizes: `release-classification` runs `release_contract.py check-promotion`, the same rule
+   authorization applies after the merge. A version bump is never committed anywhere else — not after
+   the promotion merges, not directly to a protected branch, and not without a release label — because
+   the reviewed merge commit must remain the exact source that authorization validates and tags.
 4. Obtain the required review and merge with a merge commit. The resulting merge commit is the exact
    source that authorization validates and tags.
 5. Wait for `authorize-release` to confirm the merged pull request, version transition, absence of a

@@ -15,7 +15,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.check_product_version import authoritative_version, errors as version_errors
-from scripts.classify_main_change import RELEASE_LABELS, documentation_only
+from scripts.classify_main_change import (
+    RELEASE_LABELS,
+    ClassificationError,
+    documentation_only,
+    parse_labels,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -156,6 +161,76 @@ def require_release_notes(version: str) -> None:
         raise ReleaseContractError(f"reviewed release notes are missing: docs/releases/v{version}.md")
 
 
+def release_transition(
+    *,
+    old_version: str,
+    new_version: str,
+    changed: list[str],
+    published: list[tuple[ReleaseVersion, str]],
+) -> str:
+    """Return the release intent a change from `old_version` to `new_version` actually carries.
+
+    This is the one statement of what a promotion may do to the version. `authorize_main` applies it
+    after the merge, and `check_promotion` applies the same function before it, so the two cannot
+    disagree about which transitions are authorized.
+    """
+    if new_version == old_version and documentation_only(changed):
+        return "none"
+    if not published:
+        if new_version != INITIAL_VERSION:
+            raise ReleaseContractError(f"the first release must be {INITIAL_VERSION}")
+        return "minor"
+    previous = published[-1][0]
+    if old_version != str(previous):
+        raise ReleaseContractError(
+            f"main version {old_version} differs from latest immutable release {previous}"
+        )
+    candidate = ReleaseVersion.parse(new_version)
+    transitions = {intent: expected_next(previous, intent) for intent in ("patch", "minor", "major")}
+    matching = [intent for intent, expected in transitions.items() if candidate == expected]
+    if len(matching) != 1:
+        expected = ", ".join(f"release:{intent}={version}" for intent, version in transitions.items())
+        raise ReleaseContractError(
+            f"version {new_version} is not an authorized transition after {previous}; expected {expected}"
+        )
+    return matching[0]
+
+
+def check_promotion(*, base: str, head: str, labels: set[str]) -> dict[str, str]:
+    """Refuse, before it merges, a promotion whose version is not the one its label authorizes.
+
+    Authorization applies the same rule after the merge, when a refusal leaves a promotion merged into
+    `main` and a release that never starts. Checking it on the pull request stops that at the point
+    where it is still a pull request.
+    """
+    selected = sorted(RELEASE_LABELS.intersection(labels))
+    if len(selected) != 1:
+        raise ReleaseContractError(
+            "a promotion requires exactly one of: " + ", ".join(sorted(RELEASE_LABELS))
+        )
+    label_intent = selected[0].removeprefix("release:")
+    old_version = version_at(base)
+    new_version = version_at(head)
+    findings = version_errors(new_version)
+    if findings:
+        raise ReleaseContractError("; ".join(findings))
+    immutable_intent = release_transition(
+        old_version=old_version,
+        new_version=new_version,
+        changed=run_git("diff", "--no-renames", "--name-only", base, head).splitlines(),
+        published=release_tags_merged_into(base),
+    )
+    if label_intent != immutable_intent:
+        raise ReleaseContractError(
+            f"release:{label_intent} does not match the content, which carries release:{immutable_intent} "
+            f"({old_version} -> {new_version}). Prepare the release with "
+            f"`scripts/prepare_release.py --intent {label_intent}` on dev first."
+        )
+    if immutable_intent != "none":
+        require_release_notes(new_version)
+    return {"intent": immutable_intent, "version": new_version}
+
+
 def authorize_main(
     *, before: str, head: str, prs_json: Path, allow_existing_exact_tag: bool = False
 ) -> dict[str, str]:
@@ -173,32 +248,12 @@ def authorize_main(
         raise ReleaseContractError("; ".join(findings))
 
     changed = run_git("diff", "--no-renames", "--name-only", before, head).splitlines()
-    published = release_tags_merged_into(before)
-    if new_version == old_version and documentation_only(changed):
-        immutable_intent = "none"
-    elif not published:
-        if new_version != INITIAL_VERSION:
-            raise ReleaseContractError(
-                f"the first release must be {INITIAL_VERSION}"
-            )
-        immutable_intent = "minor"
-    else:
-        previous = published[-1][0]
-        if old_version != str(previous):
-            raise ReleaseContractError(
-                f"main version {old_version} differs from latest immutable release {previous}"
-            )
-        candidate = ReleaseVersion.parse(new_version)
-        transitions = {
-            intent: expected_next(previous, intent) for intent in ("patch", "minor", "major")
-        }
-        matching = [intent for intent, expected in transitions.items() if candidate == expected]
-        if len(matching) != 1:
-            expected = ", ".join(f"release:{intent}={version}" for intent, version in transitions.items())
-            raise ReleaseContractError(
-                f"version {new_version} is not an authorized transition after {previous}; expected {expected}"
-            )
-        immutable_intent = matching[0]
+    immutable_intent = release_transition(
+        old_version=old_version,
+        new_version=new_version,
+        changed=changed,
+        published=release_tags_merged_into(before),
+    )
 
     if label_intent != immutable_intent:
         raise ReleaseContractError(
@@ -284,6 +339,10 @@ def parser() -> argparse.ArgumentParser:
     tag_authorization = commands.add_parser("validate-tag-authorization")
     tag_authorization.add_argument("--tag", required=True)
     tag_authorization.add_argument("--prs-json", type=Path, required=True)
+    promotion = commands.add_parser("check-promotion")
+    promotion.add_argument("--base", required=True)
+    promotion.add_argument("--head", required=True)
+    promotion.add_argument("--labels", required=True, help="The pull request's labels as JSON.")
     event = commands.add_parser("validate-event")
     event.add_argument("--event-name", required=True)
     event.add_argument("--ref-type", required=True)
@@ -301,6 +360,10 @@ def main() -> int:
             )
         elif arguments.command == "validate-tag":
             values = validate_tag(arguments.tag, arguments.main_ref)
+        elif arguments.command == "check-promotion":
+            values = check_promotion(
+                base=arguments.base, head=arguments.head, labels=parse_labels(arguments.labels)
+            )
         elif arguments.command == "validate-tag-authorization":
             values = validate_tag_authorization(arguments.tag, arguments.prs_json)
         else:
@@ -310,7 +373,7 @@ def main() -> int:
                 arguments.ref_name,
                 arguments.requested_tag,
             )
-    except (ReleaseContractError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
+    except (ReleaseContractError, ClassificationError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"Release contract failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(values, sort_keys=True))

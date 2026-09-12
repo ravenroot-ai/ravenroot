@@ -29,20 +29,30 @@
         "validation": "Absent or blank uses 128000; otherwise a stripped base-10 long is required, and zero, negative, malformed, and overflowing values are rejected with setting-only diagnostics.",
         "scope": "Packaged server agent authority budget.",
         "pinning": "Resolved from the process environment when the packaged server policy is composed at startup.",
-        "coverage": "Exact environment lookup and fallback atom, positive parser helper chain, typed record constructor slot and validation, and focused default/blank/invalid-value tests.",
+        "coverage": "Exact startup composition, environment lookup and fallback atom, positive parser helper chain, typed record constructor slot and validation, model-reservation consumer, and focused default/blank/invalid-value tests.",
         "rationale": "The per-turn input-token budget is an operator-controlled deployment setting. Its 128000 fallback occupies the maximumInputTokensPerTurn policy slot and is not a timing literal."
       },
-      "semanticDecision": "These three atoms are the exact binding name, environment-binding candidate, and integer fallback in one typed constructor argument. The source-derived family validates their slot, parser helpers, policy constraint, evaluated default, and decisive tests.",
+      "semanticDecision": "These three atoms are the exact binding name, environment-binding candidate, and integer fallback in one typed constructor argument. The source-derived family validates their startup composition, slot, parser helpers, policy constraint, evaluated default, model-reservation use, and decisive runnable tests.",
       "sourceAndConsumerProof": [
-        {
-          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
-          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
-          "assertion": "The fromEnvironment factory places the exact binding and fallback in the maximumInputTokensPerTurn constructor slot and routes it through positive and number."
-        },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java",
           "digest": "251bb9c720d0f20620bed477f52019d751dd5ac20661a987791fc722f166521a",
           "assertion": "The typed AgentAuthorityBudgetPolicy component and compact constructor reject nonpositive per-turn input-token budgets."
+        },
+        {
+          "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetService.java",
+          "digest": "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979",
+          "assertion": "The model reservation path reads maximumInputTokensPerTurn, applies it to remaining input/total capacity, and records it in the reserved budget vector."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+          "digest": "4d99c0b0cec3057c3817b40a2bb88bcc0f0f0c4d8f1afd863c9e2fc439cf47c5",
+          "assertion": "Packaged startup calls fromEnvironment(System.getenv()) exactly once in the durable agent-budget service construction path."
+        },
+        {
+          "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfiguration.java",
+          "digest": "8d23320006e4c336f8f8b04d94983255a553960fc4fe15afece365b0fdd62c2b",
+          "assertion": "The fromEnvironment factory places the exact binding and fallback in the maximumInputTokensPerTurn constructor slot and routes it through positive and number."
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/agent/AgentAuthorityBudgetConfigurationTest.java",

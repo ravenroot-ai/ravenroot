@@ -10,6 +10,8 @@ report are the source of the issue's counts.
 from __future__ import annotations
 
 import argparse
+import ast
+import copy
 from bisect import bisect_right
 import hashlib
 import json
@@ -840,6 +842,8 @@ def code_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
                     rows.append((candidate_offset, containing_symbol(markers, candidate_offset),
                                  "inline-operational-call", f"timeunit-{method}",
                                  normalized(text[atom.start():atom.end()]), evidence))
+    if suffix == ".java":
+        rows.extend(interaction_websocket_default_candidates(relative, text))
     return rows
 
 
@@ -2173,6 +2177,58 @@ def helm_chart_metadata(root: Path) -> dict[str, object] | None:
     }
 
 
+def program_github_sealed_file(root: Path, key: str) -> str | None:
+    """Check an independently reviewed source expectation, never a mutable inventory digest."""
+    path = PROGRAM_GITHUB_PATHS[key]
+    expected = [proof[4] for proof in PROGRAM_GITHUB_SOURCE_PROOFS if proof[0] == path and proof[1] == "file"]
+    if len(expected) != 1:
+        return None
+    try:
+        source = (root / path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    value = normalized(strip_c_comments(source)) if Path(path).suffix in {".java", ".js"} else source
+    return source if hashlib.sha256(value.encode("utf-8")).hexdigest() == expected[0] else None
+
+
+def program_authoring_helm_carrier_paths(root: Path) -> set[str] | None:
+    """Exactly three Java-owned blank carriers, with no fourth field or alternate projection."""
+    try:
+        values = (root / HELM_VALUES_PATH).read_text(encoding="utf-8")
+        schema = json.loads((root / HELM_SCHEMA_PATH).read_text(encoding="utf-8"))
+        template = (root / HELM_TEMPLATE_PATHS[1]).read_text(encoding="utf-8")
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    leaves = {"maxSourceBytes": ("MAX_SOURCE_BYTES", 1048576),
+              "maxBuildRequestBytes": ("MAX_BUILD_REQUEST_BYTES", 10485760),
+              "maxProgramsPerBuild": ("MAX_PROGRAMS_PER_BUILD", 256)}
+    actual = {path for path in helm_values_leaf_paths(values) if path.startswith("programAuthoring.")}
+    if not isinstance(schema, dict) or not isinstance(schema.get("properties"), dict):
+        return None
+    policy = schema["properties"].get("programAuthoring")
+    if not actual and policy is None:
+        return set()  # Historical chart layout remains independently supported.
+    expected = {"programAuthoring." + leaf for leaf in leaves}
+    if actual != expected or not isinstance(policy, dict) or policy.get("type") != "object" \
+            or policy.get("additionalProperties") is not False \
+            or set(policy.get("required", [])) != set(leaves) \
+            or set(policy.get("properties", {})) != set(leaves) \
+            or schema.get("required", []).count("programAuthoring") != 1:
+        return None
+    for leaf, (suffix, ceiling) in leaves.items():
+        environment = "RAVENROOT_PROGRAM_AUTHORING_" + suffix
+        if yaml_scalar_at_path(values, "programAuthoring." + leaf) != '\"\"' \
+                or policy["properties"][leaf] != {
+                    "x-ravenroot-environment": environment,
+                    "oneOf": [{"type": "integer", "minimum": 1, "maximum": ceiling},
+                              {"$ref": "#/definitions/graphBlank"}]}:
+            return None
+        projection = '- name: ' + environment + '\n              value: {{ include "ravenroot.graphLimitValue" .Values.programAuthoring.' + leaf + ' }}'
+        if template.count(projection) != 1:
+            return None
+    return expected
+
+
 def helm_timeout_runtime_evidence(root: Path) -> dict[str, object] | None:
     path = ("ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/"
             "programming/graalvm/GraalVmProgramRuntime.java")
@@ -2180,6 +2236,20 @@ def helm_timeout_runtime_evidence(root: Path) -> dict[str, object] | None:
         source = (root / path).read_text(encoding="utf-8")
     except (FileNotFoundError, UnicodeDecodeError):
         return None
+    resolver_path = PROGRAM_GITHUB_PATHS["graal"]
+    if (root / resolver_path).exists():
+        # The typed successor must preserve the same default/range, policy consumption, deadline,
+        # and fingerprint. Fixed executable expectations prevent blessing a bypass by data refresh.
+        resolver = program_github_sealed_file(root, "graal")
+        runtime = program_github_sealed_file(root, "runtime")
+        if resolver is None or runtime is None:
+            return None
+        return {"path": path, "type": "GraalVmProgramRuntime",
+                "resolverPath": resolver_path, "sourcePaths": [path, resolver_path],
+                "kind": "typed-runtime-configuration-v1",
+                "methods": {method: java_method_digest(runtime, "GraalVmProgramRuntime", method)
+                            for method in ("fromConfiguration", "policyFor", "compatibilityFingerprint", "invokeSupervisor")},
+                "resolverDigest": hashlib.sha256(normalized(strip_c_comments(resolver)).encode("utf-8")).hexdigest()}
     methods = ("policyFor", "compatibilityFingerprint", "invokeSupervisor")
     spans = {method: java_method_span(source, "GraalVmProgramRuntime", method) for method in methods}
     masked = strip_c_comments_and_literals(source)
@@ -2225,6 +2295,10 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
     actual_paths = helm_values_leaf_paths(values_source)
     external_paths = {path for path in actual_paths
                       if any(path.startswith(prefix) for prefix in HELM_JAVA_CARRIER_PREFIXES)}
+    authoring_paths = program_authoring_helm_carrier_paths(root)
+    if authoring_paths is None:
+        return None
+    external_paths.update(authoring_paths)
     if actual_paths != operator_paths | fixed_paths | external_paths:
         return None
     schema_spans = json_value_spans(schema_source)
@@ -2684,6 +2758,18 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] == "semanticPartitions" and path[3].isdigit() \
             and path[4] == "candidateIds":
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "programGithubPolicyAuthorities" and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "programGithubPolicyAuthorities" \
+            and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
+    if len(path) == 4 and path[0] == "interactionWebSocketAuthorities" and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "interactionWebSocketAuthorities" \
+            and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -2831,6 +2917,33 @@ def remap_declared_candidate_references(document: dict[str, object],
             if isinstance(partitions, list):
                 for partition in partitions:
                     remap_list(partition, "candidateIds")
+
+    program_authorities = document.get("programGithubPolicyAuthorities")
+    if isinstance(program_authorities, dict):
+        for authority in program_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("contracts", "bindingCarriers", "semanticPartitions"):
+                rows = authority.get(field)
+                if isinstance(rows, list):
+                    for row in rows:
+                        remap_list(row, "candidateIds")
+                        if field != "semanticPartitions":
+                            remap_list(row, "defaultCandidateIds")
+
+    interaction_authorities = document.get("interactionWebSocketAuthorities")
+    if isinstance(interaction_authorities, dict):
+        for authority in interaction_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("contracts", "bindingCarriers", "semanticPartitions"):
+                for row in authority.get(field, []):
+                    if isinstance(row, dict):
+                        remap_list(row, "candidateIds")
+                        if field == "contracts":
+                            remap_list(row, "defaultCandidateIds")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -3056,6 +3169,20 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
             return None, ["cannot derive the closed external-I/O policy authority from current source"]
         refreshed["externalIoPolicyAuthorities"] = {
             EXTERNAL_IO_POLICY_AUTHORITY_ID: external_io_authority,
+        }
+    if program_github_policy_source_present(root):
+        program_github_authority = program_github_policy_authority_from_source(root, current)
+        if program_github_authority is None:
+            return None, ["cannot derive the closed program/GitHub policy authority from current source"]
+        refreshed["programGithubPolicyAuthorities"] = {
+            PROGRAM_GITHUB_POLICY_AUTHORITY_ID: program_github_authority,
+        }
+    if interaction_websocket_source_present(root):
+        interaction_authority = interaction_websocket_authority_from_source(root, current)
+        if interaction_authority is None:
+            return None, ["cannot derive the closed interaction WebSocket authority from current source"]
+        refreshed["interactionWebSocketAuthorities"] = {
+            INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
@@ -5214,7 +5341,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "e0ddeb698b2f2755b9fcd57f393473609859851814d4c494d4ee0aa8209fc078"),
+         "82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -6416,7 +6543,7 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
          "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
-         "8c259d0cbe9588b242bf82e395288abe1f388d12a6e26e4318cc7e52c7b2ff97"),
+         "43f2c51c4787ff0480754524b4d204f6c615c364d4bced2a81aa527f48a367a5"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
          "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
@@ -6593,6 +6720,4458 @@ def external_io_policy_authority_errors(root: Path, authorities: object,
         if entry.get("externalIoPolicyAuthority") != EXTERNAL_IO_POLICY_AUTHORITY_ID:
             errors.append(f"{identifier}: external-I/O retained evidence marker has drifted")
     return errors
+
+
+# The program/GitHub family is independently mandatory. These source-reviewed partitions
+# distinguish operator fields, transport carriers and retained semantics; IDs are actual scanner
+# identities, never invented placeholders for scanner-blind record components.
+PROGRAM_GITHUB_POLICY_AUTHORITY_ID = "ravenroot-program-github-policy-v1"
+PROGRAM_GITHUB_PATHS = {'graal': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
+ 'runtime': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java',
+ 'placement': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxLaunchPlacement.java',
+ 'launcher': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorLauncher.java',
+ 'process': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProcessLauncher.java',
+ 'selector': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java',
+ 'authoring': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java',
+ 'github': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java',
+ 'profile': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java',
+ 'store': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/SqliteGithubOperationStore.java',
+ 'githubRuntime': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubRuntime.java',
+ 'core': 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+ 'authorized': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java',
+ 'api': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java',
+ 'server': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+ 'serverMain': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+ 'served': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ServedConfiguration.java',
+ 'submission': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/ProgramBuildSubmission.java',
+ 'client': 'ravenroot/ravenroot-ui/src/runtime-client.js',
+ 'ui': 'ravenroot/ravenroot-ui/src/app.js',
+ 'script': 'deploy/dev/sandbox-supervisor.sh',
+ 'compose': 'compose.yaml',
+ 'helmValues': 'deploy/helm/ravenroot/values.yaml',
+ 'helmSchema': 'deploy/helm/ravenroot/values.schema.json',
+ 'helmDeployment': 'deploy/helm/ravenroot/templates/deployment.yaml',
+ 'kubernetes': 'deploy/kubernetes/ravenroot.yaml',
+ 'platformTest': 'scripts/tests/test_program_authoring_platform_configuration.sh',
+ 'authority': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
+ 'projection': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java',
+ 'manifest': 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
+ 'behavior': 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/ProgramNodeBehaviorFactory.java',
+ 'release': 'scripts/github_release.py'}
+
+PROGRAM_GITHUB_CLOSED_PATHS = ['deploy/dev/sandbox-supervisor.sh',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ArtifactEvidence.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramArtifactIdentity.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramDeadlineExceededException.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramRuntimeUnavailableException.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramSourceRejectedException.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramTestPayload.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubApi.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubAppReviewBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubEventsSourceBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubOperationStore.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProtocol.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubRuntime.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubValues.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubWorkflowWatchBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ProjectTransitionBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ReleasePrepareBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/SqliteGithubOperationStore.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schema-index.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-events-source.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/project-transition.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMain.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramArtifactDigest.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramWireProtocol.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxLaunchPlacement.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxPolicy.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorLauncher.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProcessLauncher.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProtocol.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/ProgramBuildSubmission.java',
+ 'scripts/github_release.py']
+
+PROGRAM_GITHUB_REQUIRED_PATHS = ['compose.yaml',
+ 'deploy/dev/sandbox-supervisor.sh',
+ 'deploy/helm/ravenroot/templates/deployment.yaml',
+ 'deploy/helm/ravenroot/values.schema.json',
+ 'deploy/helm/ravenroot/values.yaml',
+ 'deploy/kubernetes/ravenroot.yaml',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ArtifactEvidence.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramArtifactIdentity.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramDeadlineExceededException.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramRuntimeUnavailableException.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramSourceRejectedException.java',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramTestPayload.java',
+ 'ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/application/AuthorizedRavenrootApplicationTest.java',
+ 'ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/programming/ProgramAuthoringLimitsTest.java',
+ 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
+ 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/programming/InMemoryArtifactRegistry.java',
+ 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+ 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/ProgramNodeBehaviorFactory.java',
+ 'ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationProgramAuthoringLimitsTest.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubApi.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubAppReviewBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubEventsSourceBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubOperationStore.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProtocol.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubRuntime.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubValues.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubWorkflowWatchBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ProjectTransitionBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ReleasePrepareBehavior.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/SqliteGithubOperationStore.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schema-index.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-events-source.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/project-transition.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+ 'ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubOperationStoreTest.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMain.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramArtifactDigest.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramWireProtocol.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxLaunchPlacement.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxPolicy.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorLauncher.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProcessLauncher.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProtocol.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+ 'ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ServedConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/ProgramBuildSubmission.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ContentAddressedProgramBuildHttpIntegrationTest.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ProgramRuntimeConfigurationTest.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerTest.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+ 'ravenroot/ravenroot-ui/src/app-commands.js',
+ 'ravenroot/ravenroot-ui/src/app.js',
+ 'ravenroot/ravenroot-ui/src/program-language.js',
+ 'ravenroot/ravenroot-ui/src/runtime-client.js',
+ 'scripts/check_release_configuration.py',
+ 'scripts/classify_main_change.py',
+ 'scripts/github_release.py',
+ 'scripts/publish_environment_reference.py',
+ 'scripts/tests/test_program_authoring_platform_configuration.sh']
+
+PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'DefaultRavenrootApplication',
+  'ae8c521268326545cbcd458650e1f453df8446f39698c6bb69ba09b74a849721',
+  24),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'programAuthoringLimits',
+  'dadc6cd06ce283507ad44e61c04e66b4f6670fd16cf0a05982f2316e7485e2af',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'createProgramArtifact',
+  'f37dc8cf265acd5790ac2c6dd4072fc9d8eb4a1da0d53e986f8f6e13efc62ed0',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'buildProgramArtifact',
+  '9216f38ce9fa931057486f4de65acc8c04a28bcb398bf4e2bb9d90f11990d0e1',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'startProgramBuild',
+  'efe280ddc5567d11189b12aaf932ba1c6713d677686ad28d35382583d5cf8221',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'runProgramBuildPhase',
+  'b4b15e2c83fe42212441268bb6779f6d87d24e11549cab0bcd478fdfedb2164f',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java',
+  'java',
+  'DefaultRavenrootApplication',
+  'buildProgramArtifactBlocking',
+  'b31eeae95a4716888d7b9c9758c7aa15d5a72a675eee99345c7ff9bea2f9cf5e',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java',
+  'java',
+  'AuthorizedRavenrootApplication',
+  'createProgramArtifact',
+  '7bd316000e51c9ec12c3102771f84aab6dce6b0b33e39e69ec68acd8528f705e',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java',
+  'java',
+  'AuthorizedRavenrootApplication',
+  'buildProgramArtifact',
+  '3884e0e9c08c82cb8a66485e6d135049d646c6381d65bdf6dfe6679b2ad75ab2',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java',
+  'java',
+  'AuthorizedRavenrootApplication',
+  'startProgramBuild',
+  '0671457de225e38abc593ea9e03f5682d47f9dd5e7631e2529a7f33044bd6748',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java',
+  'java',
+  'AuthorizedRavenrootApplication',
+  'approveProgramArtifacts',
+  '443336a1d61834e81b77c0752167d674765b9caa24dd106a75d60304d13e5ee2',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'java',
+  'RavenrootServer',
+  'RavenrootServer',
+  '188857c0a9f4a2009815c613a2640e03a291d1d8794eb879aa583416f6e032e6',
+  20),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'java',
+  'RavenrootServer',
+  'createProgramArtifact',
+  'b0c602323943ebed17cb725dd22e082346168d912414b380018ebcba840129f6',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'java',
+  'RavenrootServer',
+  'buildProgramArtifacts',
+  '568109464c7465d6736945e863d483c79ac7e9bd009826eb73fafa3501252da7',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'java',
+  'RavenrootServer',
+  'approveProgramArtifacts',
+  'a5a98e14c5bb94ac877eac2ce7e4dbee092e2ea1c7bf9eb1cf778d7009f81ecd',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+  'java',
+  'RavenrootServerMain',
+  'run',
+  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
+  'java',
+  'ExecutionManifestResolver',
+  'programRuntimeDigestOf',
+  '307eb85ae3f0fabab1529e1bf63fa90e537c68fcee4ba9767565acadb25c711b',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
+  'java',
+  'ExecutionManifestResolver',
+  'compare',
+  '24fb3b27ecfc9ccf883992483035f72303af202ff9eb6824b4bc51f114f076fa',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
+  'java',
+  'ExecutionManifestResolver',
+  'runtime',
+  '550e28eda4b74b597acb57b5b13664f42cb532cc79d29b1d3fbfb67e7e43bf47',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
+  'java',
+  'ExecutionManifestResolver',
+  'from',
+  'd6f02f5940ab4792238e2fa9476325096b3c0dd372ff9c5d02d7a61cce934fea',
+  1),
+ ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/ProgramNodeBehaviorFactory.java',
+  'java',
+  'ProgramNodeBehaviorFactory',
+  'create',
+  '63a3a454a6eb1ddcc6f6edb7d643e223ec004164eab496799d79879e4b7cfce4',
+  1),
+ ('ravenroot/ravenroot-ui/src/runtime-client.js',
+  'javascript',
+  '',
+  'validateRuntimeConfiguration',
+  '717ee022fd7cfdf033b28f7537c53ff38c532499fe612c98a14467605d2702e0',
+  1),
+ ('ravenroot/ravenroot-ui/src/runtime-client.js',
+  'javascript',
+  '',
+  'validProgramAuthoring',
+  '9661acc90809ed711671344fe5fca492c8a3435c33693b6919f1eb23ac0c3f33',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java',
+  'java',
+  'RavenrootApplication',
+  'programAuthoringLimits',
+  '21960542d5c30643785c551154a42c6b092f8eda402882550ec1c56d312d980a',
+  1),
+ ('ravenroot/ravenroot-ui/src/app.js',
+  'javascript',
+  '',
+  'currentProgramAuthoringLimits',
+  'c0b47a04f8c03a63bce2ffcce426ed59fbd9b71c3ece50a6c100e2c02e215a9a',
+  1),
+ ('ravenroot/ravenroot-ui/src/app.js',
+  'javascript',
+  '',
+  'ensureProgramGraphReady',
+  'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
+  1),
+ ('compose.yaml', 'file', '', '', 'db747d037f2da201896a1354991e17f49ad54d0ebd6ee7113ac163c1f7eacb4b', 1),
+ ('deploy/dev/sandbox-supervisor.sh',
+  'file',
+  '',
+  '',
+  '43122152cc55f755fe22607645633a715e774c858eeeb4f4d8020a029844fba8',
+  1),
+ ('deploy/helm/ravenroot/templates/deployment.yaml',
+  'file',
+  '',
+  '',
+  '2d255fd25c807ab3a5bae504e45cd5ca9ecc9ed2e7570d6f2a845378f45d52f5',
+  1),
+ ('deploy/helm/ravenroot/values.schema.json',
+  'file',
+  '',
+  '',
+  'eaebaa1332af902783dc57fa8fdbf30029b49d9b8cf77cfe22d08cf936e9bbf6',
+  1),
+ ('deploy/helm/ravenroot/values.yaml',
+  'file',
+  '',
+  '',
+  '54c1967b6ae9390dad39cadd1d2dcfa9a8b6f4ed8a0f381da6b7e825a148ed5f',
+  1),
+ ('deploy/kubernetes/ravenroot.yaml',
+  'file',
+  '',
+  '',
+  'f2f8fd1c3be0fdd651a94bf2098d800ff42508047df1ab99cb5fb7def9c9ba60',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
+  'file',
+  '',
+  '',
+  '83bef16f30d249d951607a2769ec8fc1f0b6a1f77fbe4d35b14b339304586586',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java',
+  'file',
+  '',
+  '',
+  '1031260b2aec69db590374d3a0f221377bab0c9b05f9f3a913d02577e56866d7',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ArtifactEvidence.java',
+  'file',
+  '',
+  '',
+  '907dda0c79e3045c33110f6ca010732d4a0e81457d8f605c8976bda215314232',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramArtifactIdentity.java',
+  'file',
+  '',
+  '',
+  '590e1b84e89747ca361443541fd2b8612c5bdcccc5360a4e0cf56c9621337029',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java',
+  'file',
+  '',
+  '',
+  'ee09e9d37cb7b141e183d68a2acbd16c99ae53f09f963d2fa530a66b8263f2f0',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramDeadlineExceededException.java',
+  'file',
+  '',
+  '',
+  '7365b631e0b2c7acb3b53ac1d8f8c2dea63fa76e3464315d2c16794e30cb547a',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramRuntimeUnavailableException.java',
+  'file',
+  '',
+  '',
+  'bd3003e4be083a26b071950bfe90bd1070f6c6cc197a7db8b84eee2c3d2759b2',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramSourceRejectedException.java',
+  'file',
+  '',
+  '',
+  '655729efa2de8191f8f852e34f46d180d5183608b05ba5fec7a0723a7b70455d',
+  1),
+ ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramTestPayload.java',
+  'file',
+  '',
+  '',
+  '3b101ab9ccca75f2ed9dd49cd087ed197a5840d8e23bda0a472c3f610b6b438e',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubApi.java',
+  'file',
+  '',
+  '',
+  '63c5bf80f4685497961cce60b4b28e07525f245dace2338f5349f5248d90eb37',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubAppReviewBehavior.java',
+  'file',
+  '',
+  '',
+  '668359183339b22109995593b23921a8a548018ef38c757a4cc79e0cfb484811',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java',
+  'file',
+  '',
+  '',
+  '7834545f4a6508ed7c18cf2cad84695ebcdd474940a71f12990eda7d4252b012',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubEventsSourceBehavior.java',
+  'file',
+  '',
+  '',
+  'f2755bd419d88c18c57e4536a188a70a44f5f61296865b394dc72074621f4dc6',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubOperationStore.java',
+  'file',
+  '',
+  '',
+  '6133dcacd0a0f3d215b4a7006d806569c283dab696d032e38a8a35bf8da1dd60',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java',
+  'file',
+  '',
+  '',
+  'b490a4ff1b5009073d9e1b9928096ca24bcca4fcd37647df2ef90ee9b9071516',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProtocol.java',
+  'file',
+  '',
+  '',
+  '438ded017f25dea36992bc409c0696e37d7109d9a46e0b3e38363f0adbe6292c',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubRuntime.java',
+  'file',
+  '',
+  '',
+  '9151d198869b44f426c28c83d3ecad78c9afd81dd9e77a518028035d181f044f',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubValues.java',
+  'file',
+  '',
+  '',
+  '8e09787ebb16c0ec17b401b3a1a213597f0891dd586255f47ecfd30528b9e4b5',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubWorkflowWatchBehavior.java',
+  'file',
+  '',
+  '',
+  'd9d88824790073d8a7f7b69b70548d6ddea695c5d0af782132a0d04754022c2b',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ProjectTransitionBehavior.java',
+  'file',
+  '',
+  '',
+  'b75887aaacab1d29c444fb4dac78c578a66f60b58fc57dd0b729f1a360909e2e',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/ReleasePrepareBehavior.java',
+  'file',
+  '',
+  '',
+  'd3b35c987ac5fcb5abea4bf0636021f3e22992957b98c9df310bc9bc6a2f41ce',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/SqliteGithubOperationStore.java',
+  'file',
+  '',
+  '',
+  '26be956615614faf62f626cdf3c0470aa791b8390bb0228c9ee92723d1703edc',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schema-index.json',
+  'file',
+  '',
+  '',
+  'd548dba5a4a97fda0a1134bc39c1697c4ce8f023e71f114d5c1a4a6c017cd291',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json',
+  'file',
+  '',
+  '',
+  '33bbf245382b749e5770a6e4c11f0c31595eab13790c34480453cb948bc556f8',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-events-source.v1.schema.json',
+  'file',
+  '',
+  '',
+  'ad5d459159c9f994ffb98bcbd47fcf4f59e07c4b3a9cd34047e8bb20fd3aad32',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json',
+  'file',
+  '',
+  '',
+  'd9a669ccffd113fa8f840745448645dbd9028ab8ea470b4cac48c4816c75578d',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/project-transition.v1.schema.json',
+  'file',
+  '',
+  '',
+  'fd25ae8677ee22eda0d49fa7ce401f06b9da34b1e0cdf9ddc71ede77113f81d9',
+  1),
+ ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/resources/META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json',
+  'file',
+  '',
+  '',
+  '5c23145d4bf1505a75b7cd959e7f11312eebdba76aea4099734362ee3a8e2cd6',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java',
+  'file',
+  '',
+  '',
+  '7ff4016e93d11fc32d88ba79c8545f83ba873af8433ffaa870b27ae8d03cded4',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
+  'file',
+  '',
+  '',
+  'd980fda0dcb0229dce77f05300079d6a2d0af9b67b7323960301df7f3d321a15',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMain.java',
+  'file',
+  '',
+  '',
+  '79a602d5b9fc55b91a1edf8aa3bea4fdde94e9ef9c93d2991a3dd27369750021',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramArtifactDigest.java',
+  'file',
+  '',
+  '',
+  '6f5e2ec39f0b9e5a797053255363e5c3ee91918827f3a032650708579c89ece4',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramWireProtocol.java',
+  'file',
+  '',
+  '',
+  'a8377f92c6d7b1076001c5eef4b09cc41e28964b37581aa30c8a6db02a923dc0',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxLaunchPlacement.java',
+  'file',
+  '',
+  '',
+  'c0d606feee16eeeda9bdb455bda0c46d3765032f1386f7db1ef8d290c2697b93',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxPolicy.java',
+  'file',
+  '',
+  '',
+  '4268ae1444de778da32f652d5fe538d4cc8c9ef2d096240095b1cd9e834074c5',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorLauncher.java',
+  'file',
+  '',
+  '',
+  '01008fd455f2fecbd53bf14133956618914b3ebf719340a809e54b8a559b3def',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProcessLauncher.java',
+  'file',
+  '',
+  '',
+  '420ade2e9e284fecc5a13944fbe1d4ffa393c2474a29804b212cab23477e7c23',
+  1),
+ ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProtocol.java',
+  'file',
+  '',
+  '',
+  'd45a985f4c5ea7346d295f8043df5a781e7e08213715851f805ed7973c3ff72e',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java',
+  'file',
+  '',
+  '',
+  'c25734437dfba4463df7af4ba902aeaa35b7d38f4b277b03418ca06586ff8a42',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ServedConfiguration.java',
+  'file',
+  '',
+  '',
+  '9bdc712e9829c5cf09698c4d6ba8c1583dcd9773d89ce689a6eb5bffdf0da842',
+  1),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/ProgramBuildSubmission.java',
+  'file',
+  '',
+  '',
+  'bc3b74d5b837125df0e9076d84f945b039fe63a4fce8f1048d7d6be8ab8c9b72',
+  1),
+ ('ravenroot/ravenroot-ui/src/runtime-client.js',
+  'file',
+  '',
+  '',
+  '1932d4859d21c5a031fa4f8b4e2d63e87d353dd9c1a49187cd25a922384f4b23',
+  1),
+ ('scripts/tests/test_program_authoring_platform_configuration.sh',
+  'file',
+  '',
+  '',
+  'ec0c86229562449b5936bd9edb03a908cfe747ecfeb98c78ec02970055443c56',
+  1),
+ ('scripts/github_release.py',
+  'file',
+  '',
+  '',
+  'e3c75dd071adc670b7243fd08ec53b95a0d4b4495aff5eee9766bcf36e3414d5',
+  1),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+  'file',
+  '',
+  '',
+  'f08049184f83a6bc67494eab7ea181ac7237b7a3cf1f4bf437f074e7e4d3c0f8',
+  1),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ContentAddressedProgramBuildHttpIntegrationTest.java',
+  'file',
+  '',
+  '',
+  '123240171be8efabb69cd0baf9fc32b4809b836753f1db034b7228ed3164102b',
+  1)]
+
+PROGRAM_GITHUB_TEST_PROOFS = [['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'defaultsAndEnvironmentOverridesReachTheTypedPolicy',
+  '00daf3e663a61dd517eaa0e0798473a7ee67ea4902836103854ecbf470144a6b'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'propertiesSelectBeforeParsingAndBlankShadowsEnvironment',
+  'a90bd51f0249546c2228ed6eaf93d83cd25875a210067e5faa62dd98baf1d51f'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'standardServerPropertyHasExactPresenceSemanticsIncludingBlank',
+  'ca3760266599b6b6ee32b086177c51f506af4ff9b0628129dc637c9e0a3e4547'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'invalidSelectedSettingsRefuseWithoutEchoingValues',
+  '0fc4d7f847de0d5d22a5e1cf992cae36f36266475eee4109aba66f26386d4d8c'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'directConstructionHasTheSameCapacityBoundsAndInstancesDoNotDrift',
+  '18c4c1f275e5dd3acbc0a3e797058675a422d4eea65efae10e902df39c3463ca'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'cachePlacementDoesNotChangeFingerprintButRuntimeCapacityDoes',
+  '331bfcda177ebf0ee77bc933a40800f77575b8ac81269e1ca62f8a26d0a7c913'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfigurationTest.java',
+  'GraalVmRuntimeConfigurationTest',
+  'nonStringSelectedPropertiesRefuseInsteadOfFallingThroughToValidEnvironment',
+  'e422abe88f171f293fcb107828ddd3805586eb9b7eb97d0b60464a27e92e8eb6'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'strictV1KeepsExactLegacyArgumentsAndRefusesOverrideWithoutLaunching',
+  '1fd7ca8cd701e48fa532b81c55a3c0b20c7fee39f98f22ca693e7c1b45c54875'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'legacyInterfaceImplementationCannotIgnoreAnOverride',
+  'd054703485e653f0cc9b462a86ac35af36049910bed82e9cc9f26ffff0d9ba01'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'overridingOnlyVerificationCannotMakeInheritedLaunchIgnorePlacement',
+  '1b7f4ae09439181cc2590c5915760975988d5be5c28ddfff07b03e3726cf9503'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'malformedNonzeroOversizedAndTimedOutCapabilityNeverLaunches',
+  '4b98ef507da0eeeaa1d34551af9c07f6e2a8163e648c26fe8b61efffa73f766a'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'shippedSupervisorSetsTheActualWorkerJvmPropertyAsOneArgument',
+  '53ac92c08e3a02888b3f3026cdc10dca94f290490069dbb6c984cbb8e5f043cb'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'shippedSupervisorRejectsMalformedExtensionBeforeWorkerCreation',
+  'a1f7c5d587f36dd553aeb0b1c151ec38247156f5cc1c455b6ff44fd4d98ea563'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'shippedSupervisorRunsTheRealWorkerWithTheSelectedCache',
+  '8fa3c58fa191d8ee30c5f9e3e1969da181e58b54b45f17be48d9b98c619d87f5'],
+ ['ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/SandboxCachePlacementTest.java',
+  'SandboxCachePlacementTest',
+  'interruptedProbePreservesInterruptAndReapsItsProcess',
+  '81afed129fcc88149749b3b8b95c41ed973ebdd6050019ea597f9e73687e4976'],
+ ['ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/programming/ProgramAuthoringLimitsTest.java',
+  'ProgramAuthoringLimitsTest',
+  'propertyPresenceShadowsEnvironmentAndBlankSelectsTheDefault',
+  'ca0a1f971da978b402fdd7fad6c9e06f8f612ad0f288ec553715a7cf4510c954'],
+ ['ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/programming/ProgramAuthoringLimitsTest.java',
+  'ProgramAuthoringLimitsTest',
+  'environmentOverridesDefaultsAndMalformedOrUnsafeValuesRefuse',
+  '6d29fb782934411fc704970b1f59f68a1d9f3147f0280d6c4553cd3b9b4c389a'],
+ ['ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/programming/ProgramAuthoringLimitsTest.java',
+  'ProgramAuthoringLimitsTest',
+  'utf8AndBatchLimitsRejectBeforeConsumersRun',
+  '93f6185406d4b27e07297bd98c1bb0b822b36c2a9fb0a37967b9fd0c4ffbcccb'],
+ ['ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ProgramRuntimeConfigurationTest.java',
+  'ProgramRuntimeConfigurationTest',
+  'propertyPresencePrecedesEnvironmentAndDefault',
+  'e90a42db1ad545cb66b74a0f4a6807d980abfd85b3d770346e870b556c32a747'],
+ ['ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ProgramRuntimeConfigurationTest.java',
+  'ProgramRuntimeConfigurationTest',
+  'blankUnknownAndNonStringSelectedPropertiesRefuseWithoutEnvironmentFallback',
+  '32a28cf8e35cc3d00b08aa7f8efec7b2cd005ef83a63c6b92663cdebb108660b'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+  'GithubConfigurationTest',
+  'documentedShapeAcceptsNumericWorkflowIdsAndBotLogin',
+  'df7791023428a567845abe88dc0234cc4f2ccf52240ca7d4edd42b35c1296b0b'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+  'GithubConfigurationTest',
+  'tenantCannotSelectAnotherTenantsProfile',
+  'db21e7b89defe6432cec905f560447f36c1ec9b318faa644d4561121ffbe6bcd'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+  'GithubConfigurationTest',
+  'unknownFieldsAndNonCanonicalBase64FailClosed',
+  '624a8d10ad4e2d639a6e345dec3d2487c332366fdc4c5b484d5c2d2d8a24b0ce'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+  'GithubConfigurationTest',
+  'propertyPresenceShadowsEnvironmentAndBlankSelectedValueRefuses',
+  'd8e553c588c5ff0b0799ea2de7668860722eba2912a4ed18ca7d3228aa3f6b3f'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+  'GithubConfigurationTest',
+  'storePolicyDirectConstructorEnforcesJsonBoundsAndPathRules',
+  '20408263ab11c1e013e1c68a800c618920cc925462c4554436ed7d7ee2ee16de'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubConfigurationTest.java',
+  'GithubConfigurationTest',
+  'profileContractDigestHasTaggedCanonicalCollectionsAndExcludesCredentials',
+  '1b1a8e1fba4ebba2ea8edff345b2adf1f3ab3f8152c01e686f04e1f96727bc20'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubOperationStoreTest.java',
+  'GithubOperationStoreTest',
+  'semanticProfileMismatchRefusesBeforeReplayTakeoverOrProjectRolloverMutation',
+  '17bb37ca0bba38050dad2399bfa25dfb4ee4f27935bdf6100bcd138b718237eb'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubOperationStoreTest.java',
+  'GithubOperationStoreTest',
+  'migratedLegacyUnboundOperationRefusesWithoutBackfillOrMutation',
+  'bb810a4da1189428372efe9a541cb32ed94f25ab2e5e3e04760790201868057f'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubOperationStoreTest.java',
+  'GithubOperationStoreTest',
+  'deliveryBindingSurvivesReopenRejectsCollisionAndIsProfileScoped',
+  'fd3d3fdfceaa9dada73336c7d4cb0bd9cfed8dd50c9494b465ed80dc5d12adee'],
+ ['ravenroot/ravenroot-extensions/ravenroot-github/src/test/java/ai/ravenroot/extensions/github/GithubOperationStoreTest.java',
+  'GithubOperationStoreTest',
+  'quotasArePerProfileAndExpiredStaleRowsAreReclaimedAfterRetention',
+  '3bdf10ba578a18325e37839e54d8f4ee13bc799a91311ff379c5442bebe36117'],
+ ('ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationProgramAuthoringLimitsTest.java',
+  'DefaultRavenrootApplicationProgramAuthoringLimitsTest',
+  'customLimitsRefuseCreateAndSingleBuildBeforeArtifactMutation',
+  '4bc4c972583ba69a2428be961b2ac179e4bf82b234af8c323e2c730629b5fdd9'),
+ ('ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationProgramAuthoringLimitsTest.java',
+  'DefaultRavenrootApplicationProgramAuthoringLimitsTest',
+  'customBatchLimitRefusesBeforeDurableBuildReservation',
+  '89f9e51e4b5c857d04e99b4e5526af78dacfec09258cf177c613f4346d028d77'),
+ ('ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/application/AuthorizedRavenrootApplicationTest.java',
+  'AuthorizedRavenrootApplicationTest',
+  'programAuthoringLimitsRefuseBeforeAuthorizationAuditOrDelegateSideEffects',
+  'c1e92dbfc29f14457145204656724e3866fa68f72859d7626a0767ff3f20b7a4'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerTest.java',
+  'RavenrootServerTest',
+  'configuredProgramSourceByteLimitRejectsBeforeArtifactCreation',
+  'b18de5730145604618d950064a57953a0f92a32b8d48476dfa447c07ddf3538f'),
+ ('ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+  'GraalVmWorkerMainResourceCacheDefaultTest',
+  'aMissingImageRootLeavesThePropertyUntouched',
+  '5110578eca24592a4930b4d43603ea7215dceadc482d0c7b063078fe69f6a4f7'),
+ ('ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+  'GraalVmWorkerMainResourceCacheDefaultTest',
+  'anExistingImageRootAppliesTheDefault',
+  'bf1ad575233af4f89e12c6d75396d74db72ce260bc2471c9d4f1ef1263ed8aa2'),
+ ('ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+  'GraalVmWorkerMainResourceCacheDefaultTest',
+  'anEnvironmentOverrideWinsOverTheDefault',
+  '5b5fcfd54d82ac1300fd60d17a15aef1cb2fbe5a19e500fee11dbcf74e8191c7'),
+ ('ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+  'GraalVmWorkerMainResourceCacheDefaultTest',
+  'aBlankEnvironmentOverrideFallsThroughToTheDefault',
+  'afc2dba06cb00f3089e93e4167c727fd8f4f82d333e7e6f07f7f94a06655abf5'),
+ ('ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+  'GraalVmWorkerMainResourceCacheDefaultTest',
+  'anAlreadySetPropertyIsNeverOverridden',
+  '33a9221a66a01137ba3b8e01d837b50a40492883e8a67384549bb4ed76dfc551'),
+ ('ravenroot/ravenroot-programming-graalvm/src/test/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMainResourceCacheDefaultTest.java',
+  'GraalVmWorkerMainResourceCacheDefaultTest',
+  'aPresentBlankStandardPropertyStillShadowsEnvironmentAndImageDefault',
+  '379ad592af7932981378f9aa070eed189dccd95b3050745b92c3525d2db1bacb'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+  'ProgramBuildSubmissionTest',
+  'configuredSourceAndBatchLimitsApplyDuringParsing',
+  '8c3cfaf996efd49b4cda38f965da744b7e8258d3c1ccfd0a3e77a1428563b188'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+  'ProgramBuildSubmissionTest',
+  'buildEnvelopeWidensOnlyEncodedAndSourceTextBudgets',
+  'aa413e27500bcf0854dda7ab34c6d7a134749fda5fb9b549bb75f61e243f858f'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+  'ProgramBuildSubmissionTest',
+  'widenedSourceEnvelopePreservesGenericLimitsEverywhereElse',
+  '9ae1d821bc02a02302d97a693a6e96ce55d86e1267323ac95d018dff07b8e655'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+  'ProgramBuildSubmissionTest',
+  'compatibilityOverloadUsesThePublishedAuthoringEnvelope',
+  '632afe42847f9cb4b4f4bfb113e286b691c55d11f11db2b94e55ca97d99c6c65'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/payload/ProgramBuildSubmissionTest.java',
+  'ProgramBuildSubmissionTest',
+  'compatibilityOverloadRetainsThePublishedBatchCeiling',
+  '9e03c96237e52fe91bc7c703cfcf1abddb63b04c56d741b9e353a8294b3ea126'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ContentAddressedProgramBuildHttpIntegrationTest.java',
+  'ContentAddressedProgramBuildHttpIntegrationTest',
+  'buildRouteMakesTheSelectedRequestAndUtf8SourceCeilingsReachable',
+  'b8626e9a3da543681e670ea9bb368a333f76f0741c56814cea70e5a55a0e79e0')]
+
+PROGRAM_GITHUB_SHARED_METHODS = {'core': ['DefaultRavenrootApplication',
+          ['DefaultRavenrootApplication',
+           'programAuthoringLimits',
+           'createProgramArtifact',
+           'buildProgramArtifact',
+           'startProgramBuild',
+           'runProgramBuildPhase',
+           'buildProgramArtifactBlocking']],
+ 'authorized': ['AuthorizedRavenrootApplication',
+                ['createProgramArtifact',
+                 'buildProgramArtifact',
+                 'startProgramBuild',
+                 'approveProgramArtifacts']],
+ 'server': ['RavenrootServer',
+            ['RavenrootServer', 'createProgramArtifact', 'buildProgramArtifacts', 'approveProgramArtifacts']],
+ 'serverMain': ['RavenrootServerMain', ['run']],
+ 'manifest': ['ExecutionManifestResolver', ['programRuntimeDigestOf', 'compare', 'runtime', 'from']],
+ 'behavior': ['ProgramNodeBehaviorFactory', ['create']],
+ 'client': ['', ['validateRuntimeConfiguration', 'validProgramAuthoring']],
+ 'api': ['RavenrootApplication', ['programAuthoringLimits']],
+ 'ui': ['', ['currentProgramAuthoringLimits', 'ensureProgramGraphReady']]}
+
+PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-00dc7c6b323744d9427e',
+ 'oc-107e73202ff972e53169',
+ 'oc-20f796f0e15a1c389586',
+ 'oc-23f50ddca7ea65fc2aec',
+ 'oc-2d7c516244dfb35125e6',
+ 'oc-2f2f5e423979f041f17a',
+ 'oc-32868e003e570b96e929',
+ 'oc-36015132ceabd984f796',
+ 'oc-4676e985e58356eee620',
+ 'oc-4ae010a2fb7f9bfd94ea',
+ 'oc-4de831fe7ec2c66a5f5a',
+ 'oc-4e82a9fdd4a3c358b6e8',
+ 'oc-564dc62e9653b1dea6d1',
+ 'oc-5993d8edf438fa1365c6',
+ 'oc-5f4310e7be163ee262b8',
+ 'oc-63047f162d89117e20f5',
+ 'oc-67dea8d9cc0d391132e7',
+ 'oc-6d43d979c592f3e0c1e2',
+ 'oc-6db386ed0c189a0fa9a3',
+ 'oc-706e27343328280fa9f1',
+ 'oc-75871ec5b862ae2d8200',
+ 'oc-803af2d60d6a6bb975c2',
+ 'oc-813a65045cfb64967a71',
+ 'oc-8561e4404c8819c4a62f',
+ 'oc-86ec24b91c7449c418be',
+ 'oc-886d1581ff889079e85d',
+ 'oc-890813c7fb2d8861e36f',
+ 'oc-92e7a625ae5d828264bc',
+ 'oc-9afebfed0a8eeafb99ce',
+ 'oc-a35ea52a7d68498116e3',
+ 'oc-a76818611ea0b6380387',
+ 'oc-a7b1db9faf39bf5173ee',
+ 'oc-a81f4fb3fb11c5ced173',
+ 'oc-ab46d6e79a37d169af02',
+ 'oc-ab94f01a1a6f66583729',
+ 'oc-b1ef322d310829b4b6af',
+ 'oc-b29bc94bb970f4cbefbf',
+ 'oc-b346d4d4b0b2a77d108c',
+ 'oc-b5679b1c894831977b55',
+ 'oc-bee73cb21d5309341327',
+ 'oc-d717c8bf6cf643f8709d',
+ 'oc-d738e23c551e8a4976e5',
+ 'oc-d8de7d03e78831997ec0',
+ 'oc-d9287bd545e51210b0b1',
+ 'oc-df7b0b61ca93b2fff91f',
+ 'oc-dfa004a7732d5296622f',
+ 'oc-e33e0e11df5aded1073e',
+ 'oc-e5b8535d9326cf51d46d',
+ 'oc-f21e86ac333e9d880b35',
+ 'oc-f49404dab093ca3f78e9']
+
+PROGRAM_GITHUB_CONTRACTS = [{'setting': 'program.runtime.selector',
+  'owner': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java#ProgramRuntimeConfiguration',
+  'field': 'runtime',
+  'bindings': ['ravenroot.program.runtime', 'RAVENROOT_PROGRAM_RUNTIME'],
+  'defaultExpression': 'GRAALVM',
+  'scope': 'Deployment runtime authority',
+  'pinning': 'Existing programRuntimeDigest drift refusal; cache placement excluded',
+  'jsonField': None,
+  'candidateIds': ['oc-21e1e419dc244cb4397f',
+                   'oc-34460b34d59b04a90229',
+                   'oc-716b0aaf3776fc84aa13',
+                   'oc-ad3dda982d6cb774519d',
+                   'oc-b445c06575143bcd409d',
+                   'oc-d5c33a36e40203d7ad8b'],
+  'defaultCandidateIds': ['oc-21e1e419dc244cb4397f',
+                          'oc-34460b34d59b04a90229',
+                          'oc-716b0aaf3776fc84aa13',
+                          'oc-ad3dda982d6cb774519d',
+                          'oc-b445c06575143bcd409d',
+                          'oc-d5c33a36e40203d7ad8b'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java#ProgramRuntimeConfiguration',
+                    'field': 'runtime',
+                    'jsonField': None}]},
+ {'setting': 'program.runtime.supervisor-executable',
+  'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+  'field': 'supervisor',
+  'bindings': ['ravenroot.graal.sandbox-supervisor', 'RAVENROOT_GRAAL_SANDBOX_SUPERVISOR'],
+  'defaultExpression': 'absent: fail closed',
+  'scope': 'Deployment runtime authority',
+  'pinning': 'Existing programRuntimeDigest drift refusal; cache placement excluded',
+  'jsonField': None,
+  'candidateIds': ['oc-6a4900b4bc1a65860284',
+                   'oc-a04c982f15e3d1005e15',
+                   'oc-c38e30f65327350b41a5',
+                   'oc-cc75a800088b5b76bd33'],
+  'defaultCandidateIds': ['oc-6a4900b4bc1a65860284',
+                          'oc-a04c982f15e3d1005e15',
+                          'oc-c38e30f65327350b41a5',
+                          'oc-cc75a800088b5b76bd33'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+                    'field': 'supervisor',
+                    'jsonField': None}]},
+ {'setting': 'program.runtime.java-executable',
+  'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+  'field': 'javaExecutable',
+  'bindings': ['ravenroot.graal.java', 'RAVENROOT_GRAAL_JAVA'],
+  'defaultExpression': 'java.home/bin/java',
+  'scope': 'Deployment runtime authority',
+  'pinning': 'Existing programRuntimeDigest drift refusal; cache placement excluded',
+  'jsonField': None,
+  'candidateIds': ['oc-121799986f759d40b77c',
+                   'oc-7e52d086a8df3ed35316',
+                   'oc-af933529d211226b9af2',
+                   'oc-ef9fc8d9035d24fa9e2e'],
+  'defaultCandidateIds': ['oc-121799986f759d40b77c',
+                          'oc-7e52d086a8df3ed35316',
+                          'oc-af933529d211226b9af2',
+                          'oc-ef9fc8d9035d24fa9e2e'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+                    'field': 'javaExecutable',
+                    'jsonField': None}]},
+ {'setting': 'program.runtime.timeout-ms',
+  'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+  'field': 'timeout',
+  'bindings': ['ravenroot.program.timeout-ms', 'RAVENROOT_PROGRAM_TIMEOUT_MS'],
+  'defaultExpression': '5000 milliseconds',
+  'scope': 'Deployment runtime authority',
+  'pinning': 'Existing programRuntimeDigest drift refusal; cache placement excluded',
+  'jsonField': None,
+  'candidateIds': ['oc-039026a645f722f997c8',
+                   'oc-2f409530f268d9c2d780',
+                   'oc-3e2b10617b8bc5f33c5d',
+                   'oc-595d70d47de38eebf8c3',
+                   'oc-85f05428fa19e8c87b17',
+                   'oc-9e0c1dbc8efa9120151f',
+                   'oc-a6b53eda69e9e2552ccd',
+                   'oc-ae09f5cd6144909f586f',
+                   'oc-b20fb66aa8ac188f1507',
+                   'oc-c0248f55387a529f6401',
+                   'oc-e23b923fccecafc21398'],
+  'defaultCandidateIds': ['oc-a6b53eda69e9e2552ccd'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+                    'field': 'timeout',
+                    'jsonField': None}]},
+ {'setting': 'program.runtime.max-heap-mib',
+  'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+  'field': 'maxHeapMegabytes',
+  'bindings': ['ravenroot.program.max-heap-mb', 'RAVENROOT_PROGRAM_MAX_HEAP_MB'],
+  'defaultExpression': '64 MiB',
+  'scope': 'Deployment runtime authority',
+  'pinning': 'Existing programRuntimeDigest drift refusal; cache placement excluded',
+  'jsonField': None,
+  'candidateIds': ['oc-0b6296663f6a49b5a2b4',
+                   'oc-27a3edece733df9153e7',
+                   'oc-2dd6f89a1a4faf80c6b6',
+                   'oc-6ac0313bfee604ac0e82',
+                   'oc-850ff8d7b11215dd2b7e',
+                   'oc-8942308bc63f6c5e9823',
+                   'oc-9d20fb1846b65ab87b39',
+                   'oc-a7bcdb9eb6014a28fed7',
+                   'oc-d46f9ed898519f399b12',
+                   'oc-e88d15e0ab1ad8b7c88c'],
+  'defaultCandidateIds': ['oc-d46f9ed898519f399b12'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+                    'field': 'maxHeapMegabytes',
+                    'jsonField': None}]},
+ {'setting': 'program.runtime.resource-cache-directory',
+  'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+  'field': 'placement',
+  'bindings': ['polyglot.engine.userResourceCache',
+               'ravenroot.graal.resource-cache-dir',
+               'RAVENROOT_GRAAL_RESOURCE_CACHE_DIR'],
+  'defaultExpression': 'legacy supervisor/worker placement; no implicit override',
+  'scope': 'Deployment runtime authority',
+  'pinning': 'Existing programRuntimeDigest drift refusal; cache placement excluded',
+  'jsonField': None,
+  'candidateIds': ['oc-4dc43778a66a6fcc8aa4',
+                   'oc-6c9fe8930da195f242c8',
+                   'oc-6ccb68d5b86b598791eb',
+                   'oc-84f484bf9b122950b5bb',
+                   'oc-8f4c3f784982e3b810d3',
+                   'oc-94da34696e92da4a521e',
+                   'oc-e0730229c59e724444d9',
+                   'oc-f358da8907f10684eb51'],
+  'defaultCandidateIds': ['oc-4dc43778a66a6fcc8aa4',
+                          'oc-6c9fe8930da195f242c8',
+                          'oc-6ccb68d5b86b598791eb',
+                          'oc-84f484bf9b122950b5bb',
+                          'oc-8f4c3f784982e3b810d3',
+                          'oc-94da34696e92da4a521e',
+                          'oc-e0730229c59e724444d9',
+                          'oc-f358da8907f10684eb51'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java#GraalVmRuntimeConfiguration',
+                    'field': 'placement',
+                    'jsonField': None}]},
+ {'setting': 'program.authoring.source-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java#ProgramAuthoringLimits',
+  'field': 'maxSourceBytes',
+  'bindings': ['ravenroot.program.authoring.max-source-bytes',
+               'RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES'],
+  'defaultExpression': 'ProgramArtifactIdentity.MAX_SOURCE_BYTES',
+  'scope': 'Current authoring admission; no manifest pin',
+  'pinning': 'Immutable deployment snapshot shared by API/core/server/UI; not execution-pinned',
+  'jsonField': None,
+  'candidateIds': ['oc-0022f13eea3dcb3bd16c',
+                   'oc-01dab9ee14f89ad2d150',
+                   'oc-0b39b24797b39f7040b4',
+                   'oc-18f6ae6687bc06a7d8cc',
+                   'oc-2232ac5413f870e5234a',
+                   'oc-29d16b9a417d1f7ff9a8',
+                   'oc-4bfbdaec619b675d5230',
+                   'oc-7363da44bdffee08210b',
+                   'oc-8b0b93860a1ca4265268',
+                   'oc-a22285f0e75bad40c807'],
+  'defaultCandidateIds': ['oc-0022f13eea3dcb3bd16c',
+                          'oc-01dab9ee14f89ad2d150',
+                          'oc-0b39b24797b39f7040b4',
+                          'oc-18f6ae6687bc06a7d8cc',
+                          'oc-2232ac5413f870e5234a',
+                          'oc-29d16b9a417d1f7ff9a8',
+                          'oc-4bfbdaec619b675d5230',
+                          'oc-7363da44bdffee08210b',
+                          'oc-8b0b93860a1ca4265268',
+                          'oc-a22285f0e75bad40c807'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java#ProgramAuthoringLimits',
+                    'field': 'maxSourceBytes',
+                    'jsonField': None}]},
+ {'setting': 'program.authoring.build-request-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java#ProgramAuthoringLimits',
+  'field': 'maxBuildRequestBytes',
+  'bindings': ['ravenroot.program.authoring.max-build-request-bytes',
+               'RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES'],
+  'defaultExpression': '10 MiB',
+  'scope': 'Current authoring admission; no manifest pin',
+  'pinning': 'Immutable deployment snapshot shared by API/core/server/UI; not execution-pinned',
+  'jsonField': None,
+  'candidateIds': ['oc-14b50129bad2e6981796',
+                   'oc-595092e3bf007905cfb7',
+                   'oc-60fbb8939f739802d943',
+                   'oc-6fd8d84ff05af9a61511',
+                   'oc-85b08f75b4fe65fc5576',
+                   'oc-a9951ac7b2c77a297519',
+                   'oc-ab1cfbfc34c825e3efb8',
+                   'oc-b0d112f36dacd32aeadd',
+                   'oc-d3f50292bf3c93bf7bdf',
+                   'oc-fac91468184c4d8ecb83'],
+  'defaultCandidateIds': ['oc-14b50129bad2e6981796',
+                          'oc-595092e3bf007905cfb7',
+                          'oc-60fbb8939f739802d943',
+                          'oc-6fd8d84ff05af9a61511',
+                          'oc-85b08f75b4fe65fc5576',
+                          'oc-a9951ac7b2c77a297519',
+                          'oc-ab1cfbfc34c825e3efb8',
+                          'oc-b0d112f36dacd32aeadd',
+                          'oc-d3f50292bf3c93bf7bdf',
+                          'oc-fac91468184c4d8ecb83'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java#ProgramAuthoringLimits',
+                    'field': 'maxBuildRequestBytes',
+                    'jsonField': None}]},
+ {'setting': 'program.authoring.batch-size',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java#ProgramAuthoringLimits',
+  'field': 'maxProgramsPerBuild',
+  'bindings': ['ravenroot.program.authoring.max-programs-per-build',
+               'RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD'],
+  'defaultExpression': '256',
+  'scope': 'Current authoring admission; no manifest pin',
+  'pinning': 'Immutable deployment snapshot shared by API/core/server/UI; not execution-pinned',
+  'jsonField': None,
+  'candidateIds': ['oc-02299097759afbe7af3d',
+                   'oc-7c50fa39acbb7503f065',
+                   'oc-8bf84db5638a9645efdd',
+                   'oc-98dbf090e77ae38abe1a',
+                   'oc-9ef96869d76ae132394c',
+                   'oc-d9dc0a24cc6934cedca0',
+                   'oc-de193b06b73465b7d418',
+                   'oc-f7c1cbc1516fd37fcba4',
+                   'oc-f8de274ee8dde6b82a1d',
+                   'oc-fa26f1430070d22fd88f',
+                   'oc-fc34ff3db40487ecf316'],
+  'defaultCandidateIds': ['oc-02299097759afbe7af3d',
+                          'oc-7c50fa39acbb7503f065',
+                          'oc-8bf84db5638a9645efdd',
+                          'oc-98dbf090e77ae38abe1a',
+                          'oc-9ef96869d76ae132394c',
+                          'oc-d9dc0a24cc6934cedca0',
+                          'oc-de193b06b73465b7d418',
+                          'oc-f7c1cbc1516fd37fcba4',
+                          'oc-f8de274ee8dde6b82a1d',
+                          'oc-fa26f1430070d22fd88f',
+                          'oc-fc34ff3db40487ecf316'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/programming/ProgramAuthoringLimits.java#ProgramAuthoringLimits',
+                    'field': 'maxProgramsPerBuild',
+                    'jsonField': None}]},
+ {'setting': 'github.ingress.listener-id',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'listenerId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.listenerId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-69bc834dd541ccb22363', 'oc-ba5e4a4361dbc9505a57'],
+  'defaultCandidateIds': ['oc-69bc834dd541ccb22363', 'oc-ba5e4a4361dbc9505a57'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'listenerId',
+                    'jsonField': 'authority.listenerId'}]},
+ {'setting': 'github.ingress.path-prefix',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'pathPrefix',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.pathPrefix',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-0428eeddb81073222622', 'oc-c2b27f1a97ed73351d91'],
+  'defaultCandidateIds': ['oc-0428eeddb81073222622', 'oc-c2b27f1a97ed73351d91'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'pathPrefix',
+                    'jsonField': 'authority.pathPrefix'}]},
+ {'setting': 'github.ingress.required-scopes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'requiredScopes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.requiredScopes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-06717fdad5cf935c6bc5', 'oc-575ee651efa6ef9ab81d', 'oc-a0387e9cf871b3c721be'],
+  'defaultCandidateIds': ['oc-06717fdad5cf935c6bc5', 'oc-575ee651efa6ef9ab81d', 'oc-a0387e9cf871b3c721be'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'requiredScopes',
+                    'jsonField': 'authority.requiredScopes'}]},
+ {'setting': 'github.ingress.max-routes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'maxRoutes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.maxRoutes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-51735fe645c85235990f', 'oc-7a24cc70e496d4051bbb', 'oc-8911f700c9b514355ea7'],
+  'defaultCandidateIds': ['oc-51735fe645c85235990f', 'oc-7a24cc70e496d4051bbb', 'oc-8911f700c9b514355ea7'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'maxRoutes',
+                    'jsonField': 'authority.maxRoutes'}]},
+ {'setting': 'github.ingress.max-concurrent-requests',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'maxConcurrentRequests',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.maxConcurrentRequests',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-6496be479b02aaa2946d', 'oc-e000b97f13127b623c1d', 'oc-e34636d84405316b74dd'],
+  'defaultCandidateIds': ['oc-6496be479b02aaa2946d', 'oc-e000b97f13127b623c1d', 'oc-e34636d84405316b74dd'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'maxConcurrentRequests',
+                    'jsonField': 'authority.maxConcurrentRequests'}]},
+ {'setting': 'github.ingress.max-request-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'maxRequestBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.maxRequestBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-0b4f6679663c76723293',
+                   'oc-2ccbd03e18ebaec3b39a',
+                   'oc-a43c80f1e322c1e9512e',
+                   'oc-b44dc131bfb50e15ede4',
+                   'oc-c1890b480aa00cef3ac4'],
+  'defaultCandidateIds': ['oc-0b4f6679663c76723293',
+                          'oc-2ccbd03e18ebaec3b39a',
+                          'oc-a43c80f1e322c1e9512e',
+                          'oc-b44dc131bfb50e15ede4',
+                          'oc-c1890b480aa00cef3ac4'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'maxRequestBytes',
+                    'jsonField': 'authority.maxRequestBytes'}]},
+ {'setting': 'github.ingress.max-response-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'maxResponseBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.maxResponseBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-369d5d7ab42a99e9539f',
+                   'oc-4521b819685cf9853c70',
+                   'oc-c38dad17c668cd3d298a',
+                   'oc-e37575f48f8d824640f6',
+                   'oc-f27d172eddf9b044873b'],
+  'defaultCandidateIds': ['oc-369d5d7ab42a99e9539f',
+                          'oc-4521b819685cf9853c70',
+                          'oc-c38dad17c668cd3d298a',
+                          'oc-e37575f48f8d824640f6',
+                          'oc-f27d172eddf9b044873b'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'maxResponseBytes',
+                    'jsonField': 'authority.maxResponseBytes'}]},
+ {'setting': 'github.ingress.request-timeout-ms',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+  'field': 'requestTimeout',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'authority.requestTimeoutMs',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': ['oc-0df394fdcaedb4eabced', 'oc-d7173bf3fbdcecca4bb0', 'oc-ec2074d97efee6860a08'],
+  'defaultCandidateIds': ['oc-0df394fdcaedb4eabced', 'oc-d7173bf3fbdcecca4bb0', 'oc-ec2074d97efee6860a08'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java#IngressAuthorityDeclaration',
+                    'field': 'requestTimeout',
+                    'jsonField': 'authority.requestTimeoutMs'}]},
+ {'setting': 'github.projection.max-relative-path-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+  'field': 'maxRelativePathBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'projection.maxRelativePathBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+                    'field': 'maxRelativePathBytes',
+                    'jsonField': 'projection.maxRelativePathBytes'}]},
+ {'setting': 'github.projection.max-query-parameters',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+  'field': 'maxQueryParameters',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'projection.maxQueryParameters',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+                    'field': 'maxQueryParameters',
+                    'jsonField': 'projection.maxQueryParameters'}]},
+ {'setting': 'github.projection.max-query-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+  'field': 'maxQueryBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'projection.maxQueryBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+                    'field': 'maxQueryBytes',
+                    'jsonField': 'projection.maxQueryBytes'}]},
+ {'setting': 'github.projection.max-header-count',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+  'field': 'maxHeaderCount',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'projection.maxHeaderCount',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+                    'field': 'maxHeaderCount',
+                    'jsonField': 'projection.maxHeaderCount'}]},
+ {'setting': 'github.projection.max-header-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+  'field': 'maxHeaderBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'projection.maxHeaderBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+                    'field': 'maxHeaderBytes',
+                    'jsonField': 'projection.maxHeaderBytes'}]},
+ {'setting': 'github.projection.max-header-value-bytes',
+  'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+  'field': 'maxHeaderValueBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'projection.maxHeaderValueBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java#IngressRequestProjectionPolicy',
+                    'field': 'maxHeaderValueBytes',
+                    'jsonField': 'projection.maxHeaderValueBytes'}]},
+ {'setting': 'github.store.path',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+  'field': 'path',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'store.path',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+                    'field': 'path',
+                    'jsonField': 'store.path'}]},
+ {'setting': 'github.store.max-operations',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+  'field': 'maxOperations',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'store.maxOperations',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+                    'field': 'maxOperations',
+                    'jsonField': 'store.maxOperations'}]},
+ {'setting': 'github.store.retention-hours',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+  'field': 'retentionHours',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'store.retentionHours',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+                    'field': 'retentionHours',
+                    'jsonField': 'store.retentionHours'}]},
+ {'setting': 'github.store.lease-ms',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+  'field': 'leaseMs',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'store.leaseMs',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#StorePolicy',
+                    'field': 'leaseMs',
+                    'jsonField': 'store.leaseMs'}]},
+ {'setting': 'github.profile.name',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'name',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'name',
+                    'jsonField': 'profiles.<name>'}]},
+ {'setting': 'github.profile.tenant-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'tenantId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.tenantId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'tenantId',
+                    'jsonField': 'profiles.<name>.tenantId'}]},
+ {'setting': 'github.profile.api-origin',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'apiOrigin',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.apiOrigin',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'apiOrigin',
+                    'jsonField': 'profiles.<name>.apiOrigin'}]},
+ {'setting': 'github.profile.owner',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'owner',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.owner',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'owner',
+                    'jsonField': 'profiles.<name>.owner'}]},
+ {'setting': 'github.profile.repository',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'repository',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.repository',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'repository',
+                    'jsonField': 'profiles.<name>.repository'}]},
+ {'setting': 'github.profile.repository-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'repositoryId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.repositoryId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'repositoryId',
+                    'jsonField': 'profiles.<name>.repositoryId'}]},
+ {'setting': 'github.profile.installation-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'installationId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.installationId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'installationId',
+                    'jsonField': 'profiles.<name>.installationId'}]},
+ {'setting': 'github.profile.reviewer-login',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'reviewerLogin',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.reviewerLogin',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'reviewerLogin',
+                    'jsonField': 'profiles.<name>.reviewerLogin'}]},
+ {'setting': 'github.profile.credential-binding-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'credentialBindingId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.credentialBindingId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'credentialBindingId',
+                    'jsonField': 'profiles.<name>.credentialBindingId'}]},
+ {'setting': 'github.profile.credential-reference',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'credentialReference',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.credentialReference',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'credentialReference',
+                    'jsonField': 'profiles.<name>.credentialReference'}]},
+ {'setting': 'github.profile.webhook-secret-reference',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'webhookSecretReference',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.webhookSecretReference',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'webhookSecretReference',
+                    'jsonField': 'profiles.<name>.webhookSecretReference'}]},
+ {'setting': 'github.profile.route',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'route',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.route',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'route',
+                    'jsonField': 'profiles.<name>.route'}]},
+ {'setting': 'github.profile.events',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'webhookEvents',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.events',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Current deployment/source authority; excluded from durable operation semantics. Credentials '
+             'remain references, never secret values.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'webhookEvents',
+                    'jsonField': 'profiles.<name>.events'}]},
+ {'setting': 'github.profile.workflow-ids',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'workflowIds',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.workflowIds',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'workflowIds',
+                    'jsonField': 'profiles.<name>.workflowIds'}]},
+ {'setting': 'github.profile.timeout-ms',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'timeoutMs',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.limits.timeoutMs',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'timeoutMs',
+                    'jsonField': 'profiles.<name>.limits.timeoutMs'}]},
+ {'setting': 'github.profile.max-request-bytes',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'maxRequestBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.limits.maxRequestBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'maxRequestBytes',
+                    'jsonField': 'profiles.<name>.limits.maxRequestBytes'}]},
+ {'setting': 'github.profile.max-response-bytes',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'maxResponseBytes',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.limits.maxResponseBytes',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'maxResponseBytes',
+                    'jsonField': 'profiles.<name>.limits.maxResponseBytes'}]},
+ {'setting': 'github.profile.max-concurrency',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'maxConcurrency',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.limits.maxConcurrency',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'maxConcurrency',
+                    'jsonField': 'profiles.<name>.limits.maxConcurrency'}]},
+ {'setting': 'github.profile.max-polls',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'maxPolls',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.limits.maxPolls',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'maxPolls',
+                    'jsonField': 'profiles.<name>.limits.maxPolls'}]},
+ {'setting': 'github.profile.poll-interval-ms',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+  'field': 'pollIntervalMs',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.limits.pollIntervalMs',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#GithubProfile',
+                    'field': 'pollIntervalMs',
+                    'jsonField': 'profiles.<name>.limits.pollIntervalMs'}]},
+ {'setting': 'github.profile.project.project-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'projectId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.projectId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'projectId',
+                    'jsonField': 'profiles.<name>.project.projectId'}]},
+ {'setting': 'github.profile.project.status-field-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'statusFieldId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.statusFieldId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'statusFieldId',
+                    'jsonField': 'profiles.<name>.project.statusFieldId'}]},
+ {'setting': 'github.profile.project.attempts-field-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'attemptsFieldId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.attemptsFieldId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'attemptsFieldId',
+                    'jsonField': 'profiles.<name>.project.attemptsFieldId'}]},
+ {'setting': 'github.profile.project.generation-field-id',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'generationFieldId',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.generationFieldId',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'generationFieldId',
+                    'jsonField': 'profiles.<name>.project.generationFieldId'}]},
+ {'setting': 'github.profile.project.status-options',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'statusOptions',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.statusOptions',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'statusOptions',
+                    'jsonField': 'profiles.<name>.project.statusOptions'}]},
+ {'setting': 'github.profile.project.allowed-transitions',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'allowedTransitions',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.allowedTransitions',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'allowedTransitions',
+                    'jsonField': 'profiles.<name>.project.allowedTransitions'}]},
+ {'setting': 'github.profile.project.claim-transition',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+  'field': 'claimTransition',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.project.claimTransition',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ProjectPolicy',
+                    'field': 'claimTransition',
+                    'jsonField': 'profiles.<name>.project.claimTransition'}]},
+ {'setting': 'github.profile.release.branch',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+  'field': 'branch',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.release.branch',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+                    'field': 'branch',
+                    'jsonField': 'profiles.<name>.release.branch'}]},
+ {'setting': 'github.profile.release.version-path',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+  'field': 'versionPath',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.release.versionPath',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+                    'field': 'versionPath',
+                    'jsonField': 'profiles.<name>.release.versionPath'}]},
+ {'setting': 'github.profile.release.fragments-path',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+  'field': 'fragmentsPath',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.release.fragmentsPath',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+                    'field': 'fragmentsPath',
+                    'jsonField': 'profiles.<name>.release.fragmentsPath'}]},
+ {'setting': 'github.profile.release.allowed-kinds',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+  'field': 'allowedKinds',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.release.allowedKinds',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+                    'field': 'allowedKinds',
+                    'jsonField': 'profiles.<name>.release.allowedKinds'}]},
+ {'setting': 'github.profile.release.max-files',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+  'field': 'maxFiles',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'jsonField': 'profiles.<name>.release.maxFiles',
+  'defaultExpression': 'Required scoped document value; no global default',
+  'scope': 'Tenant + profile scoped authority; secret references only',
+  'pinning': 'Secret-free canonical profile contract digest is atomically compared before replay, takeover, '
+             'or terminal rollover; legacy unbound rows refuse.',
+  'candidateIds': [],
+  'defaultCandidateIds': [],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubProfile.java#ReleasePolicy',
+                    'field': 'maxFiles',
+                    'jsonField': 'profiles.<name>.release.maxFiles'}]}]
+
+PROGRAM_GITHUB_BINDING_CARRIERS = [{'setting': 'github.configuration-bundle',
+  'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#GithubConfiguration',
+  'field': 'ENVIRONMENT',
+  'bindings': ['ravenroot.github.config', 'RAVENROOT_GITHUB_CONFIG'],
+  'defaultExpression': 'Required encoded document; no default',
+  'scope': 'Deployment transport for all 50 scoped fields',
+  'pinning': 'Transport only; field lifetimes remain explicit',
+  'jsonField': None,
+  'candidateIds': ['oc-36d80489e9f868dfad6c',
+                   'oc-befff88734482777dc11',
+                   'oc-f4c592f9b1850f4b7cbf',
+                   'oc-ff422cf3373053acd8aa'],
+  'defaultCandidateIds': ['oc-36d80489e9f868dfad6c',
+                          'oc-befff88734482777dc11',
+                          'oc-f4c592f9b1850f4b7cbf',
+                          'oc-ff422cf3373053acd8aa'],
+  'sourceFields': [{'owner': 'ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubConfiguration.java#GithubConfiguration',
+                    'field': 'ENVIRONMENT',
+                    'jsonField': None}]}]
+
+PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': {'classification': 'derived',
+                                            'status': 'retained',
+                                            'rationale': 'Zero/one state records strict extension '
+                                                         'marker/value cardinality.',
+                                            'candidateIds': ['oc-991a95e480d5071d8c2a',
+                                                             'oc-4fb033a8b5e9c9e52230',
+                                                             'oc-32ba3996df1e5ff9181a',
+                                                             'oc-db4f553a649c798cd1a1']},
+ 'program.authoring.deployment-schema-and-delegation': {'classification': 'protocol-or-format-invariant',
+                                                        'status': 'retained',
+                                                        'rationale': 'Closed typed-policy deployment schema, '
+                                                                     'projection or blank delegation; '
+                                                                     'numeric ceilings are validated against '
+                                                                     'the Java compatibility bounds and '
+                                                                     'never supply an independent default.',
+                                                        'candidateIds': ['oc-58b6bb91c334fd93fde4',
+                                                                         'oc-028b110b3e69a78601e2',
+                                                                         'oc-c37b4abf1ed08575bd3f',
+                                                                         'oc-c8ad782792d62e076403',
+                                                                         'oc-32f6fc40a5ad8cda0865',
+                                                                         'oc-8d3ae97717c09bd94bdf',
+                                                                         'oc-f40aa7e38502f19a48f6',
+                                                                         'oc-8e4ba14419b5241c9fa3',
+                                                                         'oc-9bfdc2a14c32a1174adc',
+                                                                         'oc-5ef226f1f314a1077bbb',
+                                                                         'oc-501c700204d8a9d7f163',
+                                                                         'oc-85ce2d357c1423d07134',
+                                                                         'oc-ce5ab4ff468ca3ba444e',
+                                                                         'oc-d688f971bd0ef27118b8',
+                                                                         'oc-e88aa2c7793400a81249',
+                                                                         'oc-f89f5a0d2544bb040277',
+                                                                         'oc-5a5e935aebb602343562',
+                                                                         'oc-6859d8cb1a1a7a18c849',
+                                                                         'oc-350119ba01fa3c52073d',
+                                                                         'oc-80c3e8c01a24e0af08bf',
+                                                                         'oc-b48ba4f78470f9d97838',
+                                                                         'oc-aeb570d7e741b785e01c',
+                                                                         'oc-4bc478816ddd8cece258',
+                                                                         'oc-c93227265297493e4752',
+                                                                         'oc-8e16313ebc9059eb0f13',
+                                                                         'oc-87d0e615161e6ffeed82',
+                                                                         'oc-930e259739c8bb038445',
+                                                                         'oc-ddf751d009d8f5b7468b',
+                                                                         'oc-56c29d1e367b26b11b65',
+                                                                         'oc-61c32ed14470b308ed5a',
+                                                                         'oc-261f3f43d0f512545aea',
+                                                                         'oc-5376b61ad32aeafad5d3',
+                                                                         'oc-052316feb792e1972fa7',
+                                                                         'oc-4942637a324f09327014',
+                                                                         'oc-f120ad4ec10c3d698df7',
+                                                                         'oc-37b02f1420d719a39a00',
+                                                                         'oc-523ff553b5c26f494921']},
+ 'program.authoring.deployment-schema-and-delegation.security-ceiling-or-default': {'classification': 'security-ceiling-or-default',
+                                                                                    'status': 'retained',
+                                                                                    'rationale': 'Closed '
+                                                                                                 'typed-policy '
+                                                                                                 'deployment '
+                                                                                                 'schema, '
+                                                                                                 'projection '
+                                                                                                 'or blank '
+                                                                                                 'delegation; '
+                                                                                                 'numeric '
+                                                                                                 'ceilings '
+                                                                                                 'are '
+                                                                                                 'validated '
+                                                                                                 'against '
+                                                                                                 'the Java '
+                                                                                                 'compatibility '
+                                                                                                 'bounds and '
+                                                                                                 'never '
+                                                                                                 'supply an '
+                                                                                                 'independent '
+                                                                                                 'default.',
+                                                                                    'candidateIds': ['oc-d4ad23142840013cd19c',
+                                                                                                     'oc-8a1c80c40e789841fa2e',
+                                                                                                     'oc-1defd0d9ae63c2a0808b',
+                                                                                                     'oc-dd69c077fcdf07b658d2',
+                                                                                                     'oc-3eccf3b937520c396a51',
+                                                                                                     'oc-442ab0c0a8e39107ec83']},
+ 'program.application-property-contract': {'classification': 'protocol-or-format-invariant',
+                                           'status': 'retained',
+                                           'rationale': 'The property namespace/key controls protected graph '
+                                                        'metadata and request identity; it is graph '
+                                                        'protocol, not process configuration.',
+                                           'candidateIds': ['oc-07c57343a0675f08c1ad',
+                                                            'oc-d25ebd3faf3327838a70',
+                                                            'oc-5c4137fcc2e51aba26c2']},
+ 'program.artifact.evidence-normalization': {'classification': 'derived',
+                                             'status': 'retained',
+                                             'rationale': 'The empty text fallback is deterministic evidence '
+                                                          'normalization.',
+                                             'candidateIds': ['oc-d4ee44ce91d85f778997']},
+ 'program.artifact.identity-format': {'classification': 'protocol-or-format-invariant',
+                                      'status': 'retained',
+                                      'rationale': 'The value is part of the immutable versioned artifact '
+                                                   'digest format.',
+                                      'candidateIds': ['oc-16be8605df8dd79b5494', 'oc-60c9488fea71c90f6acf']},
+ 'program.artifact.identity-source-ceiling': {'classification': 'security-ceiling-or-default',
+                                              'status': 'retained',
+                                              'rationale': 'The one-MiB source ceiling is embedded in '
+                                                           'versioned artifact identity/digest semantics and '
+                                                           'is the hard compatible upper bound.',
+                                              'candidateIds': ['oc-7e8d296fddb0719bcdec',
+                                                               'oc-759b6b017251a4a0c270']},
+ 'program.artifact.identity-normalization': {'classification': 'derived',
+                                             'status': 'retained',
+                                             'rationale': 'The empty source byte fallback is a deterministic '
+                                                          'digest normalization.',
+                                             'candidateIds': ['oc-68c42d5e25d8f2a08e6a']},
+ 'program.authoring.compatibility-ceiling': {'classification': 'security-ceiling-or-default',
+                                             'status': 'retained',
+                                             'rationale': 'Fixed public compatibility ceiling that the '
+                                                          'operator policy may only narrow.',
+                                             'candidateIds': ['oc-1b38bf1926789ea04b2e',
+                                                              'oc-cf125f78c7c9ac74ecb8',
+                                                              'oc-f1ff31086ce7c2a260eb',
+                                                              'oc-ba50731a56488c2c42ff']},
+ 'program.api.failure-contract': {'classification': 'protocol-or-format-invariant',
+                                  'status': 'retained',
+                                  'rationale': 'The serial version or structured detail field is part of the '
+                                               'public typed failure contract.',
+                                  'candidateIds': ['oc-8341bc61ff33272b40ce',
+                                                   'oc-5391e64a0f6358cffa09',
+                                                   'oc-17887447895f0dea8d53']},
+ 'program.api.serialization': {'classification': 'protocol-or-format-invariant',
+                               'status': 'retained',
+                               'rationale': 'The serial version is a compatibility token.',
+                               'candidateIds': ['oc-0053e155751a384d186a']},
+ 'program.api.diagnostic-ceiling': {'classification': 'security-ceiling-or-default',
+                                    'status': 'retained',
+                                    'rationale': 'The public diagnostic length ceiling bounds untrusted '
+                                                 'worker text.',
+                                    'candidateIds': ['oc-691afad14f1381775b68']},
+ 'program.api.fallback-diagnostic': {'classification': 'presentation-text',
+                                     'status': 'retained',
+                                     'rationale': 'The fixed safe text is shown when a runtime supplies no '
+                                                  'diagnostic.',
+                                     'candidateIds': ['oc-4ae28cd1a60411448ad2']},
+ 'program.authoring.test-payload-default': {'classification': 'protocol-or-format-invariant',
+                                            'status': 'retained',
+                                            'rationale': 'The canonical per-node fallback is parsed and '
+                                                         'hashed into smoke-test evidence, making it '
+                                                         'behavioral authoring protocol rather than '
+                                                         'descriptive text or deployment configuration.',
+                                            'candidateIds': ['oc-216c605e38e4dca72e20',
+                                                             'oc-29b48acfac72795495b5']},
+ 'program.artifact-registry-concurrency': {'classification': 'security-ceiling-or-default',
+                                           'status': 'retained',
+                                           'rationale': 'The fixed stripe count bounds in-memory '
+                                                        'coordination and is not operator-facing.',
+                                           'candidateIds': ['oc-376d35e8d5152e11eb00']},
+ 'program.artifact-transition-diagnostic': {'classification': 'presentation-text',
+                                            'status': 'retained',
+                                            'rationale': 'The literal formats a safe illegal-transition '
+                                                         'diagnostic.',
+                                            'candidateIds': ['oc-31b73e4fd42d081e714c',
+                                                             'oc-bd9a059abae48c95d144',
+                                                             'oc-4eebfa43e3b8ac70e5da',
+                                                             'oc-aee64ccfd2104de825a8']},
+ 'program.authoring.consumer-support': {'classification': 'presentation-text',
+                                        'status': 'retained',
+                                        'rationale': 'Constructor diagnostic label or one-byte overflow '
+                                                     'detection sentinel; actual limit comes from typed '
+                                                     'authority.',
+                                        'candidateIds': ['oc-a68d837bf511cde6b728',
+                                                         'oc-5a8bd2fe322ae448350c']},
+ 'program.artifact-metadata-contract': {'classification': 'protocol-or-format-invariant',
+                                        'status': 'retained',
+                                        'rationale': 'The atom is an immutable evidence/compatibility '
+                                                     'metadata key or its deterministic absent-value '
+                                                     'normalization, not a JVM property setting.',
+                                        'candidateIds': ['oc-243ee3fb5526e4f51793',
+                                                         'oc-e80755c43d1b24d66d4f',
+                                                         'oc-199cdfb2f0c3b2bc5711',
+                                                         'oc-0ac3d6b70e699c7434eb',
+                                                         'oc-5633324a5dcf8f742a09',
+                                                         'oc-db3c83b8a42bd2ff8769',
+                                                         'oc-1581d10568bcc2d16e1f',
+                                                         'oc-06d013d0303f2ff20895',
+                                                         'oc-1377543e9545904d69ae',
+                                                         'oc-9c03470f47fa93f6fc2c',
+                                                         'oc-91e80bd8ad594a9ecaa7',
+                                                         'oc-20b21bd2c944e8afebb0',
+                                                         'oc-3e3658902a2df99fa40d',
+                                                         'oc-3bef507a43b20ca8895b',
+                                                         'oc-8ed0d39907d055a321db',
+                                                         'oc-8f4972ec07d0258c9a1d']},
+ 'program.artifact-metadata-contract.derived': {'classification': 'derived',
+                                                'status': 'retained',
+                                                'rationale': 'The atom is an immutable '
+                                                             'evidence/compatibility metadata key or its '
+                                                             'deterministic absent-value normalization, not '
+                                                             'a JVM property setting.',
+                                                'candidateIds': ['oc-6dec0a3906cffaa4ab9d']},
+ 'program.node-property-contract': {'classification': 'protocol-or-format-invariant',
+                                    'status': 'retained',
+                                    'rationale': 'The property/metadata key is part of the program node '
+                                                 'contract.',
+                                    'candidateIds': ['oc-27c79ebf21edcaf51c90', 'oc-bdf702cd4ba0a2447159']},
+ 'github.http-empty-body-minimum': {'classification': 'derived',
+                                    'status': 'retained',
+                                    'rationale': 'Empty-body positive request floor or fixed per-call '
+                                                 'decompression safety narrowing.',
+                                    'candidateIds': ['oc-1c6afec58ace9fc73481']},
+ 'github.http.decompression-ratio': {'classification': 'security-ceiling-or-default',
+                                     'status': 'retained',
+                                     'rationale': 'Empty-body positive request floor or fixed per-call '
+                                                  'decompression safety narrowing.',
+                                     'candidateIds': ['oc-026c8e617f034581665c']},
+ 'github.behavior-id': {'classification': 'protocol-or-format-invariant',
+                        'status': 'retained',
+                        'rationale': 'The behavior id is part of the published node contract.',
+                        'candidateIds': ['oc-36af88b57f1384ae635f',
+                                         'oc-3322f7eededb08cd7550',
+                                         'oc-92c6eaa48cdbe5715b6c']},
+ 'github.api.pagination-start': {'classification': 'derived',
+                                 'status': 'retained',
+                                 'rationale': 'The initial GitHub REST page is derived protocol traversal '
+                                              'state.',
+                                 'candidateIds': ['oc-3e88f6365b4b80a8bfa6']},
+ 'github.package-identity': {'classification': 'protocol-or-format-invariant',
+                             'status': 'retained',
+                             'rationale': 'The package id binds configuration and ingress authority to this '
+                                          'extension.',
+                             'candidateIds': ['oc-ef28a4f57fa08262474a']},
+ 'github.configuration-bundle-size': {'classification': 'security-ceiling-or-default',
+                                      'status': 'retained',
+                                      'rationale': 'Fixed encoded-document parser ceiling, not a scoped '
+                                                   'default.',
+                                      'candidateIds': ['oc-2a339114459c95288f32',
+                                                       'oc-abc0df802d69e31e99e9',
+                                                       'oc-ebfc4c4eff554ad10d99']},
+ 'github.configuration-document-format': {'classification': 'protocol-or-format-invariant',
+                                          'status': 'retained',
+                                          'rationale': 'The token names a nested section of the strict '
+                                                       'configuration document.',
+                                          'candidateIds': ['oc-f2c5543bef1729332b8e',
+                                                           'oc-f0860b3dc0dd7b1e9c84']},
+ 'github.events.webhook-protocol': {'classification': 'protocol-or-format-invariant',
+                                    'status': 'retained',
+                                    'rationale': 'The behavior id, route prefix, method, header, '
+                                                 'empty-absence value, or response status is a webhook '
+                                                 'protocol atom.',
+                                    'candidateIds': ['oc-e3b089fb3765b99de80d',
+                                                     'oc-e12a5c17343a387b5ee8',
+                                                     'oc-7f79dc8e4bb69f2cafc5',
+                                                     'oc-18a4bd227c66f56529bc',
+                                                     'oc-b2fdc992b62ef9924fc7',
+                                                     'oc-21bef41f544eda0fc61b']},
+ 'github.events.route-derivation': {'classification': 'derived',
+                                    'status': 'retained',
+                                    'rationale': 'The numeric value is a substring/index/generation '
+                                                 'derivation used for a stable managed route.',
+                                    'candidateIds': ['oc-7ab15964bd5961165bed',
+                                                     'oc-1756e82d95e3f99eff6d',
+                                                     'oc-32754264de7aa787cd8e']},
+ 'github.events.optional-header-normalization': {'classification': 'derived',
+                                                 'status': 'retained',
+                                                 'rationale': 'Missing header normalizes to empty before '
+                                                              'independent validation.',
+                                                 'candidateIds': ['oc-7f7038e2a54f88d2ccc4',
+                                                                  'oc-34f64466aa0a047fc29c']},
+ 'github.operation-state-format': {'classification': 'protocol-or-format-invariant',
+                                   'status': 'retained',
+                                   'rationale': 'The value is a persisted terminal-state token.',
+                                   'candidateIds': ['oc-206801c74e1c38d815a7',
+                                                    'oc-18033de05fb4e6d3ad51',
+                                                    'oc-ee60db0bf9e02400900b',
+                                                    'oc-450d142759aafd7d7225',
+                                                    'oc-805ba65440fdeb384dab',
+                                                    'oc-e61cea720a7a50f621b4',
+                                                    'oc-7164d0b91557f5556166',
+                                                    'oc-8d1b29628e6375a01083',
+                                                    'oc-5621a0053bd3b9673769',
+                                                    'oc-94a5309257f1372a4f55',
+                                                    'oc-b9c3fc7ce9318f699ddf',
+                                                    'oc-d612178c3ecbdacf1dbd']},
+ 'github.durable-semantic-format': {'classification': 'protocol-or-format-invariant',
+                                    'status': 'retained',
+                                    'rationale': 'Tagged canonical durable profile field identity; '
+                                                 'credentials are excluded and current authorization stays '
+                                                 'live.',
+                                    'candidateIds': ['oc-0087f9565f3f1fc25df5',
+                                                     'oc-768068541cb4530ce22c',
+                                                     'oc-144724a27852f346305a',
+                                                     'oc-96e2fef03c07200d3010',
+                                                     'oc-0cc529b50da4fe41f221',
+                                                     'oc-fe4948b89733cdc503a6',
+                                                     'oc-7587660359d4657f034c',
+                                                     'oc-f81c3ca9b20cbc705166',
+                                                     'oc-c3ab6e375b67eeeaa890',
+                                                     'oc-c7f638a2ffafb36d76df',
+                                                     'oc-0f0940db6868d0bf54e6',
+                                                     'oc-c82be0de2945801a3196']},
+ 'github.profile.project-field-id-ceiling': {'classification': 'security-ceiling-or-default',
+                                             'status': 'retained',
+                                             'rationale': 'The finite field-id length bounds a scoped '
+                                                          'project setting parsed into GithubProfile.',
+                                             'candidateIds': ['oc-7d3f4944ec40a31b1da6']},
+ 'github.http-protocol': {'classification': 'protocol-or-format-invariant',
+                          'status': 'retained',
+                          'rationale': 'Fixed peer protocol/header/schema identity, not a deployment '
+                                       'default.',
+                          'candidateIds': ['oc-969967589d59a84003ac',
+                                           'oc-27100c9c2319255b9c00',
+                                           'oc-2db8b23ac8e629568081',
+                                           'oc-26b5ed182272ed3f7812',
+                                           'oc-71b0e83a5d24bb42b58d',
+                                           'oc-c22a5a986c012cbed995',
+                                           'oc-185110446e1820b1178b',
+                                           'oc-408bedce93aa164c58bb',
+                                           'oc-0209bcb008a970cd2e0d',
+                                           'oc-c3b7544e2d9c35f19bd4',
+                                           'oc-5f7ead9b40612ea4b07e']},
+ 'github.runtime.lease-thread-count': {'classification': 'security-ceiling-or-default',
+                                       'status': 'retained',
+                                       'rationale': 'The fixed scheduler size bounds lease-renewal '
+                                                    'concurrency.',
+                                       'candidateIds': ['oc-ad5627d9f2f009bbf592']},
+ 'github.runtime.thread-name': {'classification': 'presentation-text',
+                                'status': 'retained',
+                                'rationale': 'The thread name is an operational diagnostic label.',
+                                'candidateIds': ['oc-d735949ba6c77ab1e3dc']},
+ 'github.runtime.lease-renewal-interval': {'classification': 'derived',
+                                           'status': 'retained',
+                                           'rationale': 'The renewal interval is derived as max(100ms, '
+                                                        'configured leaseMs/3).',
+                                           'candidateIds': ['oc-9aae36a8a86b4b88e380',
+                                                            'oc-edeaff14c5c4b5a29d8d']},
+ 'github.payload-safety': {'classification': 'security-ceiling-or-default',
+                           'status': 'retained',
+                           'rationale': 'The fixed PayloadLimits value bounds GitHub wire and durable JSON '
+                                        'structures.',
+                           'candidateIds': ['oc-7ee64e9144fef28e9e51',
+                                            'oc-17b301aff268e71f4dc2',
+                                            'oc-b215c2ff576382506691',
+                                            'oc-02696b69f9239a8a6c9a',
+                                            'oc-95246d677efa18e101c9',
+                                            'oc-b29457df769a41609293',
+                                            'oc-f44062ca0b86a6f98d11',
+                                            'oc-61252179754866407fe5',
+                                            'oc-e6579ef492646c620e0c',
+                                            'oc-ce89b83c6114b1dca465']},
+ 'github.workflow.poll-thread-count': {'classification': 'security-ceiling-or-default',
+                                       'status': 'retained',
+                                       'rationale': 'The fixed scheduler size bounds polling concurrency.',
+                                       'candidateIds': ['oc-8e15e099dd222eed56d5']},
+ 'github.workflow.poll-thread-name': {'classification': 'presentation-text',
+                                      'status': 'retained',
+                                      'rationale': 'The thread name is an operational diagnostic label.',
+                                      'candidateIds': ['oc-dcac94e817a23aca4583']},
+ 'github.workflow.retry-normalization': {'classification': 'derived',
+                                         'status': 'retained',
+                                         'rationale': 'The zero/one value clamps or normalizes retry and '
+                                                      'poll state.',
+                                         'candidateIds': ['oc-89372907dcee04a957f4',
+                                                          'oc-9f9c0bd5b441fecc779f',
+                                                          'oc-4a59b11baf812a3ede89',
+                                                          'oc-3c435969f84a41dba993']},
+ 'github.project-transition-protocol': {'classification': 'protocol-or-format-invariant',
+                                        'status': 'retained',
+                                        'rationale': 'The behavior id, GraphQL document, transition kind, or '
+                                                     'query token is a published operation protocol '
+                                                     'invariant.',
+                                        'candidateIds': ['oc-a2b5f02b376ed5de5daa',
+                                                         'oc-76ba3771ef40a1df42ea',
+                                                         'oc-b286e3bf0fdc7efa4a7e',
+                                                         'oc-229b2ac0633a3d155c56',
+                                                         'oc-89a82e6ca3642cf66e37',
+                                                         'oc-6087a3968afbb64e29a7',
+                                                         'oc-dbf88d770e5736bfcf54',
+                                                         'oc-be692dd7bd0fd9070933',
+                                                         'oc-645e3319dff6b9605061',
+                                                         'oc-898e9cedd8c263fb3d4f',
+                                                         'oc-fd32e346368c2704cfd5',
+                                                         'oc-b28bdbef39be83e5f1c6']},
+ 'github.project-transition.exact-integer-ceiling': {'classification': 'security-ceiling-or-default',
+                                                     'status': 'retained',
+                                                     'rationale': 'The IEEE-754 exact-integer ceiling '
+                                                                  'prevents lossy GitHub numeric identity '
+                                                                  'and counter conversion.',
+                                                     'candidateIds': ['oc-09601e1ed90b63526fd6']},
+ 'github.project-transition-derived': {'classification': 'derived',
+                                       'status': 'retained',
+                                       'rationale': 'The number/empty fragment is derived pagination, '
+                                                    'numeric conversion, or query assembly state.',
+                                       'candidateIds': ['oc-b835a760c7dfcd4f7030',
+                                                        'oc-34bc22039c814512290e',
+                                                        'oc-ec748eaa4b9600e0e7d8',
+                                                        'oc-5674d255aa9e50239a68']},
+ 'github.project-transition-format': {'classification': 'protocol-or-format-invariant',
+                                      'status': 'retained',
+                                      'rationale': 'The field token is part of GraphQL or durable result '
+                                                   'format.',
+                                      'candidateIds': ['oc-4bd7ea129b4f7fbccc42',
+                                                       'oc-63f922a76a1b9ff33474',
+                                                       'oc-4b71500dd6a83dbc5e97']},
+ 'github.release-file-path-bound': {'classification': 'derived',
+                                    'status': 'retained',
+                                    'rationale': 'The value bounds or initializes release fragment '
+                                                 'processing under the scoped maxFiles policy.',
+                                    'candidateIds': ['oc-bd0ccf82acad3d6a65cd']},
+ 'github.release-result-format': {'classification': 'protocol-or-format-invariant',
+                                  'status': 'retained',
+                                  'rationale': 'The field name is part of the versioned release result '
+                                               'format.',
+                                  'candidateIds': ['oc-28370a02deb713753895']},
+ 'github.release-file-path-bound.security-ceiling-or-default': {'classification': 'security-ceiling-or-default',
+                                                                'status': 'retained',
+                                                                'rationale': 'The value bounds or '
+                                                                             'initializes release fragment '
+                                                                             'processing under the scoped '
+                                                                             'maxFiles policy.',
+                                                                'candidateIds': ['oc-9bcfbc320e835596f6cb']},
+ 'github.operation-store-schema': {'classification': 'protocol-or-format-invariant',
+                                   'status': 'retained',
+                                   'rationale': 'Persisted schema version or JDBC column position derived '
+                                                'from the selected SQL layout.',
+                                   'candidateIds': ['oc-af99f410bac30fc7908a']},
+ 'github.operation-store-column-index': {'classification': 'derived',
+                                         'status': 'retained',
+                                         'rationale': 'Persisted schema version or JDBC column position '
+                                                      'derived from the selected SQL layout.',
+                                         'candidateIds': ['oc-c518ea7a013c0a319146',
+                                                          'oc-a7b27a30ef8200b6d6d3']},
+ 'github.schema-index-format': {'classification': 'protocol-or-format-invariant',
+                                'status': 'retained',
+                                'rationale': 'The token is part of the versioned schema catalog identity, '
+                                             'media type, or resource path.',
+                                'candidateIds': ['oc-b62afc51cc8a492d543c',
+                                                 'oc-a66d74ba04718180b778',
+                                                 'oc-f331739949b100c07c9e',
+                                                 'oc-f8346ca28e67144a50d0',
+                                                 'oc-87966d8d44f375bff653',
+                                                 'oc-49b5224123b539c68cb2',
+                                                 'oc-41f135900d2a915522f7',
+                                                 'oc-cbfffcab5e0bc320a634',
+                                                 'oc-b517d316a2eaaf6dace1',
+                                                 'oc-cdfe86ae999e16d926d3',
+                                                 'oc-84a81942550a557ef48c',
+                                                 'oc-19221bbc4b133538f6d9',
+                                                 'oc-92e2a9d7fb36416974ac',
+                                                 'oc-e24be9a9cec9dbe93d32',
+                                                 'oc-a631c4d5fa8dc3883ab3',
+                                                 'oc-0b178d71ed20c0764e73',
+                                                 'oc-84003aa1e9fd673c5b11',
+                                                 'oc-beb4365b41b19c341e2a',
+                                                 'oc-11504ecfdc15979526b0',
+                                                 'oc-9613914ffd9571426fbc',
+                                                 'oc-2e8eca755c94522ae47d',
+                                                 'oc-03342781380c0d04559d',
+                                                 'oc-de5026a2f38e4bc58731',
+                                                 'oc-4091616dad0882162fa1']},
+ 'github.published-schema-format': {'classification': 'protocol-or-format-invariant',
+                                    'status': 'retained',
+                                    'rationale': 'The token defines the versioned published JSON Schema '
+                                                 'grammar, field name, enum, reference, or type.',
+                                    'candidateIds': ['oc-83dd3b48b1c74ca59af0',
+                                                     'oc-ddc30b6f3cdefda208a4',
+                                                     'oc-c4a4c34144588abd61d5',
+                                                     'oc-c29f7fb563ed72494e8b',
+                                                     'oc-13c5b35c6812816a7151',
+                                                     'oc-f9ff8a26383ea774cbf5',
+                                                     'oc-56aa533a281be2297e30',
+                                                     'oc-dfd43cb23abb473757a0',
+                                                     'oc-e7eb5a8bee5917a4023b',
+                                                     'oc-eda6f97c7c9927cb09d0',
+                                                     'oc-c8e9ddc73a3cd0a453d2',
+                                                     'oc-bddbfffd02e80ddd469a',
+                                                     'oc-d295a3538957a71d0441',
+                                                     'oc-ad9da74b7f3dc20ddcf7',
+                                                     'oc-eae5c5bba157f06dc387',
+                                                     'oc-38a817046c8e79386150',
+                                                     'oc-bf6a32bbda9bb541a8d6',
+                                                     'oc-a392187e2aeebcc61d2e',
+                                                     'oc-8035f479ff51a1b11d68',
+                                                     'oc-29fee16c0ddcf29223cc',
+                                                     'oc-cba18360e97a89819bb1',
+                                                     'oc-5a23f5768e0bfffabbee',
+                                                     'oc-476008f02c54bddaf893',
+                                                     'oc-89fc89a290e00a6a5112',
+                                                     'oc-8280f1c08ed13221ad7c',
+                                                     'oc-91da2e10c4b0db488f19',
+                                                     'oc-770d9abf8b562796a20f',
+                                                     'oc-f9ef695e059ff563ab57',
+                                                     'oc-27e154e76f3a19fab4a8',
+                                                     'oc-f6c5478e6de647afbd8d',
+                                                     'oc-19f85bcb244a24cb37ff',
+                                                     'oc-f6bdf12e55dadf05b7bd',
+                                                     'oc-34174baf8acefc461e2f',
+                                                     'oc-d37f7cf22e9e784179f3',
+                                                     'oc-596bee488a4b7cddb89d',
+                                                     'oc-2d18691aae93991c78d9',
+                                                     'oc-4ea70c5bc0b89c52fffb',
+                                                     'oc-2570f53250e7fd52e190',
+                                                     'oc-31858250fa4d5efc5d04',
+                                                     'oc-ff7192f42da8ee2a6a3c',
+                                                     'oc-8d5404a5b1719168ab65',
+                                                     'oc-e175e19af4c77f93f228',
+                                                     'oc-d10488013eec76ba8bb5',
+                                                     'oc-2393f9e50eb0ec6f6837',
+                                                     'oc-8baa38dbe43860c3f8e6',
+                                                     'oc-5f33cea82e92107c7505',
+                                                     'oc-97f27d8452b892e3c53a',
+                                                     'oc-7acf8c9d988c009ed169',
+                                                     'oc-a66b970d2f8f83ae251d',
+                                                     'oc-2513200cd3ee1189a99a',
+                                                     'oc-2d39819b9c1686373a52',
+                                                     'oc-c0e110f13af7a1a37cca',
+                                                     'oc-d1b19ce8ef4074874705',
+                                                     'oc-167a736cf0fc85469931',
+                                                     'oc-7ae9d1b970de26009355',
+                                                     'oc-88748f553c5035d8d590',
+                                                     'oc-d97965c245beae8b0f0f',
+                                                     'oc-e44b48b819e3b7eed219',
+                                                     'oc-10d7330c35a048695979',
+                                                     'oc-3da875d77d622de57d4d',
+                                                     'oc-194065cb86c9e53dd746',
+                                                     'oc-47c46d0b2926e066fdbb',
+                                                     'oc-2c810ef390e8b23b2c51',
+                                                     'oc-957bdbed1727a9eb74fd',
+                                                     'oc-ec0b85dbaf8f8399d699',
+                                                     'oc-0a346eaa507a86e912e3',
+                                                     'oc-c490b4ae9988ec975089',
+                                                     'oc-7b9bf2043f5c274555eb',
+                                                     'oc-134781c72bb5e3e5df17',
+                                                     'oc-418cdce690d6f727561f',
+                                                     'oc-ef9920216df25e95081b',
+                                                     'oc-9cf9b73187dbdaaead7a',
+                                                     'oc-59f8167985888ec813f6',
+                                                     'oc-0f5b90132e7f34ea584f',
+                                                     'oc-2e9d83f3996efbd0f45a',
+                                                     'oc-96ec81906a87695db439',
+                                                     'oc-48e7fff14a21d9dff76d',
+                                                     'oc-4c01465bb011c9d3298d',
+                                                     'oc-b0ab7db15891a4ff1fb3',
+                                                     'oc-064a0a9f110740eff5ab',
+                                                     'oc-ef43749c4534bd8388a6',
+                                                     'oc-416a969d678ae3d5c165',
+                                                     'oc-a908751e6ea7034e1371',
+                                                     'oc-87fe3956226573d80b62',
+                                                     'oc-9e463e4a01a0e5a913fe',
+                                                     'oc-fccacb9274fa407a484b',
+                                                     'oc-c81d0a2c8287ffc72bae',
+                                                     'oc-6bacc7dca990d1bc06a9',
+                                                     'oc-5549294bba9664e4956d',
+                                                     'oc-fff3924bb5a6e3f446bb',
+                                                     'oc-fffbc35cfc0ec172514f',
+                                                     'oc-6c7c10bfa9c110f38088',
+                                                     'oc-3514e7fa19f95a8e0514',
+                                                     'oc-9ca1c911aee4daed3803',
+                                                     'oc-3933ebd5c7e9ef218b15',
+                                                     'oc-371aa413ceee4bb7a583',
+                                                     'oc-6af96531f509a4b961cb',
+                                                     'oc-269a6c280f2b073d804f',
+                                                     'oc-c9e8ca2e563674647c7e',
+                                                     'oc-da32bf68f736314704bb',
+                                                     'oc-3dbb5925ef2ea5a30a43',
+                                                     'oc-967acda0fb2ac3b14ad9',
+                                                     'oc-c8a5f5cb687c271902ca',
+                                                     'oc-3b6e04e1249b140934d8',
+                                                     'oc-a9b446a28314aeb1c929',
+                                                     'oc-a7986f4e4d2340a3fff0',
+                                                     'oc-5e04914eafc531c2b1fb',
+                                                     'oc-a1ef4df8876d3ba961d1',
+                                                     'oc-0731c50d5b294099c765',
+                                                     'oc-54a60d17c880c84807cd',
+                                                     'oc-db8be7e78f0b2e0c77f6',
+                                                     'oc-ae12250520a95666859c',
+                                                     'oc-4c18cd96f84f5fc0e987',
+                                                     'oc-ca900c7b11f13098ee7d',
+                                                     'oc-d4e857f67dabe10dccea',
+                                                     'oc-d693290884c8a31d96f5',
+                                                     'oc-f90fb581f63cbc2561d0',
+                                                     'oc-867b612da765f86057f0',
+                                                     'oc-88adf5abf77b925ebe9e',
+                                                     'oc-d922aad1207a413e8c96',
+                                                     'oc-dd488dd6a8430bf12586',
+                                                     'oc-f47b92047cac6377f487',
+                                                     'oc-dbbc6ce931d5d902fed8',
+                                                     'oc-530bfb71c01d3a30fd0b',
+                                                     'oc-bf6dc95290b14ea63926',
+                                                     'oc-faf2ba8b83f6fbea643f',
+                                                     'oc-0bce1b0dd5528d68247e',
+                                                     'oc-d522a52a5aa6b1ac8873',
+                                                     'oc-6e85214681b4e88d836c',
+                                                     'oc-bfc525f9bd06e992b14f',
+                                                     'oc-88cc40a77f75e6237460',
+                                                     'oc-fee80f1c6d6c3ec91da8',
+                                                     'oc-aeede15ad1c7f159480c',
+                                                     'oc-c3a9b9559bd23e56aae4',
+                                                     'oc-385e06ea559cac3d6d6a',
+                                                     'oc-e714695adfa9f3bda31a',
+                                                     'oc-6623f48ef82c09c03ca2',
+                                                     'oc-6bccb1830e6d547da3d0',
+                                                     'oc-2b19e133188e67ce99a6',
+                                                     'oc-b3542ea0630a23a850ac',
+                                                     'oc-c92c6a634b215361665b',
+                                                     'oc-8e46b08001328705ce25',
+                                                     'oc-f0e383461ab45c5812bd',
+                                                     'oc-103f89b5ff98600d39c9',
+                                                     'oc-a38cf2642f8db7e60661',
+                                                     'oc-32abbaf2c600de005903',
+                                                     'oc-984c9b18dc36caa04aab',
+                                                     'oc-66a94a025371339f9907',
+                                                     'oc-8ff692c90c187ea8b97d',
+                                                     'oc-d27f98304da2a56610fb',
+                                                     'oc-95ab97f938a4d2b9c3be',
+                                                     'oc-7a8a6d9f41714d0abb33',
+                                                     'oc-18d3aaa7393823950e0b',
+                                                     'oc-49b79f7b7268eb698354',
+                                                     'oc-ed86d1114d16fa69ae7d',
+                                                     'oc-ccf25f3a509a8e864b76',
+                                                     'oc-ed5425af56bba689b782',
+                                                     'oc-872bc9689cb41dfca8c5',
+                                                     'oc-d1d79a7818f1e932463a',
+                                                     'oc-41b78db2d129738de798',
+                                                     'oc-60ce1ee02f47c5c32715',
+                                                     'oc-056a2a2d96ed9784cb79',
+                                                     'oc-bb90e791f0a6b3dc859b',
+                                                     'oc-7e9624c55e980f4db667',
+                                                     'oc-92c3d93284a57147d1d1',
+                                                     'oc-3b485f0d3cc384b5a64b',
+                                                     'oc-a04079c64408c826ff1c',
+                                                     'oc-22c605188c00cb9a3922',
+                                                     'oc-be8071f3895864c2c2ac',
+                                                     'oc-a77fda30753c084b31e3',
+                                                     'oc-4a5c4961d6e32b692b51',
+                                                     'oc-57b52929888e39c6bd4a',
+                                                     'oc-a5e719b647e3f34d10db',
+                                                     'oc-4072a34f923a52ea0901',
+                                                     'oc-be449f2fe82d33c616be',
+                                                     'oc-7312003efd4655cd486e',
+                                                     'oc-5efd5a8f989d3d1a30d2',
+                                                     'oc-d12da79ebdf2bb3a5b78',
+                                                     'oc-8eac85b53e074200f399',
+                                                     'oc-540c36636c7b3053d924',
+                                                     'oc-7426635ceecc01444de8',
+                                                     'oc-c1eb2ea0fb3749953e23',
+                                                     'oc-7afe1712836739e6714e',
+                                                     'oc-df752dc31eab54a3a306',
+                                                     'oc-c6a4f49e8fe1cad8d7c8',
+                                                     'oc-a90b02d3da2ff2125400',
+                                                     'oc-1d52a05ce671d6c5972f',
+                                                     'oc-ea1aeea5dcb85ddb4e25',
+                                                     'oc-693c93a9f51dd89c5380',
+                                                     'oc-7851c35416e08372842e',
+                                                     'oc-4be009fbee184d2dc09a',
+                                                     'oc-69f88435defce62ec254',
+                                                     'oc-43ba3a8767e4e87d5732',
+                                                     'oc-cbafb060e16b4df7def1',
+                                                     'oc-932eeeb35d3a4b5319ec',
+                                                     'oc-1c7bf9af770c729da597',
+                                                     'oc-68e6062f9a8f35dab756',
+                                                     'oc-d4672da880200152f685',
+                                                     'oc-8f5c78790142e403b3d3',
+                                                     'oc-2023500b542fd20bb78f',
+                                                     'oc-6065737b516ea810df60',
+                                                     'oc-78204bfc555216a48f93',
+                                                     'oc-0e4cc83d6a025b6978d5',
+                                                     'oc-9c786ddb095850595341',
+                                                     'oc-7810d9f93987eb3d369f',
+                                                     'oc-295bbc33136761bba329',
+                                                     'oc-e4e5958c8a5de67e285b',
+                                                     'oc-6ab43379d3835a2a4e55',
+                                                     'oc-d3b356b384bcaf6436e2',
+                                                     'oc-e6e55a82d410470679a6',
+                                                     'oc-eff91ceea4b3bd633f61',
+                                                     'oc-8fbda3f9628376bf76cf',
+                                                     'oc-fa0cc1f44fb33ec1f191',
+                                                     'oc-457949e06ea9826bec1e',
+                                                     'oc-bcbb66f584a36fd177d8',
+                                                     'oc-03c1e50e9ad5655cf13e',
+                                                     'oc-7b1e5c136b0208c02110',
+                                                     'oc-90f0c7b0f33dffb94d33',
+                                                     'oc-dbe776834f871c058039',
+                                                     'oc-837610f4eaf9b276883d',
+                                                     'oc-407fd40ac2b83038b01f',
+                                                     'oc-6a03a12444a4f629da7a',
+                                                     'oc-a067b33188af9ad130a2',
+                                                     'oc-2152e1fd9600b8d54ced',
+                                                     'oc-755be7f03aa1be102cf5',
+                                                     'oc-88cac4af1b6f3a3d85e7',
+                                                     'oc-0df86528d8d8e7d7a088',
+                                                     'oc-37fb34f7e08c60195fe6',
+                                                     'oc-9f04c84d67d48065e975',
+                                                     'oc-fd88b34048589da746f2',
+                                                     'oc-90b6baceb3cc78ff8f74',
+                                                     'oc-bde2a096a9ebf560a020',
+                                                     'oc-c9407b48c9bae923f5ad',
+                                                     'oc-8a6202dffd3e798b7750',
+                                                     'oc-3aea0ab6e9563856a42d',
+                                                     'oc-990b2a0eeb379dbc5e85',
+                                                     'oc-777f391c590c90ac65cc',
+                                                     'oc-d538825d9d76077125c6',
+                                                     'oc-749db679eb41ca5ff38a',
+                                                     'oc-4e0b13420d7d5578d390',
+                                                     'oc-c27b9f92df27418bdaac',
+                                                     'oc-eb7ba8363ab6efc809c6',
+                                                     'oc-4f0b61f07fafb7583a74',
+                                                     'oc-2cb1875b3776e7468b7e',
+                                                     'oc-367b85b026681320c107',
+                                                     'oc-8bb3f8cc752cf0d5914e',
+                                                     'oc-f4d500a128ec2a27c005',
+                                                     'oc-5c862c49fd005ddb239b',
+                                                     'oc-8d8abce5239a8c243f33',
+                                                     'oc-c5d3e6c15099dd32d37c',
+                                                     'oc-835dfce36126228e3d7c',
+                                                     'oc-516218b7729b5ecbea6a',
+                                                     'oc-e4839d382430ccdffc44',
+                                                     'oc-6a82656e7ce0bb51a17a',
+                                                     'oc-f693ad0664c7b69c8142',
+                                                     'oc-ed2e340b157a627e01fc',
+                                                     'oc-a3640d1f298f9ed18618',
+                                                     'oc-40ac789b60a1313f7a22',
+                                                     'oc-668f9b3c0283971e137f',
+                                                     'oc-d5046c650483c374d88f',
+                                                     'oc-f67bab932a3964c05865',
+                                                     'oc-8df5d4bec68bec55114e',
+                                                     'oc-eee6f5fc0fde84e7eace',
+                                                     'oc-a75631885a65a05df8fc',
+                                                     'oc-18125531e87d2d517283',
+                                                     'oc-87220c065ff48b4a24f1',
+                                                     'oc-de392ff9ec75c96e0caa',
+                                                     'oc-ee20bf40b56c6bc06ac2',
+                                                     'oc-b322b0124a619ce4f57e',
+                                                     'oc-bc917f61ea77d2c9c252',
+                                                     'oc-6d242085a8fe71b7f03b',
+                                                     'oc-e6f1a85f48dacdf7d4e2',
+                                                     'oc-bbc8ced11c83435075bf',
+                                                     'oc-fccf08fd61a33994a286',
+                                                     'oc-a898fc7f720af3e91815',
+                                                     'oc-11e0ba85f4ebcb4e5090',
+                                                     'oc-eacdab519e7d6d78a003',
+                                                     'oc-010f020b011d9419ce39',
+                                                     'oc-c2c1837366d190421f7b',
+                                                     'oc-1c90ded821b524c7c575',
+                                                     'oc-cb3104fc094925f352a9',
+                                                     'oc-1d7bb2a0d8ecfce367a6',
+                                                     'oc-c6f827fbe132959f97de',
+                                                     'oc-67f278aa9f4642058141',
+                                                     'oc-3a5b61e1efd06d911b3f',
+                                                     'oc-b1c73f8f3049d1567cf5',
+                                                     'oc-1b5f9b78c985e4268f25',
+                                                     'oc-11128e58134f7af42c39',
+                                                     'oc-71937416e51ea85c8217',
+                                                     'oc-5a152b5053cc97304405',
+                                                     'oc-06ac403f484a6fd93597',
+                                                     'oc-95706c9dc54b42acf36d',
+                                                     'oc-3a9d6c182b46b2be3071',
+                                                     'oc-14cab90e84d755a7dce6',
+                                                     'oc-d2a27197bb80465f8a90',
+                                                     'oc-6135ce3ebf80d7a455d0',
+                                                     'oc-b7a0008c074dbac15faa',
+                                                     'oc-7031599067ebd79b6bd0',
+                                                     'oc-71c8936cd732ed66c193',
+                                                     'oc-704080b90e140357d0c0',
+                                                     'oc-83d6ff55111efdf6322e',
+                                                     'oc-af5a37751ecd3d4e50a3',
+                                                     'oc-e3fa86c8a71e5dde88f5',
+                                                     'oc-1a13c7b8109abc0c1eb5',
+                                                     'oc-d1308e5f581f01a3f103',
+                                                     'oc-e1ed8185d74355c57613',
+                                                     'oc-003e545bf1e675e2ebcd',
+                                                     'oc-efe03f12469bf6aec77a',
+                                                     'oc-549fd22e9f1c18d677be',
+                                                     'oc-71dddd6d84aad3cb89ac',
+                                                     'oc-d5605151a57a316f14ed',
+                                                     'oc-98ee9d6fcb8b846c3332',
+                                                     'oc-6c1894448037aab7f780',
+                                                     'oc-80230ddefecb6f32b77e',
+                                                     'oc-0cb75caa4371e6fb3cd0',
+                                                     'oc-6aacd61bbe5da7f70a12',
+                                                     'oc-d334e60be664c8f064b0',
+                                                     'oc-6f4ac3a2db66448b825e',
+                                                     'oc-65d6a178b1bba6797251',
+                                                     'oc-3dd29766b2e6f8943982',
+                                                     'oc-fbd0496414c4ba40a234',
+                                                     'oc-394dd3c150548163d321',
+                                                     'oc-15e58c12c6d09f602cd7',
+                                                     'oc-cef6bef39d60112c451d',
+                                                     'oc-be68c363298170dc6214',
+                                                     'oc-2a8649f5acf3b718dfac',
+                                                     'oc-97b5e5c3acb5cf449312',
+                                                     'oc-6aa72999bfc78b508092',
+                                                     'oc-7a6469a6a370d7045361',
+                                                     'oc-97986c7a8766a2c85f20',
+                                                     'oc-a9db0e051c1077d790e9',
+                                                     'oc-8939b24500b5523584df',
+                                                     'oc-a2d7b89a72a9f7899c4e',
+                                                     'oc-b6fea32005b4407a52a4',
+                                                     'oc-741c606a4f39d355a9f4',
+                                                     'oc-8b509112dbb36862c7fd',
+                                                     'oc-7bbb51d0a43f2f2861b1',
+                                                     'oc-f618d7fdedcdb4ae339b',
+                                                     'oc-61fe127d35bc8cb9f0ba',
+                                                     'oc-006a48a93bbfc3744fbc',
+                                                     'oc-95cab8a0708ff4ffc85b',
+                                                     'oc-9ba1b8e84b06d7e5bdc5',
+                                                     'oc-e602e4f6b1c1ce9eab1e',
+                                                     'oc-24a36f5a65daf4c62350',
+                                                     'oc-f278d6ea5a60e36894fe',
+                                                     'oc-e6376510d1d6f22b1442',
+                                                     'oc-b7f20428c54f8263a982',
+                                                     'oc-dd1757e7bcfee1859277',
+                                                     'oc-06f2f51403e1ae90af37',
+                                                     'oc-bae345590007d07eaa04',
+                                                     'oc-651997ac5686c5b3e6d3',
+                                                     'oc-c1892dd936242c8fdf1e',
+                                                     'oc-8d463230fff671e2abe2',
+                                                     'oc-1632b660b85ada33c322',
+                                                     'oc-5119b64ded602b5ae488',
+                                                     'oc-462b3e1d1c9e0ee655f9',
+                                                     'oc-12225fe66c916f818d2a',
+                                                     'oc-6e349bf926b76d89a783',
+                                                     'oc-1be5eb17a53d79236577',
+                                                     'oc-ad1ed4b384e675bbbc2e',
+                                                     'oc-47c7f5e2b5b342b02c79',
+                                                     'oc-bf2b4c5536cd21a90bd1',
+                                                     'oc-0d16bcebcb4ccb393f8f',
+                                                     'oc-acccd88e8b4f3725881c',
+                                                     'oc-45e59c92ef8eddc5d1c3',
+                                                     'oc-375c9aa5b299abd275aa',
+                                                     'oc-ecafcaabf3029f7b6a8d',
+                                                     'oc-bcdb1ced308be0d09752',
+                                                     'oc-ba46ce05b30b29190630',
+                                                     'oc-95c65f1c80d86643e274',
+                                                     'oc-47e5abbdfde68b9c6a72',
+                                                     'oc-268c245db2aa8b076816',
+                                                     'oc-346cf6222e3bb71bf047',
+                                                     'oc-8a004b0d95423ba11e15',
+                                                     'oc-416a9bd06908ec18c179',
+                                                     'oc-379adef127e7b2a84452',
+                                                     'oc-0548c6985427d6a630bc',
+                                                     'oc-8ac6b420fd9597bc2bb5',
+                                                     'oc-72ed1934c612fab41624',
+                                                     'oc-590b59a9c8963d682878',
+                                                     'oc-17e2a8761f6ff3a67670',
+                                                     'oc-914133ba5b0c8474e32b',
+                                                     'oc-06a09a311c907567a456',
+                                                     'oc-eceff93c77e79ee14c77',
+                                                     'oc-cdb6766f7f0a9f40a6bb',
+                                                     'oc-bfa734af9445601a0570',
+                                                     'oc-92fd9401d483da03ceb5',
+                                                     'oc-b00fe1806ce64c761928',
+                                                     'oc-e4ca06fa85af54008c56',
+                                                     'oc-0c3db2db21260842dd9a',
+                                                     'oc-ab2e8088f13aebe4845c',
+                                                     'oc-c43d934943d141f566e6',
+                                                     'oc-18a5898190962b70e92f',
+                                                     'oc-df7a21ce121bd05d2684',
+                                                     'oc-d65039c28b84824ebb6a',
+                                                     'oc-8395ff4973df01ce9ce0',
+                                                     'oc-0255d9722df9236c2ed8',
+                                                     'oc-472e14dedeccafa8cac7',
+                                                     'oc-98d2580e2bc1c4da7c1a',
+                                                     'oc-3f30349030be71f7cc2d',
+                                                     'oc-c28c575fae85d636934a',
+                                                     'oc-382011c971cb658f7c64',
+                                                     'oc-8b5d5a1e7d2a171792b2',
+                                                     'oc-b2865347ea4411fd5c75',
+                                                     'oc-cce6d825866fb5320c2c',
+                                                     'oc-ba5943639decf58d8826',
+                                                     'oc-be8dc58428f4776d39d5',
+                                                     'oc-b82fa6a4fa152abf3e33',
+                                                     'oc-6f8c24f64aaaec659710',
+                                                     'oc-b28ac97e944fadb1a302',
+                                                     'oc-b21487692ba046fe6a4d',
+                                                     'oc-1491f728a922d928b99a',
+                                                     'oc-a5db081965b760ff4236',
+                                                     'oc-8448e6b4742c5fc2ab24',
+                                                     'oc-c71a12f68931b9b1d909',
+                                                     'oc-4a16700ca4eaae87a121',
+                                                     'oc-959110fd890ef936c1b9',
+                                                     'oc-8f8bf4ad0387ec87f7fb',
+                                                     'oc-e3335251edecfe5b7d35',
+                                                     'oc-caf2a0b9f5c01b53e1ab',
+                                                     'oc-53e06c64e43c82a16d0c',
+                                                     'oc-a72e9987ca9b1a57583e',
+                                                     'oc-40e64a6738558c84227c',
+                                                     'oc-8602f06f86eab97da2e4',
+                                                     'oc-846227963e43adcd18a0',
+                                                     'oc-c0797aaf986cfb146ef4',
+                                                     'oc-2576891d870065ac7767',
+                                                     'oc-78a0c8e7c483bba4f5e7',
+                                                     'oc-99755faef4670303dc46',
+                                                     'oc-82833ef69c7617d21684',
+                                                     'oc-707ea3f0c3fea6b467c8',
+                                                     'oc-46e266114c228fa4d293',
+                                                     'oc-98cb60b7e864b9f4b60e',
+                                                     'oc-cacb731021398bd9d23d',
+                                                     'oc-b0cd8d65f0908877ba92',
+                                                     'oc-65ba0e692ff386cb7e3b',
+                                                     'oc-278b46caa88b7677c5cb',
+                                                     'oc-b061227f832444b70e79',
+                                                     'oc-25c9599c1d0f371369a9',
+                                                     'oc-b284ca82c332b8252264',
+                                                     'oc-816ed47cefdec9e16ae0',
+                                                     'oc-f7dcb8dbdbdf20a8a452',
+                                                     'oc-746321570c81d5cf3a2e',
+                                                     'oc-b72f20d9a5a7d3873d5f',
+                                                     'oc-c5cdbbe34c9fa3f5d050',
+                                                     'oc-704ffd9277edc41156e0',
+                                                     'oc-f1145c667e2ee8be04cb',
+                                                     'oc-96c4c7e982aa678b5104',
+                                                     'oc-45c9d390125c7516b0c4',
+                                                     'oc-a816c7d36fa1362f83f6',
+                                                     'oc-0ce697e9c0e9ec17e40c',
+                                                     'oc-f713b6773612ff8ce49a',
+                                                     'oc-9807a32ef53c144ad5a2',
+                                                     'oc-7ea677d7304b4f172540',
+                                                     'oc-3a2cec1b741faf475cb6',
+                                                     'oc-f3799adf41e6a0c6984f',
+                                                     'oc-52e19ed2b0c78d843965',
+                                                     'oc-9002e5c38c5dd35e361d',
+                                                     'oc-ecdcb33d7b7c7203bf9e',
+                                                     'oc-28d645a46859c5937b4d',
+                                                     'oc-5ff8906b772ff6d18b45',
+                                                     'oc-68dc43763cac17a2837d',
+                                                     'oc-028bd77cb6dfae2d2925',
+                                                     'oc-3609a3334d378c635f29',
+                                                     'oc-05982073dd5d584a4f5e',
+                                                     'oc-2eba1940af77e8d0eb79',
+                                                     'oc-f9c928b29b2bc462ac2b',
+                                                     'oc-a0d924723b1f46977ebf',
+                                                     'oc-7e4b4de74e405a0da8d6',
+                                                     'oc-397a2d413d24a9dc62c5',
+                                                     'oc-c6247ef1553b4f76b750',
+                                                     'oc-5245b0da419a8dd2591a',
+                                                     'oc-0e546343ef263d082afc',
+                                                     'oc-9341cbf5e96c3ef69dbf',
+                                                     'oc-ebc7bcc5591244df7de9',
+                                                     'oc-90a8acb2cea961b2f6f4',
+                                                     'oc-7e641922641ed32249ae',
+                                                     'oc-021e29c31afad50d22ed',
+                                                     'oc-05ffcf96b62d583ea20e',
+                                                     'oc-d7a0159bfd0d30dd7e02',
+                                                     'oc-46747879b76648cff515',
+                                                     'oc-5a003b25d89bce5f2086',
+                                                     'oc-7c41f8803d0383a79117',
+                                                     'oc-df67eef0fb96341f8495',
+                                                     'oc-64d08d994afed2559b4c',
+                                                     'oc-dd40225201ce46cb37c0',
+                                                     'oc-7c66504a2b71a5da2b8d',
+                                                     'oc-8ebc292a31e81da1f045',
+                                                     'oc-6abdeb6cb4dba1eef541',
+                                                     'oc-90046499dcdcd387827a',
+                                                     'oc-e5606534186ec734ce14',
+                                                     'oc-fc0a16750419bbe6b4b8',
+                                                     'oc-8febded2fa5f2c0af0d8',
+                                                     'oc-d105a5334902577b5f44',
+                                                     'oc-79b10e8b7d5cb2ed9a8a',
+                                                     'oc-fbd7fc6e3bed397fb25a',
+                                                     'oc-8801e6d93568695fee6a',
+                                                     'oc-1ae7ed3feab580ad049f',
+                                                     'oc-ed51978209a09c717a28',
+                                                     'oc-8a04998f95bc81ef0362',
+                                                     'oc-96c595ab5ccb343cc82b',
+                                                     'oc-e936db867025c79d0a6a',
+                                                     'oc-9f5f83f483d93e0a9a89',
+                                                     'oc-4ee56faaee2fd1ff8002',
+                                                     'oc-92071536d6760bd16556',
+                                                     'oc-1138bca49a3a0e018f00',
+                                                     'oc-f7f5e04e7f3dcd8d7d0f',
+                                                     'oc-1f08009a4de1c92b0065',
+                                                     'oc-4cc85eafceee220048d3',
+                                                     'oc-7dd97adbb8dd6d6a603c',
+                                                     'oc-f21ef7ade9559741edd5',
+                                                     'oc-64823f08434b36c12fa3',
+                                                     'oc-d0624e5214bdc523b250',
+                                                     'oc-cd611bda807cd0431912',
+                                                     'oc-cb65781266ecfe205747',
+                                                     'oc-38ee047029ed38691834',
+                                                     'oc-96946381dbdbe6fba0da',
+                                                     'oc-0f637366f4e1880242e8',
+                                                     'oc-ca76a6a424d8c38f46a4',
+                                                     'oc-32a9ec7babc0dc0d3f05',
+                                                     'oc-862c673a6fd62dd5db87',
+                                                     'oc-8871c3b9bf9808a2f897',
+                                                     'oc-6e50467b82c2b5e8b10e',
+                                                     'oc-25787e39c56e098722e4',
+                                                     'oc-fbe1bb17d58b82459ced',
+                                                     'oc-15469e99be11a6cd51d3',
+                                                     'oc-57c60adfcf791c0965a9',
+                                                     'oc-5088c42eb525fa35e801',
+                                                     'oc-d14756fa0b0f7e7f64e9',
+                                                     'oc-886099695b0e26efa59d',
+                                                     'oc-85077c2a8fa1636bd342',
+                                                     'oc-6a34bf68dcbdf15a2422',
+                                                     'oc-47b91089f3798554f81b',
+                                                     'oc-667d632d9700b7b90139',
+                                                     'oc-6cf8348b304106cbb64e',
+                                                     'oc-9343eacd579480134e4c',
+                                                     'oc-bad5203d5dabc44c158e',
+                                                     'oc-45cf419ec6cc8293e3ea',
+                                                     'oc-51167911c2ffed70284b',
+                                                     'oc-61d9b472166b19828d1c',
+                                                     'oc-9bac922841c9dba68623',
+                                                     'oc-915f7d3c52bb10b85e48',
+                                                     'oc-9958928e72ad02ffb3c2',
+                                                     'oc-33256a51503671fdedcb',
+                                                     'oc-12a2c40923466dbd8cb5',
+                                                     'oc-9ae54a5e03cb15530c79',
+                                                     'oc-5e10af62e3893fc16b7a',
+                                                     'oc-0db9a8ab2c2e3be2c4d9',
+                                                     'oc-ec7066a3f0aca51271cd',
+                                                     'oc-07f1e75f9c9aca9339aa',
+                                                     'oc-02ef1d283bbd7a11917f',
+                                                     'oc-5e1f4edfefc4b9d9d638',
+                                                     'oc-ce3beec8c80630c14f45',
+                                                     'oc-ada8ea0896f20abc63e0',
+                                                     'oc-fea3b36f7600586d6c35',
+                                                     'oc-57df1d3efaec384c1f70',
+                                                     'oc-94a0b0594989c51527e2',
+                                                     'oc-191e6b9041c8181280b5',
+                                                     'oc-22a374870a9a1da11ca3',
+                                                     'oc-c30c533dff750156b3c3',
+                                                     'oc-2adb669a3e2fb539548f',
+                                                     'oc-37255c8ef90e15b6d3d6',
+                                                     'oc-4e27af562fdaa7f61fc8',
+                                                     'oc-ab6b1e73a6d663107a88',
+                                                     'oc-8582d415ed5bc4f7ceb4',
+                                                     'oc-7f6adcf8ac638f361eda',
+                                                     'oc-54e17669f7b4ceab74ce',
+                                                     'oc-aee24d017099f94f9420',
+                                                     'oc-ce8bed2e00aed200f90c',
+                                                     'oc-0107148173f0c28622b6',
+                                                     'oc-7d17548e746c24ad7822',
+                                                     'oc-bcb20ed406f0a0e734ec',
+                                                     'oc-fcdaa501197115841666',
+                                                     'oc-15177a4eb428287900b9',
+                                                     'oc-1f03e0af609c7611e656',
+                                                     'oc-4018e09002a90b78558d',
+                                                     'oc-0d57d28213f097b006ec',
+                                                     'oc-6046eaf5551d1de80978',
+                                                     'oc-4e4b091237187f5f8638',
+                                                     'oc-cf0a6d6a6f0cdf810f1f',
+                                                     'oc-e4cfcf199bc8d3b56a8d',
+                                                     'oc-3fbb66f8ac1d7bbcb619',
+                                                     'oc-dee73138736d4c7fe532',
+                                                     'oc-b99ddab8a43c60922851',
+                                                     'oc-9618cddd6c6173e27180',
+                                                     'oc-87b64a6e529525acf8ac',
+                                                     'oc-9ac72ecea2105f54719d',
+                                                     'oc-f4c87c41a8d8ffb5659a',
+                                                     'oc-f5a584d34b4c46ad9a91',
+                                                     'oc-3c85534b6fd66dcbe70f',
+                                                     'oc-57325e66a5b2f83143cd',
+                                                     'oc-499ff878c92927e5e0a0',
+                                                     'oc-9ba4089e36acc81d20ff',
+                                                     'oc-3d0950b93f425520e41d',
+                                                     'oc-f587d1b243089cb9de3b',
+                                                     'oc-05259482e01db1f02517',
+                                                     'oc-f1b46abaf5709874a930',
+                                                     'oc-cf118ed99bada4a64213',
+                                                     'oc-9f3a3e381977db8b8d8a',
+                                                     'oc-68c324047503eb1e5cee',
+                                                     'oc-5189bdeeefb0a7a95e5f',
+                                                     'oc-b054033b61278ab31d00',
+                                                     'oc-68a10f806cac3b26ab02',
+                                                     'oc-ddd21cd5949b46c65425',
+                                                     'oc-330c0fe172fe33facb81',
+                                                     'oc-80aca218d26ca13678fe',
+                                                     'oc-5a6dc54c8d418b1e1918',
+                                                     'oc-a42f860036443280aaab',
+                                                     'oc-dd257c6898ba88f3310f',
+                                                     'oc-0eabc18392540f598194',
+                                                     'oc-df4ba63cc14c12e27402',
+                                                     'oc-229c47a0c3d159d7f848',
+                                                     'oc-3fb4ccd2706c4ac8fcab',
+                                                     'oc-cc034c43994f0da91bd2',
+                                                     'oc-eea234ea60ad48f0883d',
+                                                     'oc-5bd868761db079a44319',
+                                                     'oc-615e9acf8c49939775a5',
+                                                     'oc-da514f5665e1227b9834',
+                                                     'oc-8e03f0321353dee86425',
+                                                     'oc-13315be98253debd3735',
+                                                     'oc-fb3824fc9dfc8e87b3a7',
+                                                     'oc-55db65f5c620686ed2e2',
+                                                     'oc-3da08155bd316e85a3a4',
+                                                     'oc-bcf48f6913e8450b5c63',
+                                                     'oc-a02a00f97c287d3b6784',
+                                                     'oc-a638a7ae61ad9c4e0222',
+                                                     'oc-4e4122b480ddb848582d',
+                                                     'oc-5f712ad43fa3d21c88d8',
+                                                     'oc-6c073034bae5761ef730',
+                                                     'oc-84118c4f3b656c0b1983',
+                                                     'oc-350e1378a6ca041539d3',
+                                                     'oc-5eafdf95ba18a01edc13',
+                                                     'oc-e0e7d6ddc7ec003b916b',
+                                                     'oc-33951bbd29684a6f1108',
+                                                     'oc-0524d3fb49b0421020dc',
+                                                     'oc-ff03bf69ee312264b3e3',
+                                                     'oc-b5d0644eba936593539e',
+                                                     'oc-799a5169c9bc4601ce18',
+                                                     'oc-3ef9d8556e3d4deaa09d',
+                                                     'oc-ca24fda7e3e4e00c4888',
+                                                     'oc-1822e638664cc562b4b2',
+                                                     'oc-b2e5e34897363d576d83',
+                                                     'oc-6eb1b6ba1134e83e3487',
+                                                     'oc-ee4d6d133e8dfad3c082',
+                                                     'oc-416d4ce464a671a00ef2',
+                                                     'oc-61d72c298340e501208e',
+                                                     'oc-528a10fe8b1b1a294e20',
+                                                     'oc-a970c29d6f93a4f98e81',
+                                                     'oc-d49e3eb0a3f8b1bed06e',
+                                                     'oc-7f17fa83868ad96b5f7a',
+                                                     'oc-f372d6e583e24df6caf6',
+                                                     'oc-50507e14707fba5c3161',
+                                                     'oc-87ad8ddbeab10ab9ce75',
+                                                     'oc-54f3c344426c4e1914c7',
+                                                     'oc-6fd2b28ab52efb5760af',
+                                                     'oc-0f429bc00033efcbfeb7',
+                                                     'oc-020c4d15ca2b0b209277',
+                                                     'oc-252f7c7b9b8c4774b45b',
+                                                     'oc-369b55f42253bf7a2338',
+                                                     'oc-9b7e5f043fd7a379445a',
+                                                     'oc-5e16d5ca38f0d48e59bc',
+                                                     'oc-d006386729b19ba9b2b8',
+                                                     'oc-33a78dba251acc0da4d1',
+                                                     'oc-86a942f95acc38445059']},
+ 'github.published-schema-bounds': {'classification': 'security-ceiling-or-default',
+                                    'status': 'retained',
+                                    'rationale': 'The numeric JSON Schema value bounds accepted input or '
+                                                 'output; it is a fixed payload safety/compatibility limit, '
+                                                 'not a deployment setting.',
+                                    'candidateIds': ['oc-3ea25b9c300ba91cc998',
+                                                     'oc-e8ec28acd64f9a8bdc9a',
+                                                     'oc-88dba22febfba716b8e0',
+                                                     'oc-dd10e0b4afd56b6e4c58',
+                                                     'oc-d6ee8b5d15f088cea90b',
+                                                     'oc-c509b9de75d29df552eb',
+                                                     'oc-e8bf1a74d820c4585318',
+                                                     'oc-47e955f675dc6f802096',
+                                                     'oc-3bc4090c4200410f6c37',
+                                                     'oc-bd793b85fa5be3e1e35b',
+                                                     'oc-c199eed97af3c232c6da',
+                                                     'oc-8c100324876d9d8ae2eb',
+                                                     'oc-9fc7b00d64a8b2548b55',
+                                                     'oc-03a7f22eb6ac51c6b6fc',
+                                                     'oc-39362f63155967e5a16c',
+                                                     'oc-2b8e9875dcee23490b3c',
+                                                     'oc-53401f6cfd20b44fea94',
+                                                     'oc-f8f5a00db9127debf065',
+                                                     'oc-b00f6c5f9fc869bea7bd',
+                                                     'oc-418655228bc15ca438ac',
+                                                     'oc-eed64ea0af4755b8e56d',
+                                                     'oc-1c2e653f8ecf0d42b22c',
+                                                     'oc-9b6f877ad3a6e6bd6933',
+                                                     'oc-829050a337abeee7cd63',
+                                                     'oc-a45f8f4e20632cb113bb',
+                                                     'oc-8155245c1d93cbd9edbf',
+                                                     'oc-56ce39b5be04561eba93',
+                                                     'oc-1a236d34af58b3524646',
+                                                     'oc-3f772241ff9a078a9765',
+                                                     'oc-7151deed6e0817d4dec6',
+                                                     'oc-6d58112a5a4d5fb914c3',
+                                                     'oc-89f463cfd891b43aea0e',
+                                                     'oc-0f9aac4acd13dcb50989',
+                                                     'oc-de090de993a6c734f631',
+                                                     'oc-898929d64cf8c7bd3adc',
+                                                     'oc-ccb0e1d57fad0f0bcb01',
+                                                     'oc-f024aa512bb556930d49',
+                                                     'oc-7c0f5f9063a71a2cc545',
+                                                     'oc-a96b6e52e27f30956418']},
+ 'github.published-schema-description': {'classification': 'published-contract-description',
+                                         'status': 'retained',
+                                         'rationale': 'The title describes the published GitHub node payload '
+                                                      'contract.',
+                                         'candidateIds': ['oc-f456b7996907315385dc',
+                                                          'oc-b98a3b4f9e2fb4308e59']},
+ 'program.runtime.fixed-safety': {'classification': 'security-ceiling-or-default',
+                                  'status': 'retained',
+                                  'rationale': 'The finite fixed value is an implementation safety or '
+                                               'cleanup ceiling outside operator configuration.',
+                                  'candidateIds': ['oc-22b8df5a89b082eb6adb',
+                                                   'oc-5c54e3ed6b44a5674cea',
+                                                   'oc-87a8b47e57f1b7e827eb',
+                                                   'oc-385171dfcbabcfebde15',
+                                                   'oc-8e83f0b450af7e5ff4b8',
+                                                   'oc-5a5c83584303f5e079f4']},
+ 'program.runtime.boundary-arithmetic': {'classification': 'derived',
+                                         'status': 'retained',
+                                         'rationale': 'The value is an implementation clamp/index for '
+                                                      'bounded waits/output, derived from the resolved '
+                                                      'policy.',
+                                         'candidateIds': ['oc-b3617f45691ea6114ee7',
+                                                          'oc-cd336367b39423fbd08a',
+                                                          'oc-829504654a1c4e6e6ebe',
+                                                          'oc-16a8f2cd1e0a6f0e0efe',
+                                                          'oc-5b3cd8c7239e9cbc8532']},
+ 'program.runtime.platform-derived': {'classification': 'derived',
+                                      'status': 'retained',
+                                      'rationale': 'The Java executable/classpath fallback is derived from '
+                                                   'the host JVM and then included in runtime compatibility, '
+                                                   'not exposed as a new Ravenroot setting.',
+                                      'candidateIds': ['oc-34efa6bda77e6329c69a']},
+ 'program.runtime.diagnostic-code': {'classification': 'protocol-or-format-invariant',
+                                     'status': 'retained',
+                                     'rationale': 'The stable typed failure/diagnostic token names an '
+                                                  'unavailable launcher.',
+                                     'candidateIds': ['oc-0a1a6cddb1224d678309', 'oc-90b8d80f89c8a19f807b']},
+ 'program.runtime.typed-validation-or-derived': {'classification': 'security-ceiling-or-default',
+                                                 'status': 'retained',
+                                                 'rationale': 'Typed validation boundary, diagnostic label '
+                                                              'or unit/path derivation; it is not a separate '
+                                                              'operator setting.',
+                                                 'candidateIds': ['oc-550e8914435c12c5ba17',
+                                                                  'oc-b8a591efe1a3a2672a12',
+                                                                  'oc-5df1a083308bc51bc0d0',
+                                                                  'oc-d8d8db7c9cff048aabf9']},
+ 'program.runtime.typed-validation-or-derived.derived': {'classification': 'derived',
+                                                         'status': 'retained',
+                                                         'rationale': 'Typed validation boundary, diagnostic '
+                                                                      'label or unit/path derivation; it is '
+                                                                      'not a separate operator setting.',
+                                                         'candidateIds': ['oc-7a3984479facf044f932',
+                                                                          'oc-df68eae07bb536feed66',
+                                                                          'oc-4a9ffb730279ac071c1a',
+                                                                          'oc-e85f9797815d30d752df',
+                                                                          'oc-f1cd933e93a99bff9d18',
+                                                                          'oc-157408aa465ea59060e9',
+                                                                          'oc-27090fdc4df03effa238']},
+ 'program.runtime.typed-validation-or-derived.presentation-text': {'classification': 'presentation-text',
+                                                                   'status': 'retained',
+                                                                   'rationale': 'Typed validation boundary, '
+                                                                                'diagnostic label or '
+                                                                                'unit/path derivation; it is '
+                                                                                'not a separate operator '
+                                                                                'setting.',
+                                                                   'candidateIds': ['oc-0afe48bd4fde6b69f89e']},
+ 'program.runtime.result-safety': {'classification': 'security-ceiling-or-default',
+                                   'status': 'retained',
+                                   'rationale': 'The fixed result structure ceiling bounds untrusted program '
+                                                'output.',
+                                   'candidateIds': ['oc-dd491db1d7cfa3ae7978', 'oc-0228f3220291295ca8e6']},
+ 'program.runtime.shipped-image-layout': {'classification': 'protocol-or-format-invariant',
+                                          'status': 'retained',
+                                          'rationale': 'The image root is the fixed shipped container-layout '
+                                                       'guard used to decide whether the image-owned cache '
+                                                       'default applies.',
+                                          'candidateIds': ['oc-79e22e13bd8b5dd48e39']},
+ 'program.runtime.worker-format': {'classification': 'protocol-or-format-invariant',
+                                   'status': 'retained',
+                                   'rationale': 'The token is a stable worker failure/serialization contract '
+                                                'atom.',
+                                   'candidateIds': ['oc-b258a5be56141a6469e5',
+                                                    'oc-814b8930ba7e715ee6a8',
+                                                    'oc-6d9dfa3a5c7c60045251']},
+ 'program.runtime.protocol': {'classification': 'protocol-or-format-invariant',
+                              'status': 'retained',
+                              'rationale': 'The token is part of the digest, sandbox-policy, or supervisor '
+                                           'wire protocol.',
+                              'candidateIds': ['oc-79cbbc8144af9b9bdbed',
+                                               'oc-697a5f9690ff3daf54c8',
+                                               'oc-c25af5f6fd97e823a353',
+                                               'oc-0da284fb0915238cf892']},
+ 'program.runtime.wire-format': {'classification': 'protocol-or-format-invariant',
+                                 'status': 'retained',
+                                 'rationale': 'The magic value identifies the wire format.',
+                                 'candidateIds': ['oc-d410243c2c76751ba9e5']},
+ 'program.runtime.wire-safety': {'classification': 'security-ceiling-or-default',
+                                 'status': 'retained',
+                                 'rationale': 'The fixed non-configurable wire ceiling bounds the program '
+                                              'worker protocol; it must not be folded into authoring policy.',
+                                 'candidateIds': ['oc-c8950a652929fa1c4812',
+                                                  'oc-1a0df6e00e5414b77cc1',
+                                                  'oc-962ceadd9fc3b0a98112',
+                                                  'oc-ce737e7c6c65930c0d51',
+                                                  'oc-306f6295b837e35fdf3d',
+                                                  'oc-18b690e070e29ad2f4f9',
+                                                  'oc-52be261611aefc87cfae']},
+ 'program.runtime.wire-normalization': {'classification': 'derived',
+                                        'status': 'retained',
+                                        'rationale': 'The value normalizes empty/dirty serialization state.',
+                                        'candidateIds': ['oc-5e989aa935078b7afab0',
+                                                         'oc-acb766f5f9f58687b2b0']},
+ 'program.runtime.cache-argument-bound': {'classification': 'security-ceiling-or-default',
+                                          'status': 'retained',
+                                          'rationale': 'Fixed UTF-8 process argument bound, independent of '
+                                                       'execution policy.',
+                                          'candidateIds': ['oc-782811900b20fac56bd2',
+                                                           'oc-d814eb19b62658a9b412']},
+ 'program.runtime.attested-launch-protocol': {'classification': 'security-ceiling-or-default',
+                                              'status': 'retained',
+                                              'rationale': 'Attestation wire token, bounded lifecycle '
+                                                           'control or overflow sentinel, never an operator '
+                                                           'capacity.',
+                                              'candidateIds': ['oc-501c82cb28ce8e232b3c',
+                                                               'oc-cc3bac01dbcf27026fab']},
+ 'program.runtime.attested-launch-protocol.protocol-or-format-invariant': {'classification': 'protocol-or-format-invariant',
+                                                                           'status': 'retained',
+                                                                           'rationale': 'Attestation wire '
+                                                                                        'token, bounded '
+                                                                                        'lifecycle control '
+                                                                                        'or overflow '
+                                                                                        'sentinel, never an '
+                                                                                        'operator capacity.',
+                                                                           'candidateIds': ['oc-af24b5e3fd3fdb1fca29',
+                                                                                            'oc-68100fea26d57b968def']},
+ 'program.runtime.attested-launch-protocol.derived': {'classification': 'derived',
+                                                      'status': 'retained',
+                                                      'rationale': 'Attestation wire token, bounded '
+                                                                   'lifecycle control or overflow sentinel, '
+                                                                   'never an operator capacity.',
+                                                      'candidateIds': ['oc-1b4e7b22199282f6bebe',
+                                                                       'oc-4f52a449ad7a4ac70044',
+                                                                       'oc-524a572d1df4fb3316c1']},
+ 'program.runtime.supervisor-lifecycle-bound': {'classification': 'security-ceiling-or-default',
+                                                'status': 'retained',
+                                                'rationale': 'The finite wait is a fixed '
+                                                             'capability/termination/reap safety bound, not '
+                                                             'an operator setting.',
+                                                'candidateIds': ['oc-6d0e60cfee592e5da2d5',
+                                                                 'oc-388c0b85f3e92bcf0e15',
+                                                                 'oc-f601b440d03e20919d23']},
+ 'program.authoring.consumer-support.derived': {'classification': 'derived',
+                                                'status': 'retained',
+                                                'rationale': 'Constructor diagnostic label or one-byte '
+                                                             'overflow detection sentinel; actual limit '
+                                                             'comes from typed authority.',
+                                                'candidateIds': ['oc-45c33d012ba830f6aa95',
+                                                                 'oc-f104357558572e8b33a8']},
+ 'program.authoring.served-schema-version': {'classification': 'protocol-or-format-invariant',
+                                             'status': 'retained',
+                                             'rationale': 'Fixed peer protocol/header/schema identity, not a '
+                                                          'deployment default.',
+                                             'candidateIds': ['oc-58ebba64a0b7f7a5a071']},
+ 'program.authoring.payload-field': {'classification': 'protocol-or-format-invariant',
+                                     'status': 'retained',
+                                     'rationale': 'The language field name is part of the authoring request '
+                                                  'format.',
+                                     'candidateIds': ['oc-01da7dffeb6813a67ae7']},
+ 'ui.command-registry': {'classification': 'protocol-or-format-invariant',
+                         'status': 'retained',
+                         'rationale': 'The token is a command/scope/localization contract or its '
+                                      'deterministic ordering priority.',
+                         'candidateIds': ['oc-40c9889d52987aee2d5f',
+                                          'oc-d26c0820a38104978a6c',
+                                          'oc-4b088d91348a0f56f96b',
+                                          'oc-c529d89d8d1f35f46f82',
+                                          'oc-036a393626121c3ff49d',
+                                          'oc-55b986de9017f0bd4e63',
+                                          'oc-9e0a66f8a1cd2fc1debe',
+                                          'oc-5e905d433ea04436c4c3',
+                                          'oc-039f46545edf6f765b77',
+                                          'oc-02fe8b5831e03bc4e917',
+                                          'oc-a9ef4cfbd1d3dda6f377',
+                                          'oc-80957d019008bd91d08c',
+                                          'oc-df5870644c087d7c7e5f',
+                                          'oc-549af4a423d61c5fc112',
+                                          'oc-d1b7b650b9c57a49564e',
+                                          'oc-b8b538c7083bc6591ec9']},
+ 'ui.command-registry.derived': {'classification': 'derived',
+                                 'status': 'retained',
+                                 'rationale': 'The token is a command/scope/localization contract or its '
+                                              'deterministic ordering priority.',
+                                 'candidateIds': ['oc-042a9a47171c6d881c6e', 'oc-0fd59c6d31e0803670f1']},
+ 'ui.program-authoring-client-bound': {'classification': 'security-ceiling-or-default',
+                                       'status': 'retained',
+                                       'rationale': 'The finite client polling/display value bounds UI '
+                                                    'scheduling or presentation; it is not server execution '
+                                                    'policy.',
+                                       'candidateIds': ['oc-5bf5247edab5e0f7f59d',
+                                                        'oc-2245eb55611e1e5a4cb0',
+                                                        'oc-7cebf7aef87ff15d4948']},
+ 'program.authoring.workspace-format': {'classification': 'protocol-or-format-invariant',
+                                        'status': 'retained',
+                                        'rationale': 'The names are graph/program workspace property keys.',
+                                        'candidateIds': ['oc-f5f22a1e125344b4c565',
+                                                         'oc-3b66f0c4d0d0ce84cdf9',
+                                                         'oc-5d48311582dc7246d333',
+                                                         'oc-0e79c0725fb880a171c2']},
+ 'ui.editor-contract': {'classification': 'protocol-or-format-invariant',
+                        'status': 'retained',
+                        'rationale': 'The token is a DOM selector, field name, status, or editor protocol '
+                                     'atom.',
+                        'candidateIds': ['oc-012d1725fb9a2daeadfd',
+                                         'oc-cf3bbb71996b48c0f46e',
+                                         'oc-82a8e52250a56ec2c985',
+                                         'oc-0672ac3c8e380ee0ec5f',
+                                         'oc-99dd7031555ddb1292e1',
+                                         'oc-8f8eb56e48bd5cc9bf4a',
+                                         'oc-d54da92540eb7d036f4a',
+                                         'oc-4d05f45809db8e2097e0',
+                                         'oc-9f6632280bd5f9ba3096',
+                                         'oc-7e6b45de3e179c7b3d85',
+                                         'oc-5b73e4544bd834e64749',
+                                         'oc-c02bef0da48669d41646',
+                                         'oc-351a2899d8713a810f5b',
+                                         'oc-488bafb5cb7c8dbdc3b1',
+                                         'oc-7531d78311d9fedec439',
+                                         'oc-c70ddd4a4628b8e0e999',
+                                         'oc-d287d4766be3561e08dd',
+                                         'oc-368486d0401fece0f9e1',
+                                         'oc-b91bb236483e1de0233a',
+                                         'oc-41ee164d25645afc567f',
+                                         'oc-4acde52b61c288f092c8',
+                                         'oc-d1e6e7faecdae4f8a63d',
+                                         'oc-165826fc9435a668e382',
+                                         'oc-8457c76b110f6ca29636',
+                                         'oc-0626fd8d0db5dd3a864b',
+                                         'oc-eb4cf690e2a2a55336b5',
+                                         'oc-7ab8fa5b87fb889ac1a1',
+                                         'oc-9d952a2da310783258d3',
+                                         'oc-7ede5a1199e1744e80a9',
+                                         'oc-6a527ac11e4927e44e37']},
+ 'ui.editor-normalization': {'classification': 'derived',
+                             'status': 'retained',
+                             'rationale': 'The empty/zero value is local editor state normalization.',
+                             'candidateIds': ['oc-92a2477d557d100ff89b',
+                                              'oc-da728b9d83ab6a52f4d4',
+                                              'oc-f89271d05e6bb645ce56',
+                                              'oc-f1a019d154a95a20c5b4',
+                                              'oc-9289a55dd69373261574',
+                                              'oc-8a33ce581e8b14da45ff',
+                                              'oc-9410c36f41ade558606f',
+                                              'oc-d48c087c63462af36bdb',
+                                              'oc-7f63e0e2bf3a57350f71',
+                                              'oc-fa94bd615dba8166dac1',
+                                              'oc-c92e68d85bedd9861d58',
+                                              'oc-f9b827e4d78f2ce932e4',
+                                              'oc-8d961996b7f86aa35383',
+                                              'oc-c2dbd66896624f918487',
+                                              'oc-520badde56933a3624f8']},
+ 'ui.program-authoring-text': {'classification': 'presentation-text',
+                               'status': 'retained',
+                               'rationale': 'The literal is user-facing program-authoring status/help text.',
+                               'candidateIds': ['oc-42aa86187035ff50bd36',
+                                                'oc-b6a8afcabdd51ce9a1e3',
+                                                'oc-ebd242dd7cb634e7c45e',
+                                                'oc-fab56ab5f23eea7791d8']},
+ 'ui.program-language-selection': {'classification': 'presentation-text',
+                                   'status': 'retained',
+                                   'rationale': 'The token renders selected-state presentation for a program '
+                                                'language option.',
+                                   'candidateIds': ['oc-ac0e6aa02111bc76df32', 'oc-c090287ff1a11e1b79dd']},
+ 'program.authoring.legacy-v1-compatibility': {'classification': 'protocol-or-format-invariant',
+                                               'status': 'retained',
+                                               'rationale': 'Frozen v1 served-configuration compatibility '
+                                                            'values; v2 consumes explicit live policy.',
+                                               'candidateIds': ['oc-65c8000e6fe913317add',
+                                                                'oc-87e740a52876bfd1efe9',
+                                                                'oc-e8f6a5e25680158ff4db',
+                                                                'oc-de775a52ca0d0d549342',
+                                                                'oc-f1b0272cfcddb491aac6',
+                                                                'oc-edfb1227ab4feb105e70']},
+ 'release.checker-source-input': {'classification': 'derived',
+                                  'status': 'retained',
+                                  'rationale': 'The script path/encoding is a local checker implementation '
+                                               'input.',
+                                  'candidateIds': ['oc-f45e8bd4a37768cff9a1', 'oc-60149af9fb912e199731']},
+ 'github.actions-output-binding': {'classification': 'protocol-or-format-invariant',
+                                   'status': 'retained',
+                                   'rationale': 'GITHUB_OUTPUT is a GitHub Actions protocol binding.',
+                                   'candidateIds': ['oc-5ba99a781e30ac3f6149']},
+ 'github.actions-output-io': {'classification': 'derived',
+                              'status': 'retained',
+                              'rationale': 'The append mode/encoding is local deterministic output I/O.',
+                              'candidateIds': ['oc-4892f122aae9ee47aba8', 'oc-d2ccb4d7615671bde4e4']},
+ 'github.release-tool-normalization': {'classification': 'derived',
+                                       'status': 'retained',
+                                       'rationale': 'The value is a local path/I/O/sentinel normalization '
+                                                    'used by the release tool.',
+                                       'candidateIds': ['oc-400691183723d68d6fb2',
+                                                        'oc-ad91689d9238147fdfe3',
+                                                        'oc-258efc9677236628602a',
+                                                        'oc-2e991215fb7eee7f322f',
+                                                        'oc-f2541096576b865f0885',
+                                                        'oc-9819575b4746216caa6f',
+                                                        'oc-cf86d4964468bbcc6453',
+                                                        'oc-125c11a21e7762c3900d']},
+ 'github.release-tool-diagnostic': {'classification': 'presentation-text',
+                                    'status': 'retained',
+                                    'rationale': 'The text is a CLI diagnostic/help contract and contains no '
+                                                 'configurable authority.',
+                                    'candidateIds': ['oc-a48db9f13ca0a70c04c3',
+                                                     'oc-3b6b9a4e0e3cddfee8c2',
+                                                     'oc-c3f41f1be4a106c9eee2',
+                                                     'oc-1182e8806a9ca1a01c86',
+                                                     'oc-6fb97c7d541b3489ec89',
+                                                     'oc-4deb53b8dc09b60e477d',
+                                                     'oc-18b54569910224826522',
+                                                     'oc-e7dd399425db3a82f7f4',
+                                                     'oc-961d55730e27e07a3cfe',
+                                                     'oc-e7479958796f9e79b52c',
+                                                     'oc-d54ad04aaff817431f12',
+                                                     'oc-ff3614e05a9f0763b165',
+                                                     'oc-53b3e46de09d2be4e720',
+                                                     'oc-915d328eaac25d34e6b3',
+                                                     'oc-a2bbfc5341ec45a8a026',
+                                                     'oc-760f27be591db3129a74']},
+ 'github.release-tool-protocol': {'classification': 'protocol-or-format-invariant',
+                                  'status': 'retained',
+                                  'rationale': 'The route, GitHub CLI verb/flag, field, or repository '
+                                               'release path is a GitHub/tool protocol invariant.',
+                                  'candidateIds': ['oc-a942d555f11f6207f679',
+                                                   'oc-3656d5bfbee93b6d808c',
+                                                   'oc-59eb471b66ab7b600dbe',
+                                                   'oc-28f90c2a68b76d4164e5',
+                                                   'oc-31ece5f0f8caa3142fc7',
+                                                   'oc-5606f42005cebdf0e433',
+                                                   'oc-f29fd92d76ea3f5d69b5',
+                                                   'oc-c26fc8a52e3ce9e63d25',
+                                                   'oc-fdef11e900edb53e5c9a',
+                                                   'oc-b8e4f0c06ef313d33f4d',
+                                                   'oc-2f467d22377e2fa0acbd',
+                                                   'oc-2ab126d7ee53a6b2d7e1',
+                                                   'oc-20783b3efccf634d2d3b',
+                                                   'oc-46991401e3dfd4c8c13a',
+                                                   'oc-f2f8701325793c73ed72',
+                                                   'oc-0772b43643e80307bc75',
+                                                   'oc-0f3cc683dec8b02276b1',
+                                                   'oc-251b1ccfdda0685f2eae',
+                                                   'oc-5fac131ed20618b5ad0d',
+                                                   'oc-03a33af413c9ca467f7f']},
+ 'documentation.environment-prefix': {'classification': 'protocol-or-format-invariant',
+                                      'status': 'retained',
+                                      'rationale': 'The prefix groups documented environment bindings; it is '
+                                                   'publisher grammar rather than a setting.',
+                                      'candidateIds': ['oc-9d755baf3baac9a8f8a3', 'oc-0b1352875b06ecfe1649']}}
+
+
+def program_github_method_spans(source: str, type_symbol: str, method: str) -> list[tuple[int, int]]:
+    """Resolve every direct overload, including constructor delegation, in its real type scope."""
+    span = java_type_span(source, type_symbol)
+    if span is None:
+        return []
+    base, limit = span
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    result: list[tuple[int, int]] = []
+    for name in re.finditer(rf"\b{re.escape(method)}\s*\(", code):
+        if depths[name.start()] != 1 or (name.start() and code[name.start() - 1] == "."):
+            continue
+        opening = code.find("(", name.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            continue
+        suffix = re.match(r"\s*(?:throws\s+[^{};]+)?\s*\{", code[closing + 1:])
+        if suffix is None:
+            continue
+        brace = closing + 1 + suffix.end() - 1
+        end = matching_delimiter(code, brace, "{", "}")
+        if end is not None:
+            result.append((base + name.start(), base + end + 1))
+    return result
+
+
+def program_github_javascript_spans(source: str, method: str) -> list[tuple[int, int]]:
+    code = strip_c_comments_and_literals(source)
+    matches = list(re.finditer(rf"\bfunction\s+{re.escape(method)}\s*\(", code))
+    if len(matches) != 1:
+        return []
+    parameters = matching_delimiter(code, code.find("(", matches[0].start()), "(", ")")
+    if parameters is None:
+        return []
+    opening = code.find("{", parameters + 1)
+    end = matching_delimiter(code, opening, "{", "}")
+    return [] if end is None else [(matches[0].start(), end + 1)]
+
+
+def program_github_policy_source_present(root: Path) -> bool:
+    # Pre-existing defining sources are anchors too: deleting new typed classes cannot opt out.
+    return any((root / PROGRAM_GITHUB_PATHS[key]).exists()
+               for key in ("runtime", "github", "authoring", "selector", "core"))
+
+
+def program_github_deployment_candidate(root: Path, candidate: Candidate) -> bool:
+    paths = PROGRAM_GITHUB_PATHS
+    if candidate.path not in {paths[key] for key in ("compose", "helmValues", "helmSchema", "helmDeployment", "kubernetes")}:
+        return False
+    try:
+        source = (root / candidate.path).read_text(encoding="utf-8")
+        if candidate.path == paths["helmSchema"]:
+            spans = json_value_spans(source)
+            span = None if spans is None else spans.get(("properties", "programAuthoring"))
+            return span is not None and line_number(source, span[0]) <= candidate.line <= line_number(source, span[1] - 1)
+        if candidate.path == paths["helmValues"]:
+            return "programAuthoring" in candidate.role
+        lines = source.splitlines()
+        line = lines[candidate.line - 1]
+        return "RAVENROOT_PROGRAM_AUTHORING_" in line or ".Values.programAuthoring." in line or (
+            candidate.path == paths["kubernetes"] and candidate.line > 1
+            and "RAVENROOT_PROGRAM_AUTHORING_" in lines[candidate.line - 2])
+    except (OSError, UnicodeError, IndexError):
+        return False
+
+
+def program_github_policy_cohort_candidate_ids(root: Path, discovered: dict[str, Candidate]) -> set[str]:
+    reviewed = {identifier for contract in PROGRAM_GITHUB_CONTRACTS + PROGRAM_GITHUB_BINDING_CARRIERS
+                for identifier in contract["candidateIds"]}
+    reviewed.update(identifier for group in PROGRAM_GITHUB_RETAINED_PARTITIONS.values()
+                    for identifier in group["candidateIds"])
+    excluded = set(PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS)
+    selected: set[str] = set()
+    shared_lines: dict[str, list[tuple[int, int]]] = {}
+    for key, (type_symbol, methods) in PROGRAM_GITHUB_SHARED_METHODS.items():
+        path = PROGRAM_GITHUB_PATHS[key]
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        spans = [span for method in methods for span in (
+            program_github_method_spans(source, type_symbol, method) if type_symbol
+            else program_github_javascript_spans(source, method))]
+        shared_lines[path] = [(line_number(source, start), line_number(source, end))
+                              for start, end in spans]
+    for candidate in discovered.values():
+        if candidate.surface == "test-fixture" or candidate.id in excluded:
+            continue
+        if candidate.id in reviewed or candidate.path in PROGRAM_GITHUB_CLOSED_PATHS or program_github_deployment_candidate(root, candidate) \
+                or (candidate.path == PROGRAM_GITHUB_PATHS["served"]
+                    and candidate.role == "CURRENT_SCHEMA_VERSION") \
+                or (candidate.path == PROGRAM_GITHUB_PATHS["client"]
+                    and candidate.role == "LEGACY_PROGRAM_AUTHORING") \
+                or any(start <= candidate.line <= end
+                       for start, end in shared_lines.get(candidate.path, [])):
+            selected.add(candidate.id)
+    return selected
+
+
+def program_github_policy_authority_from_source(root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive all 59 fields and their closed executable proof, independently of inventory metadata.
+
+    Approved executable-body digests are intentionally conservative: an implementation change must
+    receive source review, not be accepted by refreshing the inventory's own evidence digests.
+    Shared classes seal only named consumer/constructor overloads; unrelated old debt is excluded by
+    exact existing identity rather than by a wildcard that could hide newly introduced candidates.
+    """
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8")
+                   for path in PROGRAM_GITHUB_REQUIRED_PATHS}
+    except (OSError, UnicodeError):
+        return None
+    for path, kind, type_symbol, method, expected_digest, expected_count in PROGRAM_GITHUB_SOURCE_PROOFS:
+        source = sources[path]
+        if kind == "file":
+            value = normalized(strip_c_comments(source)) if Path(path).suffix in {".java", ".js"} else source
+            spans = [(0, len(source))]
+        else:
+            spans = (program_github_method_spans(source, type_symbol, method) if kind == "java"
+                     else program_github_javascript_spans(source, method))
+            value = "\n".join(normalized(strip_c_comments(source[start:end])) for start, end in spans)
+        if len(spans) != expected_count or hashlib.sha256(value.encode("utf-8")).hexdigest() != expected_digest:
+            return None
+    tests: list[dict[str, str]] = []
+    for path, type_symbol, method, expected_digest in PROGRAM_GITHUB_TEST_PROOFS:
+        source = sources[path]
+        if java_method_digest(source, type_symbol, method) != expected_digest \
+                or not re.search(rf"@Test\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:public\s+)?void\s+{re.escape(method)}\s*\(", source):
+            return None
+        tests.append({"path": path, "type": type_symbol, "method": method, "methodDigest": expected_digest})
+    if len(PROGRAM_GITHUB_CONTRACTS) != 59 \
+            or len({contract["setting"] for contract in PROGRAM_GITHUB_CONTRACTS}) != 59:
+        return None
+    for contract in PROGRAM_GITHUB_CONTRACTS + PROGRAM_GITHUB_BINDING_CARRIERS:
+        path, type_symbol = contract["owner"].split("#")
+        source = sources.get(path)
+        if source is None or not java_type_declares_field(source, type_symbol, contract["field"]):
+            return None
+    expected_components = {
+        "graal": ("supervisor", "javaExecutable", "timeout", "maxHeapMegabytes", "placement"),
+        "authoring": ("maxSourceBytes", "maxBuildRequestBytes", "maxProgramsPerBuild"),
+        "selector": ("runtime",),
+        "github": ("authority", "projection", "store", "profiles"),
+        "profile": ("name", "tenantId", "apiOrigin", "owner", "repository", "repositoryId", "installationId",
+                    "reviewerLogin", "credentialBindingId", "credentialReference", "webhookSecretReference",
+                    "route", "webhookEvents", "project", "workflowIds", "release", "timeoutMs", "maxRequestBytes",
+                    "maxResponseBytes", "maxConcurrency", "maxPolls", "pollIntervalMs"),
+    }
+    if any(java_record_components(sources[PROGRAM_GITHUB_PATHS[key]], Path(PROGRAM_GITHUB_PATHS[key]).stem) != components
+           for key, components in expected_components.items()):
+        return None
+    # No logical field may be omitted merely because the lexical scanner sees no literal for it.
+    scoped = [contract for contract in PROGRAM_GITHUB_CONTRACTS if contract["setting"].startswith("github.")]
+    if len(scoped) != 50 or len({(c["owner"], c["field"]) for c in scoped}) != 50:
+        return None
+    by_id = [identifier for contract in PROGRAM_GITHUB_CONTRACTS + PROGRAM_GITHUB_BINDING_CARRIERS
+             for identifier in contract["candidateIds"]]
+    by_id += [identifier for group in PROGRAM_GITHUB_RETAINED_PARTITIONS.values() for identifier in group["candidateIds"]]
+    if len(by_id) != len(set(by_id)) or set(by_id) != program_github_policy_cohort_candidate_ids(root, discovered):
+        return None
+    partitions = [{"semanticPartition": name, **copy.deepcopy(group)}
+                  for name, group in sorted(PROGRAM_GITHUB_RETAINED_PARTITIONS.items())]
+    # These descriptions are part of the closed source proof, not free-form row claims.
+    contract_evidence = {
+        "validation": "Closed typed field, selected binding precedence, validated domain and exact executable consumer/source proof.",
+        "coverage": "Mandatory source-derived logical field contract, fixed reviewed executable bodies and decisive test evidence.",
+    }
+    return {"kind": "java-program-github-policy-family-v1", "logicalSettingCount": 59,
+            "contracts": [{**copy.deepcopy(contract), **contract_evidence} for contract in PROGRAM_GITHUB_CONTRACTS],
+            "bindingCarriers": [{**copy.deepcopy(contract), **contract_evidence} for contract in PROGRAM_GITHUB_BINDING_CARRIERS],
+            "semanticPartitions": partitions, "candidateIds": sorted(by_id),
+            "sourceDigests": [{"path": path, "digest": _source_digest(source)}
+                              for path, source in sorted(sources.items())],
+            "testEvidence": tests}
+
+
+def program_github_policy_authority_errors(root: Path, authorities: object,
+                                           entries: dict[str, dict[str, object]],
+                                           discovered: dict[str, Candidate]) -> list[str]:
+    if not program_github_policy_source_present(root):
+        return [] if authorities in (None, {}) else ["program/GitHub authority exists without its source family"]
+    expected = program_github_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["program/GitHub policy source family is incomplete, unpartitioned, or unsupported"]
+    errors: list[str] = []
+    if authorities != {PROGRAM_GITHUB_POLICY_AUTHORITY_ID: expected}:
+        errors.append("program/GitHub settings require the exact mandatory source-derived authority")
+    operators = {identifier: contract for contract in expected["contracts"] + expected["bindingCarriers"]
+                 for identifier in contract["candidateIds"]}
+    retained = {identifier: group for group in expected["semanticPartitions"] for identifier in group["candidateIds"]}
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, entry in entries.items() if entry.get("programGithubPolicyAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("program/GitHub authority candidate partition is missing, duplicated, or foreign")
+    for identifier in expected_ids:
+        entry = entries.get(identifier)
+        if entry is None or entry.get("status") == "pending-review" or entry.get("authorityStatus") == "unresolved":
+            errors.append(f"{identifier}: mandatory program/GitHub candidate requires resolved semantic review")
+            continue
+        if entry.get("programGithubPolicyAuthority") != PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
+            errors.append(f"{identifier}: program/GitHub authority marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            if entry.get("classification") != "operator-configurable" or entry.get("status") not in {"already-centralized", "converted"}:
+                errors.append(f"{identifier}: program/GitHub operator classification has drifted")
+            for field, expected_value in (("setting", contract["setting"]), ("owner", contract["owner"]),
+                                          ("field", contract["field"]), ("bindings", contract["bindings"]),
+                                          ("defaultEvidence", contract["defaultCandidateIds"]),
+                                          ("default", contract["defaultExpression"]), ("scope", contract["scope"]),
+                                          ("pinning", contract["pinning"]), ("validation", contract["validation"]),
+                                          ("coverage", contract["coverage"])):
+                if entry.get(field) != expected_value:
+                    errors.append(f"{identifier}: program/GitHub {field} authority has drifted")
+        else:
+            group = retained[identifier]
+            if entry.get("classification") != group["classification"] or entry.get("status") != group["status"]:
+                errors.append(f"{identifier}: program/GitHub retained semantic partition has drifted")
+    return errors
+
+
+INTERACTION_WEBSOCKET_SETTINGS = [{'suffix': 'enabled',
+  'environment': 'RAVENROOT_WEBSOCKET_ENABLED',
+  'field': 'enabled',
+  'componentIndex': 0,
+  'componentPart': 'value',
+  'helper': 'bool',
+  'fallback': 'false',
+  'evaluated': {'kind': 'boolean', 'value': False},
+  'validation': 'strict Boolean; enabled refuses disabled authentication',
+  'bindingCandidateIds': ['oc-9e28f161f43693c559ed',
+                          'oc-b13eff4a40d962cffe60',
+                          'oc-dc12eba6bd889c1cc5c7']},
+ {'suffix': 'bind',
+  'environment': 'RAVENROOT_WEBSOCKET_BIND',
+  'field': 'bindAddress',
+  'componentIndex': 1,
+  'componentPart': 'bind',
+  'helper': 'value',
+  'fallback': '"127.0.0.1"',
+  'evaluated': {'kind': 'string', 'value': '127.0.0.1'},
+  'validation': 'canonical IP literal or localhost',
+  'bindingCandidateIds': ['oc-13e07be93e1c8322b1fd',
+                          'oc-aed00961852be00b90a0',
+                          'oc-f9dd85e360ca5b23dd1f']},
+ {'suffix': 'port',
+  'environment': 'RAVENROOT_WEBSOCKET_PORT',
+  'field': 'bindAddress',
+  'componentIndex': 1,
+  'componentPart': 'port',
+  'helper': 'integer',
+  'fallback': '8081',
+  'evaluated': {'kind': 'integer', 'value': 8081},
+  'validation': 'integer 1..65535',
+  'bindingCandidateIds': ['oc-17886066f99cd29df2e6',
+                          'oc-4c2e325174fb927be216',
+                          'oc-66b7c2cee01a78772737']},
+ {'suffix': 'max-connections',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_CONNECTIONS',
+  'field': 'maxConnections',
+  'componentIndex': 2,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '256',
+  'evaluated': {'kind': 'integer', 'value': 256},
+  'validation': 'integer 1..100000',
+  'bindingCandidateIds': ['oc-73cc1700243a35612eb0',
+                          'oc-8f84af8efaa4f6eecdc9',
+                          'oc-b0f564e4df6eb25b3695']},
+ {'suffix': 'pending-authentication',
+  'environment': 'RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION',
+  'field': 'maxPendingAuthentication',
+  'componentIndex': 3,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '32',
+  'evaluated': {'kind': 'integer', 'value': 32},
+  'validation': 'integer 1..maxConnections',
+  'bindingCandidateIds': ['oc-1ef539325ca72a835ff3',
+                          'oc-28f2724707efb2dc569c',
+                          'oc-aaf3adb4cfa168278ac0']},
+ {'suffix': 'pending-authentication-per-address',
+  'environment': 'RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION_PER_ADDRESS',
+  'field': 'maxPendingAuthenticationPerAddress',
+  'componentIndex': 4,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '4',
+  'evaluated': {'kind': 'integer', 'value': 4},
+  'validation': 'integer 1..maxPendingAuthentication',
+  'bindingCandidateIds': ['oc-541a224dc213ad1c64a0',
+                          'oc-a0205ce634a613c2377b',
+                          'oc-ef140e9c120a82d1b399']},
+ {'suffix': 'backend-operations',
+  'environment': 'RAVENROOT_WEBSOCKET_BACKEND_OPERATIONS',
+  'field': 'maxBackendOperations',
+  'componentIndex': 5,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '128',
+  'evaluated': {'kind': 'integer', 'value': 128},
+  'validation': 'integer 1..100000',
+  'bindingCandidateIds': ['oc-0d699da0857e2ef74363',
+                          'oc-3de773f7a70587f9d2c6',
+                          'oc-44272f4d32fdcbd52831']},
+ {'suffix': 'authentication-deadline-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_AUTHENTICATION_DEADLINE_SECONDS',
+  'field': 'authenticationDeadline',
+  'componentIndex': 6,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '5',
+  'evaluated': {'kind': 'duration-seconds', 'value': 5},
+  'validation': 'duration 1..60 seconds',
+  'bindingCandidateIds': ['oc-3845d261e5586af4fc25',
+                          'oc-8e9591be1abe3702bd60',
+                          'oc-dde8986ae9c96dadf72b']},
+ {'suffix': 'max-message-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_MESSAGE_BYTES',
+  'field': 'maxMessageBytes',
+  'componentIndex': 7,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '512 * 1_024',
+  'evaluated': {'kind': 'integer', 'value': 524288},
+  'validation': 'integer 1024..16777216',
+  'bindingCandidateIds': ['oc-31eb82774aa4cb560fde',
+                          'oc-33b1853de942d8938f93',
+                          'oc-b65c8d149e396f55c704']},
+ {'suffix': 'max-fragments',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_FRAGMENTS',
+  'field': 'maxFragments',
+  'componentIndex': 8,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '16',
+  'evaluated': {'kind': 'integer', 'value': 16},
+  'validation': 'integer 1..1024',
+  'bindingCandidateIds': ['oc-01f941d8d461f82f760a',
+                          'oc-08e73abdbce98f5c61df',
+                          'oc-3df568ca0522d534485b']},
+ {'suffix': 'pending-commands',
+  'environment': 'RAVENROOT_WEBSOCKET_PENDING_COMMANDS',
+  'field': 'maxPendingCommands',
+  'componentIndex': 9,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '32',
+  'evaluated': {'kind': 'integer', 'value': 32},
+  'validation': 'integer 1..1024 per connection',
+  'bindingCandidateIds': ['oc-0214d7a08716e5ad60e8',
+                          'oc-7b440b74e3893348de0c',
+                          'oc-c6bf43c88f0d62b17852']},
+ {'suffix': 'queued-incoming-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_QUEUED_INCOMING_BYTES',
+  'field': 'maxQueuedIncomingBytes',
+  'componentIndex': 10,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '1024 * 1024',
+  'evaluated': {'kind': 'integer', 'value': 1048576},
+  'validation': 'integer maxMessageBytes..67108864 per connection',
+  'bindingCandidateIds': ['oc-8f18eecc4570e82e7a97',
+                          'oc-c0f412fae83a0ce094f7',
+                          'oc-dab874b0a4d9edacaf0e']},
+ {'suffix': 'max-outgoing-frame-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_MAX_OUTGOING_FRAME_BYTES',
+  'field': 'maxOutgoingFrameBytes',
+  'componentIndex': 11,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '64 * 1_024',
+  'evaluated': {'kind': 'integer', 'value': 65536},
+  'validation': 'integer 1024..maxMessageBytes',
+  'bindingCandidateIds': ['oc-c290aa7f35fbe025d798',
+                          'oc-c5fa1b7575cae649d7da',
+                          'oc-fd8effc7df884df9c21d']},
+ {'suffix': 'queued-outgoing-frames',
+  'environment': 'RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_FRAMES',
+  'field': 'maxQueuedOutgoingFrames',
+  'componentIndex': 12,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '64',
+  'evaluated': {'kind': 'integer', 'value': 64},
+  'validation': 'integer 1..4096 per connection',
+  'bindingCandidateIds': ['oc-0a5a6bf2901605e92c04',
+                          'oc-2b3f7ed1d25287805770',
+                          'oc-d6ca7a3a48c9c711e182']},
+ {'suffix': 'queued-outgoing-bytes',
+  'environment': 'RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_BYTES',
+  'field': 'maxQueuedOutgoingBytes',
+  'componentIndex': 13,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '1024 * 1024',
+  'evaluated': {'kind': 'integer', 'value': 1048576},
+  'validation': 'integer maxOutgoingFrameBytes..67108864 per connection',
+  'bindingCandidateIds': ['oc-38731131acd8f3504db9',
+                          'oc-979260b7c213c48f7b72',
+                          'oc-eaea492e98edcf8ab078']},
+ {'suffix': 'unacknowledged-events',
+  'environment': 'RAVENROOT_WEBSOCKET_UNACKNOWLEDGED_EVENTS',
+  'field': 'maxUnacknowledgedEvents',
+  'componentIndex': 14,
+  'componentPart': 'value',
+  'helper': 'integer',
+  'fallback': '64',
+  'evaluated': {'kind': 'integer', 'value': 64},
+  'validation': 'integer 1..4096 per connection',
+  'bindingCandidateIds': ['oc-0202d9651098772b6e6d',
+                          'oc-57ecfaa0ef37bcf5c976',
+                          'oc-a43214a8ff5932ddb729']},
+ {'suffix': 'replay-poll-millis',
+  'environment': 'RAVENROOT_WEBSOCKET_REPLAY_POLL_MILLIS',
+  'field': 'replayPollInterval',
+  'componentIndex': 15,
+  'componentPart': 'value',
+  'helper': 'millis',
+  'fallback': '100',
+  'evaluated': {'kind': 'duration-milliseconds', 'value': 100},
+  'validation': 'duration 50..60000 milliseconds',
+  'bindingCandidateIds': ['oc-58b0e24a974ff9bba443',
+                          'oc-60c9e753107aa473b9b1',
+                          'oc-f0f147f5900af030cea7']},
+ {'suffix': 'acknowledgement-deadline-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_ACKNOWLEDGEMENT_DEADLINE_SECONDS',
+  'field': 'acknowledgementDeadline',
+  'componentIndex': 16,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '30',
+  'evaluated': {'kind': 'duration-seconds', 'value': 30},
+  'validation': 'duration 1..300 seconds',
+  'bindingCandidateIds': ['oc-0070aa2c8724d4fc82b0',
+                          'oc-2856b9bbe9d493fb25c7',
+                          'oc-742babd642f7bc5d4e34']},
+ {'suffix': 'idle-timeout-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_IDLE_TIMEOUT_SECONDS',
+  'field': 'idleTimeout',
+  'componentIndex': 17,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '60',
+  'evaluated': {'kind': 'duration-seconds', 'value': 60},
+  'validation': 'duration 1..3600 seconds',
+  'bindingCandidateIds': ['oc-01a7e53809dcd24ff7f1',
+                          'oc-91eef30d6e4b804e44e4',
+                          'oc-c1ebd27dd47d99cd2bec']},
+ {'suffix': 'absolute-lifetime-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_ABSOLUTE_LIFETIME_SECONDS',
+  'field': 'absoluteLifetime',
+  'componentIndex': 18,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '3_600',
+  'evaluated': {'kind': 'duration-seconds', 'value': 3600},
+  'validation': 'duration 1..86400 seconds',
+  'bindingCandidateIds': ['oc-748c63c150e70c4f3481',
+                          'oc-85577f20d5d1a924ddc6',
+                          'oc-d77ac6c70e36974ee0b1']},
+ {'suffix': 'shutdown-timeout-seconds',
+  'environment': 'RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS',
+  'field': 'shutdownTimeout',
+  'componentIndex': 19,
+  'componentPart': 'value',
+  'helper': 'seconds',
+  'fallback': '5',
+  'evaluated': {'kind': 'duration-seconds', 'value': 5},
+  'validation': 'duration 1..60 seconds',
+  'bindingCandidateIds': ['oc-39d6f7e259ddc85cadce',
+                          'oc-6868bf9fdff8a18b3c72',
+                          'oc-a738f49bf78540579079']}]
+
+INTERACTION_WEBSOCKET_COMPONENTS = ('enabled',
+ 'bindAddress',
+ 'maxConnections',
+ 'maxPendingAuthentication',
+ 'maxPendingAuthenticationPerAddress',
+ 'maxBackendOperations',
+ 'authenticationDeadline',
+ 'maxMessageBytes',
+ 'maxFragments',
+ 'maxPendingCommands',
+ 'maxQueuedIncomingBytes',
+ 'maxOutgoingFrameBytes',
+ 'maxQueuedOutgoingFrames',
+ 'maxQueuedOutgoingBytes',
+ 'maxUnacknowledgedEvents',
+ 'replayPollInterval',
+ 'acknowledgementDeadline',
+ 'idleTimeout',
+ 'absoluteLifetime',
+ 'shutdownTimeout')
+
+INTERACTION_WEBSOCKET_PRODUCTION_PATHS = ['ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java']
+
+INTERACTION_WEBSOCKET_MAIN_PATH = 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java'
+
+INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environment_reference.py'
+
+INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
+ 'scripts/publish_environment_reference.py': '1e990505413c0e500635a06674ad09894e086adb61a7391028a70944d8be8d0b',
+ 'scripts/tests/test_publish_environment_reference.py': '135e497abc1202d12264bba621dfb75d29854df4f59e90b5a1a994108b46bb49',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
+
+INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+  'RavenrootServerMain',
+  'run',
+  '82e3aae849d23ee1d20daf60f4e67a5f832fb21a6a1ea506342bdb623715d029'),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'RavenrootServer',
+  'installInteractionWebSockets',
+  '8e139193181b7eb3622ece92403e9fa22b568ca955b68134e9184426a201c97c'),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'RavenrootServer',
+  'start',
+  '70c93f7c7d1802742dfe51a89b1f5ef032f6ad3052df24257461a5c03e45977c'),
+ ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+  'RavenrootServer',
+  'close',
+  'e1b43cb51ffacf4750c2d240b7f5fc529c67dc67a456378fda67688fe06119cf')]
+
+INTERACTION_WEBSOCKET_TEST_PROOFS = [('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'allPublishedDefaultsAreExact',
+  '3a3e224b4a108268a362e37c0cd14f436578e6237ef993df2c409dcd4402680c'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'everyPropertyAndEnvironmentBindingResolvesThroughOneTypedAuthority',
+  '81c8b269a0dcaf85331e9dec63fdf188bf2cc0249c4716703e68e0acd9124aef'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'blankAndNonStringPropertiesUseTheDocumentedFallbackChain',
+  'c89e61221dce35f7ac55b220947fe3b367d74ba2db326bce9bd7cae4dbb7aa33'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'resolvedConfigurationIsAnImmutableSnapshotOfInputs',
+  '468c13a38c7d798861f55d49fe5525d0fac3b0be4dd78e230fe3dc9436d9220b'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'strictScalarParsingAndEverySimpleBoundRefuse',
+  '8edcf3b76f35869429845eb1cab56f957b3e709cd690fa1d6b90224c23fe3596'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'everySimpleBoundAcceptsItsExactEndpoints',
+  '8ba385d2b461a68217daaab1c812914e33b0934cd92c6e66fe204eefc8ccd2e8'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'everyCrossFieldBoundRefuses',
+  '8538f3575b10ccba5ccae30897976738bdc8add741b36f1d4a0490b09bd9d41b'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+  'InteractionWebSocketConfigurationTest',
+  'enabledListenerRefusesDisabledAuthentication',
+  'd558d332c1d1e5b30508f348648b83a2f40c448e8159b195b8aeb1432c561538'),
+ ('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java',
+  'RavenrootServerInteractionLifecycleTest',
+  'installedInteractionListenerStartsAndClosesWithTheServerLifecycle',
+  '4b50e2deee29ba6da32018dd0e38e69f83a96487a5d7bf14b0efc85224752cde')]
+
+INTERACTION_WEBSOCKET_REQUIRED_PATHS = ['ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java',
+ 'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
+ 'scripts/publish_environment_reference.py',
+ 'scripts/tests/test_publish_environment_reference.py']
+
+INTERACTION_WEBSOCKET_BINDING_CARRIER = {'candidateIds': ['oc-8661ab6558d7b802ae8a'],
+ 'classification': 'protocol-or-format-invariant',
+ 'status': 'retained',
+ 'bindingCarrier': {'kind': 'interaction-websocket-property-prefix-v1',
+                    'prefix': 'ravenroot.websocket.',
+                    'owner': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java#InteractionWebSocketConfiguration',
+                    'method': 'value',
+                    'role': 'Forms each full property name from the exact reviewed setting suffix; '
+                            'carries no scalar value/default.'}}
+
+INTERACTION_WEBSOCKET_RETAINED_PARTITIONS = [{'semanticPartition': 'interaction.server.counter-or-byte-origin',
+  'classification': 'derived',
+  'status': 'retained',
+  'rationale': 'Zero is the exact initial/reset origin for a bounded in-memory counter or byte '
+               'accumulator.',
+  'candidateIds': ['oc-01f492f57995392a492c',
+                   'oc-1617336b4f40ea4321b6',
+                   'oc-601d2acd6904b4513ffa',
+                   'oc-8cd26c923f63689770b8',
+                   'oc-9eab3cbadcac7913b641',
+                   'oc-ef7b11d44ed21993ea62']},
+ {'semanticPartition': 'interaction.publisher.replay-poll-millis',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-024468c4185ceaddc0c3', 'oc-cb82030d17932d1b2e1f'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.protocol.parser-ceilings',
+  'classification': 'security-ceiling-or-default',
+  'status': 'retained',
+  'rationale': 'This fixed parser/token ceiling bounds the public interaction wire grammar and is '
+               'enforced before command authority.',
+  'candidateIds': ['oc-02c3a578bd0e0cf954d4',
+                   'oc-67070fa727a916e32c9c',
+                   'oc-9f4766ed4f852b913299',
+                   'oc-c1450f6faeca937bddde',
+                   'oc-db4202cabfb155ea60dd',
+                   'oc-effdce91b72ed45d73fc',
+                   'oc-f473dbda9b83cc0bf18a']},
+ {'semanticPartition': 'interaction.publisher.enabled',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-05b76d906c5449103b0f', 'oc-d9e745f43f0e6c7f9be0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.test-fixture',
+  'classification': 'test-fixture',
+  'status': 'retained',
+  'rationale': 'This literal is confined to the publisher regression that distinguishes interaction '
+               'listener variables from outbound profile variables.',
+  'candidateIds': ['oc-0a5ee148a41a3457a1e2',
+                   'oc-38a6fc859d10fc83215a',
+                   'oc-54448df6af97b09a2238',
+                   'oc-54474268e4d6a43bcc5d',
+                   'oc-8ad90786644dea1e6227',
+                   'oc-90a7ea5b4fe026815594',
+                   'oc-b3fef9fac3f5323c343a',
+                   'oc-da47c43068594a0b4dc3',
+                   'oc-e06facf10c0299f5457f',
+                   'oc-e0999fa708f8e4fe41d9',
+                   'oc-e68f75fa60142aef3e91',
+                   'oc-ff0126da7b183eec0cf5']},
+ {'semanticPartition': 'interaction.publisher.queued-outgoing-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-11e28e9db0743c1a626c', 'oc-a450a0be998b9af73ad0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-message-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-12d15486e77fc4b5383b', 'oc-e696dc905ae3483dfad5'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-outgoing-frame-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-1da353f0de82e7a55412', 'oc-cafd8fc870c336ba115d'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-connections',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-2532910b3bf0186c90ac', 'oc-2bf09157c105a974b9d0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.max-fragments',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-287b74d86284f8c45b88', 'oc-5543506f8e68ab7606e2'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.bind',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-33d56ce331d34c00f695', 'oc-a49248d36a1eb7a5b2d0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.acknowledgement-deadline-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-36b91f96ce53237fb8d3', 'oc-56a1aaf4eb8fadd8b04d'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.pending-commands',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-3b6197752cf27f6f0505', 'oc-4407bb362c93d6033ab5'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.unacknowledged-events',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-3deb6adb710bf647dd14', 'oc-6fa05819dfd4f7f8451b'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.idle-timeout-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-41cda62b7e24e2b6605c', 'oc-6b2b6ea7bf04e33c0c27'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.server.constructor-field-labels',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The exact constructor dependency label is structural failure vocabulary.',
+  'candidateIds': ['oc-4c5d05274b003bd7ed3c', 'oc-89fd6cb91623ee3201f5']},
+ {'semanticPartition': 'interaction.protocol.listener-identity',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The path and WebSocket subprotocol are fixed public wire identities.',
+  'candidateIds': ['oc-4e937d0d15a823cc708c', 'oc-c3cdbde3e652e96b4b67', 'oc-ea57f08120417ef42e1a']},
+ {'semanticPartition': 'interaction.publisher.absolute-lifetime-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-5c576a94d93e637e0f3b', 'oc-de82b0dc44248925b53f'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.queued-incoming-bytes',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-5cda9859766e1684ec7b', 'oc-fc2d1e1b8f2187fce283'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.pending-authentication',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-5edd1523f971557a2c69', 'oc-d6f67d06fc8d109ad618'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.diagnostic.authentication-requirement',
+  'classification': 'presentation-text',
+  'status': 'retained',
+  'rationale': 'This token appears in a fixed startup refusal message and does not read or default '
+               'either setting.',
+  'candidateIds': ['oc-5f90ea084a36bfd1ab71', 'oc-7b6457670ddec2b86a6b']},
+ {'semanticPartition': 'interaction.publisher.pending-authentication-per-address',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-624a9a0e82f5d929a590', 'oc-e3dd01ed7f85ba25eed0'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.validation.duration-unit',
+  'classification': 'derived',
+  'status': 'retained',
+  'rationale': 'Zero is the derived comparison origin used while translating validated duration units.',
+  'candidateIds': ['oc-6d22f53e57378ab1d83f',
+                   'oc-81c21960eb5c94966c58',
+                   'oc-95c98d399aaf71704c1a',
+                   'oc-989efa11eed9b518ffd4']},
+ {'semanticPartition': 'interaction.publisher.port',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-775c3f97bf73171ac904', 'oc-a9237e10e83b212ebbe9'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.authentication-deadline-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-9490e2feeba5dec456f9', 'oc-c4a1c943156a48500dcd'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.shutdown-timeout-seconds',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-a4ade30ec474a27ec4db', 'oc-dfa0f503452f7ce86e87'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.validation.setting-label',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The exact port field label is structural validation vocabulary; the numeric default is '
+               'owned separately.',
+  'candidateIds': ['oc-a96ad2d82f8f7f8b4f7a']},
+ {'semanticPartition': 'interaction.publisher.backend-operations',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-a989123e01970621a5ce', 'oc-b963df6336cf9b9e1def'],
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.publisher.queued-outgoing-frames',
+  'classification': 'published-contract-description',
+  'status': 'retained',
+  'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
+               'and links its typed contract.',
+  'candidateIds': ['oc-f1c71dd9674ee3c81279', 'oc-f72dbf1ad32b5a779753'],
+  'retainedAuthority': 'environment-reference-generator-v1'}]
+
+# This family belongs to the upstream interaction listener, not the program/GitHub remediation.
+INTERACTION_WEBSOCKET_AUTHORITY_ID = "ravenroot-interaction-websocket-policy-v1"
+INTERACTION_WEBSOCKET_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java")
+INTERACTION_WEBSOCKET_PROPERTY_PREFIX = "ravenroot.websocket."
+
+
+def interaction_websocket_default_calls(source: str) -> dict[str, dict[str, object]] | None:
+    """Resolve only the exact named fallback arguments of the supported typed factory.
+
+    This extracts real source spans, including arithmetic expressions. It does not infer defaults
+    from binding names, scan unrelated helpers, or manufacture an ID for a scanner-blind field.
+    """
+    span = java_method_span(source, "InteractionWebSocketConfiguration", "from")
+    if span is None:
+        return None
+    start, end = span
+    code = strip_c_comments_and_literals(source)
+    if re.match(r"from\s*\(\s*Properties\s+properties\s*,\s*Map\s*<\s*String\s*,\s*String\s*>\s+environment\s*\)",
+                code[start:end]) is None:
+        return None
+    supported = {item["suffix"]: item for item in INTERACTION_WEBSOCKET_SETTINGS}
+    result: dict[str, dict[str, object]] = {}
+    for match in re.finditer(r"\b(bool|value|integer|seconds|millis)\s*\(", code[start:end]):
+        call_start = start + match.start()
+        if call_start and code[call_start - 1] == ".":
+            return None
+        opening = code.find("(", call_start)
+        parsed = split_java_arguments(source, code, opening)
+        if parsed is None or parsed[1] >= end or len(parsed[0]) != 4:
+            return None
+        args, closing = parsed
+        if [arg[0] for arg in args[:2]] != ["properties", "environment"]:
+            return None
+        name = java_string_value(args[2][0])
+        if name not in supported or name in result or match.group(1) != supported[name]["helper"]:
+            return None
+        expression, left, right = args[3]
+        while left < right and source[left].isspace(): left += 1
+        while right > left and source[right - 1].isspace(): right -= 1
+        helper = match.group(1)
+        if helper == "bool":
+            evaluated = {"kind": "boolean", "value": expression == "true"} if expression in {"true", "false"} else None
+        elif helper == "value":
+            string = java_string_value(expression)
+            evaluated = {"kind": "string", "value": string} if string is not None else None
+        else:
+            evaluated = evaluated_java_default(expression, False)
+            if evaluated is not None and helper in {"seconds", "millis"}:
+                evaluated = {"kind": "duration-seconds" if helper == "seconds" else "duration-milliseconds",
+                             "value": evaluated["value"]}
+        if evaluated is None:
+            return None
+        result[name] = {"helper": helper, "expression": expression, "evaluated": evaluated,
+                        "start": left, "end": right,
+                        "evidence": normalized(strip_c_comments(source[call_start:closing + 1]))}
+    return result if set(result) == set(supported) else None
+
+
+def interaction_websocket_default_candidates(relative: Path, source: str) -> list[tuple[int, str, str, str, str, str]]:
+    if relative != INTERACTION_WEBSOCKET_CONFIGURATION_PATH:
+        return []
+    calls = interaction_websocket_default_calls(source)
+    if calls is None:
+        return []
+    result = []
+    for name, call in calls.items():
+        if name == "port":
+            # The ordinary operational-declaration scanner already owns this exact 8081 span.
+            # The source authority below requires that one existing candidate, never a duplicate.
+            continue
+        result.append((call["start"], "from", "inline-operational-call",
+                       "interaction-websocket-default:" + name, call["expression"], call["evidence"]))
+    return result
+
+
+def interaction_websocket_source_present(root: Path) -> bool:
+    if any((root / path).exists() for path in INTERACTION_WEBSOCKET_PRODUCTION_PATHS):
+        return True
+    # A removed defining class cannot opt out while its shipped factory consumer remains.
+    main = root / INTERACTION_WEBSOCKET_MAIN_PATH
+    try:
+        return re.search(r"\bInteractionWebSocketConfiguration\b", strip_c_comments_and_literals(main.read_text())) is not None
+    except (OSError, UnicodeError):
+        return False
+
+
+def interaction_websocket_publisher_span(source: str) -> tuple[int, int] | None:
+    try:
+        nodes = [node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "INTERACTION_WEBSOCKET_VARIABLES"
+                         for target in node.targets)]
+    except SyntaxError:
+        return None
+    if len(nodes) != 1:
+        return None
+    node = nodes[0]
+    value = node.value
+    if not isinstance(value, ast.Call) or not isinstance(value.func, ast.Name) or value.func.id != "frozenset" \
+            or len(value.args) != 1 or value.keywords or not isinstance(value.args[0], ast.Set):
+        return None
+    elements = value.args[0].elts
+    names = [element.value for element in elements if isinstance(element, ast.Constant) and isinstance(element.value, str)]
+    expected = {item["environment"] for item in INTERACTION_WEBSOCKET_SETTINGS}
+    if len(names) != len(elements) or len(names) != len(set(names)) or set(names) != expected:
+        return None
+    return node.lineno, node.end_lineno
+
+
+def interaction_websocket_publication_candidate_ids(root: Path, candidates: Iterable[Candidate]) -> set[str]:
+    try:
+        source = (root / ENVIRONMENT_REFERENCE_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return set()
+    span = interaction_websocket_publisher_span(source)
+    if span is None:
+        return set()
+    names = {item["environment"] for item in INTERACTION_WEBSOCKET_SETTINGS}
+    return {item.id for item in candidates if item.path == ENVIRONMENT_REFERENCE_PATH.as_posix()
+            and span[0] <= item.line <= span[1]
+            and item.kind in {"environment-binding", "inline-script-operational", "binding-default"}
+            and item.expression.strip('"\'') in names}
+
+
+def interaction_websocket_cohort_candidate_ids(root: Path, discovered: dict[str, Candidate]) -> set[str]:
+    selected = {item.id for item in discovered.values() if item.path in INTERACTION_WEBSOCKET_PRODUCTION_PATHS}
+    try:
+        publisher = (root / ENVIRONMENT_REFERENCE_PATH).read_text(encoding="utf-8")
+        # Locate the entire declaration, even if malformed/unreviewed names were inserted in it.
+        tree = ast.parse(publisher)
+        spans = [(node.lineno, node.end_lineno) for node in tree.body if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "INTERACTION_WEBSOCKET_VARIABLES"
+                         for target in node.targets)]
+        test_source = (root / INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH).read_text(encoding="utf-8")
+        test_nodes = [node for node in ast.walk(ast.parse(test_source)) if isinstance(node, ast.FunctionDef)
+                      and node.name == "test_interaction_listener_and_outbound_profile_have_distinct_references"]
+        test_spans = [(node.lineno, node.end_lineno) for node in test_nodes]
+        for item in discovered.values():
+            if item.path == ENVIRONMENT_REFERENCE_PATH.as_posix() and any(a <= item.line <= b for a, b in spans):
+                selected.add(item.id)
+            if item.path == INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH and any(a <= item.line <= b for a, b in test_spans):
+                selected.add(item.id)
+    except (OSError, UnicodeError, SyntaxError):
+        pass
+    return selected
+
+
+def interaction_websocket_authority_from_source(root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Close consumed defaults, typed routing, immutable listener lifetime and all source atoms."""
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in INTERACTION_WEBSOCKET_REQUIRED_PATHS}
+    except (OSError, UnicodeError):
+        return None
+    # Fixed reviewed expectations are independent of refreshed inventory/sourceDigests metadata.
+    for path, expected in INTERACTION_WEBSOCKET_FILE_PROOFS.items():
+        if _source_digest(sources[path]) != expected:
+            return None
+    for path, type_symbol, method, expected in INTERACTION_WEBSOCKET_METHOD_PROOFS:
+        if java_method_digest(sources[path], type_symbol, method) != expected:
+            return None
+    if not INTERACTION_WEBSOCKET_TEST_PROOFS:
+        return None
+    tests = []
+    for path, type_symbol, method, expected in INTERACTION_WEBSOCKET_TEST_PROOFS:
+        source = sources[path]
+        if java_method_digest(source, type_symbol, method) != expected \
+                or not re.search(rf"@Test\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:public\s+)?void\s+{re.escape(method)}\s*\(", source) \
+                or re.search(r"@Disabled\b|\babstract\s+class\b", strip_c_comments(source)):
+            return None
+        tests.append({"path": path, "type": type_symbol, "method": method, "methodDigest": expected})
+    source = sources[INTERACTION_WEBSOCKET_CONFIGURATION_PATH.as_posix()]
+    if java_record_components(source, "InteractionWebSocketConfiguration") != INTERACTION_WEBSOCKET_COMPONENTS:
+        return None
+    calls = interaction_websocket_default_calls(source)
+    if calls is None:
+        return None
+    environment_entries = re.findall(r'Map\.entry\(\s*"([a-z-]+)"\s*,\s*"(RAVENROOT_[A-Z_]+)"\s*\)', strip_c_comments(source))
+    if len(environment_entries) != 21 or dict(environment_entries) != {
+            item["suffix"]: item["environment"] for item in INTERACTION_WEBSOCKET_SETTINGS}:
+        return None
+    # Preserve every lexical candidate; environment and string atoms can share an offset.
+    positioned = java_source_candidates(INTERACTION_WEBSOCKET_CONFIGURATION_PATH, source)
+    contracts = []
+    owner = INTERACTION_WEBSOCKET_CONFIGURATION_PATH.as_posix() + "#InteractionWebSocketConfiguration"
+    for item in INTERACTION_WEBSOCKET_SETTINGS:
+        call = calls[item["suffix"]]
+        if call["expression"] != item["fallback"] or call["evaluated"] != item["evaluated"]:
+            return None
+        defaults = [candidate for offset, candidate in positioned
+                    if call["start"] <= offset < call["end"] and candidate.expression == call["expression"]
+                    and ((item["suffix"] == "port" and candidate.kind == "operational-declaration" and candidate.role == "port")
+                         or candidate.role == "interaction-websocket-default:" + item["suffix"])]
+        if len(defaults) != 1:
+            return None
+        default = defaults[0]
+        if discovered.get(default.id) != default:
+            return None
+        ids = sorted(set(item["bindingCandidateIds"]) | {default.id})
+        if len(ids) != 4 or any(identifier not in discovered for identifier in ids):
+            return None
+        contracts.append({"setting": "interaction.websocket." + item["suffix"], "owner": owner,
+            "field": item["field"], "componentIndex": item["componentIndex"], "componentPart": item["componentPart"],
+            "property": INTERACTION_WEBSOCKET_PROPERTY_PREFIX + item["suffix"], "environment": item["environment"],
+            "bindings": [INTERACTION_WEBSOCKET_PROPERTY_PREFIX + item["suffix"], item["environment"]],
+            "defaultExpression": item["fallback"], "evaluatedDefault": copy.deepcopy(item["evaluated"]),
+            "defaultCandidateIds": [default.id], "candidateIds": ids,
+            "bindingAuthority": {"kind": "interaction-websocket-named-property-environment-v1",
+                "prefix": INTERACTION_WEBSOCKET_PROPERTY_PREFIX, "suffix": item["suffix"],
+                "property": INTERACTION_WEBSOCKET_PROPERTY_PREFIX + item["suffix"], "environment": item["environment"],
+                "precedence": "Nonblank Properties.getProperty result (including inherited defaults), then nonblank environment, then fallback; selected values are trimmed. Null or blank getProperty result delegates to environment."},
+            "defaultAuthority": {"kind": "interaction-websocket-fallback-span-v1", "path": INTERACTION_WEBSOCKET_CONFIGURATION_PATH.as_posix(),
+                "method": "from", "helper": call["helper"], "start": call["start"], "end": call["end"],
+                "expression": call["expression"], "evaluated": copy.deepcopy(call["evaluated"]), "evidenceDigest": default.evidence_digest},
+            "validation": item["validation"], "scope": "Resolved once at packaged server startup for the optional interaction listener.",
+            "pinning": "Immutable deployment/listener-lifetime snapshot; a later process resolves new configuration; no execution-manifest pin.",
+            "coverage": "Exact named fallback, typed helper, compact-constructor bounds, authenticated startup, listener consumers and lifecycle, fixed source/test proof."})
+    carriers = [copy.deepcopy(INTERACTION_WEBSOCKET_BINDING_CARRIER)]
+    partitions = copy.deepcopy(INTERACTION_WEBSOCKET_RETAINED_PARTITIONS)
+    all_ids = [identifier for group in contracts + carriers + partitions for identifier in group["candidateIds"]]
+    if len(all_ids) != 164 or len(all_ids) != len(set(all_ids)) \
+            or set(all_ids) != interaction_websocket_cohort_candidate_ids(root, discovered):
+        return None
+    published = {identifier for group in partitions if group["classification"] == "published-contract-description"
+                 for identifier in group["candidateIds"]}
+    if published != interaction_websocket_publication_candidate_ids(root, discovered.values()):
+        return None
+    return {"kind": "interaction-websocket-policy-family-v1", "logicalSettingCount": 21,
+            "contracts": contracts, "bindingCarriers": carriers, "semanticPartitions": partitions,
+            "candidateIds": sorted(all_ids), "sourceDigests": [{"path": path, "digest": _source_digest(text)}
+                for path, text in sorted(sources.items())], "testEvidence": tests}
+
+
+def interaction_websocket_authority_errors(root: Path, authorities: object,
+        entries: dict[str, dict[str, object]], discovered: dict[str, Candidate]) -> list[str]:
+    if not interaction_websocket_source_present(root):
+        return [] if authorities in (None, {}) else ["interaction WebSocket authority exists without its source family"]
+    expected = interaction_websocket_authority_from_source(root, discovered)
+    if expected is None:
+        return ["interaction WebSocket source family is incomplete, unpartitioned, or unsupported"]
+    errors = []
+    if authorities != {INTERACTION_WEBSOCKET_AUTHORITY_ID: expected}:
+        errors.append("interaction WebSocket settings require the exact mandatory source-derived authority")
+    expected_ids = set(expected["candidateIds"])
+    marked = {identifier for identifier, row in entries.items() if row.get("interactionWebSocketAuthority") is not None}
+    if marked != expected_ids:
+        errors.append("interaction WebSocket candidate partition is missing, duplicated, or foreign")
+    operators = {identifier: contract for contract in expected["contracts"] for identifier in contract["candidateIds"]}
+    retained = {identifier: group for group in expected["semanticPartitions"] + expected["bindingCarriers"]
+                for identifier in group["candidateIds"]}
+    for identifier in sorted(expected_ids):
+        row = entries.get(identifier)
+        if row is None or row.get("status") == "pending-review" or row.get("authorityStatus") == "unresolved":
+            errors.append(f"{identifier}: mandatory interaction WebSocket candidate requires resolved semantic review")
+            continue
+        if row.get("interactionWebSocketAuthority") != INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            errors.append(f"{identifier}: interaction WebSocket marker has drifted")
+        if identifier in operators:
+            contract = operators[identifier]
+            if row.get("classification") != "operator-configurable" or row.get("status") != "already-centralized":
+                errors.append(f"{identifier}: interaction WebSocket operator classification has drifted")
+            expected_fields = {key: contract[key] for key in ("setting", "owner", "field", "bindings", "bindingAuthority",
+                "defaultAuthority", "validation", "scope", "pinning", "coverage")}
+            expected_fields.update(default=contract["defaultExpression"], defaultEvidence=contract["defaultCandidateIds"])
+        else:
+            group = retained[identifier]
+            expected_fields = {"status": group["status"], "classification": group["classification"]}
+            if "retainedAuthority" in group:
+                expected_fields["retainedAuthority"] = group["retainedAuthority"]
+            if identifier in INTERACTION_WEBSOCKET_BINDING_CARRIER["candidateIds"]:
+                expected_fields["bindingCarrier"] = group["bindingCarrier"]
+                for forbidden in ("setting", "default", "defaultEvidence", "owner", "field", "bindingAuthority", "defaultAuthority"):
+                    if forbidden in row:
+                        errors.append(f"{identifier}: interaction WebSocket prefix carrier must not claim {forbidden}")
+        for key, value in expected_fields.items():
+            if row.get(key) != value:
+                errors.append(f"{identifier}: interaction WebSocket {key} authority has drifted")
+    return errors
+
 
 
 MANIFEST_PIN_ATTEMPTS_SETTING = "execution.manifest.pin-retries"
@@ -7350,6 +11929,7 @@ ROUTE_BOUND_PATHS = {
 def environment_reference_description_candidate_ids(
         root: Path, candidates: Iterable[Candidate]) -> set[str]:
     """Return source-derived atoms that route real production bindings into the reference page."""
+    candidates = tuple(candidates)
     production_names: set[str] = set()
     source_root = root / "ravenroot"
     if source_root.is_dir():
@@ -7374,6 +11954,7 @@ def environment_reference_description_candidate_ids(
                 and candidate.kind == "environment-binding" \
                 and any(name.startswith(expression) for name in production_names):
             identifiers.add(candidate.id)
+    identifiers.update(interaction_websocket_publication_candidate_ids(root, candidates))
     return identifiers
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
@@ -9044,7 +13625,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 and entry.get("retainedAuthority") == ROUTE_TABLE_AUTHORITY_ID
             environment_publication = identifier in environment_reference_descriptions \
                 and entry.get("retainedAuthority") == ENVIRONMENT_REFERENCE_AUTHORITY_ID
-            if not route_publication and not environment_publication:
+            program_github_publication = entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID \
+                and any(identifier in group["candidateIds"] and group["classification"] == "published-contract-description"
+                        for group in PROGRAM_GITHUB_RETAINED_PARTITIONS.values())
+            if not route_publication and not environment_publication and not program_github_publication:
                 errors.append(
                     f"{identifier}: published-contract-description requires a closed publication authority")
         if classification == "operator-configurable" and status != "pending-review":
@@ -9082,6 +13666,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 elif entry.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
                     pass
                 elif entry.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+                    pass
+                elif entry.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
+                    pass
+                elif entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
                     pass
                 elif current_source_owner(root, owner) is None:
                     errors.append(f"{identifier}: owner is not a tracked in-repository path#symbol: {owner}")
@@ -9295,6 +13883,12 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(external_io_policy_authority_errors(
         root, document.get("externalIoPolicyAuthorities"), entries, discovered,
     ))
+    errors.extend(program_github_policy_authority_errors(
+        root, document.get("programGithubPolicyAuthorities"), entries, discovered,
+    ))
+    errors.extend(interaction_websocket_authority_errors(
+        root, document.get("interactionWebSocketAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -9317,6 +13911,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
             continue
         if representative.get("externalIoPolicyAuthority") == EXTERNAL_IO_POLICY_AUTHORITY_ID:
+            continue
+        if representative.get("programGithubPolicyAuthority") == PROGRAM_GITHUB_POLICY_AUTHORITY_ID:
+            continue
+        if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
             continue
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
         if representative.get("bindingAuthority") is None:
@@ -9560,6 +14158,37 @@ def render_report(document: dict[str, object]) -> str:
             lines.append(f"| {partition.get('semanticPartition', '')} | "
                          f"{partition.get('classification', '')} | "
                          f"{len(partition.get('candidateIds', []))} |")
+    program_authorities = document.get("programGithubPolicyAuthorities", {})
+    program_authority = (program_authorities.get(PROGRAM_GITHUB_POLICY_AUTHORITY_ID)
+                         if isinstance(program_authorities, dict) else None)
+    if isinstance(program_authority, dict):
+        lines.extend(("", "## Source-proven program and GitHub policy", "",
+                      "59 logical fields distinguish deployment runtime policy, current authoring admission,",
+                      "and tenant/profile configuration. The encoded GitHub document is a separate transport",
+                      "carrier; it does not substitute for the 50 scoped fields. Scanner-blind fields retain",
+                      "structural validation and consumer evidence without fabricated candidate IDs.", "",
+                      "| Setting | Typed owner | Field | Default source | Candidates | Lifetime |",
+                      "|---|---|---|---|---:|---|"))
+        for contract in program_authority.get("contracts", []) + program_authority.get("bindingCarriers", []):
+            lines.append(f"| {contract.get('setting', '')} | `{contract.get('owner', '')}` | "
+                         f"`{contract.get('field', '')}` | `{contract.get('defaultExpression', '')}` | "
+                         f"{len(contract.get('candidateIds', []))} | {contract.get('pinning', '')} |")
+        lines.extend(("", "| Retained semantic role | Classification | Candidates |", "|---|---|---:|"))
+        for partition in program_authority.get("semanticPartitions", []):
+            lines.append(f"| {partition.get('semanticPartition', '')} | {partition.get('classification', '')} | "
+                         f"{len(partition.get('candidateIds', []))} |")
+    interaction_authorities = document.get("interactionWebSocketAuthorities", {})
+    interaction = (interaction_authorities.get(INTERACTION_WEBSOCKET_AUTHORITY_ID)
+                   if isinstance(interaction_authorities, dict) else None)
+    if isinstance(interaction, dict):
+        lines.extend(("", "## Source-proven interaction WebSocket policy", "",
+                      "The upstream listener has 21 deployment-lifetime settings. Each default is anchored",
+                      "to its consumed factory argument. The property prefix is a separate protocol carrier",
+                      "with no scalar value or default; these upstream rows do not add program/GitHub remediation credit.", "",
+                      "| Setting | Field | Default expression | Candidates |", "|---|---|---|---:|"))
+        for contract in interaction.get("contracts", []):
+            lines.append(f"| {contract['setting']} | `{contract['field']}` | `{contract['defaultExpression']}` | "
+                         f"{len(contract['candidateIds'])} |")
     lines.extend(("", "## Deferred values", "", "| Candidate | Follow-up | Rationale |", "|---|---|---|"))
     deferred_entries = sorted(
         (entry for entry in typed if entry.get("status") == "deferred"),

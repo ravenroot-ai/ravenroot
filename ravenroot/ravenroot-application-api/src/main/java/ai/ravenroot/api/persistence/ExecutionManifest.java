@@ -46,6 +46,7 @@ import java.util.Objects;
  * @param runtime semantic dependencies resolved for this execution other than the document.
  * @param nodePackages node packages resolved for this execution, sorted and free of duplicates.
  * @param pinnedAt instant at which the runtime resolved these dependencies.
+ * @param operationalPolicy quantitative execution policy pinned for formats that support it.
  */
 public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphContentId graphContentId,
                                 GraphDefinitionIdentity graphIdentity, ResolvedRuntimeProfile runtime,
@@ -131,7 +132,17 @@ public record ExecutionManifest(int formatVersion, ExecutionKey key, GraphConten
         }
     }
 
-    /** Source-compatible constructor for the persisted v1 layout. */
+    /**
+     * Source-compatible constructor for the persisted v1 layout.
+     *
+     * @param formatVersion manifest field-layout version
+     * @param key tenant-scoped process instance
+     * @param graphContentId address of the canonical accepted graph document
+     * @param graphIdentity logical graph and version identity
+     * @param runtime semantic runtime dependencies
+     * @param nodePackages sorted node-package pins
+     * @param pinnedAt instant at which the dependencies were resolved
+     */
     public ExecutionManifest(int formatVersion, ExecutionKey key, GraphContentId graphContentId,
                              GraphDefinitionIdentity graphIdentity, ResolvedRuntimeProfile runtime,
                              List<PinnedNodePackage> nodePackages, Instant pinnedAt) {

@@ -124,10 +124,12 @@ class RateLimitDeploymentConfigurationContractTest {
         rateSchema(schema, settings);
 
         String missingRequired = replaceOne(schema,
-                "\"assistant\", \"rateLimit\"", "\"assistant\"");
+                "\"assistant\", \"programAuthoring\", \"rateLimit\"",
+                "\"assistant\", \"programAuthoring\"");
         assertThrows(AssertionError.class, () -> rateSchema(missingRequired, settings));
         String duplicateRequired = replaceOne(schema,
-                "\"assistant\", \"rateLimit\"", "\"assistant\", \"rateLimit\", \"rateLimit\"");
+                "\"assistant\", \"programAuthoring\", \"rateLimit\"",
+                "\"assistant\", \"programAuthoring\", \"rateLimit\", \"rateLimit\"");
         assertThrows(AssertionError.class, () -> rateSchema(duplicateRequired, settings));
 
         String missingDirect = replaceOne(schema, "    \"rateLimit\": {", "    \"renamedRateLimit\": {");

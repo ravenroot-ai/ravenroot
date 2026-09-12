@@ -8,6 +8,8 @@ public interface NodePackageServices {
     /**
      * Describes the immutable quantitative external-I/O policy enforced by this service view.
      * Empty means a custom provider has not supplied the v2 contract; it does not imply denial.
+     *
+     * @return quantitative managed external-I/O capacity, when supplied by the provider
      */
     default Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
         return Optional.empty();

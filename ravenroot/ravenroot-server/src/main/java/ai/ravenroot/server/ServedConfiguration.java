@@ -7,8 +7,9 @@ import ai.ravenroot.server.audit.JsonStrings;
 import java.util.Objects;
 
 /** Typed, immutable subset of operator configuration that the connected authoring UI may consume. */
-record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
-    static final int CURRENT_SCHEMA_VERSION = 1;
+record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes,
+                           ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoring) {
+    static final int CURRENT_SCHEMA_VERSION = 2;
 
     ServedConfiguration {
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
@@ -20,11 +21,22 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
         if (graphDocumentMaxBytes > GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES) {
             throw new IllegalArgumentException("graphDocumentMaxBytes exceeds the supported safety ceiling");
         }
+        Objects.requireNonNull(programAuthoring, "programAuthoring");
+    }
+
+    ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
+        this(schemaVersion, graphDocumentMaxBytes,
+                ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS);
+    }
+
+    static ServedConfiguration from(GraphMlLimits limits,
+                                    ai.ravenroot.api.programming.ProgramAuthoringLimits authoring) {
+        Objects.requireNonNull(limits, "limits");
+        return new ServedConfiguration(CURRENT_SCHEMA_VERSION, limits.maxBytes(), authoring);
     }
 
     static ServedConfiguration from(GraphMlLimits limits) {
-        Objects.requireNonNull(limits, "limits");
-        return new ServedConfiguration(CURRENT_SCHEMA_VERSION, limits.maxBytes());
+        return from(limits, ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS);
     }
 
     String json() {
@@ -52,7 +64,10 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
 
     private String limitsJson() {
         return "{\"schemaVersion\":" + schemaVersion
-                + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes;
+                + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes
+                + ",\"programAuthoring\":{\"maxSourceBytes\":" + programAuthoring.maxSourceBytes()
+                + ",\"maxBuildRequestBytes\":" + programAuthoring.maxBuildRequestBytes()
+                + ",\"maxProgramsPerBuild\":" + programAuthoring.maxProgramsPerBuild() + "}";
     }
 
     private static String workspaceJson(String tenantId) {

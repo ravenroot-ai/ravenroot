@@ -331,6 +331,9 @@ Detailed contract: [Programs and artifacts](configuration.md#programmable-artifa
 | `RAVENROOT_GRAAL_JAVA` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAAL_RESOURCE_CACHE_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAAL_SANDBOX_SUPERVISOR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_PROGRAM_MAX_HEAP_MB` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_PROGRAM_RUNTIME` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_PROGRAM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |

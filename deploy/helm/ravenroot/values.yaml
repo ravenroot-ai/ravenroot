@@ -102,6 +102,13 @@ assistant:
   maxOutputTokens: ""
   maxToolIterations: ""
 
+# Program authoring admission limits. Blank values select ProgramAuthoringLimits' Java-owned
+# compatibility defaults; explicit integers may only narrow the public source/build ceilings.
+programAuthoring:
+  maxSourceBytes: ""
+  maxBuildRequestBytes: ""
+  maxProgramsPerBuild: ""
+
 # HTTP rate, representation, and retained-limiter policy. Empty values leave every numerical
 # default in RateLimitConfiguration.DEFAULTS; use YAML integers for explicit startup values.
 rateLimit:

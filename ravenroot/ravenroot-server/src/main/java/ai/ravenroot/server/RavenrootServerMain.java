@@ -412,7 +412,8 @@ public final class RavenrootServerMain {
         // Effectively final, and null when the embed is off, so the shutdown hook below can close it
         // on the same line userCredentials is closed on. Both are their own database with their own
         // lifecycle, neither is a table in the execution store, and neither closes inside its scope.
-        final var embedRegistrations = "true".equals(System.getenv("RAVENROOT_EMBED_ENABLED"))
+        final var embedRegistrations = ai.ravenroot.server.embed.EmbedBrowserConfiguration
+                .enabledFromEnvironment(System.getenv())
                 ? openEmbedRegistrationStore()
                 : null;
         var embedConfiguration = embedRegistrations == null

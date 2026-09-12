@@ -54,12 +54,14 @@ public final class EmbedStartupCheck {
      */
     public static Refusal evaluate(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
-        String enabled = environment.get("RAVENROOT_EMBED_ENABLED");
-        if (enabled == null || "false".equals(enabled)) return null;
-        if (!"true".equals(enabled)) {
+        final boolean enabled;
+        try {
+            enabled = EmbedBrowserConfiguration.enabledFromEnvironment(environment);
+        } catch (IllegalArgumentException invalid) {
             return new Refusal("EMBED_CONFIGURATION_INVALID",
                     "RAVENROOT_EMBED_ENABLED must be true or false");
         }
+        if (!enabled) return null;
         String directory = environment.get(DIRECTORY_VARIABLE);
         if (directory == null || directory.isBlank()) {
             // The same code the relevant contract used, deliberately: an operator who enabled the embed against a

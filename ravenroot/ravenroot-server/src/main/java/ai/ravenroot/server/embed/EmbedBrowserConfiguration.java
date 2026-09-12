@@ -70,7 +70,7 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
             EmbedRegistrationAuthority registrations, AuthorizedEmbedGraphProjection projections,
             EmbedSecurityAuditSink audit, Clock clock) {
         Objects.requireNonNull(environment, "environment");
-        if (!strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)) return disabled();
+        if (!enabledFromEnvironment(environment)) return disabled();
         return new EmbedBrowserConfiguration(true,
                 new EmbedViewerOrigin(required(environment, "RAVENROOT_EMBED_VIEWER_ORIGIN")),
                 sessionCreation, registrations, projections, audit, clock,
@@ -86,6 +86,12 @@ public record EmbedBrowserConfiguration(boolean enabled, EmbedViewerOrigin viewe
     }
 
     public boolean active() { return enabled; }
+
+    /** The single strict parser used by every packaged-startup enablement decision. */
+    public static boolean enabledFromEnvironment(Map<String, String> environment) {
+        Objects.requireNonNull(environment, "environment");
+        return strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false);
+    }
 
     private static Duration seconds(Map<String, String> environment, String name, int fallback) {
         return Duration.ofSeconds(integer(environment, name, fallback));

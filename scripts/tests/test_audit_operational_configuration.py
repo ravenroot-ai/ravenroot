@@ -6989,6 +6989,21 @@ class EmbedEnabledAuditTest(unittest.TestCase):
                               audit.inventory_errors(root, document, audit.discover(root)))
                 routed.assert_called_once()
 
+    def test_embed_binding_is_owned_by_the_closed_family_authority(self) -> None:
+        contract = copy.deepcopy(self.authority["contract"])
+        setting_entries = [self.entries[identifier]
+                           for identifier in self.authority["candidateIds"]]
+        self.assertEqual([], audit.binding_authority_errors(
+            self.root, "embed.enabled", contract, setting_entries,
+            self.entries, self.discovered, {}))
+
+        contract["bindingAuthority"] = {"kind": "duplicate-parser"}
+        self.assertEqual(
+            ["embed.enabled: embed binding belongs to the closed embed enablement authority"],
+            audit.binding_authority_errors(
+                self.root, "embed.enabled", contract, setting_entries,
+                self.entries, self.discovered, {}))
+
 
 class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
     @classmethod

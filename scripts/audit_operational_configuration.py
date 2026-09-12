@@ -13103,6 +13103,10 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
     if setting in GRAPH_LIMIT_AUTHORITY_BY_SETTING:
         return ([] if contract.get("bindingAuthority") is None
                 else [f"{setting}: graph binding belongs to the closed graph family authority"])
+    if setting == "embed.enabled" \
+            and contract.get("embedEnabledAuthority") == EMBED_ENABLED_AUTHORITY_ID:
+        return ([] if contract.get("bindingAuthority") is None
+                else [f"{setting}: embed binding belongs to the closed embed enablement authority"])
     return environment_binding_authority_errors(
         root, setting, contract, setting_entries, entries, discovered, resolver_authorities,
     )

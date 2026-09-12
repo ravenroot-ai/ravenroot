@@ -7320,6 +7320,33 @@ class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
         for location in audit.candidate_reference_locations(document, {new}):
             self.assertTrue(audit.allowed_migrated_reference(location), location)
 
+    def test_final_review_requires_http_status_atoms_to_remain_protocol_constants(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "StatusConsumer.java"
+            source.write_text(
+                "if (response.statusCode() == 429) retry();\n"
+                "if (!live()) return empty(503);\n"
+                "Duration timeout = Duration.ofMillis(500);\n",
+                encoding="utf-8",
+            )
+            base = {
+                "path": source.name, "surface": "java", "expression": "429", "line": 1,
+            }
+            for identifier, expression, line in (
+                    ("oc-status-comparison", "429", 1),
+                    ("oc-status-response", "503", 2)):
+                entry = {**base, "id": identifier, "expression": expression, "line": line}
+                errors = audit.final_review_candidate_semantic_errors(
+                    root, entry, "security-ceiling-or-default")
+                self.assertEqual(1, len(errors), errors)
+                self.assertIn("HTTP status protocol constant", errors[0])
+                self.assertEqual([], audit.final_review_candidate_semantic_errors(
+                    root, entry, "protocol-or-format-invariant"))
+            duration = {**base, "id": "oc-timeout", "expression": "500", "line": 3}
+            self.assertEqual([], audit.final_review_candidate_semantic_errors(
+                root, duration, "security-ceiling-or-default"))
+
 
 if __name__ == "__main__":
     unittest.main()

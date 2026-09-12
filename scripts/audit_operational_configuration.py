@@ -3049,6 +3049,10 @@ def final_review_authority_errors(
             errors.append(f"final review group {identifier} overlaps another semantic authority")
         for candidate in candidates:
             candidate_id = str(candidate)
+            source_entry = source_entries.get(candidate_id)
+            if source_entry is not None:
+                errors.extend(final_review_candidate_semantic_errors(
+                    root, source_entry, classification))
             active_id = active_identifier(candidate_id)
             if active_id not in expected_metadata:
                 continue
@@ -16168,6 +16172,41 @@ def main(argv: list[str] | None = None) -> int:
     document = load_inventory(inventory)
     print(f"Operational configuration inventory is current ({len(document['entries'])} candidates).")
     return 0
+
+
+def final_review_candidate_semantic_errors(
+        root: Path, entry: dict[str, object], classification: object) -> list[str]:
+    """Reject lexical timing matches that are actually HTTP protocol status constants."""
+    if entry.get("surface") != "java" or not isinstance(entry.get("path"), str) \
+            or not isinstance(entry.get("line"), int) \
+            or not isinstance(entry.get("expression"), str):
+        return []
+    literal = str(entry["expression"]).replace("_", "")
+    if re.fullmatch(r"[0-9]+", literal) is None or not 100 <= int(literal) <= 599:
+        return []
+    relative = Path(str(entry["path"]))
+    source_path = root / relative
+    if relative.is_absolute() or ".." in relative.parts or not source_path.is_file():
+        return []
+    lines = source_path.read_text(encoding="utf-8").splitlines()
+    line_number_value = int(entry["line"])
+    if not 1 <= line_number_value <= len(lines):
+        return []
+    source_line = lines[line_number_value - 1]
+    escaped = re.escape(str(entry["expression"]))
+    is_status = re.search(
+        rf"\bstatusCode\s*\(\s*\)\s*(?:==|!=|<=|>=|<|>)\s*{escaped}\b",
+        source_line,
+    ) is not None or re.search(
+        rf"\b(?:empty|status|statusCode)\s*\(\s*{escaped}\s*\)",
+        source_line,
+    ) is not None
+    if is_status and classification != "protocol-or-format-invariant":
+        return [
+            f"final review candidate {entry.get('id')} is an HTTP status protocol constant, "
+            "not a security ceiling or timing default"
+        ]
+    return []
 
 
 if __name__ == "__main__":

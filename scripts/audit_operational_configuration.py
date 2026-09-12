@@ -188,6 +188,8 @@ EMBED_MAIN_TEST_PATH = Path(
 EMBED_REPLICA_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/ReplicaTopologyStartupCheckTest.java")
 EMBED_CONFIGURATION_DOC_PATH = Path("docs/reference/configuration.md")
+EMBED_CENTRALIZATION_BEFORE_REVISION = "a7f0c592e4b09adbee1fe0e7c4c1b59d05c99a5e"
+EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
     EMBED_STARTUP_CHECK_PATH: "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
@@ -11461,7 +11463,7 @@ def embed_enabled_source_present(root: Path) -> bool:
 
 def embed_enabled_authority_from_source(
         root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
-    """Derive the five exact enablement atoms from their validated startup sequence."""
+    """Derive surviving enablement atoms and the shared typed startup sequence."""
     try:
         sources = {relative: (root / relative).read_text(encoding="utf-8")
                    for relative in (*EMBED_SOURCE_DIGESTS, EMBED_CONFIGURATION_DOC_PATH)}
@@ -11582,13 +11584,54 @@ def embed_enabled_authority_from_source(
     documentation_row = "| `RAVENROOT_EMBED_ENABLED` | strict Boolean; `false` |"
     if sources[EMBED_CONFIGURATION_DOC_PATH].count(documentation_row) != 1:
         return None
+    before_sources = {
+        path: committed_source(root, EMBED_CENTRALIZATION_BEFORE_REVISION, path.as_posix())
+        for path in (EMBED_CONFIGURATION_PATH, EMBED_STARTUP_CHECK_PATH,
+                     EMBED_MAIN_PATH, EMBED_REPLICA_CHECK_PATH)
+    }
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+    if any(source is None for source in before_sources.values()) \
+            or not revision_is_ancestor(
+                root, EMBED_CENTRALIZATION_BEFORE_REVISION,
+                EMBED_CENTRALIZATION_AFTER_REVISION) \
+            or not revision_is_ancestor(root, EMBED_CENTRALIZATION_AFTER_REVISION, head):
+        return None
+    before_configuration = normalized(before_sources[EMBED_CONFIGURATION_PATH] or "")
+    before_startup = normalized(before_sources[EMBED_STARTUP_CHECK_PATH] or "")
+    before_main = normalized(before_sources[EMBED_MAIN_PATH] or "")
+    before_replica = normalized(before_sources[EMBED_REPLICA_CHECK_PATH] or "")
+    if before_configuration.count(
+            'strictBoolean(environment, "RAVENROOT_EMBED_ENABLED", false)') != 1 \
+            or before_startup.count(
+                'String enabled = environment.get("RAVENROOT_EMBED_ENABLED");') != 1 \
+            or before_startup.count('if (!"true".equals(enabled))') != 1 \
+            or before_main.count(
+                '"true".equals(System.getenv("RAVENROOT_EMBED_ENABLED"))') != 1 \
+            or before_replica.count(
+                '"true".equals(environment.get("RAVENROOT_EMBED_ENABLED"))') != 1:
+        return None
+    centralization = {
+        "kind": "java-embed-enable-parser-centralization-v1", "issue": "#321",
+        "beforeRevision": EMBED_CENTRALIZATION_BEFORE_REVISION,
+        "afterRevision": EMBED_CENTRALIZATION_AFTER_REVISION,
+        "typedOwner": f"{EMBED_CONFIGURATION_PATH.as_posix()}#EmbedBrowserConfiguration",
+        "parser": "enabledFromEnvironment", "field": "enabled",
+        "removedDuplicateReaders": [
+            f"{EMBED_STARTUP_CHECK_PATH.as_posix()}#evaluate",
+            f"{EMBED_MAIN_PATH.as_posix()}#run",
+            f"{EMBED_REPLICA_CHECK_PATH.as_posix()}#replicaLocalAuthorities",
+        ],
+    }
     metadata = {
         "status": "already-centralized", "classification": "operator-configurable",
         "embedEnabledAuthority": EMBED_ENABLED_AUTHORITY_ID,
         "setting": "embed.enabled",
         "owner": f"{EMBED_CONFIGURATION_PATH.as_posix()}#EmbedBrowserConfiguration",
         "field": "enabled", "bindings": ["RAVENROOT_EMBED_ENABLED"],
-        "default": "false", "defaultEvidence": [candidate_ids[0]],
+        "default": "false", "defaultEvidence": [],
+        "centralization": centralization,
         "validation": "Absent defaults false; only exact lowercase true or false is accepted before composition.",
         "scope": "Packaged server process during startup.",
         "pinning": "Validated at the start of packaged-server run and read again only by later startup composition and topology checks in the same process environment.",
@@ -15150,8 +15193,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             default_evidence = entry.get("defaultEvidence")
             agent_budget_evidence = entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID
             jwk_policy_evidence = entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID
+            embed_enabled_evidence = entry.get("embedEnabledAuthority") == EMBED_ENABLED_AUTHORITY_ID
             if not isinstance(default_evidence, list) \
-                    or (not default_evidence and not agent_budget_evidence and not jwk_policy_evidence) or any(
+                    or (not default_evidence and not agent_budget_evidence and not jwk_policy_evidence
+                        and not embed_enabled_evidence) or any(
                     not isinstance(evidence_id, str) or not evidence_id.strip()
                     for evidence_id in default_evidence):
                 errors.append(f"{identifier}: reviewed operator setting requires defaultEvidence candidate ids")
@@ -15506,7 +15551,8 @@ def remediation_owner(entry: dict[str, object]) -> str:
             or entry.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
         return "#320"
     if entry.get("agentBudgetAuthority") == AGENT_BUDGET_AUTHORITY_ID \
-            or entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
+            or entry.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID \
+            or entry.get("embedEnabledAuthority") == EMBED_ENABLED_AUTHORITY_ID:
         return "#321"
     if entry.get("followUp") in {"#316", "#317", "#318", "#319", "#320", "#321"}:
         return str(entry["followUp"])
@@ -15742,7 +15788,10 @@ def render_report(document: dict[str, object], root: Path = ROOT) -> str:
                   "|---|---|---|---|---|---|---:|"))
     if isinstance(embed_contract, dict):
         bindings = ", ".join(f"`{item}`" for item in embed_contract.get("bindings", []))
-        lines.append(f"| {embed_contract.get('setting', '')} | {embed_contract.get('status', '')} | "
+        state = str(embed_contract.get("status", ""))
+        if isinstance(embed_contract.get("centralization"), dict):
+            state += "; duplicate consumers centralized in #321"
+        lines.append(f"| {embed_contract.get('setting', '')} | {state} | "
                      f"`{embed_contract.get('owner', '')}` | `{embed_contract.get('field', '')}` | "
                      f"{bindings} | `{embed_contract.get('default', '')}` | "
                      f"{len(embed_contract.get('candidateIds', []))} |")

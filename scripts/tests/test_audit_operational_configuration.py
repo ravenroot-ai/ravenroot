@@ -6815,7 +6815,26 @@ class EmbedEnabledAuditTest(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, target)
         subprocess.run(["git", "init", "-q"], cwd=cls.root, check=True)
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout.strip()
+        common_path = (ROOT / common).resolve()
+        alternates = cls.root / ".git/objects/info/alternates"
+        alternates.parent.mkdir(parents=True, exist_ok=True)
+        alternates.write_text(str(common_path / "objects") + "\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=cls.root, check=True)
+        tree = subprocess.run(
+            ["git", "write-tree"], cwd=cls.root, check=True,
+            capture_output=True, text=True).stdout.strip()
+        commit = subprocess.run(
+            ["git", "commit-tree", tree, "-p", audit.EMBED_CENTRALIZATION_AFTER_REVISION],
+            cwd=cls.root, check=True, input="Embed authority fixture\n", capture_output=True,
+            text=True, env={**dict(os.environ), "GIT_AUTHOR_NAME": "audit fixture",
+                            "GIT_AUTHOR_EMAIL": "audit@example.invalid",
+                            "GIT_COMMITTER_NAME": "audit fixture",
+                            "GIT_COMMITTER_EMAIL": "audit@example.invalid"}).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/heads/main", commit], cwd=cls.root, check=True)
+        subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=cls.root, check=True)
         cls.candidates = audit.discover(cls.root)
         cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
         cls.authority = audit.embed_enabled_authority_from_source(cls.root, cls.discovered)
@@ -6860,8 +6879,8 @@ class EmbedEnabledAuditTest(unittest.TestCase):
         self.assertEqual(
             ["oc-c92f93b348c318a14a6d", "oc-e67c99abfd1d50dd0a6f"],
             self.authority["candidateIds"])
-        self.assertEqual(["oc-c92f93b348c318a14a6d"],
-                         self.authority["contract"]["defaultEvidence"])
+        self.assertEqual([], self.authority["contract"]["defaultEvidence"])
+        self.assertEqual("#321", self.authority["contract"]["centralization"]["issue"])
         self.assertEqual([], audit.embed_enabled_authority_errors(
             self.root, {audit.EMBED_ENABLED_AUTHORITY_ID: self.authority},
             self.entries, self.discovered))

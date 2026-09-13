@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 19921 |
+| Atomic operational candidates discovered | 19924 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 19921 |
+| Reviewed | 19924 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 245 |
@@ -51,7 +51,7 @@ semantic review and focused source inventories remain required for those boundar
 | Retained published contract descriptions | 424 |
 | Retained presentation text | 498 |
 | Retained derived values | 1007 |
-| Test fixtures | 6653 |
+| Test fixtures | 6656 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 1614.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 24.
+Checked source reconciliations: 25.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 19921 candidates.
+zero-count or unclassified rows as needed and sums to 19924 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 19921 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 18586 |
+| retained | 18589 |
 
 ### Classification counts
 
@@ -89,7 +89,7 @@ zero-count or unclassified rows as needed and sums to 19921 candidates.
 | protocol-or-format-invariant | 8185 |
 | published-contract-description | 424 |
 | security-ceiling-or-default | 1819 |
-| test-fixture | 6653 |
+| test-fixture | 6656 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -100,7 +100,7 @@ zero-count or unclassified rows as needed and sums to 19921 candidates.
 | deployment-example | 20 |
 | java | 6330 |
 | script | 1966 |
-| test-fixture | 6653 |
+| test-fixture | 6656 |
 | ui | 2910 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1539 |
 | #321 | 8652 |
-| Retained; no remediation required | 8679 |
+| Retained; no remediation required | 8682 |
 
 ## Latest reconciliation
 
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 19921 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 19921 |
+| Semantically classified additions | 3 |
+| Current candidates | 19924 |
 
 ## Final semantic review
 
@@ -12765,41 +12765,41 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-87fe54b140998a340a58` | `scripts/central_registry.py:54` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-c71511f0bdc862f4aa49` | `scripts/central_registry.py:65` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-5142a378057ec3d21b19` | `scripts/central_registry.py:104` `exists` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
-| `oc-4f01b1172085279cde03` | `scripts/central_registry.py:187` `local_signature` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-03ca2e6a9d6276664098` | `scripts/central_registry.py:199` `build_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-bba7487596e4415ac040` | `scripts/central_registry.py:209` `build_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d4ddf755d320e24511f1` | `scripts/central_registry.py:219` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-80389a367ec25b48c67d` | `scripts/central_registry.py:225` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-3884855566668cdaf0b8` | `scripts/central_registry.py:227` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-9e2866afdf5f5d6899b6` | `scripts/central_registry.py:229` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-27039ee0879a4ec4a937` | `scripts/central_registry.py:230` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8c5c2a008640b3171ae8` | `scripts/central_registry.py:236` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f2d8bfb5806aa6c1af37` | `scripts/central_registry.py:237` `verify_signatures` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-dc2f44ae8187b923455b` | `scripts/central_registry.py:239` `verify_signatures` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-c3d6d0db155bfcbde73c` | `scripts/central_registry.py:240` `verify_signatures` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-496172f3bd8689949a99` | `scripts/central_registry.py:246` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a74d5968811c818658dc` | `scripts/central_registry.py:248` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d48fd60e6a2d1c4ad5b5` | `scripts/central_registry.py:260` `verify_signatures` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-abefe9fa83db822e20ca` | `scripts/central_registry.py:276` `validate_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-baab6ee105008bd844de` | `scripts/central_registry.py:328` `compare_local` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
-| `oc-f3073e078aade09238e3` | `scripts/central_registry.py:338` `compare_local` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
-| `oc-eb2bc958fd77834e66dd` | `scripts/central_registry.py:346` `compare_local` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
-| `oc-2cd10fa5ba0c41b701c7` | `scripts/central_registry.py:368` `portal_request` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d20ebd97ec7b49b70345` | `scripts/central_registry.py:368` `portal_request` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-05ca9f72b35071fbf2a4` | `scripts/central_registry.py:369` `portal_request` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
-| `oc-75fe597a703c5928432a` | `scripts/central_registry.py:375` `upload_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-e03a8a6c00d42e67c17e` | `scripts/central_registry.py:375` `upload_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-e2755c0c7b5ed1627b99` | `scripts/central_registry.py:396` `upload_bundle` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-a539c0d86b0f18a30017` | `scripts/central_registry.py:403` `wait_for_deployment` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-518d522131ea44b5f473` | `scripts/central_registry.py:438` `write_output` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-3c28ef6ab2b3be9cea88` | `scripts/central_registry.py:440` `write_output` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-42d15ec729b61818000b` | `scripts/central_registry.py:440` `write_output` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6822719ed5b8bfbdfedc` | `scripts/central_registry.py:453` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-dee49dba5b42e1f4908c` | `scripts/central_registry.py:456` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-49d0b7d83c63ecf7ea75` | `scripts/central_registry.py:459` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-64952529bb1752cab68e` | `scripts/central_registry.py:477` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-4e9821c7634dcda66a61` | `scripts/central_registry.py:480` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-c261533dd10d88edd05a` | `scripts/central_registry.py:483` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-4f01b1172085279cde03` | `scripts/central_registry.py:192` `local_signature` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-03ca2e6a9d6276664098` | `scripts/central_registry.py:204` `build_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-bba7487596e4415ac040` | `scripts/central_registry.py:214` `build_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d4ddf755d320e24511f1` | `scripts/central_registry.py:224` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-80389a367ec25b48c67d` | `scripts/central_registry.py:230` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-3884855566668cdaf0b8` | `scripts/central_registry.py:232` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-9e2866afdf5f5d6899b6` | `scripts/central_registry.py:234` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-27039ee0879a4ec4a937` | `scripts/central_registry.py:235` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8c5c2a008640b3171ae8` | `scripts/central_registry.py:241` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f2d8bfb5806aa6c1af37` | `scripts/central_registry.py:242` `verify_signatures` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-dc2f44ae8187b923455b` | `scripts/central_registry.py:244` `verify_signatures` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-c3d6d0db155bfcbde73c` | `scripts/central_registry.py:245` `verify_signatures` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-496172f3bd8689949a99` | `scripts/central_registry.py:251` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-a74d5968811c818658dc` | `scripts/central_registry.py:253` `verify_signatures` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d48fd60e6a2d1c4ad5b5` | `scripts/central_registry.py:265` `verify_signatures` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-abefe9fa83db822e20ca` | `scripts/central_registry.py:281` `validate_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-baab6ee105008bd844de` | `scripts/central_registry.py:333` `compare_local` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
+| `oc-f3073e078aade09238e3` | `scripts/central_registry.py:343` `compare_local` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
+| `oc-eb2bc958fd77834e66dd` | `scripts/central_registry.py:351` `compare_local` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
+| `oc-2cd10fa5ba0c41b701c7` | `scripts/central_registry.py:373` `portal_request` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d20ebd97ec7b49b70345` | `scripts/central_registry.py:373` `portal_request` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-05ca9f72b35071fbf2a4` | `scripts/central_registry.py:374` `portal_request` | script | retained | security-ceiling-or-default | These numeric script atoms bound retries, time, ports, batches, or other local tool execution. |
+| `oc-75fe597a703c5928432a` | `scripts/central_registry.py:380` `upload_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-e03a8a6c00d42e67c17e` | `scripts/central_registry.py:380` `upload_bundle` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-e2755c0c7b5ed1627b99` | `scripts/central_registry.py:401` `upload_bundle` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-a539c0d86b0f18a30017` | `scripts/central_registry.py:408` `wait_for_deployment` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-518d522131ea44b5f473` | `scripts/central_registry.py:443` `write_output` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-3c28ef6ab2b3be9cea88` | `scripts/central_registry.py:445` `write_output` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-42d15ec729b61818000b` | `scripts/central_registry.py:445` `write_output` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6822719ed5b8bfbdfedc` | `scripts/central_registry.py:458` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-dee49dba5b42e1f4908c` | `scripts/central_registry.py:461` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-49d0b7d83c63ecf7ea75` | `scripts/central_registry.py:464` `parser` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-64952529bb1752cab68e` | `scripts/central_registry.py:482` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-4e9821c7634dcda66a61` | `scripts/central_registry.py:485` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-c261533dd10d88edd05a` | `scripts/central_registry.py:488` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-e7b6a29a1cfc05f2afd0` | `scripts/check_argline.py:2` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-cec8c20c011600e6743f` | `scripts/check_argline.py:30` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-71539553afbe2d227973` | `scripts/check_argline.py:31` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |

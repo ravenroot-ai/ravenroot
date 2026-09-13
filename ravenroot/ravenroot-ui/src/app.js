@@ -27,6 +27,7 @@ import {
   createEdge,
   createNode,
   createWorkflowDocument,
+  setGraphPresentation,
   declaredJoinKind,
   edgeDeclaresFailureRoute,
   edgeFailureRouteKind,
@@ -3184,8 +3185,10 @@ function initLoadedGraph(graph, currentStyle) {
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
   mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null } = {}) {
+  const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
-    documentId, tenantId, mode, provenance, presentation,
+    documentId, tenantId, mode, provenance,
+    presentation: presentation || graphPresentation,
   });
   if (graph) {
     graphName = name;
@@ -5365,6 +5368,7 @@ function setLayout(name, options = {}) {
   // this render mode's own placement for everything else, including a plain render-mode change.
   applyLayeredLabelSide(target, layeredLabelSide(name), owner);
   layoutMode = name;
+  setGraphPresentation(graphData, { renderMode, layoutMode: name });
   if (owner) {
     owner.layoutMode = name;
     owner.pendingElasticLayoutToken = null;
@@ -5427,6 +5431,8 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   }
   renderMode = semanticMode;
   owner.renderMode = semanticMode;
+  setGraphPresentation(graphData, { renderMode: semanticMode,
+    layoutMode: semanticMode === 'monitoring' ? 'elastic' : owner.layoutMode || 'cyto' });
   // Product choices project onto existing internal engines. Design owns a deterministic full
   // relayout plus the established Cyto routing; Monitoring owns the continuous D3 lifecycle.
   const style = 'cyto';

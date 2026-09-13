@@ -88,6 +88,8 @@ export const JOIN_SEMANTICS_DECLARED = 'declared';
 export const JOIN_POLICY_PROPERTY = 'joinPolicy';
 export const JOIN_QUORUM_PROPERTY = 'joinQuorum';
 export const JOIN_TIMEOUT_PROPERTY = 'joinTimeout';
+export const GRAPH_RENDER_MODE_PROPERTY = 'ravenroot.renderMode';
+export const GRAPH_LAYOUT_MODE_PROPERTY = 'ravenroot.layoutMode';
 // The legacy state-machine merge policy (JoinSemantics#EACH_POLICY): legal, and this editor's own
 // serializeGraphML stamps it on EVERY SAVE of a legacy state-machine fan-in below -- not only while
 // migrating one, and not only once. "Migrating" and "saving" are two different events (a save with
@@ -305,8 +307,20 @@ export function createWorkflowDocument() {
     // A drawing made from scratch has no join unless its author selects one. The marker is
     // what makes that true, and it is set here -- at creation -- rather than at save time, so that
     // every document this editor originates carries it and no document it opens acquires it.
-    graphProperties: { [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED },
+    graphProperties: {
+      [JOIN_SEMANTICS_PROPERTY]: JOIN_SEMANTICS_DECLARED,
+      [GRAPH_RENDER_MODE_PROPERTY]: 'design',
+      [GRAPH_LAYOUT_MODE_PROPERTY]: 'cyto',
+    },
   };
+}
+
+export function setGraphPresentation(graph, { renderMode, layoutMode } = {}) {
+  if (!graph || typeof graph !== 'object') return graph;
+  graph.graphProperties = { ...(graph.graphProperties || {}) };
+  if (renderMode != null) graph.graphProperties[GRAPH_RENDER_MODE_PROPERTY] = String(renderMode);
+  if (layoutMode != null) graph.graphProperties[GRAPH_LAYOUT_MODE_PROPERTY] = String(layoutMode);
+  return graph;
 }
 
 export function createNode(id, name, kind = 'PASSTHROUGH', position = {}) {

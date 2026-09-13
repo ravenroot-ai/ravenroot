@@ -1,4 +1,5 @@
 import { readVisualGroups, reconcileVisualGroupState } from './visual-groups.js';
+import { GRAPH_LAYOUT_MODE_PROPERTY, GRAPH_RENDER_MODE_PROPERTY } from './graph-document.js';
 
 export function normalizedCanvasState(value, graph) {
   if (!value || typeof value !== 'object') return null;
@@ -81,7 +82,10 @@ export function layoutFromLegacyMode(layoutMode) {
 }
 
 export function documentPresentationState(document_) {
-  const explicitDesign = document_?.renderMode === DESIGN_RENDER_MODE
+  const graphProperties = document_?.graph?.graphProperties || {};
+  const persistedRenderMode = document_?.renderMode ?? graphProperties[GRAPH_RENDER_MODE_PROPERTY];
+  const persistedLayoutMode = document_?.layoutMode ?? graphProperties[GRAPH_LAYOUT_MODE_PROPERTY];
+  const explicitDesign = persistedRenderMode === DESIGN_RENDER_MODE
     && Object.hasOwn(document_, 'layoutMode') && DESIGN_LAYOUT_MODES.has(document_.layoutMode)
     && Object.hasOwn(document_, 'visualStyle') && VISUAL_STYLES.has(document_.visualStyle);
   if (explicitDesign) {
@@ -91,8 +95,11 @@ export function documentPresentationState(document_) {
       visualStyle: document_.visualStyle,
     };
   }
-  const storedMode = document_ && Object.hasOwn(document_, 'renderMode')
-    ? document_.renderMode : document_?.layoutMode;
+  if (!Object.hasOwn(document_ || {}, 'renderMode')
+      && persistedRenderMode === DESIGN_RENDER_MODE && DESIGN_LAYOUT_MODES.has(persistedLayoutMode)) {
+    return { renderMode: DESIGN_RENDER_MODE, layoutMode: persistedLayoutMode, visualStyle: DEFAULT_VISUAL_STYLE };
+  }
+  const storedMode = persistedRenderMode ?? persistedLayoutMode;
   return renderModePresentation(storedMode);
 }
 

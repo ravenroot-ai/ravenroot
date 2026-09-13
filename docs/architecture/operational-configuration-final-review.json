@@ -6582,7 +6582,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "dev.sh",
-          "digest": "5cf110dabf674f98661ad685bcea022bf37b22393321590cdf8f7c75394cac40",
+          "digest": "ff0ff4604d7fa7c6435b75d2dea5107398a79b15e67599fd05ce1902e3858198",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -7704,7 +7704,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "dev.sh",
-          "digest": "5cf110dabf674f98661ad685bcea022bf37b22393321590cdf8f7c75394cac40",
+          "digest": "ff0ff4604d7fa7c6435b75d2dea5107398a79b15e67599fd05ce1902e3858198",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -7860,7 +7860,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "dev.sh",
-          "digest": "5cf110dabf674f98661ad685bcea022bf37b22393321590cdf8f7c75394cac40",
+          "digest": "ff0ff4604d7fa7c6435b75d2dea5107398a79b15e67599fd05ce1902e3858198",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -7886,7 +7886,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "dev.sh",
-          "digest": "5cf110dabf674f98661ad685bcea022bf37b22393321590cdf8f7c75394cac40",
+          "digest": "ff0ff4604d7fa7c6435b75d2dea5107398a79b15e67599fd05ce1902e3858198",
           "assertion": "Developer launcher consumes external environment names."
         },
         {
@@ -8014,7 +8014,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "dev.sh",
-          "digest": "5cf110dabf674f98661ad685bcea022bf37b22393321590cdf8f7c75394cac40",
+          "digest": "ff0ff4604d7fa7c6435b75d2dea5107398a79b15e67599fd05ce1902e3858198",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -8057,7 +8057,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "dev.sh",
-          "digest": "5cf110dabf674f98661ad685bcea022bf37b22393321590cdf8f7c75394cac40",
+          "digest": "ff0ff4604d7fa7c6435b75d2dea5107398a79b15e67599fd05ce1902e3858198",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -8383,7 +8383,7 @@
         },
         {
           "path": "scripts/check_release_configuration.py",
-          "digest": "abb1e9ef2b0ba79708c8e3886e24820279bd4a43a0e9ece53986393fd805a040",
+          "digest": "ea7e8df9dd56633e45b3c286559f07603afbe2374cab34d37807f11116be168b",
           "assertion": "Release checker consumes external tool configuration names."
         }
       ],

@@ -60,7 +60,7 @@ class PostgresStatusLiteralSqlTest {
         assertEquals(expectedHandlerList(true), PostgresExecutionStore.TERMINAL_HANDLER_STATUSES);
         assertEquals(Set.of("WAITING", "ESCALATED"),
                 namesIn(PostgresExecutionStore.LIVE_HANDLER_STATUSES));
-        assertEquals(Set.of("RESOLVED", "DENIED", "EXPIRED"),
+        assertEquals(Set.of("RESOLVED", "DENIED", "EXPIRED", "CANCELLED"),
                 namesIn(PostgresExecutionStore.TERMINAL_HANDLER_STATUSES));
     }
 

@@ -15,6 +15,7 @@ import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionTransition;
@@ -43,6 +44,7 @@ import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
+import ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry;
 import ai.ravenroot.core.recovery.ExecutionRecoveryService;
 import ai.ravenroot.core.recovery.RecoveryOutcome;
 import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
@@ -278,6 +280,81 @@ class HumanTaskServiceTest {
             assertEquals(HumanTaskResult.Code.CANCELLED,
                     service.cancel(requester(), suspended.task().request().taskId(), 1).code(),
                     "the original requester may cancel without holding responder roles");
+        }
+    }
+
+    @Test
+    void lifecycleGateRetainsASettledTaskUntilReentryIsAdmitted() throws Exception {
+        try (var store = sqlite("reentry-gate", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            HumanTaskResult suspended;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                suspended = service.suspend(fixture.message(), definition());
+            }
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), suspended.task().request().taskId(), 1, response()).code());
+            PendingWork.HandlerTrigger trigger = assertInstanceOf(PendingWork.HandlerTrigger.class,
+                    store.claimPendingWork(TENANT, "reentry-worker", 10, Duration.ofSeconds(30))
+                            .toCompletableFuture().join().getFirst());
+            var executorConsulted = new java.util.concurrent.atomic.AtomicBoolean();
+            HumanTaskContinuationExecutor executor = new HumanTaskContinuationExecutor() {
+                @Override public boolean supports(ai.ravenroot.api.persistence.DurableHumanTask task) {
+                    executorConsulted.set(true);
+                    return true;
+                }
+
+                @Override public java.util.concurrent.CompletionStage<Void> execute(
+                        ai.ravenroot.api.persistence.DurableHumanTask task,
+                        ai.ravenroot.api.persistence.DurableHandler handler,
+                        PendingWork.HandlerTrigger claim) {
+                    return CompletableFuture.completedFuture(null);
+                }
+            };
+            var closed = new HumanTaskHandlerDispatcher(store, service, executor, task -> false);
+            assertFalse(closed.canDispatch(trigger));
+            assertFalse(executorConsulted.get(),
+                    "a lifecycle hold must be checked before graph reconstruction or dispatch");
+
+            var open = new HumanTaskHandlerDispatcher(store, service, executor, task -> true);
+            assertTrue(open.canDispatch(trigger));
+            assertTrue(executorConsulted.get());
+        }
+    }
+
+    @Test
+    void deploymentGateHoldsPauseButLetsDrainFinishAcceptedHumanTaskWork() throws Exception {
+        var deploymentId = ai.ravenroot.api.deployment.DeploymentId.of("orders");
+        var deployments = new InMemoryDeploymentRegistry(Clock.fixed(NOW, ZoneOffset.UTC),
+                tenant -> deploymentId);
+        var created = deployments.create(
+                new ai.ravenroot.api.deployment.registry.GraphVersion.Content(
+                        1, new byte[]{1}, "test", NOW),
+                new ai.ravenroot.api.deployment.registry.DeploymentRegistry.CreateCommand(
+                        TENANT, "create", "a".repeat(64))).toCompletableFuture().join();
+        try (var store = sqlite("deployment-reentry-gate", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store, deploymentId.value());
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                task = service.suspend(fixture.message(), definition()).task();
+            }
+            var gate = new DeploymentHumanTaskReentryGate(store, deployments);
+
+            var paused = deployments.command(
+                    new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Desired(
+                            ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.PAUSED,
+                            null, null, 0), deploymentCommand(created, "pause"))
+                    .toCompletableFuture().join();
+            assertFalse(gate.admits(task), "Pause retains a settled response without re-entering");
+
+            deployments.command(new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Desired(
+                            ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.DRAINED,
+                            null, null, 0), deploymentCommand(paused, "drain"))
+                    .toCompletableFuture().join();
+            assertTrue(gate.admits(task), "Drain must allow already accepted Human Task work to finish");
         }
     }
 
@@ -842,6 +919,10 @@ class HumanTaskServiceTest {
     }
 
     private static Fixture running(ExecutionStore store) {
+        return running(store, null);
+    }
+
+    private static Fixture running(ExecutionStore store, String deploymentId) {
         ExecutionKey key = new ExecutionKey(TENANT, UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         UUID invocationId = UUID.randomUUID();
@@ -851,10 +932,12 @@ class HumanTaskServiceTest {
                 NodeInvocationStatus.RUNNING, List.of(attempt));
         Traversal traversal = new Traversal(traversalId, "review", TraversalStatus.RUNNING,
                 Map.of(invocationId, invocation));
-        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+        var creation = ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
                         ProcessInstanceStatus.RUNNING, Map.of(traversalId, traversal)),
-                        new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join();
+                        new GraphVersionPin("graph-v1")));
+        if (deploymentId != null) creation.recordOrigin(ExecutionOrigin.of(deploymentId, null, null));
+        store.apply(creation.build()).toCompletableFuture().join();
         NodeMessage message = new NodeMessage(SecurityContext.of(requester()), key.processInstanceId(),
                 traversalId, invocationId, attemptId, Set.of(), "review", Map.of("secret", "not copied"),
                 Map.of(), ai.ravenroot.api.execution.NodeCommand.PROCESS);
@@ -881,6 +964,14 @@ class HumanTaskServiceTest {
     }
 
     private record Fixture(ExecutionKey key, UUID traversalId, NodeMessage message) { }
+
+    private static ai.ravenroot.api.deployment.registry.DeploymentRegistry.Command deploymentCommand(
+            ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record record, String key) {
+        return new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Command(
+                record.tenantId(), record.deploymentId(), key, "b".repeat(64),
+                RevisionExpectation.exactly(record.revision()),
+                ai.ravenroot.api.deployment.registry.GenerationExpectation.any());
+    }
 
     private record HistoricalTask(ExecutionKey key, UUID traversalId, UUID invocationId,
                                   UUID attemptId, UUID taskId, String correlationKey,

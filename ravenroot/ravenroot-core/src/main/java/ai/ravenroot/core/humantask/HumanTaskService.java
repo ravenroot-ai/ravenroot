@@ -5,6 +5,8 @@ import ai.ravenroot.api.application.NodeInvocationStatus;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
+import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadJson;
@@ -242,6 +244,106 @@ public final class HumanTaskService {
                     + policy.inboxMaxPageSize());
         }
         return await(store.listHumanTasks(context.tenantId(), query));
+    }
+
+    /**
+     * Terminally closes every outstanding task owned by one deployment generation.
+     *
+     * <p>This is an internal lifecycle action, not a human decision: it creates no re-entry
+     * traversal and therefore cannot execute graph work after the deployment cancellation barrier.
+     * Each task, handler, timer cancellation, traversal termination, and (when this is its final
+     * live traversal) process termination is one compare-and-set batch.</p>
+     *
+     * @param tenantId tenant authority of the deployment
+     * @param deploymentId durable deployment identity recorded on process admission
+     * @param correlationId lifecycle command idempotency key used in emitted events
+     * @return number of tasks this call moved to the terminal cancelled state
+     */
+    public int cancelDeploymentTasks(String tenantId, DeploymentId deploymentId,
+                                     String correlationId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(deploymentId, "deploymentId");
+        Objects.requireNonNull(correlationId, "correlationId");
+        int cancelled = 0;
+        HumanTaskQuery query = HumanTaskQuery.outstanding(policy.inboxMaxPageSize());
+        while (true) {
+            HumanTaskPage page = await(store.listHumanTasks(tenantId, query));
+            for (DurableHumanTask task : page.items()) {
+                var process = await(store.findProcessInstance(task.key())).orElse(null);
+                if (process == null || process.deploymentId().isEmpty()
+                        || !deploymentId.value().equals(process.deploymentId().orElseThrow())) {
+                    continue;
+                }
+                if (cancelForDeployment(task, correlationId)) cancelled++;
+            }
+            if (page.nextCursor().isEmpty()) return cancelled;
+            query = query.after(page.nextCursor().orElseThrow());
+        }
+    }
+
+    private boolean cancelForDeployment(DurableHumanTask original, String correlationId) {
+        int maxAttempts = original.request().executionLimits().writeAttempts();
+        for (int attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber++) {
+            DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
+                    original.request().taskId())).orElse(null);
+            if (task == null || !task.key().equals(original.key()) || task.status().terminal()) {
+                return false;
+            }
+            StoredProcessInstance stored = load(task.key());
+            var traversal = stored.state().traversals().get(task.request().traversalId());
+            if (traversal == null || traversal.status().terminal()) return false;
+            var invocation = traversal.invocations().get(task.request().invocationId());
+            if (invocation == null) return false;
+            var targetAttempt = invocation.attempts().stream()
+                    .filter(candidate -> candidate.attemptId().equals(task.request().attemptId()))
+                    .findFirst().orElse(null);
+            if (targetAttempt == null) return false;
+
+            var builder = ExecutionBatch.to(task.key())
+                    .expecting(RevisionExpectation.exactly(stored.revision()));
+            if (!targetAttempt.status().terminal()) {
+                builder.apply(new ExecutionTransition.AttemptTransitioned(
+                        traversal.traversalId(), invocation.invocationId(),
+                        targetAttempt.attemptId(), NodeAttemptStatus.FAILED));
+            }
+            if (!invocation.status().terminal()) {
+                builder.apply(new ExecutionTransition.InvocationTransitioned(
+                        traversal.traversalId(), invocation.invocationId(),
+                        NodeInvocationStatus.FAILED));
+            }
+            builder.apply(new ExecutionTransition.TraversalTransitioned(
+                    traversal.traversalId(), TraversalStatus.FAILED,
+                    ExecutionTerminationReason.CANCELLED));
+            boolean finalLiveTraversal = stored.state().traversals().values().stream()
+                    .filter(candidate -> !candidate.status().terminal()).count() == 1;
+            if (!stored.state().status().terminal() && finalLiveTraversal) {
+                builder.apply(new ExecutionTransition.ProcessTransitioned(
+                        ProcessInstanceStatus.FAILED, ExecutionTerminationReason.CANCELLED));
+            }
+            var batch = builder
+                    .applyHumanTask(new HumanTaskTransition.Cancelled(task.request().taskId(),
+                            task.generation(), "deployment-lifecycle", ""))
+                    .applyHandler(new HandlerTransition.Cancelled(
+                            task.request().taskId(), "deployment-lifecycle"))
+                    .cancelTimer(escalationTimerId(task.request().taskId()))
+                    .cancelTimer(expiryTimerId(task.request().taskId()))
+                    .publish(event(task.key(), stored, task.request(), "HUMAN_TASK_CANCELLED",
+                            correlationId, traversal.traversalId(), HumanTaskStatus.CANCELLED,
+                            task.generation() + 1))
+                    .build();
+            try {
+                await(store.apply(batch));
+                return true;
+            } catch (ExecutionStoreException conflict) {
+                if (conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
+                        && attemptNumber < maxAttempts) continue;
+                if (conflict.failure() instanceof ExecutionStoreFailure.HumanTaskNotResolvable) {
+                    return false;
+                }
+                throw conflict;
+            }
+        }
+        return false;
     }
 
     /**

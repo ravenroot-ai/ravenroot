@@ -28,7 +28,12 @@ public final class DeploymentHumanTaskReentryGate implements HumanTaskReentryGat
         if (deploymentId == null) return true;
         var deployment = await(deployments.get(task.key().tenantId(), DeploymentId.of(deploymentId)))
                 .orElse(null);
-        if (deployment == null || deployment.tombstone() != null) return false;
+        // Transient submissions and legacy source sessions can carry a deployment-shaped origin
+        // without being enrolled in the durable deployment authority. Preserve their established
+        // continuation behavior; an enrolled deployment that was removed remains present as a
+        // tombstone and is still denied below.
+        if (deployment == null) return true;
+        if (deployment.tombstone() != null) return false;
         if (deployment.lastLifecycleCommand()
                 == ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.CANCEL
                 && deployment.lastLifecycleCommandAt() != null

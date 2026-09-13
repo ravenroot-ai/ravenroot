@@ -32,7 +32,10 @@ public enum HandlerStatus {
     DENIED,
 
     /** The wait ended without a trigger. Terminal, and resumes the process. */
-    EXPIRED;
+    EXPIRED,
+
+    /** The owning work was cancelled terminally; no re-entry traversal is created. */
+    CANCELLED;
 
     /**
      * Tests whether this state permits a direct transition to another state.
@@ -46,9 +49,11 @@ public enum HandlerStatus {
      */
     public boolean canTransitionTo(HandlerStatus next) {
         return switch (this) {
-            case WAITING -> next == ESCALATED || next == RESOLVED || next == DENIED || next == EXPIRED;
-            case ESCALATED -> next == RESOLVED || next == DENIED || next == EXPIRED;
-            case RESOLVED, DENIED, EXPIRED -> false;
+            case WAITING -> next == ESCALATED || next == RESOLVED || next == DENIED
+                    || next == EXPIRED || next == CANCELLED;
+            case ESCALATED -> next == RESOLVED || next == DENIED || next == EXPIRED
+                    || next == CANCELLED;
+            case RESOLVED, DENIED, EXPIRED, CANCELLED -> false;
         };
     }
 
@@ -57,7 +62,7 @@ public enum HandlerStatus {
      * @return {@code true} for resolved, denied and expired handlers.
      */
     public boolean terminal() {
-        return this == RESOLVED || this == DENIED || this == EXPIRED;
+        return this == RESOLVED || this == DENIED || this == EXPIRED || this == CANCELLED;
     }
 
     /**
@@ -70,6 +75,6 @@ public enum HandlerStatus {
      * @return {@code true} when entering this state produces exactly one durable trigger.
      */
     public boolean resumesProcess() {
-        return terminal();
+        return this == RESOLVED || this == DENIED || this == EXPIRED;
     }
 }

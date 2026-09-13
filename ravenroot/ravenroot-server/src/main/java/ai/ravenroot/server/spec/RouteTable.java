@@ -303,6 +303,33 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/pause",
+                    "Durably closes admission for one tenant-scoped deployment generation while "
+                            + "retaining accepted work for Resume. Requires Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation headers and a bounded X-Ravenroot-Reason.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/resume",
+                    "Durably reopens a paused deployment under a new fenced generation. Requires "
+                            + "Idempotency-Key and X-Ravenroot-Expected-Generation headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/cancel",
+                    "Commits a generation barrier that cooperatively ends work captured before it "
+                            + "without stopping the deployment domain. Requires Idempotency-Key, "
+                            + "X-Ravenroot-Expected-Generation, and X-Ravenroot-Reason headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/drain",
+                    "Durably closes admission and lets accepted work reach its ordinary terminal "
+                            + "state within the configured drain bound. Requires Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
             // Sub-routes under /v1/executions use registersContext=false:
             // the JDK HttpServer matches contexts by longest prefix, so "/v1/executions" already
             // receives both "/v1/executions/{id}" and "/v1/executions/{id}/cancel". Registering a

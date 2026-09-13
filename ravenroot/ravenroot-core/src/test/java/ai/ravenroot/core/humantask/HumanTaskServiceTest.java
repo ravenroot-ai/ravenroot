@@ -8,6 +8,8 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
+import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadKind;
@@ -23,6 +25,7 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
@@ -89,6 +92,53 @@ class HumanTaskServiceTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void deploymentCancellationTerminallyClosesOnlyItsTasksWithoutReentry() throws Exception {
+        try (var store = sqlite("deployment-cancel", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture cancelledFixture = running(store, "deployment-a");
+            Fixture siblingFixture = running(store, "deployment-b");
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            HumanTaskResult cancelledTask;
+            HumanTaskResult siblingTask;
+            try (var firstRecorder = ExecutionRecorder.open(store, cancelledFixture.key,
+                         "cancelled-worker", Duration.ofSeconds(30), 1);
+                 var secondRecorder = ExecutionRecorder.open(store, siblingFixture.key,
+                         "sibling-worker", Duration.ofSeconds(30), 1);
+                 var firstBinding = service.bindLive(cancelledFixture.key, firstRecorder);
+                 var secondBinding = service.bindLive(siblingFixture.key, secondRecorder)) {
+                cancelledTask = service.suspend(cancelledFixture.message(), definition());
+                siblingTask = service.suspend(siblingFixture.message(), definition());
+            }
+
+            assertEquals(1, service.cancelDeploymentTasks(TENANT,
+                    DeploymentId.of("deployment-a"), "cancel-command"));
+            assertEquals(HumanTaskStatus.CANCELLED,
+                    store.loadHumanTask(TENANT, cancelledTask.task().request().taskId())
+                            .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(HandlerStatus.CANCELLED,
+                    store.loadHandler(cancelledFixture.key, cancelledTask.task().request().taskId())
+                            .toCompletableFuture().join().orElseThrow().status());
+            var cancelledProcess = store.load(cancelledFixture.key).toCompletableFuture().join().state();
+            assertEquals(ProcessInstanceStatus.FAILED, cancelledProcess.status());
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    cancelledProcess.terminationReason());
+            assertEquals(TraversalStatus.FAILED,
+                    cancelledProcess.traversals().get(cancelledFixture.traversalId).status());
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    cancelledProcess.traversals().get(cancelledFixture.traversalId).terminationReason());
+            assertEquals(HumanTaskStatus.WAITING,
+                    store.loadHumanTask(TENANT, siblingTask.task().request().taskId())
+                            .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(0, store.claimPendingWork(TENANT, "reentry", 20,
+                            Duration.ofSeconds(30)).toCompletableFuture().join().stream()
+                    .filter(PendingWork.HandlerTrigger.class::isInstance).count(),
+                    "deployment cancellation must never create a graph re-entry trigger");
+            assertEquals(0, service.cancelDeploymentTasks(TENANT,
+                    DeploymentId.of("deployment-a"), "cancel-command"),
+                    "recovery replay must be idempotent");
+        }
+    }
 
     @Test
     void concurrentProcessesRetainAndIndependentlySettleTasksAcrossRestart() throws Exception {
@@ -364,6 +414,21 @@ class HumanTaskServiceTest {
                     .toCompletableFuture().join();
             assertFalse(gate.admits(task),
                     "a Human Task captured before graph Cancel must never re-enter its old traversal");
+        }
+    }
+
+    @Test
+    void deploymentGatePreservesLegacyUnenrolledSourceSessionReentry() throws Exception {
+        var deployments = new InMemoryDeploymentRegistry(Clock.fixed(NOW, ZoneOffset.UTC));
+        try (var store = sqlite("unenrolled-reentry-gate", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store, "editor-session");
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                task = service.suspend(fixture.message(), definition()).task();
+            }
+            assertTrue(new DeploymentHumanTaskReentryGate(store, deployments).admits(task));
         }
     }
 

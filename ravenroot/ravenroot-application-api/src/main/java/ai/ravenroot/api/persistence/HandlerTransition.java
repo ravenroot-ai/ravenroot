@@ -184,6 +184,20 @@ public sealed interface HandlerTransition {
         }
     }
 
+    /** Terminally closes a handler because its owning logical work was cancelled. */
+    record Cancelled(UUID handlerId, String actor) implements HandlerTransition {
+        public Cancelled {
+            requireHandlerId(handlerId);
+            actor = HandlerRegistration.requireBoundedKey(actor, "actor");
+        }
+
+        @Override public HandlerStatus next() { return HandlerStatus.CANCELLED; }
+        @Override public UUID resumeTraversalId() { return null; }
+        @Override public OpaquePayload outcomePayload() {
+            return OpaquePayload.empty(EMPTY_CONTENT_TYPE);
+        }
+    }
+
     private static void requireHandlerId(UUID handlerId) {
         if (handlerId == null) {
             throw new IllegalArgumentException("handlerId cannot be null");

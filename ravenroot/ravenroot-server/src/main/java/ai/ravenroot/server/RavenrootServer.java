@@ -305,6 +305,7 @@ public final class RavenrootServer implements AutoCloseable {
     private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
+    private ai.ravenroot.core.deployment.DurableLocalDeploymentControl durableDeploymentControl;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
     private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
@@ -969,6 +970,7 @@ public final class RavenrootServer implements AutoCloseable {
         }
         try {
             if (interactionWebSockets != null) interactionWebSockets.start();
+            if (durableDeploymentControl != null) durableDeploymentControl.startRecovery();
             server.start();
             verifyRequestHeaderCapTookEffect();
         } catch (RuntimeException failure) {
@@ -1007,6 +1009,18 @@ public final class RavenrootServer implements AutoCloseable {
     synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
                                         java.util.function.Consumer<String> sweep) {
         installHumanTasks(tasks, sweep, HumanTaskPolicy.DEFAULTS);
+    }
+
+    /** Installs the shared durable lifecycle authority before the listener starts. */
+    synchronized void installDurableDeploymentControl(
+            ai.ravenroot.core.deployment.DurableLocalDeploymentControl control) {
+        if (started.get()) {
+            throw new IllegalStateException("deployment control must be installed before start");
+        }
+        if (durableDeploymentControl != null) {
+            throw new IllegalStateException("deployment control is already installed");
+        }
+        durableDeploymentControl = java.util.Objects.requireNonNull(control, "control");
     }
 
     synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
@@ -3086,8 +3100,11 @@ public final class RavenrootServer implements AutoCloseable {
                 // have required this handler to read the registration first, and that read is a
                 // different authorization action -- so registering would have started demanding an
                 // observe scope it does not otherwise need, to decorate a status code.
-                var status = authorizedApplication.registerLocalDeployment(context, deploymentId,
-                        new java.io.ByteArrayInputStream(graph));
+                var status = durableDeploymentControl == null
+                        ? authorizedApplication.registerLocalDeployment(context, deploymentId,
+                                new java.io.ByteArrayInputStream(graph))
+                        : durableDeploymentControl.register(
+                                ai.ravenroot.api.security.SecurityContext.of(context), deploymentId, graph).local();
                 deploymentJson(exchange, 200, status);
                 return;
             }
@@ -3111,6 +3128,10 @@ public final class RavenrootServer implements AutoCloseable {
                     return;
                 }
                 if ("DELETE".equalsIgnoreCase(exchange.getRequestMethod())) {
+                    if (durableDeploymentControl != null) {
+                        durableDeploymentCommand(exchange, httpContext, deploymentId, "undeploy");
+                        return;
+                    }
                     awaitDeploymentCommand(exchange, httpContext,
                             authorizedApplication.undeployLocalDeployment(context, deploymentId));
                     return;
@@ -3121,6 +3142,10 @@ public final class RavenrootServer implements AutoCloseable {
             }
 
             if (!method(exchange, httpContext, "POST")) return;
+            if (durableDeploymentControl != null) {
+                durableDeploymentCommand(exchange, httpContext, deploymentId, segments[2]);
+                return;
+            }
             java.util.concurrent.CompletionStage<java.util.Optional<
                     ai.ravenroot.api.application.LocalDeploymentStatus>> command =
                     switch (segments[2]) {
@@ -3162,6 +3187,84 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (IllegalStateException conflict) {
             fail(exchange, httpContext, ErrorCode.CONFLICT);
         }
+    }
+
+    private void durableDeploymentCommand(HttpExchange exchange, HttpRequestContext httpContext,
+                                          String deploymentId, String action) throws IOException {
+        String key = requiredHeader(exchange, "Idempotency-Key");
+        String generationText = requiredHeader(exchange, "X-Ravenroot-Expected-Generation");
+        long generation = Long.parseLong(generationText);
+        var command = switch (action) {
+            case "start" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Start(
+                    key, 1, ai.ravenroot.api.deployment.registry.DeploymentRegistry.UpdateStrategy.STOP_FIRST);
+            case "pause" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Pause(
+                    key, requiredHeader(exchange, "X-Ravenroot-Reason"));
+            case "resume" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Resume(key);
+            case "cancel" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Cancel(
+                    key, requiredHeader(exchange, "X-Ravenroot-Reason"));
+            case "drain" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Drain(key, drainBound);
+            case "stop" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Stop(
+                    key, requiredHeader(exchange, "X-Ravenroot-Reason"));
+            case "restart" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Restart(key);
+            case "undeploy" -> new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Undeploy(
+                    key, ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Undeploy.Disposition.valueOf(
+                            requiredHeader(exchange, "X-Ravenroot-Undeploy-Disposition")),
+                    requiredHeader(exchange, "X-Ravenroot-Reason"));
+            default -> null;
+        };
+        if (command == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        var outcome = durableDeploymentControl.submit(httpContext.applicationContext().tenantId(),
+                deploymentId, command,
+                ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(generation));
+        if (outcome.isEmpty()) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        json(exchange, 200, deploymentOutcomeObject(outcome.orElseThrow()));
+    }
+
+    private static String requiredHeader(HttpExchange exchange, String name) {
+        String value = exchange.getRequestHeaders().getFirst(name);
+        if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required");
+        return value;
+    }
+
+    private static String deploymentOutcomeObject(
+            ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome outcome) {
+        return switch (outcome) {
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Accepted accepted ->
+                    "{\"outcome\":\"ACCEPTED\",\"commandId\":\"" + escape(accepted.commandId())
+                            + "\",\"fromGeneration\":" + accepted.fromGeneration()
+                            + ",\"generation\":" + accepted.toGeneration() + "}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Converged converged ->
+                    "{\"outcome\":\"CONVERGED\",\"commandId\":\"" + escape(converged.commandId())
+                            + "\",\"generation\":" + converged.generation()
+                            + ",\"observed\":\"" + converged.observed().name() + "\"}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Replayed replayed ->
+                    "{\"outcome\":\"REPLAYED\",\"original\":"
+                            + deploymentOutcomeObject(replayed.original()) + "}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.IdempotencyConflict conflict ->
+                    "{\"outcome\":\"IDEMPOTENCY_CONFLICT\",\"key\":\""
+                            + escape(conflict.key()) + "\"}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.StaleGeneration stale ->
+                    "{\"outcome\":\"STALE_GENERATION\",\"expected\":" + stale.expected()
+                            + ",\"generation\":" + stale.current() + "}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Superseded superseded ->
+                    "{\"outcome\":\"SUPERSEDED\",\"by\":\""
+                            + escape(superseded.bySupersedingLevel()) + "\",\"generation\":"
+                            + superseded.generation() + "}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Refused refused ->
+                    "{\"outcome\":\"REFUSED\",\"reason\":\"" + refused.reason().name() + "\"}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Failed failed ->
+                    "{\"outcome\":\"FAILED\",\"cause\":\""
+                            + escape(failed.classifiedCause()) + "\"}";
+            case ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Terminal terminal ->
+                    "{\"outcome\":\"TERMINAL\",\"commandId\":\"" + escape(terminal.commandId())
+                            + "\",\"generation\":" + terminal.generation() + "}";
+        };
     }
 
     /**
@@ -5053,6 +5156,7 @@ public final class RavenrootServer implements AutoCloseable {
             managedIngress.close();
         }
         if (interactionWebSockets != null) interactionWebSockets.close();
+        if (durableDeploymentControl != null) durableDeploymentControl.close();
         server.stop((int) httpStopDelay.toSeconds());
         executor.close();
         try {

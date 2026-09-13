@@ -4493,7 +4493,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(readHandler(rows, key, null));
+                    DurableHandler handler = readHandler(rows, key, null);
+                    if (handler.status().resumesProcess()) ready.add(handler);
                 }
             }
         }

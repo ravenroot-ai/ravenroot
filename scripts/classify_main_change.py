@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Classify a CI event without trusting mutable pull-request prose."""
+"""Classify a CI event without trusting mutable pull-request prose.
+
+`dev` is the verification point and `main` is a promotion. Every functional check therefore belongs
+on a pull request into `dev`, where a failure names the single pull request that caused it, and the
+`dev` to `main` promotion carries only the security gate and the two checks that make the release
+classification real. The tier this module returns is what encodes that: `full` runs the functional
+suite, `promotion` deliberately runs none of it, and `docs` covers a content-only push to `main`.
+"""
 
 from __future__ import annotations
 
@@ -77,14 +84,65 @@ def parse_labels(raw_labels: str) -> set[str]:
     return labels
 
 
+# The only tier a manual dispatch may request. Dispatch exists to verify a review candidate on the
+# exact commit about to be reviewed, and the result lands on that commit, where a pull request into
+# `dev` reads it. A caller able to choose a lighter tier could make `ci-required` pass on a
+# work-branch commit without the functional suite ever running on it.
+DISPATCHABLE_TIERS = {"full"}
+
+# The Dependabot routing inputs of ci.yml's dispatch, by the variable the classify step passes each in.
+ROUTED_INPUTS = {
+    "routed_pr_number": "ROUTED_PR_NUMBER",
+    "base_sha": "ROUTED_BASE_SHA",
+    "head_sha": "ROUTED_HEAD_SHA",
+    "merge_sha": "ROUTED_MERGE_SHA",
+}
+
+
 def classify(
-    *, event_name: str, base_ref: str, ref_name: str, labels: set[str], paths: list[str]
+    *,
+    event_name: str,
+    base_ref: str,
+    ref_name: str,
+    labels: set[str],
+    paths: list[str],
+    dispatch_tier: str = "",
+    head_ref: str = "",
+    head_repository: str = "",
+    repository: str = "",
+    routed_inputs: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Return the CI tier and release intent for one event."""
     docs_only = documentation_only(paths)
 
+    if event_name == "workflow_dispatch":
+        requested = dispatch_tier or "full"
+        if requested not in DISPATCHABLE_TIERS:
+            raise ClassificationError(
+                f"A dispatched run may request only: {', '.join(sorted(DISPATCHABLE_TIERS))}. "
+                f"Refusing {requested!r}: any lighter tier would let ci-required pass on this commit "
+                "without the full tier."
+            )
+        # A routed Dependabot run reaches this classifier as `pull_request`, after its routing run was
+        # validated. Here the routing is absent, so its inputs must be too: every job checks out
+        # `merge_sha` when it is set, while the run is recorded on the dispatched branch's commit.
+        # Accepting it would record a full-tier success on a commit this run never tested — and a
+        # promotion reads exactly that success as its evidence.
+        supplied = sorted(name for name, value in (routed_inputs or {}).items() if value)
+        if supplied:
+            raise ClassificationError(
+                f"A dispatched run without routing_run_id must not set {', '.join(supplied)}: the run "
+                "would test another commit while its result is recorded on this one."
+            )
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+
+    # A merge-group commit is `dev` plus the queued pull request: the integration, tested before the
+    # queue advances `dev` to exactly this commit.
+    if event_name == "merge_group":
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+
     if event_name == "pull_request" and base_ref == "dev":
-        return {"tier": "fast", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":
         selected = sorted(RELEASE_LABELS.intersection(labels))
@@ -105,11 +163,23 @@ def classify(
                 "A documentation-only pull request to main must use release:none; "
                 "it must not advance the product version."
             )
-        return {
-            "tier": "docs" if intent == "none" else "full",
-            "release_intent": intent,
-            "docs_only": str(docs_only).lower(),
-        }
+        # Only `dev` of this repository is a promotion. Its content was verified on `dev`, so the
+        # promotion re-runs no functional job — and ci-required, on this tier, still refuses unless
+        # a full-tier run passed on this exact commit. A `hotfix/*` branch never passed through
+        # `dev`, so it runs the full tier. Anything else targeting `main` is refused here, as
+        # `main-source-policy` refuses it: a promotion tier granted to an arbitrary head would give
+        # that commit a green ci-required with no functional job behind it.
+        same_repository = bool(repository) and head_repository == repository
+        if same_repository and head_ref == "dev":
+            tier = "promotion"
+        elif same_repository and head_ref.startswith("hotfix/"):
+            tier = "full"
+        else:
+            raise ClassificationError(
+                f"A pull request into main must come from dev or a hotfix/* branch of {repository or 'this repository'}; "
+                f"refusing head {head_repository or '?'}:{head_ref or '?'}."
+            )
+        return {"tier": tier, "release_intent": intent, "docs_only": str(docs_only).lower()}
 
     if event_name == "push" and ref_name == "main" and docs_only:
         return {"tier": "docs", "release_intent": "none", "docs_only": "true"}
@@ -148,6 +218,11 @@ def main() -> int:
             ref_name=os.environ.get("REF_NAME", ""),
             labels=parse_labels(os.environ.get("PR_LABELS", "[]")),
             paths=paths,
+            dispatch_tier=os.environ.get("DISPATCH_TIER", ""),
+            head_ref=os.environ.get("HEAD_REF", ""),
+            head_repository=os.environ.get("HEAD_REPOSITORY", ""),
+            repository=os.environ.get("REPOSITORY", ""),
+            routed_inputs={name: os.environ.get(variable, "") for name, variable in ROUTED_INPUTS.items()},
         )
     except (ClassificationError, subprocess.CalledProcessError) as exc:
         print(f"Release classification failed: {exc}", file=sys.stderr)

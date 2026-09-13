@@ -95,6 +95,8 @@ final class JoinCoordinator {
      * once the dispatch chain releases it.</p>
      */
     private final ConcurrentHashMap<String, LocalJoin> locals = new ConcurrentHashMap<>();
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> continuationListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private final AtomicInteger liveTimeouts = new AtomicInteger();
 
@@ -344,6 +346,120 @@ final class JoinCoordinator {
      */
     int liveParkedBranchCount() {
         return locals.values().stream().mapToInt(LocalJoin::liveWaiterCount).sum();
+    }
+
+    /** Snapshots only arrivals still waiting in the current join bucket. */
+    List<GraphExecutionContinuationCheckpoint.JoinState> continuationState() {
+        var result = new ArrayList<GraphExecutionContinuationCheckpoint.JoinState>();
+        synchronized (gate) {
+            for (LocalJoin local : locals.values()) {
+                local.payloads.forEach((branch, arrival) -> {
+                    if (BranchId.lapIn(branch) <= local.firedThrough) return;
+                    result.add(new GraphExecutionContinuationCheckpoint.JoinState(
+                            local.key.joinNodeId(), branch,
+                            ai.ravenroot.api.payload.PayloadValue.fromJava(arrival.payload(),
+                                    checkpointPayloadLimits()),
+                            ai.ravenroot.api.payload.PayloadValue.fromJava(arrival.attributes(),
+                                    checkpointPayloadLimits()),
+                            arrival.parentInvocationIds(), arrival.command().name(), arrival.context().laps()));
+                });
+            }
+        }
+        result.sort(java.util.Comparator.comparing(GraphExecutionContinuationCheckpoint.JoinState::joinNodeId)
+                .thenComparing(GraphExecutionContinuationCheckpoint.JoinState::branchId));
+        return List.copyOf(result);
+    }
+
+    private static ai.ravenroot.api.payload.PayloadLimits checkpointPayloadLimits() {
+        return new ai.ravenroot.api.payload.PayloadLimits(
+                ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_ENCODED_BYTES,
+                ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_DEPTH,
+                ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_COLLECTION_SIZE,
+                ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_VALUE_COUNT,
+                ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_TEXT_LENGTH,
+                ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_KEY_LENGTH);
+    }
+
+    /**
+     * Waits until every already-dispatched sibling of a withheld Human Task branch has either
+     * completed or durably parked at a join. This is the first instant at which the task's
+     * continuation can describe the complete fan-out without guessing about work still running.
+     */
+    CompletionStage<Void> awaitContinuationBoundary(ExecutionBudget budget, int withheldHops,
+                                                     List<CompletableFuture<Void>> dispatched) {
+        var ready = new CompletableFuture<Void>();
+        Runnable check = () -> {
+            if (ready.isDone()) return;
+            try {
+                int parked = continuationState().size();
+                if (budget.snapshot().inFlightHops() == parked + withheldHops) {
+                    ready.complete(null);
+                }
+            } catch (RuntimeException failure) {
+                ready.completeExceptionally(failure);
+            }
+        };
+        continuationListeners.add(check);
+        dispatched.forEach(branch -> branch.whenComplete((ignored, failure) -> {
+            if (failure != null) ready.completeExceptionally(failure);
+            else check.run();
+        }));
+        ready.whenComplete((ignored, failure) -> continuationListeners.remove(check));
+        check.run();
+        return ready;
+    }
+
+    private void continuationStateChanged() {
+        continuationListeners.forEach(Runnable::run);
+    }
+
+    /** Replays checkpointed arrivals without parking a second copy of their former branches. */
+    CompletionStage<Void> restoreContinuation(
+            List<GraphExecutionContinuationCheckpoint.JoinState> checkpoint) {
+        return restoreContinuation(checkpoint, null);
+    }
+
+    /** Replays arrivals under the fresh re-entry ingress while retaining their original lineage there. */
+    CompletionStage<Void> restoreContinuation(
+            List<GraphExecutionContinuationCheckpoint.JoinState> checkpoint,
+            UUID reentryInvocationId) {
+        CompletionStage<Void> restored = CompletableFuture.completedFuture(null);
+        for (var saved : checkpoint) {
+            restored = restored.thenCompose(ignored -> {
+                BranchId branch = BranchId.parse(saved.branchId());
+                var arrival = new JoinArrival(branch,
+                        saved.payload() instanceof ai.ravenroot.api.payload.PayloadValue.NullValue
+                                ? null : saved.payload().toJava(),
+                        asAttributes(saved.attributes()), reentryInvocationId == null
+                                ? saved.parentInvocationIds() : java.util.Set.of(reentryInvocationId),
+                        ai.ravenroot.api.execution.NodeCommand.parse(saved.command()),
+                        new IterationContext(saved.iteration()));
+                LocalJoin local = local(saved.joinNodeId());
+                if (local == null) {
+                    return CompletableFuture.failedFuture(new IllegalArgumentException(
+                            "checkpoint names an unavailable join: " + saved.joinNodeId()));
+                }
+                local.payloads.put(saved.branchId(), arrival);
+                return settle(local, saved.branchId(), branch.lap(), JoinBranchOutcome.ARRIVED, false)
+                        .thenApply(decision -> {
+                            if (!(decision instanceof JoinDecision.Wait)) {
+                                throw new IllegalStateException(
+                                        "checkpointed join arrival did not restore as pending");
+                            }
+                            return null;
+                        });
+            });
+        }
+        return restored;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asAttributes(ai.ravenroot.api.payload.PayloadValue value) {
+        Object projected = value.toJava();
+        if (!(projected instanceof Map<?, ?> map)) {
+            throw new IllegalArgumentException("checkpointed join attributes must be a map");
+        }
+        return Map.copyOf((Map<String, Object>) map);
     }
 
     /**
@@ -705,9 +821,12 @@ final class JoinCoordinator {
                         return CompletableFuture.<JoinDecision>failedFuture(error);
                     }
                     return switch (decision) {
-                        case JoinDecision.Wait waiting -> parkWhileWaiting
-                                ? local.waiter(lap)
-                                : CompletableFuture.<JoinDecision>completedFuture(waiting);
+                        case JoinDecision.Wait waiting -> {
+                            continuationStateChanged();
+                            yield parkWhileWaiting
+                                    ? local.waiter(lap)
+                                    : CompletableFuture.<JoinDecision>completedFuture(waiting);
+                        }
                         case JoinDecision.Proceed proceed -> {
                             // Per bucket, both of them. The deadline is re-armed for the bucket now
                             // being filled rather than cancelled for good, and only the branches

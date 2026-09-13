@@ -2,7 +2,7 @@ const SHARED = Object.freeze({
   nodeType: Object.freeze({
     start: '#238636', end: '#cf222e', error: '#9a6700', terminal: '#57606a',
     consumer: '#bc4c00', handler: '#8250df', agent: '#0969da', flow: '#0969da',
-    actor: '#9a6700', system: '#57606a',
+    actor: '#9a6700', system: '#57606a', trace: '#0550ae', 'human-task': '#8250df',
   }),
   edgeType: Object.freeze({
     failed: '#cf222e', completed: '#238636', continue: '#0969da', continueP: '#0969da',
@@ -28,7 +28,7 @@ export const RENDERER_PALETTES = Object.freeze({
     nodeType: Object.freeze({
       start: '#3fb950', end: '#ff7b72', error: '#e3b341', terminal: '#a5adb7',
       consumer: '#f0883e', handler: '#d2a8ff', agent: '#58a6ff', flow: '#58a6ff',
-      actor: '#e3b341', system: '#8b949e',
+      actor: '#e3b341', system: '#8b949e', trace: '#79b8ff', 'human-task': '#d2a8ff',
     }),
     edgeType: Object.freeze({
       failed: '#ff7b72', completed: '#3fb950', continue: '#58a6ff', continueP: '#58a6ff',
@@ -41,7 +41,7 @@ export const RENDERER_PALETTES = Object.freeze({
     nodeSurfaceByType: Object.freeze({
       start: '#0d2518', end: '#2d0e0e', error: '#2d1a06', terminal: '#1a1a2e',
       consumer: '#2e1500', handler: '#1e1030', agent: '#0e1e30', flow: '#0e1e30',
-      actor: '#241800', system: '#1a1f26',
+      actor: '#241800', system: '#1a1f26', trace: '#102a43', 'human-task': '#241a3b',
     }),
   }),
   light: Object.freeze({
@@ -54,7 +54,7 @@ export const RENDERER_PALETTES = Object.freeze({
     nodeSurfaceByType: Object.freeze({
       start: '#dafbe1', end: '#ffebe9', error: '#fff8c5', terminal: '#f6f8fa',
       consumer: '#fff1e5', handler: '#fbefff', agent: '#ddf4ff', flow: '#ddf4ff',
-      actor: '#fff8c5', system: '#f6f8fa',
+      actor: '#fff8c5', system: '#f6f8fa', trace: '#ddf4ff', 'human-task': '#fbefff',
     }),
   }),
 });

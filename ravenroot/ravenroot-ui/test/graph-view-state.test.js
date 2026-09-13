@@ -58,6 +58,15 @@ describe('Cytoscape layout lifecycle', () => {
     }
   });
 
+  it('restores a presentation persisted as GraphML graph properties', () => {
+    expect(documentPresentationState({ graph: { graphProperties: {
+      'ravenroot.renderMode': 'design', 'ravenroot.layoutMode': 'layered-down',
+    } } })).toEqual({ renderMode: 'design', layoutMode: 'layered-down', visualStyle: 'cyto' });
+    expect(documentPresentationState({ graph: { graphProperties: {
+      'ravenroot.renderMode': 'monitoring', 'ravenroot.layoutMode': 'elastic',
+    } } })).toEqual({ renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto' });
+  });
+
   it('normalizes every legacy split or combined preference into two semantic modes', () => {
     for (const legacy of ['dagre', 'cose', 'elk', 'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto', 'preset']) {
       expect(documentPresentationState({ layoutMode: legacy })).toEqual({

@@ -20,6 +20,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -40,8 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * contributes is the number, so the question can be
  * answered from evidence instead of from imagination.
  *
- * <p>It asserts only that a refusal happens above the declared bound, which is the gate working as
- * written. It deliberately does not assert a policy.
+ * <p>It asserts the declared boundary exactly: one invocation is admitted and every simultaneous
+ * arrival above that bound is refused. It deliberately does not assert a different policy.
  */
 class ConcurrencyGateThresholdTest {
 
@@ -60,16 +61,21 @@ class ConcurrencyGateThresholdTest {
     void measuresWhereTheMailSendGateBeginsRefusing() throws Exception {
         int declaredConcurrency = 1;
         int arrivals = 8;
-        var action = mailSendAction(declaredConcurrency);
 
         var refusals = new AtomicInteger();
         var admitted = new AtomicInteger();
+        var ready = new CountDownLatch(arrivals);
         var start = new CountDownLatch(1);
+        var sendEntered = new CountDownLatch(1);
+        var releaseSend = new CountDownLatch(1);
+        var refusalsObserved = new CountDownLatch(arrivals - declaredConcurrency);
+        var action = mailSendAction(declaredConcurrency, sendEntered, releaseSend);
         var pool = Executors.newFixedThreadPool(arrivals);
         try {
             var calls = new CompletableFuture[arrivals];
             for (int index = 0; index < arrivals; index++) {
                 calls[index] = CompletableFuture.runAsync(() -> {
+                    ready.countDown();
                     try {
                         start.await();
                     } catch (InterruptedException interrupted) {
@@ -80,19 +86,26 @@ class ConcurrencyGateThresholdTest {
                     stage.handle((result, error) -> {
                         if (isCapacityRefusal(error)) {
                             refusals.incrementAndGet();
+                            refusalsObserved.countDown();
                         } else {
-                            // Admitted by the gate. It then fails on the unreachable SMTP host, which
-                            // is not what is being measured: admission is, and admission already
-                            // happened before any socket was opened.
+                            // Admitted by the gate. The credential boundary below holds that one
+                            // operation until every simultaneous excess arrival has been observed.
                             admitted.incrementAndGet();
                         }
                         return null;
                     }).toCompletableFuture().join();
                 }, pool);
             }
+            assertTrue(ready.await(10, TimeUnit.SECONDS), "all callers must be ready before admission starts");
             start.countDown();
+            assertTrue(sendEntered.await(10, TimeUnit.SECONDS), "the admitted send must hold its gate permit");
+            assertTrue(refusalsObserved.await(10, TimeUnit.SECONDS),
+                    "every simultaneous arrival above maxConcurrency must be refused while the permit is held");
+            releaseSend.countDown();
             CompletableFuture.allOf(calls).get(120, TimeUnit.SECONDS);
         } finally {
+            start.countDown();
+            releaseSend.countDown();
             pool.shutdownNow();
         }
 
@@ -106,27 +119,43 @@ class ConcurrencyGateThresholdTest {
                 + "Declarable maxConcurrency is validated to 1..16 in MailProfile, ImapProfile, "
                 + "KafkaProfile and AmqpProfile.");
 
-        assertTrue(refusals.get() > 0,
-                "with maxConcurrency=" + declaredConcurrency + " and " + arrivals + " concurrent "
-                        + "arrivals the gate must refuse at least one. It refused none, which would "
-                        + "mean the arrivals were still being serialised somewhere.");
+        assertEquals(declaredConcurrency, admitted.get(), "the declared number of sends must be admitted");
+        assertEquals(arrivals - declaredConcurrency, refusals.get(),
+                "every simultaneous arrival above maxConcurrency must be refused");
     }
 
-    private static NodeAction mailSendAction(int maxConcurrency) {
-        var behavior = MailTestSupport.loopbackBehavior(reference -> Optional.empty(),
+    private static NodeAction mailSendAction(int maxConcurrency, CountDownLatch sendEntered,
+                                             CountDownLatch releaseSend) {
+        var behavior = MailTestSupport.loopbackBehavior(reference -> {
+                    sendEntered.countDown();
+                    await(releaseSend);
+                    return Optional.empty();
+                },
                 (tenant, name) -> Optional.of(MailTestSupport.profile(tenant, name, "127.0.0.1", 2525,
-                        "SMTP", "", "", 0)), "127.0.0.1");
+                        "STARTTLS", "smtp-user", "gate-hold", 0)), "127.0.0.1");
         var properties = new LinkedHashMap<String, Object>();
         properties.put("mailProfile", MailTestSupport.PROFILE);
-        properties.put("credentialRef", "");
+        properties.put("credentialRef", "gate-hold");
         properties.put("maxConcurrency", maxConcurrency);
         return behavior.create(new NodeConfiguration("gate-node", "mail.send", properties));
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("timed out waiting for the admission measurement to release the send");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("admission measurement interrupted", interrupted);
+        }
     }
 
     private static NodeMessage message() {
         return new NodeMessage(IDENTITY, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 UUID.randomUUID(), Set.of(), "gate-node",
-                Map.of("to", "someone@example.com", "subject", "s", "body", "b"), Map.of());
+                Map.of("version", "mail.send.v1", "to", java.util.List.of("someone@example.com"),
+                        "subject", "s", "text", "b"), Map.of());
     }
 
     /** A capacity refusal, distinguished from every other way a send can fail. */

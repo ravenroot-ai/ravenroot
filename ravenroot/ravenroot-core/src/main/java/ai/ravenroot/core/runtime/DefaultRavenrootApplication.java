@@ -1890,6 +1890,21 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return true;
     }
 
+    @Override
+    public int stopProcessInvocations(String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        int stopped = 0;
+        for (var entry : activeExecutions.entrySet()) {
+            ActiveExecution active = entry.getValue();
+            if (!tenantId.equals(active.tenantId) || !processInstanceId.equals(active.processInstanceId)
+                    || !activeExecutions.remove(entry.getKey(), active)) continue;
+            stopped++;
+            Thread.startVirtualThread(active::close);
+        }
+        return stopped;
+    }
+
     /**
      * Reads {@link #activeExecutions} without removing: a paused traversal is still live, still
      * listed by {@link #liveExecutions} and still cancellable, which is exactly what distinguishes

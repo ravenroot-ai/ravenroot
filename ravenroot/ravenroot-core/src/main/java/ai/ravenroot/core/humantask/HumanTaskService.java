@@ -507,6 +507,24 @@ public final class HumanTaskService {
         }
     }
 
+    /** Terminally cancels outstanding tasks belonging to one exact process, without re-entry. */
+    public int cancelProcessTasks(String tenantId, UUID processInstanceId, String correlationId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        Objects.requireNonNull(correlationId, "correlationId");
+        int cancelled = 0;
+        HumanTaskQuery query = HumanTaskQuery.outstanding(policy.inboxMaxPageSize());
+        while (true) {
+            HumanTaskPage page = await(store.listHumanTasks(tenantId, query));
+            for (DurableHumanTask task : page.items()) {
+                if (processInstanceId.equals(task.key().processInstanceId())
+                        && cancelForDeployment(task, correlationId)) cancelled++;
+            }
+            if (page.nextCursor().isEmpty()) return cancelled;
+            query = query.after(page.nextCursor().orElseThrow());
+        }
+    }
+
     private boolean cancelForDeployment(DurableHumanTask original, String correlationId) {
         int maxAttempts = original.request().executionLimits().writeAttempts();
         for (int attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber++) {

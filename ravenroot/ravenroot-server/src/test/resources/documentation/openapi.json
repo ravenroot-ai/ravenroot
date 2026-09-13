@@ -947,6 +947,47 @@
         }
       }
     },
+    "/v1/processes": {
+      "post": {
+        "summary": "Authenticated dispatch context for process-instance lifecycle commands.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"}
+        }
+      }
+    },
+    "/v1/processes/{processInstanceId}/{command}": {
+      "post": {
+        "summary": "Applies Pause, Resume, Cancel, Drain, or recoverable Stop to one durable process and all contained traversals. Idempotency-Key and X-Ravenroot-Expected-Generation are mandatory; outcomes distinguish replay, stale generation, partial settlement, terminal state, and absence.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "processInstanceId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "command", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/program-artifacts": {
       "get": {
         "summary": "GET lists program artifacts; POST creates one from source.",

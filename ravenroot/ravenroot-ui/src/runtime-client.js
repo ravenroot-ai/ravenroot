@@ -507,6 +507,29 @@ export class RavenrootRuntimeClient {
     return this.#controlExecution(executionId, 'cancel', options);
   }
 
+  async controlProcess(processInstanceId, operation, expectedGeneration,
+    { idempotencyKey, reason = '', signal } = {}) {
+    const id = String(processInstanceId || '');
+    const allowed = new Set(['pause', 'resume', 'cancel', 'drain', 'stop']);
+    if (!id || !allowed.has(operation) || !Number.isSafeInteger(expectedGeneration)
+        || expectedGeneration < 1 || typeof idempotencyKey !== 'string' || !idempotencyKey) {
+      throw new Error('Process lifecycle command is invalid');
+    }
+    const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    const result = await this.#json(`/v1/processes/${encodeURIComponent(id)}/${operation}${query}`, {
+      method: 'POST', signal, headers: {
+        Accept: 'application/json', 'Idempotency-Key': idempotencyKey,
+        'X-Ravenroot-Expected-Generation': String(expectedGeneration),
+      },
+    });
+    if (!result || result.processInstanceId !== id || !Number.isSafeInteger(result.generation)
+        || typeof result.outcome !== 'string' || typeof result.state !== 'string'
+        || typeof result.reason !== 'string' || !Array.isArray(result.traversals)) {
+      throw new Error(`Process ${operation} response is invalid`);
+    }
+    return result;
+  }
+
   /**
    * The durable, tenant-scoped process inventory (issue 154): what the runtime's own persisted
    * record says exists, surviving a restart. This is the authoritative source the UI shares with

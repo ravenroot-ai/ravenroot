@@ -600,6 +600,18 @@ public final class RouteTable {
                             + "resume: none of them is the traversal running again.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/processes",
+                    "Authenticated dispatch context for process-instance lifecycle commands.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code()),
+                    NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/processes/{processInstanceId}/{command}",
+                    "Applies Pause, Resume, Cancel, Drain, or recoverable Stop to one durable process and all "
+                            + "contained traversals. Idempotency-Key and X-Ravenroot-Expected-Generation are "
+                            + "mandatory; outcomes distinguish replay, stale generation, partial settlement, "
+                            + "terminal state, and absence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.CONFLICT.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"),
                     "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
                     "Approves, denies, or cancels one exact durable tool call. The authenticated "

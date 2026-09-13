@@ -307,6 +307,7 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private ai.ravenroot.core.deployment.DurableLocalDeploymentControl durableDeploymentControl;
+    private ai.ravenroot.core.process.ProcessLifecycleService processLifecycle;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
     private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
@@ -776,6 +777,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
         apiContext("/v1/executions", this::startExecution);
+        apiContext("/v1/processes", this::processLifecycle);
         apiContext("/v1/source-sessions", this::sourceSessions);
         apiContext("/v1/deployments", this::deployments);
         // API-02: /v1/executions/{id}/cancel is handled inside startExecution's own dispatch
@@ -1024,6 +1026,12 @@ public final class RavenrootServer implements AutoCloseable {
             throw new IllegalStateException("deployment control is already installed");
         }
         durableDeploymentControl = java.util.Objects.requireNonNull(control, "control");
+    }
+
+    synchronized void installProcessLifecycle(ai.ravenroot.core.process.ProcessLifecycleService control) {
+        if (started.get()) throw new IllegalStateException("process lifecycle must be installed before start");
+        if (processLifecycle != null) throw new IllegalStateException("process lifecycle is already installed");
+        processLifecycle = java.util.Objects.requireNonNull(control, "control");
     }
 
     synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
@@ -2735,6 +2743,56 @@ public final class RavenrootServer implements AutoCloseable {
                     caller.roles(), caller.scopes());
             json(exchange, 200, adminHumanTaskPurgeJson(
                     service.adminPurge(scoped, query, mode, dryRun, idempotencyKey)));
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        } catch (RuntimeException failure) {
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    /** Durable generation-fenced control of one process and all its contained traversals. */
+    private void processLifecycle(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        var service = processLifecycle;
+        if (service == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        String suffix = exchange.getRequestURI().getPath().substring("/v1/processes".length());
+        String[] segments = suffix.startsWith("/") ? suffix.substring(1).split("/", -1) : new String[0];
+        if (segments.length != 2 || segments[0].isBlank() || segments[1].isBlank()
+                || !method(exchange, httpContext, "POST")) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        try {
+            java.util.UUID processId = java.util.UUID.fromString(segments[0]);
+            var command = ai.ravenroot.core.process.ProcessLifecycleService.Command.valueOf(
+                    segments[1].toUpperCase(java.util.Locale.ROOT));
+            String idempotencyKey = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+            String generationHeader = exchange.getRequestHeaders().getFirst("X-Ravenroot-Expected-Generation");
+            long generation = Long.parseLong(generationHeader);
+            Map<String, String> parameters = query(exchange);
+            if (!java.util.Set.of("reason").containsAll(parameters.keySet())) {
+                throw new IllegalArgumentException("unknown process lifecycle parameter");
+            }
+            var context = httpContext.applicationContext();
+            authorization.requireAllowed(context, ai.ravenroot.api.security.AuthorizationAction.EXECUTION_CONTROL,
+                    ai.ravenroot.api.security.ProtectedResource.owned(
+                            "process-instance", processId.toString(), context.tenantId()));
+            var result = service.command(context.tenantId(), processId, command, generation,
+                    idempotencyKey, parameters.getOrDefault("reason", ""));
+            int status = switch (result.code()) {
+                case NOT_FOUND -> 404;
+                case STALE_GENERATION, IDEMPOTENCY_CONFLICT -> 409;
+                default -> 200;
+            };
+            String traversals = result.traversals().stream().map(item -> "{\"traversalId\":\""
+                            + item.traversalId() + "\",\"outcome\":\"" + item.outcome() + "\"}")
+                    .collect(java.util.stream.Collectors.joining(","));
+            json(exchange, status, "{\"outcome\":\"" + result.code() + "\",\"processInstanceId\":\""
+                    + result.processInstanceId() + "\",\"generation\":" + result.generation()
+                    + ",\"state\":\"" + result.state() + "\",\"reason\":\"" + escape(result.reason())
+                    + "\",\"traversals\":[" + traversals + "]}");
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {

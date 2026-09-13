@@ -439,6 +439,27 @@ describe('execution lifecycle client', () => {
   });
 });
 
+describe('process lifecycle client', () => {
+  it('sends the durable process identity, command generation, and idempotency key', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ outcome: 'APPLIED', processInstanceId: 'process/one',
+        generation: 8, state: 'PAUSED', reason: 'inspect', traversals: [] }),
+    });
+    const client = new RavenrootRuntimeClient('https://runtime.example/', {
+      fetchImpl, accessToken: 'operator-token',
+    });
+    await client.controlProcess('process/one', 'pause', 7,
+      { idempotencyKey: 'pause-7', reason: 'inspect' });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://runtime.example/v1/processes/process%2Fone/pause?reason=inspect',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({
+        'Idempotency-Key': 'pause-7', 'X-Ravenroot-Expected-Generation': '7',
+      }) }),
+    );
+  });
+});
+
 describe('process-local deployment client', () => {
   const ready = {
     deploymentId: 'deployment-1', state: 'READY', sourceCount: 0,

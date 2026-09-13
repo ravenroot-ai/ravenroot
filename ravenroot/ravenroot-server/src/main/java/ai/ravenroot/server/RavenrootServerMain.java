@@ -280,6 +280,9 @@ public final class RavenrootServerMain {
                 graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore(),
                 executionRuntime.applicationRunnerShutdownStepBound(),
                 executionOwnershipConfiguration.runtimeOwnership(), programAuthoringLimits);
+        var processLifecycle = executionStore == null ? null
+                : new ai.ravenroot.core.process.ProcessLifecycleService(
+                        executionStore, application, humanTasks, java.time.Clock.systemUTC());
         var deploymentRegistry = executionStoreOwner.deploymentRegistry();
         var deploymentSingleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
         // Every recovery path verifies against the application's own resolver rather than one built
@@ -333,10 +336,14 @@ public final class RavenrootServerMain {
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
                         executionManifests, executionRuntime.humanTaskRunnerShutdownStepBound());
-                var reentryGate = deploymentRegistry == null
+                var deploymentReentryGate = deploymentRegistry == null
                         ? ai.ravenroot.core.humantask.HumanTaskReentryGate.OPEN
                         : new ai.ravenroot.core.humantask.DeploymentHumanTaskReentryGate(
                                 executionStore, deploymentRegistry);
+                ai.ravenroot.core.humantask.HumanTaskReentryGate reentryGate = task ->
+                        deploymentReentryGate.admits(task)
+                                && processLifecycle.admitsReentry(task.key().tenantId(),
+                                        task.key().processInstanceId());
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor, reentryGate));
             }
@@ -521,6 +528,9 @@ public final class RavenrootServerMain {
                 }
                 if (installedDeploymentControl != null) {
                     server.installDurableDeploymentControl(installedDeploymentControl);
+                }
+                if (processLifecycle != null) {
+                    server.installProcessLifecycle(processLifecycle);
                 }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(

@@ -6700,6 +6700,38 @@ class JwkPolicyAuditTest(unittest.TestCase):
         global_errors = audit.inventory_errors(self.root, self.document(), self.candidates)
         self.assertFalse([error for error in global_errors if "JWKS" in error], global_errors)
 
+    def test_jwk_live_references_remap_without_modifying_history_or_prose(self):
+        old, new = "oc-live-before", "oc-live-after"
+        authority = {
+            "candidateIds": [old],
+            "contracts": [{
+                "candidateIds": [old],
+                "defaultCandidateIds": [old],
+                "rationale": old,
+            }],
+            "semanticPartitions": [{
+                "candidateIds": [old],
+                "defaultCandidateIds": [old],
+                "rationale": old,
+            }],
+        }
+        history = [{"candidateIds": [old], "source": old}]
+        document = {
+            "jwkPolicyAuthorities": {audit.JWK_POLICY_AUTHORITY_ID: authority},
+            "reconciliationHistory": copy.deepcopy(history),
+            "retiredEntries": copy.deepcopy(history),
+        }
+        audit.remap_declared_candidate_references(document, {old: new})
+        self.assertEqual([new], authority["candidateIds"])
+        for field in ("contracts", "semanticPartitions"):
+            self.assertEqual([new], authority[field][0]["candidateIds"])
+            self.assertEqual([new], authority[field][0]["defaultCandidateIds"])
+            self.assertEqual(old, authority[field][0]["rationale"])
+        self.assertEqual(history, document["reconciliationHistory"])
+        self.assertEqual(history, document["retiredEntries"])
+        for location in audit.candidate_reference_locations(document, {new}):
+            self.assertTrue(audit.allowed_migrated_reference(location), location)
+
     def test_jwk_missing_duplicate_marker_and_row_reclassification_fail_both_routes(self) -> None:
         without_authority = self.document()
         del without_authority["jwkPolicyAuthorities"]

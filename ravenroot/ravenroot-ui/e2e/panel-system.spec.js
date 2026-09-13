@@ -1526,10 +1526,10 @@ test.describe('the short form', () => {
       const first = items[0].getBoundingClientRect();
       return { count: items.length, rows: rows.size, cell: Math.round(first.width) };
     });
-    // Twelve items on twelve rows become twelve items on two compact rows.
+    // Twelve items on twelve rows become twelve items on three adaptive compact rows here.
     expect(rowsBefore).toBe(12);
     expect(grid.count).toBe(12);
-    expect(grid.rows).toBe(2);
+    expect(grid.rows).toBe(3);
     // The cell clears the 24px WCAG 2.5.8 floor that the 23px full-form row misses by one pixel.
     expect(grid.cell).toBe(32);
   });

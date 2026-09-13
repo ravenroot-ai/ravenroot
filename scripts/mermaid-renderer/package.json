@@ -9,7 +9,7 @@
     "verify-browser": "node browser-path.mjs"
   },
   "dependencies": {
-    "@mermaid-js/mermaid-cli": "11.16.0",
+    "@mermaid-js/mermaid-cli": "11.17.0",
     "puppeteer": "25.9.0"
   }
 }

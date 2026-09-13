@@ -1106,9 +1106,14 @@ function renderSelectedHumanTasks(owner = workspace.active) {
       const capability = currentHumanTaskCapability();
       if (!capability || !tenantAuthorityAllows(owner)) return;
       rememberHumanTaskSelection(task);
+      // The summary row deliberately has no service origin. Exact-detail reconciliation must use
+      // the opaque locator we just persisted, otherwise sameHumanTaskSelection compares that absent
+      // field with the stored origin and silently retires every successful explicit selection.
+      const locator = readHumanTaskSelection();
+      if (!locator) return;
       const recoveryGeneration = humanTaskRecoveryGeneration;
       humanTaskDecisionDialog.loading(task, capability, { show: true });
-      void loadHumanTaskDetail(owner, task, capability, recoveryGeneration);
+      void loadHumanTaskDetail(owner, locator, capability, recoveryGeneration);
     },
     onNext: () => humanTaskController?.nextPage(),
     onPrevious: () => humanTaskController?.previousPage(),

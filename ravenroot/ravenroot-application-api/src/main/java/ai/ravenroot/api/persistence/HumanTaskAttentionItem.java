@@ -29,6 +29,7 @@ import java.util.UUID;
  * @param actionLabelMaxUtf8Bytes immutable pinned action-label limit.
  * @param commentMaxUtf8Bytes immutable pinned comment limit.
  * @param availableActions pinned actions currently authorized for this caller.
+ * @param reviewPresentation review material present only on authorized exact-task detail.
  */
 public record HumanTaskAttentionItem(
         UUID taskId,
@@ -46,7 +47,22 @@ public record HumanTaskAttentionItem(
         int promptMaxUtf8Bytes,
         int actionLabelMaxUtf8Bytes,
         int commentMaxUtf8Bytes,
-        List<HumanTaskConfirmationAction> availableActions) {
+        List<HumanTaskConfirmationAction> availableActions,
+        Optional<HumanTaskReviewPresentation> reviewPresentation) {
+
+    /** Compatibility constructor for summary projections that deliberately omit review content. */
+    public HumanTaskAttentionItem(UUID taskId, long generation, HumanTaskStatus status,
+                                  String graphVersion, Optional<String> deploymentId,
+                                  UUID processInstanceId, UUID traversalId, String nodeId,
+                                  Instant createdAt, Instant expiresAt, Optional<Instant> escalateAt,
+                                  HumanTaskConfirmationPresentation presentation,
+                                  int promptMaxUtf8Bytes, int actionLabelMaxUtf8Bytes,
+                                  int commentMaxUtf8Bytes,
+                                  List<HumanTaskConfirmationAction> availableActions) {
+        this(taskId, generation, status, graphVersion, deploymentId, processInstanceId, traversalId,
+                nodeId, createdAt, expiresAt, escalateAt, presentation, promptMaxUtf8Bytes,
+                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, Optional.empty());
+    }
 
     /** Validates the bounded safe projection. */
     public HumanTaskAttentionItem {
@@ -70,6 +86,12 @@ public record HumanTaskAttentionItem(
             throw new IllegalArgumentException("pinned confirmation limits must be positive");
         }
         availableActions = List.copyOf(availableActions == null ? List.of() : availableActions);
+        reviewPresentation = reviewPresentation == null ? Optional.empty() : reviewPresentation;
+        reviewPresentation.ifPresent(review -> {
+            if (!review.present()) {
+                throw new IllegalArgumentException("detail review presentation must be present");
+            }
+        });
         if (new HashSet<>(availableActions).size() != availableActions.size()
                 || !presentation.actions().containsAll(availableActions)) {
             throw new IllegalArgumentException("attention item has invalid authorized pinned actions");

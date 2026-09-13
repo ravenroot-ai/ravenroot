@@ -163,6 +163,7 @@ public final class HumanTaskService {
         if (binding == null) return new HumanTaskResult(HumanTaskResult.Code.UNAVAILABLE, null, null);
         ExecutionRecorder recorder = binding.recorder();
         UUID taskId = taskId(message);
+        DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         Instant now = clock.instant();
         int continuationVersion = 1;
         byte[] continuation = new byte[0];
@@ -174,6 +175,11 @@ public final class HumanTaskService {
                     1, new byte[0], binding.budgetSnapshot().apply(message));
             continuationVersion = GraphExecutionContinuationCheckpoint.VERSION;
         }
+        // Do not re-read a retry's mutable source path. The deterministic identity owns the first
+        // admitted bytes, including when the later payload is missing, non-text, or oversized.
+        var reviewPresentation = existing == null
+                ? definition.reviewDefinition().presentation(message.payload())
+                : existing.request().reviewPresentation();
         var registration = new HumanTaskRegistration(taskId, message.traversalId(),
                 message.invocationId(), message.attemptId(), message.nodeId(), taskId.toString(),
                 "human-task:" + message.attemptId(), definition.metadata(), definition.responseSchema(),
@@ -184,9 +190,11 @@ public final class HumanTaskService {
                 ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation),
                 definition.confirmationPresentation(), definition.confirmationPresentation().embedded()
                         ? policy.confirmationLimits()
-                        : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC);
-        DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
+                        : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC,
+                reviewPresentation);
         if (existing != null) {
+            // A deterministic retry reuses the first committed review bytes even when its
+            // upstream payload has since changed. Nothing re-derives or overwrites the review.
             return new HumanTaskResult(existing.request().sameRequest(registration)
                     ? HumanTaskResult.Code.ALREADY_APPLIED : HumanTaskResult.Code.ALREADY_SETTLED,
                     existing, resumeTraversalOf(existing));

@@ -970,6 +970,12 @@ final class PostgresSchema {
                 )
                 """)),
                 new SchemaMigration(3, "execution manifest operational policy v2", List.of(
-                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")));
+                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")),
+                new SchemaMigration(4, "immutable human-task review presentation", List.of(
+                        "ALTER TABLE human_task ADD COLUMN review_version INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN review_content_type TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_text TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_digest TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_max_utf8_bytes INTEGER NOT NULL DEFAULT 1")));
     }
 }

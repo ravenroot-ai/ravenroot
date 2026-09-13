@@ -2864,6 +2864,12 @@ public final class RavenrootServer implements AutoCloseable {
                 .collect(java.util.stream.Collectors.joining(","));
         String available = item.availableActions().stream().map(action -> "\"" + action.name() + "\"")
                 .collect(java.util.stream.Collectors.joining(","));
+        String review = item.reviewPresentation().map(value ->
+                ",\"reviewPresentation\":{\"version\":" + value.version()
+                        + ",\"contentType\":\"" + escape(value.contentType())
+                        + "\",\"text\":\"" + escape(value.text())
+                        + "\",\"contentDigest\":\"" + escape(value.contentDigest())
+                        + "\",\"maxUtf8Bytes\":" + value.maxUtf8Bytes() + "}").orElse("");
         return "{\"taskId\":\"" + item.taskId() + "\",\"generation\":" + item.generation()
                 + ",\"status\":\"" + item.status().name() + "\",\"graphVersion\":\""
                 + escape(item.graphVersion()) + "\",\"deploymentId\":"
@@ -2882,7 +2888,8 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"actions\":[" + actions + "],\"resolveLabel\":\""
                 + escape(presentation.resolveLabel()) + "\",\"denyLabel\":\""
                 + escape(presentation.denyLabel()) + "\",\"cancelLabel\":\""
-                + escape(presentation.cancelLabel()) + "\"},\"availableActions\":[" + available + "]}";
+                + escape(presentation.cancelLabel()) + "\"}" + review
+                + ",\"availableActions\":[" + available + "]}";
     }
 
     private static String humanTaskPageJson(ai.ravenroot.api.persistence.HumanTaskPage page) {

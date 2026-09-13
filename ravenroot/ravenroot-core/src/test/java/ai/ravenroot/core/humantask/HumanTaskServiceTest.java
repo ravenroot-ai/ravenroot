@@ -133,6 +133,43 @@ class HumanTaskServiceTest {
     }
 
     @Test
+    void deterministicRetryKeepsTheFirstAdmittedReviewBytes() throws Exception {
+        try (var store = sqlite("review-retry", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var presentation = new HumanTaskConfirmationPresentation(1, "Review the mail.",
+                    HumanTaskCommentRequirement.OPTIONAL,
+                    List.of(HumanTaskConfirmationAction.RESOLVE), "Confirm", "", "");
+            var definition = new HumanTaskDefinition(
+                    new HumanTaskMetadata("Review mail", "Confirm the exact body."),
+                    new HumanTaskResponseSchema(HumanTaskService.CONFIRMATION_CONTENT_TYPE,
+                            HumanTaskService.CONFIRMATION_SCHEMA,
+                            HumanTaskService.CONFIRMATION_SCHEMA_VERSION, PayloadKind.SCALAR, 4096),
+                    HandlerAuthorization.ofRoles(Role.APPROVER.name()),
+                    Optional.empty(), Duration.ofHours(1),
+                    new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                    HumanTaskPolicy.DEFAULTS.executionLimits(4096), presentation,
+                    new HumanTaskReviewDefinition(1, "payload.secret", 64));
+            NodeMessage original = fixture.message();
+            NodeMessage changed = new NodeMessage(original.security(), original.processInstanceId(),
+                    original.traversalId(), original.invocationId(), original.attemptId(),
+                    original.parentInvocationIds(), original.nodeId(), Map.of("secret", "x".repeat(100)),
+                    original.attributes(), original.command());
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                assertEquals(HumanTaskResult.Code.CREATED, service.suspend(original, definition).code());
+                HumanTaskResult retry = service.suspend(changed, definition);
+                assertEquals(HumanTaskResult.Code.ALREADY_APPLIED, retry.code());
+                assertEquals("not copied", retry.task().request().reviewPresentation().text());
+                assertFalse(store.readJournal(TENANT, 0, 100).toCompletableFuture().join().stream()
+                        .anyMatch(row -> new String(row.envelope().payload().bytes(), StandardCharsets.UTF_8)
+                                .contains("not copied")),
+                        "review content must not be copied into audit journal payloads");
+            }
+        }
+    }
+
+    @Test
     void ambiguousActiveLabelsAreRejectedBeforeTaskOrTraversalMutation() throws Exception {
         try (var store = sqlite("ambiguous-labels", Clock.fixed(NOW, ZoneOffset.UTC))) {
             Fixture fixture = running(store);

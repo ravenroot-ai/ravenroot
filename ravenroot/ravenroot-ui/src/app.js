@@ -1096,7 +1096,9 @@ function renderSelectedHumanTasks(owner = workspace.active) {
       const capability = currentHumanTaskCapability();
       if (!capability || !tenantAuthorityAllows(owner)) return;
       rememberHumanTaskSelection(task);
-      humanTaskDecisionDialog.open(task, capability);
+      const recoveryGeneration = humanTaskRecoveryGeneration;
+      humanTaskDecisionDialog.loading(task, capability, { show: true });
+      void loadHumanTaskDetail(owner, task, capability, recoveryGeneration);
     },
     onNext: () => humanTaskController?.nextPage(),
     onPrevious: () => humanTaskController?.previousPage(),
@@ -1159,6 +1161,12 @@ async function recoverHumanTaskSelection(owner) {
   if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
       || typeof locator.taskId !== 'string'
       || !Number.isSafeInteger(locator.generation) || locator.generation < 1) return;
+  humanTaskDecisionDialog.loading(locator, capability);
+  return loadHumanTaskDetail(owner, locator, capability, recoveryGeneration);
+}
+
+async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneration) {
+  const client = runtimeClient;
   try {
     // The locator deliberately carries no graph, deployment, process, presentation, or auth data.
     // The authenticated exact-task projection reconstructs those durable details after reload,
@@ -1170,11 +1178,20 @@ async function recoverHumanTaskSelection(owner) {
         || !sameHumanTaskSelection(readHumanTaskSelection(), locator)) return;
     const task = page.items.find(item => item.taskId === locator.taskId
       && item.generation === locator.generation);
-    if (!task) { clearHumanTaskSelection(); return; }
-    if (!humanTaskDecisionDialog.selected()) humanTaskDecisionDialog.open(task, capability);
-  } catch {
+    if (!task) {
+      humanTaskDecisionDialog.unavailable(
+        'This task detail is unavailable. It may be stale, settled, or outside your current authority.');
+      clearHumanTaskSelection();
+      return;
+    }
+    humanTaskDecisionDialog.open(task, capability);
+  } catch (error) {
     // A rejected or unreachable lookup carries no proof that the durable task disappeared. Keep
     // only the locator and let the next authenticated reconnect try again; never cache the row.
+    if (recoveryGeneration === humanTaskRecoveryGeneration) {
+      humanTaskDecisionDialog.unavailable(
+        'Authorized task detail could not be loaded. Refresh or reconnect before deciding.');
+    }
   }
 }
 

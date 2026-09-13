@@ -34,6 +34,8 @@ RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH
 RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS
 RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES
 RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
+RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES
+RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES
 RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
 RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
 RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS
@@ -70,8 +72,8 @@ if definitions.get("humanTaskBlank") != {
     raise SystemExit("Helm Human Task blank definition differs from the Java character contract")
 
 properties = schema["properties"]["humanTask"]["properties"]
-if len(properties) != 27:
-    raise SystemExit("Helm Human Task policy must expose exactly 27 fields")
+if len(properties) != 29:
+    raise SystemExit("Helm Human Task policy must expose exactly 29 fields")
 required = schema["properties"]["humanTask"].get("required", [])
 if len(required) != len(set(required)) or set(required) != set(properties):
     raise SystemExit("Every Helm Human Task policy field must be required")
@@ -167,6 +169,8 @@ RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH=128
 RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS=5
 RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES=65536
 RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES=256
+RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES=65536
+RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES=1048576
 RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES=16384
 RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS=300000
 RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS=300000
@@ -360,6 +364,7 @@ fi
 
 for invalid in humanTask.maxResponseSchemaBytes=129 humanTask.maxAuthorizationTokens=257 humanTask.maxPageSize=1001 humanTask.writeAttempts=33 \
   humanTask.maxConfirmationPromptBytes=65537 humanTask.maxConfirmationActionLabelBytes=257 \
+  humanTask.defaultReviewTextBytes=1048577 humanTask.maxReviewTextBytes=1048577 \
   humanTask.maxDecisionCommentBytes=16385 humanTask.attentionPollMillis=300001 \
   humanTask.attentionPollBackoffMaxMillis=300001 humanTask.defaultAttentionPageSize=101 \
   humanTask.maxAttentionPageSize=101; do
@@ -374,6 +379,7 @@ done
 
 for invalid in humanTask.maxResponseBytes=not-a-number humanTask.maxConfirmationPromptBytes=not-a-number \
   humanTask.maxConfirmationActionLabelBytes=not-a-number humanTask.maxDecisionCommentBytes=not-a-number \
+  humanTask.defaultReviewTextBytes=not-a-number humanTask.maxReviewTextBytes=not-a-number \
   humanTask.attentionPollMillis=not-a-number humanTask.attentionPollBackoffMaxMillis=not-a-number \
   humanTask.defaultAttentionPageSize=not-a-number humanTask.maxAttentionPageSize=not-a-number; do
   if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \

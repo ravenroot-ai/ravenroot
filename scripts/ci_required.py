@@ -22,10 +22,8 @@ the workflow but absent from this table, or absent from the gate's `needs`, fail
 unobserved job is indistinguishable from a job that silently stopped running.
 
 It also checks the tier against the event, independently of the classifier, and enforces one
-constraint on every workflow: only ci.yml may publish `ci-required`. The work-branch fast tier in
-ci-fast.yml publishes `ci-fast` instead, because a check run belongs to the commit and a skipped job
-counts as passed for a required check — a fast run publishing `ci-required` would let a pull request
-into `dev` merge without the full tier. `--fast` runs the same checks as that workflow's aggregator.
+constraint on every workflow: only ci.yml may publish `ci-required`. The work-branch feedback in
+ci-fast.yml publishes `ci-fast` instead. `--fast` runs the same checks as that workflow's aggregator.
 
 Run with `--print-contexts TIER` to list the check contexts an event produces, which is what a branch
 ruleset's required-checks list has to name.
@@ -59,6 +57,12 @@ E2E_SHARDS = 4
 # Jobs whose gate is the tier, mapped to the check context each publishes. The keys are the workflow
 # job identifiers `toJSON(needs)` reports; the values are the names GitHub shows and a ruleset
 # requires. Three of them differ, which is precisely why the mapping is written down.
+ADMISSION_JOBS = {
+    "admission-policy": "admission-policy",
+    "admission-ui": "admission-ui",
+    "admission-backend": "admission-backend",
+}
+
 POLICY_JOBS = {
     "docs-site": "docs-site",
     "full-docs-policy": "full-docs-policy",
@@ -68,6 +72,7 @@ POLICY_JOBS = {
 }
 
 PRODUCT_JOBS = {
+    "full-preflight": "full-preflight",
     "full-ui-audit": "full-ui-audit",
     "full-ui-unit-tests": "full-ui-unit-tests",
     "full-ui-build": "full-ui-build",
@@ -82,17 +87,19 @@ PRODUCT_JOBS = {
     "full-runtime-auth-smoke": "full-runtime-auth-smoke",
     "full-runtime-jar-smoke": "full-runtime-jar-smoke",
     "full-runtime-container-smoke": "full-runtime-container-smoke",
+    "full-regression": "full-regression",
 }
 
-GATED_JOBS = {**POLICY_JOBS, **PRODUCT_JOBS}
+GATED_JOBS = {**ADMISSION_JOBS, **POLICY_JOBS, **PRODUCT_JOBS}
 
-# What each tier demands. `promotion` is empty on purpose: `dev` to `main` re-verifies nothing,
-# because the behaviour was already verified on the pull requests into `dev`. What guards `main` is
-# the security gate, `main-source-policy`, and the classification itself — none of which is gated on
-# the tier, and none of which this module observes.
+# What each tier demands. `admission` gives review fast diagnostics; `full` verifies the merge-group
+# integration commit; `postmerge` and `promotion` repeat no functional work. What guards `main` also
+# includes the security gate and main-source-policy, neither of which this module observes.
 REQUIRED_BY_TIER = {
+    "admission": frozenset(ADMISSION_JOBS),
     "full": frozenset(POLICY_JOBS) | frozenset(PRODUCT_JOBS),
-    "docs": frozenset(POLICY_JOBS),
+    "docs": frozenset({"docs-site", "full-docs-policy", "full-source-policy"}),
+    "postmerge": frozenset(),
     "promotion": frozenset(),
 }
 
@@ -101,12 +108,12 @@ REQUIRED_BY_TIER = {
 # for `dev` a lighter tier is refused here instead of trusted. Push events are keyed by the branch
 # pushed; pull requests by their base. Anything not listed is refused.
 ALLOWED_TIERS_BY_EVENT = {
-    ("pull_request", "dev"): frozenset({"full"}),
+    ("pull_request", "dev"): frozenset({"admission"}),
     # A pull request into main is keyed by its head as well: only this repository's `dev` is a
     # promotion, a `hotfix/*` runs the full tier, and any other head is not part of the model.
     ("pull_request", "main", "dev"): frozenset({"promotion"}),
     ("pull_request", "main", "hotfix"): frozenset({"full"}),
-    ("push", "dev"): frozenset({"full"}),
+    ("push", "dev"): frozenset({"postmerge"}),
     ("push", "main"): frozenset({"full", "docs"}),
     ("workflow_dispatch", ""): frozenset({"full"}),
     ("merge_group", ""): frozenset({"full"}),
@@ -118,6 +125,7 @@ FAST_GATE_JOB = "ci-fast"
 FAST_JOBS = frozenset({"fast-policy", "fast-ui", "fast-backend"})
 FAST_TRIGGER = "on:\n  push:\n    branches: ['feature/**']\n"
 
+ADMISSION_CONDITION = "needs.release-classification.outputs.tier == 'admission'"
 POLICY_CONDITION = (
     "contains(fromJSON('[\"docs\",\"full\"]'), needs.release-classification.outputs.tier)"
 )
@@ -127,9 +135,13 @@ PRODUCT_CONDITION = "needs.release-classification.outputs.tier == 'full'"
 AGGREGATOR_CONDITION = f"always() && {PRODUCT_CONDITION}"
 
 EXPECTED_CONDITIONS = {
-    **{job: POLICY_CONDITION for job in POLICY_JOBS},
+    **{job: ADMISSION_CONDITION for job in ADMISSION_JOBS},
+    **{job: POLICY_CONDITION for job in ("docs-site", "full-docs-policy", "full-source-policy")},
+    **{job: PRODUCT_CONDITION for job in ("full-python-contracts", "full-shell-contracts")},
     **{job: PRODUCT_CONDITION for job in PRODUCT_JOBS},
+    "full-preflight": AGGREGATOR_CONDITION,
     "full-ui-e2e": AGGREGATOR_CONDITION,
+    "full-regression": AGGREGATOR_CONDITION,
 }
 
 
@@ -350,8 +362,8 @@ def verify_single_publisher(directory: Path) -> list[str]:
     """Refuse any workflow other than ci.yml that could publish a `ci-required` context.
 
     Check runs belong to the commit, and a skipped job counts as passed for a required check. A
-    `ci-required` published by any other run — the fast tier above all — would therefore satisfy the
-    ruleset for a pull request whose head is that commit, without the full tier having run on it.
+    `ci-required` published by any other run — work-branch feedback above all — would therefore
+    satisfy the ruleset without the event-specific admission or integration tier having run.
     """
     problems: list[str] = []
     for path in sorted(directory.glob("*.y*ml")):
@@ -450,9 +462,10 @@ def verify_event(
     return []
 
 
-# The runs whose success on a commit proves the full tier passed on it. A pull-request run on the
-# promotion itself does not count: on the promotion tier it runs no functional job.
-FULL_TIER_EVENTS = frozenset({"push", "merge_group", "workflow_dispatch"})
+# The runs whose success on a commit proves the full tier passed on it. A `push` to dev is now the
+# intentionally bare postmerge tier and therefore cannot be evidence; the exact merge-group run (or
+# an explicitly dispatched full run) is what a promotion may rely on.
+FULL_TIER_EVENTS = frozenset({"merge_group", "workflow_dispatch"})
 
 
 def is_integration_branch(branch: Any) -> bool:
@@ -478,7 +491,7 @@ def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[
                 and is_integration_branch(run.get("head_branch"))):
             return []
     return [
-        f"no full-tier ci.yml run on dev has passed on {sha} (push, merge queue or dispatch). "
+        f"no full-tier ci.yml run on dev has passed on {sha} (merge queue or dispatch). "
         "A promotion re-runs no functional job, so it may be green only on a full run of this exact "
         "commit; re-run this check once that run has passed."
     ]

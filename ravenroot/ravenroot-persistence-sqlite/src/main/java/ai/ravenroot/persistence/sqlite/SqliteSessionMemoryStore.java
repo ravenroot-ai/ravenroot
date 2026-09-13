@@ -1,6 +1,7 @@
 package ai.ravenroot.persistence.sqlite;
 
 import ai.ravenroot.api.memory.SessionMemoryStore;
+import ai.ravenroot.api.persistence.ExecutionStoreException;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -56,6 +57,8 @@ public final class SqliteSessionMemoryStore implements SessionMemoryStore {
                 found = null;
             }
             return CompletableFuture.completedFuture(Optional.ofNullable(found));
+        } catch (StoreException failed) {
+            return CompletableFuture.failedFuture(failed);
         } catch (SQLException failed) {
             return unavailable(failed);
         }
@@ -113,6 +116,8 @@ public final class SqliteSessionMemoryStore implements SessionMemoryStore {
             } finally {
                 connection.setAutoCommit(true);
             }
+        } catch (StoreException failed) {
+            return CompletableFuture.failedFuture(failed);
         } catch (SQLException failed) {
             return unavailable(failed);
         }
@@ -132,6 +137,8 @@ public final class SqliteSessionMemoryStore implements SessionMemoryStore {
             if (!matches(expectation, current)) return failed(new Failure.Conflict(current.revision()));
             deleteRow(key);
             return CompletableFuture.completedFuture(true);
+        } catch (StoreException failed) {
+            return CompletableFuture.failedFuture(failed);
         } catch (SQLException failed) {
             return unavailable(failed);
         }
@@ -191,8 +198,17 @@ public final class SqliteSessionMemoryStore implements SessionMemoryStore {
             if (ledger) statement.setString(2, commandKey); else bindKey(statement, 2, key);
             try (ResultSet rows = statement.executeQuery()) {
                 if (!rows.next()) return null;
+                UUID processInstanceId;
+                try {
+                    String storedProcessInstanceId = rows.getString("process_instance_id");
+                    processInstanceId = StoredUuid.optional(storedProcessInstanceId == null
+                                    || storedProcessInstanceId.isEmpty() ? null : storedProcessInstanceId,
+                            table, "process_instance_id", key.tenantId());
+                } catch (ExecutionStoreException corrupted) {
+                    throw new StoreException(new Failure.Unavailable());
+                }
                 Key storedKey = new Key(rows.getString("tenant_id"), rows.getString("session_id"),
-                        Scope.valueOf(rows.getString("scope")), uuid(rows.getString("process_instance_id")),
+                        Scope.valueOf(rows.getString("scope")), processInstanceId,
                         empty(rows.getString("node_id")));
                 return new Entry(storedKey, rows.getLong("revision"), rows.getBytes("value"),
                         rows.getString("content_type"), instant(rows, "created_at"),
@@ -249,7 +265,6 @@ public final class SqliteSessionMemoryStore implements SessionMemoryStore {
     private static Instant instant(ResultSet r, String prefix) throws SQLException {
         return Instant.ofEpochSecond(r.getLong(prefix + "_epoch_second"), r.getInt(prefix + "_nano"));
     }
-    private static UUID uuid(String value) { return value == null || value.isEmpty() ? null : UUID.fromString(value); }
     private static String empty(String value) { return value == null || value.isEmpty() ? null : value; }
     private static boolean matches(Expectation e, Entry current) {
         return e instanceof Expectation.Any || e instanceof Expectation.Absent && current == null

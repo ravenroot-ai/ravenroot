@@ -639,6 +639,18 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks",
+                    "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. "
+                            + "Filters cover task and execution identity, lifecycle, age, and actionable, terminal, "
+                            + "orphaned, or non-resumable classification.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/purge",
+                    "Dry-runs or applies a bounded, idempotent administrative reconciliation. CANCEL uses normal "
+                            + "task re-entry semantics; FORCE_ABANDON atomically closes inconsistent work without "
+                            + "re-entry. An unfiltered operation is refused.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/agent-authority",
                     "Dispatch context for the authenticated durable agent-authority trip/reset controls. "
                             + "Bare and unknown operations are nondisclosing 404 responses.",

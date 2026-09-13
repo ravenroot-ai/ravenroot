@@ -279,6 +279,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     private final RavenrootApplication application;
     private final AuthorizedRavenrootApplication authorizedApplication;
+    private final AuthorizationService authorization;
     private final HttpServer server;
     private final ExecutorService executor;
     private final AutoCloseable auditSubscription;
@@ -725,8 +726,9 @@ public final class RavenrootServer implements AutoCloseable {
         this.httpStopDelay = java.util.Objects.requireNonNull(httpStopDelay, "httpStopDelay");
         this.drainBound = java.util.Objects.requireNonNull(drainBound, "drainBound");
         this.application = application;
+        this.authorization = java.util.Objects.requireNonNull(authorization, "authorization");
         this.authorizedApplication = new AuthorizedRavenrootApplication(application,
-                java.util.Objects.requireNonNull(authorization, "authorization"),
+                this.authorization,
                 java.util.Objects.requireNonNull(artifactAudit, "artifactAudit"), artifactDualControl,
                 AuthorizedRavenrootApplication.DEFAULT_EXECUTION_OWNERSHIP_LIMIT,
                 java.util.Objects.requireNonNull(controlAudit, "controlAudit"));
@@ -769,6 +771,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
         apiContext("/v1/human-tasks", this::humanTasks);
+        apiContext("/v1/admin/human-tasks", this::adminHumanTasks);
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
@@ -2691,6 +2694,111 @@ public final class RavenrootServer implements AutoCloseable {
                         + result.task().generation() + resume + "}");
             }
         }
+    }
+
+    /** Payload-free administrative inventory and guarded Human Task reconciliation. */
+    private void adminHumanTasks(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        ai.ravenroot.core.humantask.HumanTaskService service = humanTasks;
+        if (service == null) {
+            fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        String suffix = exchange.getRequestURI().getPath().substring("/v1/admin/human-tasks".length());
+        boolean purge = "/purge".equals(suffix);
+        if ((!suffix.isEmpty() && !"/".equals(suffix) && !purge)
+                || !method(exchange, httpContext, purge ? "POST" : "GET")) return;
+        Map<String, String> parameters = query(exchange);
+        if (!java.util.Set.of("tenant", "taskId", "status", "deploymentId", "graphVersion",
+                "processInstanceId", "traversalId", "nodeId", "classification", "createdBefore",
+                "expiresBefore", "cursor", "limit", "dryRun", "mode").containsAll(parameters.keySet())) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        String tenant = parameters.getOrDefault("tenant", httpContext.applicationContext().tenantId());
+        var resource = ai.ravenroot.api.security.ProtectedResource.owned(
+                "human-task-administration", tenant, tenant);
+        authorization.requireAllowed(httpContext.applicationContext(),
+                ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_ADMIN, resource);
+        try {
+            var query = adminHumanTaskQuery(parameters);
+            if (!purge) {
+                json(exchange, 200, adminHumanTaskPageJson(service.adminInventory(tenant, query)));
+                return;
+            }
+            String idempotencyKey = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+            boolean dryRun = Boolean.parseBoolean(parameters.getOrDefault("dryRun", "true"));
+            var mode = ai.ravenroot.core.humantask.HumanTaskService.AdminPurgeMode.valueOf(
+                    parameters.getOrDefault("mode", "CANCEL").toUpperCase(java.util.Locale.ROOT));
+            var caller = httpContext.applicationContext();
+            var scoped = tenant.equals(caller.tenantId()) ? caller : new ai.ravenroot.api.security.RequestContext(
+                    caller.requestId(), caller.subject(), caller.principalType(), caller.issuer(), tenant,
+                    caller.roles(), caller.scopes());
+            json(exchange, 200, adminHumanTaskPurgeJson(
+                    service.adminPurge(scoped, query, mode, dryRun, idempotencyKey)));
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        } catch (RuntimeException failure) {
+            fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    private static ai.ravenroot.core.humantask.HumanTaskService.AdminQuery adminHumanTaskQuery(
+            Map<String, String> values) {
+        java.util.function.Function<String, java.util.Optional<java.util.UUID>> uuid = name ->
+                java.util.Optional.ofNullable(values.get(name)).map(java.util.UUID::fromString);
+        java.util.Set<ai.ravenroot.api.persistence.HumanTaskStatus> statuses = values.containsKey("status")
+                ? java.util.Arrays.stream(values.get("status").split(",", -1))
+                        .map(value -> ai.ravenroot.api.persistence.HumanTaskStatus.valueOf(
+                                value.toUpperCase(java.util.Locale.ROOT)))
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()) : java.util.Set.of();
+        java.util.Set<ai.ravenroot.core.humantask.HumanTaskService.AdminClassification> classifications =
+                values.containsKey("classification")
+                        ? java.util.Arrays.stream(values.get("classification").split(",", -1))
+                                .map(value -> ai.ravenroot.core.humantask.HumanTaskService.AdminClassification
+                                        .valueOf(value.toUpperCase(java.util.Locale.ROOT)))
+                                .collect(java.util.stream.Collectors.toUnmodifiableSet()) : java.util.Set.of();
+        return new ai.ravenroot.core.humantask.HumanTaskService.AdminQuery(
+                uuid.apply("taskId"), statuses, java.util.Optional.ofNullable(values.get("deploymentId")),
+                java.util.Optional.ofNullable(values.get("graphVersion")), uuid.apply("processInstanceId"),
+                uuid.apply("traversalId"), java.util.Optional.ofNullable(values.get("nodeId")), classifications,
+                java.util.Optional.ofNullable(values.get("createdBefore")).map(java.time.Instant::parse),
+                java.util.Optional.ofNullable(values.get("expiresBefore")).map(java.time.Instant::parse),
+                uuid.apply("cursor"), Integer.parseInt(values.getOrDefault("limit", "50")));
+    }
+
+    private static String adminHumanTaskPageJson(
+            ai.ravenroot.core.humantask.HumanTaskService.AdminPage page) {
+        String items = page.items().stream().map(RavenrootServer::adminHumanTaskItemJson)
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"items\":[" + items + "],\"nextCursor\":"
+                + page.nextCursor().map(value -> "\"" + value + "\"").orElse("null") + "}";
+    }
+
+    private static String adminHumanTaskItemJson(
+            ai.ravenroot.core.humantask.HumanTaskService.AdminItem item) {
+        return "{\"taskId\":\"" + item.taskId() + "\",\"status\":\"" + item.status()
+                + "\",\"generation\":" + item.generation() + ",\"classification\":\""
+                + item.classification() + "\",\"reason\":\"" + escape(item.reason())
+                + "\",\"tenant\":\"" + escape(item.tenantId()) + "\",\"graphVersion\":\""
+                + escape(item.graphVersion()) + "\",\"deploymentId\":"
+                + item.deploymentId().map(value -> "\"" + escape(value) + "\"").orElse("null")
+                + ",\"processInstanceId\":\"" + item.processInstanceId() + "\",\"traversalId\":\""
+                + item.traversalId() + "\",\"nodeId\":\"" + escape(item.nodeId())
+                + "\",\"processStatus\":\"" + item.processStatus() + "\",\"traversalStatus\":\""
+                + item.traversalStatus() + "\",\"handlerStatus\":\"" + item.handlerStatus()
+                + "\",\"escalationTimer\":\"" + item.escalationTimer() + "\",\"expiryTimer\":\""
+                + item.expiryTimer() + "\",\"createdAt\":\"" + item.createdAt()
+                + "\",\"expiresAt\":\"" + item.expiresAt() + "\"}";
+    }
+
+    private static String adminHumanTaskPurgeJson(
+            ai.ravenroot.core.humantask.HumanTaskService.AdminPurgeResult result) {
+        String items = result.items().stream().map(item -> "{\"taskId\":\"" + item.taskId()
+                + "\",\"generation\":" + item.generation() + ",\"outcome\":\"" + item.outcome()
+                + "\",\"plannedTransition\":\"" + item.plannedTransition() + "\"}")
+                .collect(java.util.stream.Collectors.joining(","));
+        return "{\"dryRun\":" + result.dryRun() + ",\"mode\":\"" + result.mode()
+                + "\",\"items\":[" + items + "]}";
     }
 
     private ai.ravenroot.api.persistence.OpaquePayload humanTaskResponse(

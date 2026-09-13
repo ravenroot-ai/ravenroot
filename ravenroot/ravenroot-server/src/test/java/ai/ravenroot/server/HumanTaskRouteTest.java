@@ -81,6 +81,52 @@ class HumanTaskRouteTest {
     Path directory;
 
     @Test
+    void administrativeInventoryAndGuardedForcedAbandonmentUseTheSameDurableTask() throws Exception {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        try (var store = new SqliteExecutionStore(directory.resolve("human-task-admin-route.db"), clock);
+             var engine = new PekkoExecutionEngine("human-task-admin-route-test")) {
+            Fixture fixture = request(store, clock);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
+                    new TenantApproverAuthenticator())) {
+                server.installHumanTasks(fixture.service(), ignored -> { });
+                server.start();
+                HttpClient client = HttpClient.newHttpClient();
+                String selector = "?taskId=" + fixture.taskId();
+                HttpResponse<String> denied = client.send(HttpRequest.newBuilder(URI.create(
+                                "http://127.0.0.1:" + server.port() + "/v1/admin/human-tasks" + selector))
+                                .header("X-Test-Tenant", "tenant-a").GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(403, denied.statusCode(), denied.body());
+
+                HttpResponse<String> listed = adminGet(client, server, selector);
+                assertEquals(200, listed.statusCode(), listed.body());
+                assertTrue(listed.body().contains("\"classification\":\"ACTIONABLE\""), listed.body());
+                assertTrue(listed.body().contains("\"handlerStatus\":\"WAITING\""), listed.body());
+                assertFalse(listed.body().contains("private-input"), listed.body());
+
+                HttpResponse<String> dryRun = adminPost(client, server,
+                        selector + "&mode=FORCE_ABANDON&dryRun=true", "admin-purge");
+                assertEquals(200, dryRun.statusCode(), dryRun.body());
+                assertTrue(dryRun.body().contains("\"outcome\":\"PLANNED\""), dryRun.body());
+
+                HttpResponse<String> applied = adminPost(client, server,
+                        selector + "&mode=FORCE_ABANDON&dryRun=false", "admin-purge");
+                assertEquals(200, applied.statusCode(), applied.body());
+                assertTrue(applied.body().contains("\"outcome\":\"ABANDONED\""), applied.body());
+                assertEquals(ai.ravenroot.api.persistence.HumanTaskStatus.CANCELLED,
+                        store.loadHumanTask("tenant-a", fixture.taskId()).toCompletableFuture().join()
+                                .orElseThrow().status());
+
+                HttpResponse<String> unbounded = adminPost(client, server,
+                        "?mode=FORCE_ABANDON&dryRun=false", "admin-unbounded");
+                assertEquals(400, unbounded.statusCode(), unbounded.body());
+            }
+        }
+    }
+
+    @Test
     void tenantInboxAndGenerationFencedResolutionExposeNoResponseContent() throws Exception {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         try (var store = new SqliteExecutionStore(directory.resolve("human-task-route.db"), clock);
@@ -489,6 +535,23 @@ class HumanTaskRouteTest {
                 HttpResponse.BodyHandlers.ofString());
     }
 
+    private static HttpResponse<String> adminGet(HttpClient client, RavenrootServer server, String query)
+            throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                        + "/v1/admin/human-tasks" + query))
+                        .header("X-Test-Tenant", "tenant-a").header("X-Test-Admin", "true")
+                        .GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<String> adminPost(HttpClient client, RavenrootServer server, String query,
+                                                   String idempotencyKey) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                        + "/v1/admin/human-tasks/purge" + query))
+                        .header("X-Test-Tenant", "tenant-a").header("X-Test-Admin", "true")
+                        .header("Idempotency-Key", idempotencyKey)
+                        .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+    }
+
     private static HttpResponse<String> confirmation(
             RavenrootServer server, Fixture fixture, String tenant, String subject, boolean approver,
             String action, long generation, String body) throws Exception {
@@ -547,9 +610,11 @@ class HumanTaskRouteTest {
         @Override public AuthenticatedPrincipal authenticate(Headers headers) {
             String subject = Optional.ofNullable(headers.getFirst("X-Test-Subject")).orElse("approver");
             boolean approver = !"false".equals(headers.getFirst("X-Test-Approver"));
+            Set<Role> roles = "true".equals(headers.getFirst("X-Test-Admin"))
+                    ? Set.of(Role.TENANT_ADMIN) : approver ? Set.of(Role.APPROVER) : Set.of();
             return new AuthenticatedPrincipal(subject, AuthenticatedPrincipal.Type.USER,
                     "urn:ravenroot:test", headers.getFirst("X-Test-Tenant"),
-                    approver ? Set.of(Role.APPROVER) : Set.of(),
+                    roles,
                     Arrays.stream(AuthorizationAction.values()).filter(AuthorizationAction::available)
                             .map(AuthorizationAction::requiredScope)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));

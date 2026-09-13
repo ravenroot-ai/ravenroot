@@ -94,6 +94,90 @@ class HumanTaskServiceTest {
     Path directory;
 
     @Test
+    void administrativeInventoryIsPayloadFreeAndForcedAbandonmentIsAtomicWithoutReentry() throws Exception {
+        try (var store = sqlite("admin-human-tasks", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                task = service.suspend(fixture.message(), definition()).task();
+            }
+            var query = new HumanTaskService.AdminQuery(Optional.of(task.request().taskId()), Set.of(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Set.of(), Optional.empty(), Optional.empty(), Optional.empty(), 10);
+            var page = service.adminInventory(TENANT, query);
+            assertEquals(1, page.items().size());
+            assertEquals(HumanTaskService.AdminClassification.ACTIONABLE,
+                    page.items().getFirst().classification());
+            assertEquals(HandlerStatus.WAITING.name(), page.items().getFirst().handlerStatus());
+            assertFalse(page.toString().contains("approved"), "administrative projection must omit payloads");
+
+            var dryRun = service.adminPurge(requester(), query,
+                    HumanTaskService.AdminPurgeMode.FORCE_ABANDON, true, "admin-command");
+            assertTrue(dryRun.dryRun());
+            assertEquals("PLANNED", dryRun.items().getFirst().outcome());
+            assertEquals(HumanTaskStatus.WAITING, store.loadHumanTask(TENANT, task.request().taskId())
+                    .toCompletableFuture().join().orElseThrow().status());
+
+            var applied = service.adminPurge(requester(), query,
+                    HumanTaskService.AdminPurgeMode.FORCE_ABANDON, false, "admin-command");
+            assertEquals("ABANDONED", applied.items().getFirst().outcome());
+            assertEquals(HumanTaskStatus.CANCELLED, store.loadHumanTask(TENANT, task.request().taskId())
+                    .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(HandlerStatus.CANCELLED, store.loadHandler(fixture.key, task.request().taskId())
+                    .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(ProcessInstanceStatus.FAILED,
+                    store.load(fixture.key).toCompletableFuture().join().state().status());
+            assertTrue(store.claimPendingWork(TENANT, "admin-reentry", 10, Duration.ofSeconds(30))
+                    .toCompletableFuture().join().stream()
+                    .noneMatch(PendingWork.HandlerTrigger.class::isInstance));
+            assertEquals("ALREADY_TERMINAL", service.adminPurge(requester(), query,
+                    HumanTaskService.AdminPurgeMode.FORCE_ABANDON, false, "admin-command")
+                    .items().getFirst().outcome());
+        }
+    }
+
+    @Test
+    void administrativePurgeRefusesAnUnfilteredBlastRadius() throws Exception {
+        try (var store = sqlite("admin-unbounded", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var unbounded = new HumanTaskService.AdminQuery(Optional.empty(), Set.of(), Optional.empty(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Set.of(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), 10);
+            assertThrows(IllegalArgumentException.class, () -> service.adminPurge(requester(), unbounded,
+                    HumanTaskService.AdminPurgeMode.CANCEL, true, "admin-command"));
+        }
+    }
+
+    @Test
+    void administrativePagingDoesNotSkipCandidatesInsideAStorePage() throws Exception {
+        try (var store = sqlite("admin-paging", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture first = running(store);
+            Fixture second = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            for (Fixture fixture : List.of(first, second)) {
+                try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker-" + fixture.traversalId,
+                        Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                    service.suspend(fixture.message(), definition());
+                }
+            }
+            var firstQuery = new HumanTaskService.AdminQuery(Optional.empty(), Set.of(HumanTaskStatus.WAITING),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Set.of(), Optional.empty(), Optional.empty(), Optional.empty(), 1);
+            var firstPage = service.adminInventory(TENANT, firstQuery);
+            assertEquals(1, firstPage.items().size());
+            assertTrue(firstPage.nextCursor().isPresent());
+            var secondQuery = new HumanTaskService.AdminQuery(Optional.empty(), Set.of(HumanTaskStatus.WAITING),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Set.of(), Optional.empty(), Optional.empty(), firstPage.nextCursor(), 1);
+            var secondPage = service.adminInventory(TENANT, secondQuery);
+            assertEquals(1, secondPage.items().size());
+            assertFalse(firstPage.items().getFirst().taskId().equals(secondPage.items().getFirst().taskId()));
+        }
+    }
+
+    @Test
     void deploymentCancellationTerminallyClosesOnlyItsTasksWithoutReentry() throws Exception {
         try (var store = sqlite("deployment-cancel", Clock.fixed(NOW, ZoneOffset.UTC))) {
             Fixture cancelledFixture = running(store, "deployment-a");

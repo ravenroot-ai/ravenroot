@@ -66,6 +66,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -86,6 +87,59 @@ class HumanTaskServiceTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void concurrentProcessesRetainAndIndependentlySettleTasksAcrossRestart() throws Exception {
+        Path database = directory.resolve("concurrent-processes.db");
+        UUID firstTaskId;
+        UUID secondTaskId;
+        try (var store = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture first = running(store);
+            Fixture second = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            try (var firstRecorder = ExecutionRecorder.open(store, first.key, "first-worker",
+                         Duration.ofSeconds(30), 1);
+                 var secondRecorder = ExecutionRecorder.open(store, second.key, "second-worker",
+                         Duration.ofSeconds(30), 1);
+                 var firstBinding = service.bindLive(first.key, firstRecorder);
+                 var secondBinding = service.bindLive(second.key, secondRecorder)) {
+                var firstSuspension = CompletableFuture.supplyAsync(
+                        () -> service.suspend(first.message(), definition()));
+                var secondSuspension = CompletableFuture.supplyAsync(
+                        () -> service.suspend(second.message(), definition()));
+                HumanTaskResult firstResult = firstSuspension.join();
+                HumanTaskResult secondResult = secondSuspension.join();
+                assertEquals(HumanTaskResult.Code.CREATED, firstResult.code());
+                assertEquals(HumanTaskResult.Code.CREATED, secondResult.code());
+                firstTaskId = firstResult.task().request().taskId();
+                secondTaskId = secondResult.task().request().taskId();
+            }
+        }
+
+        try (var reopened = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(reopened, Clock.fixed(NOW, ZoneOffset.UTC));
+            assertEquals(Set.of(firstTaskId, secondTaskId), service.inbox(requester(),
+                            HumanTaskQuery.outstanding(10)).items().stream()
+                    .map(task -> task.request().taskId()).collect(java.util.stream.Collectors.toSet()),
+                    "restart must retain every independently addressable pending task");
+
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), firstTaskId, 1, response()).code());
+            assertEquals(HumanTaskStatus.WAITING,
+                    reopened.loadHumanTask(TENANT, secondTaskId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "settling one process must not affect its sibling at the same node");
+            assertEquals(1, service.inbox(requester(), HumanTaskQuery.outstanding(10)).items().size());
+
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), secondTaskId, 1, response()).code());
+            assertTrue(service.inbox(requester(), HumanTaskQuery.outstanding(10)).items().isEmpty());
+            assertEquals(2, reopened.claimPendingWork(TENANT, "reentry-worker", 10,
+                            Duration.ofSeconds(30)).toCompletableFuture().join().stream()
+                    .filter(PendingWork.HandlerTrigger.class::isInstance).count(),
+                    "each accepted decision must retain its own re-entry trigger");
+        }
+    }
 
     @Test
     void suspensionAndResolutionAreAtomicGenerationFencedAndPayloadSafe() throws Exception {

@@ -367,7 +367,16 @@ public record HumanTaskPolicy(
         public static final Confirmation DEFAULTS = new Confirmation(4 * 1024, 64,
                 4 * 1024, 1_000, 10_000, 20, 100, 64 * 1024, 256 * 1024);
 
-        /** Compatibility constructor retaining the pre-review seven-field policy shape. */
+        /**
+         * Compatibility constructor retaining the pre-review seven-field policy shape.
+         * @param maxPromptUtf8Bytes maximum confirmation prompt size.
+         * @param maxActionLabelUtf8Bytes maximum action-label size.
+         * @param maxCommentUtf8Bytes maximum responder-comment size.
+         * @param pollAfterMillis initial attention refresh delay.
+         * @param pollBackoffMaxMillis maximum attention refresh delay.
+         * @param attentionDefaultPageSize default attention page size.
+         * @param attentionMaxPageSize maximum attention page size.
+         */
         public Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
                             int maxCommentUtf8Bytes, int pollAfterMillis,
                             int pollBackoffMaxMillis, int attentionDefaultPageSize,
@@ -451,7 +460,10 @@ public record HumanTaskPolicy(
             }
         }
 
-        /** Validates one immutable review value against the active admission policy. */
+        /**
+         * Validates one immutable review value against the active admission policy.
+         * @param presentation immutable review presentation to validate.
+         */
         public void requireReviewPresentation(HumanTaskReviewPresentation presentation) {
             presentation = Objects.requireNonNull(presentation, "presentation");
             if (!presentation.present()) return;

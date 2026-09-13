@@ -58,7 +58,30 @@ public record HumanTaskRegistration(
         HumanTaskConfirmationLimits confirmationLimits,
         HumanTaskReviewPresentation reviewPresentation) {
 
-    /** Compatibility constructor retaining the canonical shape before review presentations. */
+    /**
+     * Compatibility constructor retaining the canonical shape before review presentations.
+     * @param taskId stable task identity.
+     * @param traversalId owning traversal identity.
+     * @param invocationId owning invocation identity.
+     * @param attemptId owning attempt identity.
+     * @param nodeId owning node identity.
+     * @param correlationKey external correlation identity.
+     * @param deduplicationKey durable delivery identity.
+     * @param metadata immutable task metadata.
+     * @param responseSchema allowed response shape.
+     * @param responderRequirements authorization required to settle the task.
+     * @param requester requester security context.
+     * @param graphVersionPin immutable graph version identity.
+     * @param escalateAt optional escalation instant.
+     * @param expiresAt task expiry instant.
+     * @param reentryMapping mapping from response to graph re-entry.
+     * @param executionLimits pinned execution limits.
+     * @param continuationVersion continuation encoding version.
+     * @param continuation opaque continuation bytes.
+     * @param continuationDigest digest binding the continuation bytes.
+     * @param confirmationPresentation immutable confirmation presentation.
+     * @param confirmationLimits pinned presentation and comment limits.
+     */
     public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
                                  String nodeId, String correlationKey, String deduplicationKey,
                                  HumanTaskMetadata metadata, HumanTaskResponseSchema responseSchema,

@@ -61,19 +61,30 @@ public record HumanTaskReviewPresentation(int version, String contentType, Strin
         }
     }
 
-    /** Creates an admitted version-one plain-text value with its canonical content binding. */
+    /**
+     * Creates an admitted version-one plain-text value with its canonical content binding.
+     * @param text exact responder-visible review text.
+     * @param maxUtf8Bytes inclusive pinned byte limit.
+     * @return admitted immutable review presentation.
+     */
     public static HumanTaskReviewPresentation plainText(String text, int maxUtf8Bytes) {
         Objects.requireNonNull(text, "text");
         return new HumanTaskReviewPresentation(VERSION_1, TEXT_PLAIN, text,
                 ToolApprovalRegistration.digest(text.getBytes(StandardCharsets.UTF_8)), maxUtf8Bytes);
     }
 
-    /** Returns the compatibility value used by classic tasks and pre-feature persisted rows. */
+    /**
+     * Returns the compatibility value used by classic tasks and pre-feature persisted rows.
+     * @return absent review presentation.
+     */
     public static HumanTaskReviewPresentation none() {
         return NONE;
     }
 
-    /** Reports whether this value carries review material. */
+    /**
+     * Reports whether this value carries review material.
+     * @return {@code true} only for an admitted version-one presentation.
+     */
     public boolean present() {
         return version != 0;
     }

@@ -50,7 +50,25 @@ public record HumanTaskAttentionItem(
         List<HumanTaskConfirmationAction> availableActions,
         Optional<HumanTaskReviewPresentation> reviewPresentation) {
 
-    /** Compatibility constructor for summary projections that deliberately omit review content. */
+    /**
+     * Compatibility constructor for summary projections that deliberately omit review content.
+     * @param taskId stable task identity.
+     * @param generation compare-and-set generation.
+     * @param status current task status.
+     * @param graphVersion pinned graph version.
+     * @param deploymentId deployment identity when present.
+     * @param processInstanceId owning process instance.
+     * @param traversalId owning traversal.
+     * @param nodeId owning node.
+     * @param createdAt creation instant.
+     * @param expiresAt expiry instant.
+     * @param escalateAt optional escalation instant.
+     * @param presentation immutable confirmation presentation.
+     * @param promptMaxUtf8Bytes pinned prompt byte limit.
+     * @param actionLabelMaxUtf8Bytes pinned action-label byte limit.
+     * @param commentMaxUtf8Bytes pinned comment byte limit.
+     * @param availableActions actions currently authorized for the caller.
+     */
     public HumanTaskAttentionItem(UUID taskId, long generation, HumanTaskStatus status,
                                   String graphVersion, Optional<String> deploymentId,
                                   UUID processInstanceId, UUID traversalId, String nodeId,

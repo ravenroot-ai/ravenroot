@@ -31,19 +31,32 @@ public record HumanTaskSettlement(int version, HumanTaskConfirmationAction actio
         }
     }
 
-    /** Creates a resolved settlement with a schema-defined operational response. */
+    /**
+     * Creates a resolved settlement with a schema-defined operational response.
+     * @param response operational response carried into graph re-entry.
+     * @param comment optional audit comment.
+     * @return resolved settlement document.
+     */
     public static HumanTaskSettlement resolve(OpaquePayload response, String comment) {
         return new HumanTaskSettlement(VERSION, HumanTaskConfirmationAction.RESOLVE,
                 Optional.of(Objects.requireNonNull(response, "response")), comment);
     }
 
-    /** Creates a denial with audit metadata and no operational response. */
+    /**
+     * Creates a denial with audit metadata and no operational response.
+     * @param comment optional audit comment.
+     * @return denied settlement document.
+     */
     public static HumanTaskSettlement deny(String comment) {
         return new HumanTaskSettlement(VERSION, HumanTaskConfirmationAction.DENY,
                 Optional.empty(), comment);
     }
 
-    /** Creates a cancellation with audit metadata and no operational response. */
+    /**
+     * Creates a cancellation with audit metadata and no operational response.
+     * @param comment optional audit comment.
+     * @return cancelled settlement document.
+     */
     public static HumanTaskSettlement cancel(String comment) {
         return new HumanTaskSettlement(VERSION, HumanTaskConfirmationAction.CANCEL,
                 Optional.empty(), comment);

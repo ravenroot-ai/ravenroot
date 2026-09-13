@@ -184,8 +184,13 @@ public sealed interface HandlerTransition {
         }
     }
 
-    /** Terminally closes a handler because its owning logical work was cancelled. */
+    /**
+     * Terminally closes a handler because its owning logical work was cancelled.
+     * @param handlerId stable handler identity.
+     * @param actor audit-stable identity of the cancelling principal.
+     */
     record Cancelled(UUID handlerId, String actor) implements HandlerTransition {
+        /** Validates the handler identity and cancelling principal. */
         public Cancelled {
             requireHandlerId(handlerId);
             actor = HandlerRegistration.requireBoundedKey(actor, "actor");

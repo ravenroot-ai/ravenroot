@@ -225,6 +225,9 @@ public interface DeploymentRegistry extends AutoCloseable {
  * @param lease currently held lease, or {@code null} when unleased.
  * @param failure latest sanitized runtime failure, or {@code null}.
  * @param tombstone removal marker, or {@code null} for a live deployment.
+ * @param lastLifecycleCommand latest accepted lifecycle command, or {@code null}.
+ * @param lastLifecycleReason retained operator reason, or {@code null}.
+ * @param lastLifecycleCommandAt instant of the latest lifecycle command, or {@code null}.
  * @param createdAt instant at which this aggregate was created.
  * @param updatedAt instant of its most recent accepted mutation.
  */
@@ -253,7 +256,23 @@ public interface DeploymentRegistry extends AutoCloseable {
             }
         }
 
-        /** Compatibility shape for records written before command reason was retained. */
+        /**
+         * Compatibility shape for records written before command reason was retained.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param latestVersion latest deployed version.
+         * @param generation desired-state generation.
+         * @param revision compare-and-set revision.
+         * @param desired requested lifecycle state.
+         * @param observed latest runtime observation.
+         * @param lease current lease, or {@code null}.
+         * @param failure latest failure, or {@code null}.
+         * @param tombstone removal marker, or {@code null}.
+         * @param lastLifecycleCommand latest lifecycle command, or {@code null}.
+         * @param lastLifecycleCommandAt command instant, or {@code null}.
+         * @param createdAt creation instant.
+         * @param updatedAt latest mutation instant.
+         */
         public Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation,
                       long revision, Desired desired, Observation observed, Lease lease, Failure failure,
                       Tombstone tombstone, LifecycleCommand.Kind lastLifecycleCommand,
@@ -263,7 +282,21 @@ public interface DeploymentRegistry extends AutoCloseable {
                     createdAt, updatedAt);
         }
 
-        /** Compatibility shape for records written before command identity was retained. */
+        /**
+         * Compatibility shape for records written before command identity was retained.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param latestVersion latest deployed version.
+         * @param generation desired-state generation.
+         * @param revision compare-and-set revision.
+         * @param desired requested lifecycle state.
+         * @param observed latest runtime observation.
+         * @param lease current lease, or {@code null}.
+         * @param failure latest failure, or {@code null}.
+         * @param tombstone removal marker, or {@code null}.
+         * @param createdAt creation instant.
+         * @param updatedAt latest mutation instant.
+         */
         public Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation,
                       long revision, Desired desired, Observation observed, Lease lease, Failure failure,
                       Tombstone tombstone, Instant createdAt, Instant updatedAt) {
@@ -304,6 +337,8 @@ public interface DeploymentRegistry extends AutoCloseable {
  * @param digest content digest of the graph artifact to deploy.
  * @param expectedRevision exact aggregate revision required for compare-and-set.
  * @param expectedGeneration deployment generation this mutation was decided against.
+ * @param lifecycleKind lifecycle command represented by the mutation, or {@code null}.
+ * @param lifecycleReason retained operator reason, or {@code null}.
  */
     record Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                    RevisionExpectation.Exactly expectedRevision, GenerationExpectation expectedGeneration,
@@ -322,7 +357,16 @@ public interface DeploymentRegistry extends AutoCloseable {
             }
         }
 
-        /** Compatibility shape for lifecycle commands that predate retained reasons. */
+        /**
+         * Compatibility shape for lifecycle commands that predate retained reasons.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision exact aggregate revision.
+         * @param expectedGeneration expected lifecycle generation.
+         * @param lifecycleKind lifecycle command represented by the mutation.
+         */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation.Exactly expectedRevision,
                        GenerationExpectation expectedGeneration, LifecycleCommand.Kind lifecycleKind) {
@@ -330,7 +374,15 @@ public interface DeploymentRegistry extends AutoCloseable {
                     lifecycleKind, null);
         }
 
-        /** Compatibility shape for mutations that do not represent a lifecycle decision. */
+        /**
+         * Compatibility shape for mutations that do not represent a lifecycle decision.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision exact aggregate revision.
+         * @param expectedGeneration expected lifecycle generation.
+         */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation.Exactly expectedRevision,
                        GenerationExpectation expectedGeneration) {
@@ -381,7 +433,16 @@ public interface DeploymentRegistry extends AutoCloseable {
                     expectedGeneration, null);
         }
 
-        /** Lifecycle-command shape accepting the shared revision expectation boundary. */
+        /**
+         * Lifecycle-command shape accepting the shared revision expectation boundary.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision shared expectation narrowed to an exact revision.
+         * @param expectedGeneration expected lifecycle generation.
+         * @param lifecycleKind lifecycle command represented by the mutation.
+         */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration,
                        LifecycleCommand.Kind lifecycleKind) {
@@ -389,7 +450,17 @@ public interface DeploymentRegistry extends AutoCloseable {
                     expectedGeneration, lifecycleKind);
         }
 
-        /** Lifecycle-command shape with a retained reason at the shared revision boundary. */
+        /**
+         * Lifecycle-command shape with a retained reason at the shared revision boundary.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision shared expectation narrowed to an exact revision.
+         * @param expectedGeneration expected lifecycle generation.
+         * @param lifecycleKind lifecycle command represented by the mutation.
+         * @param lifecycleReason retained operator reason, or {@code null}.
+         */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration,
                        LifecycleCommand.Kind lifecycleKind, String lifecycleReason) {

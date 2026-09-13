@@ -32,6 +32,7 @@ import java.util.UUID;
  * @param continuationDigest content binding for the continuation bytes.
  * @param confirmationPresentation immutable embedded presentation; classic when absent.
  * @param confirmationLimits effective presentation and comment bounds pinned at registration.
+ * @param reviewPresentation immutable responder-visible review material; absent for classic tasks.
  */
 public record HumanTaskRegistration(
         UUID taskId,
@@ -54,7 +55,26 @@ public record HumanTaskRegistration(
         byte[] continuation,
         String continuationDigest,
         HumanTaskConfirmationPresentation confirmationPresentation,
-        HumanTaskConfirmationLimits confirmationLimits) {
+        HumanTaskConfirmationLimits confirmationLimits,
+        HumanTaskReviewPresentation reviewPresentation) {
+
+    /** Compatibility constructor retaining the canonical shape before review presentations. */
+    public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
+                                 String nodeId, String correlationKey, String deduplicationKey,
+                                 HumanTaskMetadata metadata, HumanTaskResponseSchema responseSchema,
+                                 HandlerAuthorization responderRequirements, SecurityContext requester,
+                                 GraphVersionPin graphVersionPin, Optional<Instant> escalateAt,
+                                 Instant expiresAt, HumanTaskReentryMapping reentryMapping,
+                                 HumanTaskExecutionLimits executionLimits, int continuationVersion,
+                                 byte[] continuation, String continuationDigest,
+                                 HumanTaskConfirmationPresentation confirmationPresentation,
+                                 HumanTaskConfirmationLimits confirmationLimits) {
+        this(taskId, traversalId, invocationId, attemptId, nodeId, correlationKey, deduplicationKey,
+                metadata, responseSchema, responderRequirements, requester, graphVersionPin,
+                escalateAt, expiresAt, reentryMapping, executionLimits, continuationVersion,
+                continuation, continuationDigest, confirmationPresentation, confirmationLimits,
+                HumanTaskReviewPresentation.none());
+    }
 
     /**
      * Compatibility constructor retaining the registration shape before embedded confirmations.
@@ -90,7 +110,7 @@ public record HumanTaskRegistration(
                 metadata, responseSchema, responderRequirements, requester, graphVersionPin,
                 escalateAt, expiresAt, reentryMapping, executionLimits, continuationVersion,
                 continuation, continuationDigest, HumanTaskConfirmationPresentation.none(),
-                HumanTaskConfirmationLimits.CLASSIC);
+                HumanTaskConfirmationLimits.CLASSIC, HumanTaskReviewPresentation.none());
     }
 
     /**
@@ -208,9 +228,13 @@ public record HumanTaskRegistration(
         confirmationPresentation = Objects.requireNonNull(confirmationPresentation,
                 "confirmationPresentation");
         confirmationLimits = Objects.requireNonNull(confirmationLimits, "confirmationLimits");
+        reviewPresentation = Objects.requireNonNull(reviewPresentation, "reviewPresentation");
         if (!confirmationPresentation.embedded()
                 && !HumanTaskConfirmationLimits.CLASSIC.equals(confirmationLimits)) {
             throw new IllegalArgumentException("classic human task cannot carry confirmation limits");
+        }
+        if (reviewPresentation.present() && !confirmationPresentation.embedded()) {
+            throw new IllegalArgumentException("review presentation requires embedded confirmation");
         }
     }
 
@@ -238,7 +262,8 @@ public record HumanTaskRegistration(
                 && Arrays.equals(continuation, other.continuation)
                 && continuationDigest.equals(other.continuationDigest)
                 && confirmationPresentation.equals(other.confirmationPresentation)
-                && confirmationLimits.equals(other.confirmationLimits);
+                && confirmationLimits.equals(other.confirmationLimits)
+                && reviewPresentation.equals(other.reviewPresentation);
     }
 
     @Override public int hashCode() {
@@ -246,7 +271,7 @@ public record HumanTaskRegistration(
                 correlationKey, deduplicationKey, metadata, responseSchema, responderRequirements,
                 requester, graphVersionPin, escalateAt, expiresAt, reentryMapping,
                 executionLimits, continuationVersion, continuationDigest, confirmationPresentation,
-                confirmationLimits);
+                confirmationLimits, reviewPresentation);
         return 31 * result + Arrays.hashCode(continuation);
     }
 
@@ -257,7 +282,7 @@ public record HumanTaskRegistration(
      * with or extend the deadlines already committed by the first delivery.</p>
      *
      * @param other registration to compare.
-     * @return {@code true} when the registration describes the same logical task request.
+    * @return {@code true} when the registration describes the same logical task request.
      */
     public boolean sameRequest(HumanTaskRegistration other) {
         if (other == null) return false;
@@ -280,6 +305,7 @@ public record HumanTaskRegistration(
                 && continuationDigest.equals(other.continuationDigest)
                 && confirmationPresentation.equals(other.confirmationPresentation)
                 && confirmationLimits.equals(other.confirmationLimits)
+                && reviewPresentation.equals(other.reviewPresentation)
                 && escalateAt.isPresent() == other.escalateAt.isPresent();
     }
 }

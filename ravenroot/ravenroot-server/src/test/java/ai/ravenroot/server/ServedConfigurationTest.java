@@ -90,18 +90,23 @@ class ServedConfigurationTest {
         } else {
             JsonObject humanTasks = configuration.getAsJsonObject("humanTasks");
             assertEquals(Set.of("schemaVersion", "confirmationPresentationVersions",
+                    "reviewPresentationVersions", "reviewTextMaxUtf8Bytes",
                     "confirmationPromptMaxUtf8Bytes", "confirmationActionLabelMaxUtf8Bytes",
                     "commentMaxUtf8Bytes", "attentionPollMillis", "attentionBackoffMaxMillis",
                     "attentionPageSize", "attentionPageSizeMax"), humanTasks.keySet());
             assertEquals(1, humanTasks.get("schemaVersion").getAsInt());
             assertEquals(1, humanTasks.getAsJsonArray("confirmationPresentationVersions").size());
             assertEquals(1, humanTasks.getAsJsonArray("confirmationPresentationVersions").get(0).getAsInt());
+            assertEquals(1, humanTasks.getAsJsonArray("reviewPresentationVersions").size());
+            assertEquals(1, humanTasks.getAsJsonArray("reviewPresentationVersions").get(0).getAsInt());
             var confirmation = policy.confirmation();
             assertEquals(confirmation.maxPromptUtf8Bytes(),
                     humanTasks.get("confirmationPromptMaxUtf8Bytes").getAsInt());
             assertEquals(confirmation.maxActionLabelUtf8Bytes(),
                     humanTasks.get("confirmationActionLabelMaxUtf8Bytes").getAsInt());
             assertEquals(confirmation.maxCommentUtf8Bytes(), humanTasks.get("commentMaxUtf8Bytes").getAsInt());
+            assertEquals(confirmation.maxReviewTextUtf8Bytes(),
+                    humanTasks.get("reviewTextMaxUtf8Bytes").getAsInt());
             assertEquals(confirmation.pollAfterMillis(), humanTasks.get("attentionPollMillis").getAsInt());
             assertEquals(confirmation.pollBackoffMaxMillis(),
                     humanTasks.get("attentionBackoffMaxMillis").getAsInt());

@@ -591,7 +591,8 @@ public final class RouteTable {
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/human-tasks/attention",
                     "Lists authorized actionable embedded Human Tasks for an exact durable graph "
-                            + "context, or recovers one actionable task by its exact task and generation locator.",
+                            + "context without review content, or recovers one actionable task by its exact "
+                            + "task and generation locator with its immutable plain-text review presentation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),

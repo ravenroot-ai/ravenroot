@@ -13,6 +13,7 @@ import {
 } from '../src/human-task-attention.js';
 
 const CAPABILITY = Object.freeze({ schemaVersion: 1, confirmationPresentationVersions: [1],
+  reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
   confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
   attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
   attentionPageSize: 25, attentionPageSizeMax: 1000, commentMaxUtf8Bytes: 4096 });
@@ -34,12 +35,34 @@ describe('Human Task capability and attention projection', () => {
       attentionBackoffMaxMillis: 10000, attentionPageSize: 25, commentMaxUtf8Bytes: 4096 });
     for (const field of ['confirmationPromptMaxUtf8Bytes', 'confirmationActionLabelMaxUtf8Bytes',
       'attentionPollMillis', 'attentionBackoffMaxMillis', 'attentionPageSize',
-      'attentionPageSizeMax', 'commentMaxUtf8Bytes']) {
+      'attentionPageSizeMax', 'commentMaxUtf8Bytes', 'reviewTextMaxUtf8Bytes']) {
       expect(() => validateHumanTaskCapability({ ...CAPABILITY, [field]: undefined })).toThrow();
     }
     expect(() => validateHumanTaskCapability({ ...CAPABILITY, attentionBackoffMaxMillis: 999 })).toThrow();
     expect(() => validateHumanTaskCapability({ ...CAPABILITY,
       confirmationPresentationVersions: [2] })).toThrow(/schema version 1/);
+  });
+
+  it('admits review text only on an exact detail projection', () => {
+    const capability = validateHumanTaskCapability(CAPABILITY);
+    const reviewPresentation = { version: 1, contentType: 'text/plain', text: 'Subject: hello\n\nBody',
+      contentDigest: `sha256:${'a'.repeat(64)}`, maxUtf8Bytes: 64 };
+    const detail = validateHumanTaskAttention({ schemaVersion: 1,
+      items: [row({ reviewPresentation })], nextCursor: null,
+      counts: { pending: 1, escalated: 0 }, nodeCounts: [] }, capability,
+    { taskId: 'task-1', generation: 3, limit: 1 });
+    expect(detail.items[0].reviewPresentation.text).toBe('Subject: hello\n\nBody');
+    expect(() => validateHumanTaskAttention({ schemaVersion: 1,
+      items: [row({ reviewPresentation })], nextCursor: null,
+      counts: { pending: 1, escalated: 0 }, nodeCounts: [] }, capability)).toThrow(/summary/);
+    expect(() => validateHumanTaskAttention({ schemaVersion: 1,
+      items: [row({ reviewPresentation: { ...reviewPresentation, text: 'unsafe\u202e' } })],
+      nextCursor: null, counts: { pending: 1, escalated: 0 }, nodeCounts: [] }, capability,
+    { taskId: 'task-1', generation: 3, limit: 1 })).toThrow(/unsafe/);
+    expect(() => validateHumanTaskAttention({ schemaVersion: 1,
+      items: [row({ reviewPresentation: { ...reviewPresentation, text: 'x'.repeat(65) } })],
+      nextCursor: null, counts: { pending: 1, escalated: 0 }, nodeCounts: [] }, capability,
+    { taskId: 'task-1', generation: 3, limit: 1 })).toThrow(/pinned maximum/);
   });
 
   it('validates actionable pages, presentation versions, actions and aggregate counts', () => {

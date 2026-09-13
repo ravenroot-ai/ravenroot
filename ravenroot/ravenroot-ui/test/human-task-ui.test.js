@@ -11,17 +11,38 @@ const task = { taskId: 'task-secret-safe-id', generation: 7, status: 'ESCALATED'
   processInstanceId: 'process-safe-id', createdAt: '2026-09-06T08:00:00Z',
   expiresAt: '2026-09-07T08:00:00Z', presentation: { prompt: '<b>Approve?</b>',
     commentRequirement: 'REQUIRED', labels: { RESOLVE: '<Confirm>', DENY: 'No', CANCEL: 'Cancel' } },
-  availableActions: ['RESOLVE', 'DENY'] };
+  availableActions: ['RESOLVE', 'DENY'], reviewPresentation: { version: 1,
+    contentType: 'text/plain', text: '<script>alert(1)</script>\nsecond line',
+    contentDigest: `sha256:${'a'.repeat(64)}`, maxUtf8Bytes: 128 } };
 
 function dialogDocument() {
   return new JSDOM(`<body><dialog id="d" aria-labelledby="t"><form><p data-human-task-prompt></p>
-    <p data-human-task-identity></p><div data-human-task-comment-field><textarea data-human-task-comment></textarea>
+    <p data-human-task-identity></p><section data-human-task-review><p data-human-task-review-status></p>
+    <pre data-human-task-review-text></pre><p data-human-task-review-digest></p></section>
+    <div data-human-task-comment-field><textarea data-human-task-comment></textarea>
     <small data-human-task-comment-hint></small></div><p data-human-task-error hidden></p>
     <div data-human-task-actions></div><button type="button" data-human-task-close>Close</button></form></dialog></body>`)
     .window.document;
 }
 
 describe('Human Task inspector and decision dialog', () => {
+  it('keeps content hidden while detail loads and offers no action on failure', () => {
+    const doc = dialogDocument();
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d') });
+    controller.loading({ taskId: task.taskId, generation: task.generation }, capability);
+    expect(doc.getElementById('d').open).toBe(false);
+    expect(doc.querySelector('[data-human-task-review-text]').textContent).toBe('');
+    expect(doc.querySelector('[data-human-task-actions]').children).toHaveLength(0);
+    controller.unavailable('Authorized detail is unavailable.');
+    expect(doc.getElementById('d').open).toBe(true);
+    expect(doc.querySelector('[data-human-task-review-status]').textContent).toContain('unavailable');
+    expect(doc.querySelector('[data-human-task-actions]').children).toHaveLength(0);
+    doc.querySelector('[data-human-task-close]').click();
+    controller.loading({ taskId: task.taskId, generation: task.generation }, capability, { show: true });
+    expect(doc.getElementById('d').open).toBe(true);
+    expect(doc.querySelector('[data-human-task-actions]').children).toHaveLength(0);
+  });
+
   it('renders multiple rows as text and opens only the explicitly selected task', () => {
     const doc = new JSDOM('<body><div id="host"></div></body>').window.document;
     const selected = vi.fn();
@@ -44,6 +65,9 @@ describe('Human Task inspector and decision dialog', () => {
       onSubmit: submitted });
     controller.open(task, capability);
     expect(doc.querySelector('[data-human-task-prompt]').textContent).toBe('<b>Approve?</b>');
+    expect(doc.querySelector('[data-human-task-review-text]').textContent)
+      .toBe('<script>alert(1)</script>\nsecond line');
+    expect(doc.querySelector('[data-human-task-review-text] script')).toBeNull();
     expect(doc.querySelector('[data-human-task-actions]').innerHTML).not.toContain('<confirm>');
     expect(doc.querySelector('[data-human-task-action="RESOLVE"]').textContent).toBe('Resolve — <Confirm>');
     expect(doc.querySelector('[data-human-task-action="DENY"]').getAttribute('aria-label')).toBe('Deny — No');

@@ -7,12 +7,21 @@
   <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
   <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
   <key id="property-title" for="node" attr.name="title" attr.type="string"/>
+  <key id="property-confirmation" for="node" attr.name="confirmationPresentationVersion" attr.type="string"/>
+  <key id="property-review" for="node" attr.name="reviewPresentationVersion" attr.type="string"/>
+  <key id="property-review-source" for="node" attr.name="reviewTextSource" attr.type="string"/>
+  <key id="property-review-max" for="node" attr.name="reviewMaxUtf8Bytes" attr.type="int"/>
   <graph id="example-human-task" edgedefault="directed">
     <node id="start"><data key="kind">START</data></node>
     <node id="action">
       <data key="kind">BEHAVIOR</data>
       <data key="behavior">human-task</data>
       <data key="property-title">Review request</data>
+      <!-- With a mail-shaped input payload, disclose only the exact body on authorized detail. -->
+      <data key="property-confirmation">1</data>
+      <data key="property-review">1</data>
+      <data key="property-review-source">payload.body</data>
+      <data key="property-review-max">65536</data>
     </node>
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>

@@ -64,6 +64,15 @@ structurally forbidden. Inactive labels do not participate. The task also pins i
 action-label, and comment byte limits, so a tighter or looser policy after restart does not reinterpret
 an existing decision.
 
+Confirmation version 1 may additionally opt into `reviewPresentationVersion=1`. The closed first
+review format is only `text/plain`: `reviewTextSource` is either `payload` or a dotted path such as
+`payload.body` selecting one incoming text value, and `reviewMaxUtf8Bytes` is an inclusive UTF-8
+limit. Ravenroot does not interpolate, coerce, parse, render markup, follow URLs, or truncate. A
+missing or non-text selection, malformed Unicode, unsafe control or bidirectional formatting
+character, or oversized selection refuses task creation. The exact text, authored byte limit, media
+type, version, and SHA-256 content binding are pinned with the task. A deterministic retry reuses the
+first admitted bytes even if upstream input changed.
+
 The service applies this admission contract to every current task creation. Supported durable adapters
 apply the same check only after exact deduplication, so an exact replay of an already accepted request
 remains idempotent after a policy change. Structural decoding does not reapply current visible-label or
@@ -138,6 +147,12 @@ cursor carries its immutable `(createdAt,taskId)` boundary and is bound to the t
 actor, roles, and scopes. Deleting or settling a row therefore does not invalidate later boundaries,
 while a context or authority change requires a fresh first page.
 
+Aggregate, node, inbox, and other collection projections are always summary-only and never carry a
+review presentation. Only the exact `taskId` plus `generation` attention lookup may return
+`reviewPresentation`. The store first resolves the tenant and responder/requester authorization from
+the summary row, then performs a separately generation-fenced content read. Unauthorized, stale,
+terminal, cross-tenant, and absent locators therefore expose neither content nor an existence oracle.
+
 Browser restart recovery can use the smaller exact locator without cached graph or process context:
 
 ```http
@@ -151,7 +166,9 @@ return `nodeCounts: []`, so they disclose no unrelated graph attention.
 
 Each attention item carries only task and durable context identities, lifecycle and timer values,
 the pinned presentation, its three pinned byte limits, and the actions currently available to the
-caller. It omits request payload and attributes, requester and responder authority, response schema
+caller. An authorized exact-task detail may additionally carry the pinned inert review presentation.
+Every collection item omits it. All projections omit every other request payload and attribute,
+requester and responder authority, response schema
 and bytes, comments and actors, handler state, continuation bytes, and credentials.
 
 The embedded decision route is:

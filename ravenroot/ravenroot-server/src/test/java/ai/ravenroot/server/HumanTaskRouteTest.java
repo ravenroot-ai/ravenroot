@@ -35,6 +35,7 @@ import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.humantask.HumanTaskDefinition;
+import ai.ravenroot.core.humantask.HumanTaskReviewDefinition;
 import ai.ravenroot.core.humantask.HumanTaskResult;
 import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
@@ -223,6 +224,7 @@ class HumanTaskRouteTest {
                 HttpResponse<String> configuration = rawGet(server, "tenant-a", "/v1/configuration");
                 assertEquals(200, configuration.statusCode(), configuration.body());
                 assertTrue(configuration.body().contains("\"confirmationPresentationVersions\":[1]"));
+                assertTrue(configuration.body().contains("\"reviewPresentationVersions\":[1]"));
                 assertTrue(configuration.body().contains("\"attentionPageSize\":20"));
 
                 String context = "/v1/human-tasks/attention?graphVersion=graph-v1&processInstanceId="
@@ -233,6 +235,7 @@ class HumanTaskRouteTest {
                 assertTrue(attention.body().contains("\"actions\":[\"CANCEL\",\"RESOLVE\",\"DENY\"]"),
                         attention.body());
                 assertFalse(attention.body().contains("private-input"), attention.body());
+                assertFalse(attention.body().contains("reviewPresentation"), attention.body());
                 assertFalse(attention.body().contains("decisionComment"), attention.body());
                 assertFalse(attention.body().contains("authorizedRoles"), attention.body());
 
@@ -241,10 +244,13 @@ class HumanTaskRouteTest {
                 assertEquals(200, exact.statusCode(), exact.body());
                 assertTrue(exact.body().contains(resolve.taskId().toString()), exact.body());
                 assertTrue(exact.body().contains("\"nodeCounts\":[]"), exact.body());
+                assertTrue(exact.body().contains("\"reviewPresentation\""), exact.body());
+                assertTrue(exact.body().contains("private-input"), exact.body());
                 HttpResponse<String> withheld = rawGet(server, "other",
                         "/v1/human-tasks/attention?taskId=" + resolve.taskId() + "&generation=1&limit=20");
                 assertEquals(200, withheld.statusCode(), withheld.body());
                 assertTrue(withheld.body().contains("\"items\":[]"), withheld.body());
+                assertFalse(withheld.body().contains("private-input"), withheld.body());
 
                 String comment = "  Reviewed \\\"π\\\"\\nnext  ";
                 HttpResponse<String> applied = confirmation(server, resolve, "tenant-a", "approver",
@@ -254,7 +260,7 @@ class HumanTaskRouteTest {
                 assertTrue(applied.body().contains("\"status\":\"RESOLVED\""), applied.body());
                 assertTrue(applied.body().contains("\"availableActions\":[]"), applied.body());
                 for (String forbidden : List.of("Reviewed", "approver", "responseSchema", "continuation",
-                        "resumeTraversalId")) {
+                        "resumeTraversalId", "private-input", "reviewPresentation")) {
                     assertFalse(applied.body().contains(forbidden), applied.body());
                 }
                 var storedResolve = store.loadHumanTask("tenant-a", resolve.taskId())
@@ -337,6 +343,7 @@ class HumanTaskRouteTest {
                 assertEquals(200, restored.statusCode(), restored.body());
                 assertTrue(restored.body().contains("\"commentMaxUtf8Bytes\":8192"), restored.body());
                 assertTrue(restored.body().contains("\"promptMaxUtf8Bytes\":8192"), restored.body());
+                assertTrue(restored.body().contains("private-input"), restored.body());
 
                 String oldPinValidComment = "x".repeat(6_000);
                 var fixture = new Fixture(service, taskId, processInstanceId);
@@ -436,7 +443,8 @@ class HumanTaskRouteTest {
                 HandlerAuthorization.ofRoles(Role.APPROVER.name()), Optional.empty(), Duration.ofHours(1),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
                 policy.executionLimits(policy.defaultResponseBytes()),
-                presentation);
+                presentation, new HumanTaskReviewDefinition(1, "payload.secret",
+                        policy.confirmation().defaultReviewTextUtf8Bytes()));
         HumanTaskResult result;
         try (var recorder = ExecutionRecorder.open(store, key, "embedded-route-fixture",
                 Duration.ofSeconds(30), revision); var ignored = service.bindLive(key, recorder)) {

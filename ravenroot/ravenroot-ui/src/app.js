@@ -4442,6 +4442,7 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
 
   const initAttr = parseInt(document.getElementById('attr-slider')?.value || '30', 10) / 100;
   const initRep  = parseInt(document.getElementById('rep-slider')?.value  || '320', 10);
+  const initSpeed = parseInt(document.getElementById('speed-slider')?.value || '50', 10) / 100;
   const designViewport = { k: target.zoom(), x: target.pan().x, y: target.pan().y };
   const elasticMount = mountD3ElasticRenderer({
     svg: svgEl,
@@ -4455,6 +4456,7 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     fontSize: fontPx,
     attraction: initAttr,
     repulsion: initRep,
+    speed: initSpeed,
     initialTransform: designViewport,
     // Mount eligibility belongs to the layout request; a mounted simulation belongs to the
     // renderer generation. Presentation toggles may retire pending layouts without retiring it.
@@ -5572,6 +5574,14 @@ function onElasticAttraction(val) {
   if (!renderer?.simulation) return;
   renderer.simulation.force('link').strength(strength);
   renderer.simulation.alpha(0.5).restart();
+}
+
+function onElasticSpeed(val) {
+  const speed = Math.max(0.1, Math.min(1, parseInt(val, 10) / 100));
+  document.getElementById('speed-val').textContent = Math.round(speed * 100);
+  const renderer = elasticRendererFor(workspace.active);
+  if (!renderer?.simulation) return;
+  renderer.simulation.velocityDecay(0.65 - speed * 0.45).alphaTarget(speed * 0.08).restart();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -14589,6 +14599,7 @@ document.addEventListener('input', event => {
   if (action === 'font-size') onFontSize(event.target.value);
   else if (action === 'elastic-repulsion') onElasticRepulsion(event.target.value);
   else if (action === 'elastic-attraction') onElasticAttraction(event.target.value);
+  else if (action === 'elastic-speed') onElasticSpeed(event.target.value);
   else if (action === 'search') onSearch(event.target.value);
 });
 

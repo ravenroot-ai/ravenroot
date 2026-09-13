@@ -2389,23 +2389,23 @@
       background: var(--amber); border: 2px solid var(--bg-1);
       cursor: pointer;
     }
-    #attr-icon { font-size: 14px; color: var(--tx-2); user-select: none; line-height: 1; flex-shrink: 0; }
-    #attr-val { font-size: 11px; color: var(--tx-2); min-width: 30px;
+    #attr-icon, #speed-icon { font-size: 14px; color: var(--tx-2); user-select: none; line-height: 1; flex-shrink: 0; }
+    #attr-val, #speed-val { font-size: 11px; color: var(--tx-2); min-width: 30px;
                  text-align: right; font-variant-numeric: tabular-nums; }
-    #attr-slider {
+    #attr-slider, #speed-slider {
       -webkit-appearance: none; appearance: none;
       width: 80px; height: 4px;
       background: var(--bd); border-radius: 2px; outline: none;
       cursor: pointer;
     }
-    #attr-slider::-webkit-slider-thumb {
+    #attr-slider::-webkit-slider-thumb, #speed-slider::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none;
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--cyan); border: 2px solid var(--bg-1);
       cursor: pointer; transition: background .15s;
     }
-    #attr-slider::-webkit-slider-thumb:hover { background: var(--cyan); }
-    #attr-slider::-moz-range-thumb {
+    #attr-slider::-webkit-slider-thumb:hover, #speed-slider::-webkit-slider-thumb:hover { background: var(--cyan); }
+    #attr-slider::-moz-range-thumb, #speed-slider::-moz-range-thumb {
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--cyan); border: 2px solid var(--bg-1);
       cursor: pointer;

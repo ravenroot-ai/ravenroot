@@ -5,6 +5,14 @@ person. The wait is stored, not kept alive: no node actor, request thread, polli
 remains attached to the task. A worker can therefore resolve the task and continue the same process
 after a complete server restart.
 
+Settlement is a versioned three-part contract. The `action` (`RESOLVE`, `DENY`, or `CANCEL`) selects
+the task's lifecycle meaning and configured re-entry route. A successful `RESOLVE` also carries the
+bounded response declared by the task's media type, schema, schema version, payload kind, and byte
+limit; that response is the operational value emitted by the node. The optional `comment` is stored
+separately as immutable audit metadata. Ravenroot never uses a comment as a response, never emits it
+as workflow payload, and never accepts an operational response for `DENY` or `CANCEL`. Existing
+resolve, deny, and cancel APIs are compatibility projections of settlement contract version 1.
+
 ## Authoring contract
 
 The node publishes all of its fields through `GET /v1/node-types`, so the generic editor renders

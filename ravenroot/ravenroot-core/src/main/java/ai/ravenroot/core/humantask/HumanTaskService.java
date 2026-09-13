@@ -32,6 +32,7 @@ import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskSettlement;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -382,7 +383,7 @@ public final class HumanTaskService {
 
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response) {
-        return resolve(context, taskId, expectedGeneration, response, "");
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.resolve(response, ""));
     }
 
     /**
@@ -396,7 +397,8 @@ public final class HumanTaskService {
      */
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response, String comment) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response, comment);
+        return settle(context, taskId, expectedGeneration,
+                HumanTaskSettlement.resolve(response, comment));
     }
 
     /**
@@ -418,7 +420,7 @@ public final class HumanTaskService {
     }
 
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration) {
-        return deny(context, taskId, expectedGeneration, "");
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.deny(""));
     }
 
     /**
@@ -431,11 +433,11 @@ public final class HumanTaskService {
      */
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration,
                                 String comment) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null, comment);
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.deny(comment));
     }
 
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration) {
-        return cancel(context, taskId, expectedGeneration, "");
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.cancel(""));
     }
 
     /**
@@ -448,7 +450,21 @@ public final class HumanTaskService {
      */
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration,
                                   String comment) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null, comment);
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.cancel(comment));
+    }
+
+    /** Applies the canonical versioned action/response/comment settlement contract. */
+    public HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
+                                  HumanTaskSettlement settlement) {
+        Objects.requireNonNull(settlement, "settlement");
+        return switch (settlement.action()) {
+            case RESOLVE -> settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED,
+                    settlement.response().orElseThrow(), settlement.comment());
+            case DENY -> settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED,
+                    null, settlement.comment());
+            case CANCEL -> settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED,
+                    null, settlement.comment());
+        };
     }
 
     public HumanTaskResult escalate(ExecutionKey key, UUID taskId, long expectedGeneration,

@@ -506,6 +506,10 @@
       grid-template-columns: repeat(auto-fill, var(--panel-short-cell));
       gap: 4px;
     }
+    /* The node vocabulary now has twelve entries. Keep its compact palette at two rows while
+       preserving the 32px hit target; the legend is intentionally allowed a small fixed-width
+       projection so adding a node type does not reintroduce vertical dock overflow. */
+    .panel--short #leg-nodes { grid-template-columns: repeat(6, var(--panel-short-cell)); }
     .panel--short .li {
       width: var(--panel-short-cell); height: var(--panel-short-cell);
       padding: 0; justify-content: center; gap: 0;

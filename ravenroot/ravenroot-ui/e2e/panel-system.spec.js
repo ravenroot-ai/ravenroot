@@ -1526,9 +1526,9 @@ test.describe('the short form', () => {
       const first = items[0].getBoundingClientRect();
       return { count: items.length, rows: rows.size, cell: Math.round(first.width) };
     });
-    // Ten items on ten rows becomes ten items on two.
-    expect(rowsBefore).toBe(10);
-    expect(grid.count).toBe(10);
+    // Twelve items on twelve rows become twelve items on two compact rows.
+    expect(rowsBefore).toBe(12);
+    expect(grid.count).toBe(12);
     expect(grid.rows).toBe(2);
     // The cell clears the 24px WCAG 2.5.8 floor that the 23px full-form row misses by one pixel.
     expect(grid.cell).toBe(32);
@@ -1547,7 +1547,7 @@ test.describe('the short form', () => {
       glyphShown: getComputedStyle(item.querySelector('.li-glyph')).display !== 'none',
       labelHidden: getComputedStyle(item.querySelector('.li-label')).display === 'none',
     })));
-    expect(marks).toHaveLength(10);
+    expect(marks).toHaveLength(12);
     for (const mark of marks) {
       expect(mark.name, 'a chip lost its accessible name').toBeTruthy();
       expect(mark.glyph, `${mark.name} has no glyph`).not.toBe('');

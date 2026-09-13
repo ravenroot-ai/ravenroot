@@ -83,8 +83,15 @@ export function layoutFromLegacyMode(layoutMode) {
 
 export function documentPresentationState(document_) {
   const graphProperties = document_?.graph?.graphProperties || {};
-  const persistedRenderMode = document_?.renderMode ?? graphProperties[GRAPH_RENDER_MODE_PROPERTY];
-  const persistedLayoutMode = document_?.layoutMode ?? graphProperties[GRAPH_LAYOUT_MODE_PROPERTY];
+  // A document record's legacy fields are the compatibility input when present. Graph-level
+  // presentation properties are used for newly opened records that have no record-level choice;
+  // letting them override a legacy `layoutMode` makes an old elastic document appear as Design.
+  const hasRecordRenderMode = Object.hasOwn(document_ || {}, 'renderMode');
+  const hasRecordLayoutMode = Object.hasOwn(document_ || {}, 'layoutMode');
+  const persistedRenderMode = hasRecordRenderMode
+    ? document_.renderMode : (hasRecordLayoutMode ? undefined : graphProperties[GRAPH_RENDER_MODE_PROPERTY]);
+  const persistedLayoutMode = hasRecordLayoutMode
+    ? document_.layoutMode : graphProperties[GRAPH_LAYOUT_MODE_PROPERTY];
   const explicitDesign = persistedRenderMode === DESIGN_RENDER_MODE
     && Object.hasOwn(document_, 'layoutMode') && DESIGN_LAYOUT_MODES.has(document_.layoutMode)
     && Object.hasOwn(document_, 'visualStyle') && VISUAL_STYLES.has(document_.visualStyle);

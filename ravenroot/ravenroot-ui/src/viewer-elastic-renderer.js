@@ -213,7 +213,9 @@ export function mountD3ElasticRenderer({
     .force('collision', d3.forceCollide().radius(node => node.r + 8))
     .alphaDecay(.012)
     .velocityDecay(.65 - movementSpeed * .45)
-    .alphaTarget(movementSpeed * .08)
+    // Speed controls damping, but a permanently non-zero alpha target prevents a monitoring
+    // viewport from ever settling and makes the exported/painted centroid drift indefinitely.
+    .alphaTarget(0)
     .on('tick', () => {
       if (destroyed || !isLive()) {
         simulation.stop();

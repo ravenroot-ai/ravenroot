@@ -481,7 +481,7 @@ public final class DeploymentCoordinator {
                                                 RevisionExpectation revision) {
         return new DeploymentRegistry.Command(record.tenantId(), record.deploymentId(),
                 ledgerKey(command), DeploymentOwnership.digestOf(LifecycleCommand.canonicalForm(command, expected)),
-                revision, expected, command.kind());
+                revision, expected, command.kind(), command.operatorReason().orElse(null));
     }
 
     /**

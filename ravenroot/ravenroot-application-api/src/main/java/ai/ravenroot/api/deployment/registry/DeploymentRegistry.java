@@ -230,7 +230,8 @@ public interface DeploymentRegistry extends AutoCloseable {
  */
     record Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation, long revision,
                   Desired desired, Observation observed, Lease lease, Failure failure, Tombstone tombstone,
-                  LifecycleCommand.Kind lastLifecycleCommand, Instant lastLifecycleCommandAt,
+                  LifecycleCommand.Kind lastLifecycleCommand, String lastLifecycleReason,
+                  Instant lastLifecycleCommandAt,
                   Instant createdAt, Instant updatedAt) {
 /**
  * Preserves the aggregate ordering and requires the update instant not to precede creation.
@@ -245,6 +246,21 @@ public interface DeploymentRegistry extends AutoCloseable {
                     && (lastLifecycleCommandAt.isBefore(createdAt) || lastLifecycleCommandAt.isAfter(updatedAt))) {
                 throw new IllegalArgumentException("invalid lifecycle command evidence");
             }
+            if (lastLifecycleReason != null && (lastLifecycleReason.isBlank()
+                    || lastLifecycleReason.length() > LifecycleCommand.MAXIMUM_REASON_LENGTH
+                    || lastLifecycleReason.chars().anyMatch(Character::isISOControl))) {
+                throw new IllegalArgumentException("invalid lifecycle command reason");
+            }
+        }
+
+        /** Compatibility shape for records written before command reason was retained. */
+        public Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation,
+                      long revision, Desired desired, Observation observed, Lease lease, Failure failure,
+                      Tombstone tombstone, LifecycleCommand.Kind lastLifecycleCommand,
+                      Instant lastLifecycleCommandAt, Instant createdAt, Instant updatedAt) {
+            this(tenantId, deploymentId, latestVersion, generation, revision, desired, observed, lease,
+                    failure, tombstone, lastLifecycleCommand, null, lastLifecycleCommandAt,
+                    createdAt, updatedAt);
         }
 
         /** Compatibility shape for records written before command identity was retained. */
@@ -252,7 +268,7 @@ public interface DeploymentRegistry extends AutoCloseable {
                       long revision, Desired desired, Observation observed, Lease lease, Failure failure,
                       Tombstone tombstone, Instant createdAt, Instant updatedAt) {
             this(tenantId, deploymentId, latestVersion, generation, revision, desired, observed, lease,
-                    failure, tombstone, null, null, createdAt, updatedAt);
+                    failure, tombstone, null, null, null, createdAt, updatedAt);
         }
     }
 /**
@@ -291,7 +307,7 @@ public interface DeploymentRegistry extends AutoCloseable {
  */
     record Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                    RevisionExpectation.Exactly expectedRevision, GenerationExpectation expectedGeneration,
-                   LifecycleCommand.Kind lifecycleKind) {
+                   LifecycleCommand.Kind lifecycleKind, String lifecycleReason) {
 /**
  * Requires a deployment target, an exact revision, and a stated generation expectation.
  */
@@ -299,13 +315,26 @@ public interface DeploymentRegistry extends AutoCloseable {
             validate(tenantId, key, digest);
             if (deploymentId == null || expectedRevision == null || expectedGeneration == null)
                 throw new IllegalArgumentException("invalid command");
+            if (lifecycleReason != null && (lifecycleKind == null || lifecycleReason.isBlank()
+                    || lifecycleReason.length() > LifecycleCommand.MAXIMUM_REASON_LENGTH
+                    || lifecycleReason.chars().anyMatch(Character::isISOControl))) {
+                throw new IllegalArgumentException("invalid lifecycle command reason");
+            }
+        }
+
+        /** Compatibility shape for lifecycle commands that predate retained reasons. */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation.Exactly expectedRevision,
+                       GenerationExpectation expectedGeneration, LifecycleCommand.Kind lifecycleKind) {
+            this(tenantId, deploymentId, key, digest, expectedRevision, expectedGeneration,
+                    lifecycleKind, null);
         }
 
         /** Compatibility shape for mutations that do not represent a lifecycle decision. */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation.Exactly expectedRevision,
                        GenerationExpectation expectedGeneration) {
-            this(tenantId, deploymentId, key, digest, expectedRevision, expectedGeneration, null);
+            this(tenantId, deploymentId, key, digest, expectedRevision, expectedGeneration, null, null);
         }
 
         /**
@@ -319,7 +348,7 @@ public interface DeploymentRegistry extends AutoCloseable {
          */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation.Exactly expectedRevision) {
-            this(tenantId, deploymentId, key, digest, expectedRevision, GenerationExpectation.any(), null);
+            this(tenantId, deploymentId, key, digest, expectedRevision, GenerationExpectation.any(), null, null);
         }
 
         /**
@@ -334,7 +363,7 @@ public interface DeploymentRegistry extends AutoCloseable {
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation expectedRevision) {
             this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
-                    GenerationExpectation.any(), null);
+                    GenerationExpectation.any(), null, null);
         }
 
         /**
@@ -358,6 +387,14 @@ public interface DeploymentRegistry extends AutoCloseable {
                        LifecycleCommand.Kind lifecycleKind) {
             this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
                     expectedGeneration, lifecycleKind);
+        }
+
+        /** Lifecycle-command shape with a retained reason at the shared revision boundary. */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration,
+                       LifecycleCommand.Kind lifecycleKind, String lifecycleReason) {
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
+                    expectedGeneration, lifecycleKind, lifecycleReason);
         }
 
         private static RevisionExpectation.Exactly requireExact(RevisionExpectation expectation) {

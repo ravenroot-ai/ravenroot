@@ -103,6 +103,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             entry.desired = new Desired(desired.kind(), desired.desiredVersion(), desired.updateStrategy(), entry.generation);
             if (command.lifecycleKind() != null) {
                 entry.lastLifecycleCommand = command.lifecycleKind();
+                entry.lastLifecycleReason = command.lifecycleReason();
                 entry.lastLifecycleCommandAt = now();
             }
             entry.failure = null; // a new generation is the explicit recovery boundary
@@ -367,6 +368,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
         Tombstone tombstone;
         Failure failure;
         ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind lastLifecycleCommand;
+        String lastLifecycleReason;
         Instant lastLifecycleCommandAt;
 
         Entry(String tenant, GraphVersion first, Instant now) {
@@ -383,7 +385,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
         Record record() {
             return new Record(tenant, latest.deploymentId(), latest.version(), generation, revision, desired,
                     observed, lease, failure, tombstone, lastLifecycleCommand,
-                    lastLifecycleCommandAt, createdAt, updatedAt);
+                    lastLifecycleReason, lastLifecycleCommandAt, createdAt, updatedAt);
         }
     }
 }

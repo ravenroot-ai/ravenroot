@@ -1001,6 +1001,9 @@ final class PostgresSchema {
                                 + "created_at_epoch_second BIGINT NOT NULL, created_at_nano INTEGER NOT NULL, "
                                 + "updated_at_epoch_second BIGINT NOT NULL, updated_at_nano INTEGER NOT NULL, "
                                 + "expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, "
-                                + "PRIMARY KEY (tenant_id, command_key))")));
+                                + "PRIMARY KEY (tenant_id, command_key))")),
+                new SchemaMigration(7, "deployment lifecycle command reason", List.of(
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_reason TEXT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_reason TEXT")));
     }
 }

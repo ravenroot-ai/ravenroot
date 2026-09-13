@@ -292,6 +292,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                         newGeneration, current.revision() + 1, stamped, current.observed(), current.lease(), null,
                         current.tombstone(), command.lifecycleKind() == null
                                 ? current.lastLifecycleCommand() : command.lifecycleKind(),
+                        command.lifecycleKind() == null ? current.lastLifecycleReason()
+                                : command.lifecycleReason(),
                         command.lifecycleKind() == null ? current.lastLifecycleCommandAt() : now,
                         current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.COMMAND, command.key(),
@@ -731,7 +733,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 : StoredInstant.read(rows, "last_lifecycle_command_at");
         Lease lease = loadLease(tenant, deploymentId);
         return new Record(tenant, DeploymentId.of(deploymentId), latestVersion, generation, revision, desired,
-                observed, lease, failure, tombstone, lastCommand, lastCommandAt, createdAt, updatedAt);
+                observed, lease, failure, tombstone, lastCommand,
+                rows.getString("last_lifecycle_reason"), lastCommandAt, createdAt, updatedAt);
     }
 
     private Lease loadLease(String tenant, String deploymentId) throws SQLException {
@@ -781,7 +784,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 + "observed_version = ?, observed_generation = ?, observed_at_epoch_second = ?, "
                 + "observed_at_nano = ?, failure_code = ?, failure_message = ?, failure_at_epoch_second = ?, "
                 + "failure_at_nano = ?, tombstone_reason = ?, tombstone_at_epoch_second = ?, "
-                + "tombstone_at_nano = ?, last_lifecycle_command = ?, "
+                + "tombstone_at_nano = ?, last_lifecycle_command = ?, last_lifecycle_reason = ?, "
                 + "last_lifecycle_command_at_epoch_second = ?, last_lifecycle_command_at_nano = ?, "
                 + "updated_at_epoch_second = ?, updated_at_nano = ? "
                 + "WHERE tenant_id = ? AND deployment_id = ?";
@@ -816,6 +819,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
             }
             statement.setString(i++, r.lastLifecycleCommand() == null
                     ? null : r.lastLifecycleCommand().name());
+            statement.setString(i++, r.lastLifecycleReason());
             i = bindNullableInstant(statement, i, r.lastLifecycleCommandAt());
             i = StoredInstant.bindValue(statement, i, r.updatedAt());
             statement.setString(i++, tenant);
@@ -956,7 +960,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 + "recorded_lease_expires_at_nano, recorded_failure_code, recorded_failure_message, "
                 + "recorded_failure_at_epoch_second, recorded_failure_at_nano, recorded_tombstone_reason, "
                 + "recorded_tombstone_at_epoch_second, recorded_tombstone_at_nano, "
-                + "recorded_last_lifecycle_command, recorded_last_lifecycle_command_at_epoch_second, "
+                + "recorded_last_lifecycle_command, recorded_last_lifecycle_reason, "
+                + "recorded_last_lifecycle_command_at_epoch_second, "
                 + "recorded_last_lifecycle_command_at_nano, "
                 + "recorded_created_at_epoch_second, recorded_created_at_nano, "
                 + "recorded_updated_at_epoch_second, recorded_updated_at_nano";
@@ -980,7 +985,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 : StoredInstant.read(rows, "recorded_last_lifecycle_command_at");
         Lease lease = leaseFrom(rows, "recorded_lease_", tenant, deploymentId);
         return new Record(tenant, DeploymentId.of(deploymentId), latestVersion, generation, revision, desired,
-                observed, lease, failure, tombstone, lastCommand, lastCommandAt, createdAt, updatedAt);
+                observed, lease, failure, tombstone, lastCommand,
+                rows.getString("recorded_last_lifecycle_reason"), lastCommandAt, createdAt, updatedAt);
     }
 
     private void insertLedgerEntry(String tenant, String deploymentId, Action action, String key, String digest,
@@ -995,12 +1001,13 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 + "recorded_failure_code, recorded_failure_message, recorded_failure_at_epoch_second, "
                 + "recorded_failure_at_nano, recorded_tombstone_reason, recorded_tombstone_at_epoch_second, "
                 + "recorded_tombstone_at_nano, recorded_last_lifecycle_command, "
+                + "recorded_last_lifecycle_reason, "
                 + "recorded_last_lifecycle_command_at_epoch_second, recorded_last_lifecycle_command_at_nano, "
                 + "recorded_created_at_epoch_second, recorded_created_at_nano, "
                 + "recorded_updated_at_epoch_second, recorded_updated_at_nano, recorded_at_epoch_second, "
                 + "recorded_at_nano, expires_at_epoch_second, expires_at_nano) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int i = 1;
             statement.setString(i++, tenant);
@@ -1048,6 +1055,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
             }
             statement.setString(i++, record.lastLifecycleCommand() == null
                     ? null : record.lastLifecycleCommand().name());
+            statement.setString(i++, record.lastLifecycleReason());
             i = bindNullableInstant(statement, i, record.lastLifecycleCommandAt());
             i = StoredInstant.bindValue(statement, i, record.createdAt());
             i = StoredInstant.bindValue(statement, i, record.updatedAt());

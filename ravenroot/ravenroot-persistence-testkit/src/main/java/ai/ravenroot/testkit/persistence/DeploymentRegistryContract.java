@@ -191,11 +191,13 @@ public abstract class DeploymentRegistryContract {
             clock.advance(Duration.ofSeconds(7));
             var command = new DeploymentRegistry.Command(made.tenantId(), made.deploymentId(),
                     "cancel-kind", "d".repeat(64), RevisionExpectation.exactly(made.revision()),
-                    GenerationExpectation.exactly(made.generation()), LifecycleCommand.Kind.CANCEL);
+                    GenerationExpectation.exactly(made.generation()), LifecycleCommand.Kind.CANCEL,
+                    "operator maintenance");
             DeploymentRegistry.Record decided = registry.command(made.desired(), command)
                     .toCompletableFuture().join();
 
             assertEquals(LifecycleCommand.Kind.CANCEL, decided.lastLifecycleCommand());
+            assertEquals("operator maintenance", decided.lastLifecycleReason());
             assertEquals(clock.instant(), decided.lastLifecycleCommandAt());
             assertEquals(decided, registry.get("tenant", made.deploymentId())
                     .toCompletableFuture().join().orElseThrow());

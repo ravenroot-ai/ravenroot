@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 6765 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1665.
+Retired source candidates preserved in inventory history: 1666.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 28.
+Checked source reconciliations: 29.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 20322 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 20132 |
-| Unchanged identities | 19454 |
-| Approved identity migrations | 660 |
-| Approved retirements | 18 |
-| Semantically classified additions | 208 |
+| Source inventory candidates | 20322 |
+| Unchanged identities | 20321 |
+| Approved identity migrations | 0 |
+| Approved retirements | 1 |
+| Semantically classified additions | 1 |
 | Current candidates | 20322 |
 
 ## Final semantic review
@@ -1157,7 +1157,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-f49404dab093ca3f78e9` | `deploy/dev/sandbox-supervisor.sh:71` `module` | deployment | retained | protocol-or-format-invariant | These atoms select reproducible build inputs, OCI metadata, filesystem locations, or container command vocabulary. |
 | `oc-107e73202ff972e53169` | `deploy/dev/sandbox-supervisor.sh:77` `module` | deployment | retained | protocol-or-format-invariant | These atoms select reproducible build inputs, OCI metadata, filesystem locations, or container command vocabulary. |
 | `oc-2d7c516244dfb35125e6` | `deploy/dev/sandbox-supervisor.sh:77` `module` | deployment | retained | protocol-or-format-invariant | These atoms select reproducible build inputs, OCI metadata, filesystem locations, or container command vocabulary. |
-| `oc-81c59b173dd491ee7a28` | `deploy/helm/ravenroot/Chart.yaml:6` `module` | deployment | retained | protocol-or-format-invariant | This atom is fixed release-orchestration vocabulary, serialization, validation structure, or version metadata rather than human-facing prose or an operator setting. |
+| `oc-4aab972235bd138bfa7f` | `deploy/helm/ravenroot/Chart.yaml:6` `module` | deployment | retained | protocol-or-format-invariant | This atom is fixed release-orchestration version metadata rather than an operator setting. |
 | `oc-6b5aaaa8772589146262` | `deploy/helm/ravenroot/Chart.yaml:7` `module` | deployment | retained | protocol-or-format-invariant | This value is required Helm release or Kubernetes compatibility metadata governed by the product release contract, not an operator setting. |
 | `oc-54d357d43c98508dacc1` | `deploy/helm/ravenroot/templates/deployment.yaml:4` `module` | deployment | retained | derived | This template token derives a Kubernetes name, image, claim, or environment value from the closed Helm release and values inputs. |
 | `oc-73c8cf4044bc54b0282f` | `deploy/helm/ravenroot/templates/deployment.yaml:34` `module` | deployment | retained | derived | This template token derives a Kubernetes name, image, claim, or environment value from the closed Helm release and values inputs. |

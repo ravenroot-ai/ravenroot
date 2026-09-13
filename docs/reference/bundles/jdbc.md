@@ -97,10 +97,18 @@ bounded immutable in-memory image. A private platform-parent classloader dedicat
 defines and initializes it only from that image, so drivers in the same bundle cannot see one
 another and replacement of the installed path after verification cannot alter any class byte.
 Expanded entries are also
-bounded before retention. The class must implement `java.sql.Driver`. The extension
-rejects multi-release jars (a `Multi-Release` manifest attribute or any versioned-entry namespace)
-before class initialization; operators must supply one flat Java-21-compatible driver image. This
-narrow contract avoids silently selecting different class bytes from the pinned image. Driver
+bounded before retention. The class must implement `java.sql.Driver`. Multi-release driver jars, the
+packaging current vendors publish, are accepted: before class initialization the image is resolved
+once into one flat image for Java 21, the release Ravenroot targets, taking for each name the entry
+under the highest `META-INF/versions/<release>/` not above 21, otherwise the base entry. The release of
+the JVM running Ravenroot plays no part, so the class bytes a driver is defined from are fixed by its
+pinned SHA-256 alone, and the versioned namespace is not itself visible as resources. A jar whose
+versioned entries admit more than one reading is refused before class initialization as
+`JDBC_DRIVER_AMBIGUOUS`: versioned entries without a leading manifest that declares
+`Multi-Release: true`, a second or misplaced manifest, a release directory that is not a canonical
+decimal of at least 9, the namespace spelled in another case or with backslashes, a versioned name with
+empty, `.` or `..` segments, and a versioned `META-INF/` entry. A jar without versioned entries is one
+flat image and loads unchanged. Driver
 initialization, its private dependencies/resources/services, every JDBC operation, and asynchronous
 cancel/abort/close callbacks run with that private loader as TCCL, with the caller context restored
 on every exit. The extension calls that exact driver directly; it does not use `DriverManager`, a
@@ -156,5 +164,7 @@ rotation, tenant/profile isolation, mixed PostgreSQL/MySQL concurrency, admissio
 contract. A generated hostile-driver fixture proves that mismatch and tampering are rejected before
 its static initializer. Test-scoped PostgreSQL 42.7.7 and MySQL Connector/J 9.5.0 artifacts exercise
 deterministic driver selection and same-name dependency isolation end to end without opening a
-database connection. Both are absent from runtime and default-distribution dependency graphs. No live
+database connection. The multi-release PostgreSQL JDBC 42.7.12 jar, checksum-pinned as published,
+proves that its Java 11 class variant is the one defined. None of these artifacts is in the runtime or
+default-distribution dependency graphs. No live
 database is required by the build.

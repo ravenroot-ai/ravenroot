@@ -10,4 +10,15 @@
   <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>${postgresql-jdbc.version}</version><scope>test</scope></dependency>
   <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId><version>9.5.0</version><scope>test</scope></dependency>
   <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
- </dependencies></project>
+ </dependencies>
+ <build><plugins>
+  <!-- A real vendor multi-release driver image for JdbcMultiReleaseVendorDriverTest. It is copied as
+       a file into target/ and is never a dependency, so it cannot join any classpath. Pinned apart
+       from the bundle fixture above: it must stay multi-release whatever that fixture becomes, and
+       the test pins its exact checksum. -->
+  <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-dependency-plugin</artifactId><version>3.7.0</version>
+   <executions><execution><id>multi-release-vendor-driver</id><phase>generate-test-resources</phase><goals><goal>copy</goal></goals>
+    <configuration><skip>${skipTests}</skip><outputDirectory>${project.build.directory}/multi-release-driver</outputDirectory>
+     <artifactItems><artifactItem><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>42.7.12</version></artifactItem></artifactItems>
+    </configuration></execution></executions></plugin>
+ </plugins></build></project>

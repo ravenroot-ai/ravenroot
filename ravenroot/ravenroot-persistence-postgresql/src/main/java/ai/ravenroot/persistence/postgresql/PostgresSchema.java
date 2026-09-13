@@ -983,6 +983,24 @@ final class PostgresSchema {
                         "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_nano INTEGER",
                         "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command TEXT",
                         "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_epoch_second BIGINT",
-                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_nano INTEGER")));
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_nano INTEGER")),
+                new SchemaMigration(6, "tenant-scoped session memory", List.of(
+                        "CREATE TABLE session_memory (tenant_id TEXT NOT NULL, session_id TEXT NOT NULL, "
+                                + "scope TEXT NOT NULL, process_instance_id TEXT NOT NULL, node_id TEXT NOT NULL, "
+                                + "revision BIGINT NOT NULL, value BYTEA NOT NULL, content_type TEXT NOT NULL, "
+                                + "created_at_epoch_second BIGINT NOT NULL, created_at_nano INTEGER NOT NULL, "
+                                + "updated_at_epoch_second BIGINT NOT NULL, updated_at_nano INTEGER NOT NULL, "
+                                + "expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, "
+                                + "PRIMARY KEY (tenant_id, session_id, scope, process_instance_id, node_id))",
+                        "CREATE INDEX session_memory_expiry ON session_memory "
+                                + "(tenant_id, expires_at_epoch_second, expires_at_nano)",
+                        "CREATE TABLE session_memory_command (tenant_id TEXT NOT NULL, command_key TEXT NOT NULL, "
+                                + "digest TEXT NOT NULL, session_id TEXT NOT NULL, scope TEXT NOT NULL, "
+                                + "process_instance_id TEXT NOT NULL, node_id TEXT NOT NULL, revision BIGINT NOT NULL, "
+                                + "value BYTEA NOT NULL, content_type TEXT NOT NULL, "
+                                + "created_at_epoch_second BIGINT NOT NULL, created_at_nano INTEGER NOT NULL, "
+                                + "updated_at_epoch_second BIGINT NOT NULL, updated_at_nano INTEGER NOT NULL, "
+                                + "expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, "
+                                + "PRIMARY KEY (tenant_id, command_key))")));
     }
 }

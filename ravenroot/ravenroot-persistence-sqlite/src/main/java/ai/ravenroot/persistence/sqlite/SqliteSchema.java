@@ -1061,7 +1061,14 @@ final class SqliteSchema {
                         "ALTER TABLE human_task ADD COLUMN review_content_type TEXT NOT NULL DEFAULT ''",
                         "ALTER TABLE human_task ADD COLUMN review_text TEXT NOT NULL DEFAULT ''",
                         "ALTER TABLE human_task ADD COLUMN review_digest TEXT NOT NULL DEFAULT ''",
-                        "ALTER TABLE human_task ADD COLUMN review_max_utf8_bytes INTEGER NOT NULL DEFAULT 1")));
+                        "ALTER TABLE human_task ADD COLUMN review_max_utf8_bytes INTEGER NOT NULL DEFAULT 1")),
+                new SchemaMigration(25, "deployment lifecycle command evidence", List.of(
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command TEXT",
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_epoch_second INTEGER",
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_nano INTEGER",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command TEXT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_epoch_second INTEGER",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_nano INTEGER")));
     }
 
     static int currentVersion() {

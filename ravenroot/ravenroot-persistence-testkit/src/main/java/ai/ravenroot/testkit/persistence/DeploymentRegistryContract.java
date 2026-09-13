@@ -184,6 +184,27 @@ public abstract class DeploymentRegistryContract {
     }
 
     @Test
+    final void lifecycleCommandIdentityAndDecisionTimeSurviveTheRegistryRoundTrip() {
+        MutableClock clock = new MutableClock(START);
+        try (DeploymentRegistry registry = createRegistry(clock)) {
+            DeploymentRegistry.Record made = create(registry, clock, "tenant", "create-kind", "v1");
+            clock.advance(Duration.ofSeconds(7));
+            var command = new DeploymentRegistry.Command(made.tenantId(), made.deploymentId(),
+                    "cancel-kind", "d".repeat(64), RevisionExpectation.exactly(made.revision()),
+                    GenerationExpectation.exactly(made.generation()), LifecycleCommand.Kind.CANCEL);
+            DeploymentRegistry.Record decided = registry.command(made.desired(), command)
+                    .toCompletableFuture().join();
+
+            assertEquals(LifecycleCommand.Kind.CANCEL, decided.lastLifecycleCommand());
+            assertEquals(clock.instant(), decided.lastLifecycleCommandAt());
+            assertEquals(decided, registry.get("tenant", made.deploymentId())
+                    .toCompletableFuture().join().orElseThrow());
+            assertEquals(decided, registry.command(made.desired(), command).toCompletableFuture().join(),
+                    "ledger replay must retain the command identity used by continuation fencing");
+        }
+    }
+
+    @Test
     final void anyRevisionCannotReachAnyExistingAggregateMutation() {
         MutableClock clock = new MutableClock(START);
         try (DeploymentRegistry registry = createRegistry(clock)) {

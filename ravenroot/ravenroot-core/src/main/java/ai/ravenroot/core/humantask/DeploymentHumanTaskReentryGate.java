@@ -29,6 +29,12 @@ public final class DeploymentHumanTaskReentryGate implements HumanTaskReentryGat
         var deployment = await(deployments.get(task.key().tenantId(), DeploymentId.of(deploymentId)))
                 .orElse(null);
         if (deployment == null || deployment.tombstone() != null) return false;
+        if (deployment.lastLifecycleCommand()
+                == ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.CANCEL
+                && deployment.lastLifecycleCommandAt() != null
+                && !task.createdAt().isAfter(deployment.lastLifecycleCommandAt())) {
+            return false;
+        }
         return switch (deployment.desired().kind()) {
             case RUNNING, DRAINED -> true;
             case PAUSED, STOPPED, REMOVED -> false;

@@ -206,6 +206,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                     + "recorded_lease_expires_at_nano, recorded_failure_code, recorded_failure_message, "
                     + "recorded_failure_at_epoch_second, recorded_failure_at_nano, recorded_tombstone_reason, "
                     + "recorded_tombstone_at_epoch_second, recorded_tombstone_at_nano, "
+                    + "recorded_last_lifecycle_command, "
+                    + "recorded_last_lifecycle_command_at_epoch_second, "
+                    + "recorded_last_lifecycle_command_at_nano, "
                     + "recorded_created_at_epoch_second, recorded_created_at_nano, "
                     + "recorded_updated_at_epoch_second, recorded_updated_at_nano";
 
@@ -437,6 +440,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(), version,
                         current.generation(), current.revision() + 1, current.desired(),
                         current.observed(), current.lease(), current.failure(), current.tombstone(),
+                        current.lastLifecycleCommand(), current.lastLifecycleCommandAt(),
                         current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.APPEND, command.key(), command.digest(), now);
@@ -471,6 +475,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), newGeneration, current.revision() + 1, stamped,
                         current.observed(), current.lease(), null, current.tombstone(),
+                        command.lifecycleKind() == null ? current.lastLifecycleCommand()
+                                : command.lifecycleKind(),
+                        command.lifecycleKind() == null ? current.lastLifecycleCommandAt() : now,
                         current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.COMMAND, command.key(), command.digest(), now);
@@ -508,7 +515,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), observation, current.lease(), current.failure(),
-                        current.tombstone(), current.createdAt(), now);
+                        current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.OBSERVE, command.key(), command.digest(), now);
             });
@@ -538,7 +546,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), current.lease(), reported,
-                        current.tombstone(), current.createdAt(), now);
+                        current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.FAIL, command.key(), command.digest(), now);
             });
@@ -574,6 +583,7 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), null, current.failure(), tombstone,
+                        current.lastLifecycleCommand(), current.lastLifecycleCommandAt(),
                         current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.TOMBSTONE, command.key(), command.digest(), now);
@@ -624,7 +634,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), lease, current.failure(),
-                        current.tombstone(), current.createdAt(), now);
+                        current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, newFence), Action.ACQUIRE,
                         command.key(), command.digest(), now);
             });
@@ -660,7 +671,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), renewed, current.failure(),
-                        current.tombstone(), current.createdAt(), now);
+                        current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.RENEW, command.key(), command.digest(), now);
             });
@@ -701,7 +713,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 Record next = new Record(current.tenantId(), current.deploymentId(),
                         current.latestVersion(), current.generation(), current.revision() + 1,
                         current.desired(), current.observed(), null, current.failure(),
-                        current.tombstone(), current.createdAt(), now);
+                        current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(connection, aggregate, new Aggregate(next, aggregate.fence()),
                         Action.RELEASE, command.key(), command.digest(), now);
             });
@@ -963,6 +976,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
         Observation observed;
         Failure failure;
         Tombstone tombstone;
+        ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind lastCommand;
+        Instant lastCommandAt;
         Instant createdAt;
         Instant updatedAt;
         try (PreparedStatement statement = connection.prepareStatement(
@@ -981,6 +996,11 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 observed = observationFrom(rows, "");
                 failure = failureFrom(rows, "");
                 tombstone = tombstoneFrom(rows, "");
+                String lifecycleKind = rows.getString("last_lifecycle_command");
+                lastCommand = lifecycleKind == null ? null
+                        : ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.valueOf(lifecycleKind);
+                lastCommandAt = lifecycleKind == null ? null
+                        : StoredInstant.read(rows, "last_lifecycle_command_at");
                 createdAt = StoredInstant.read(rows, "created_at");
                 updatedAt = StoredInstant.read(rows, "updated_at");
             }
@@ -989,17 +1009,22 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
         // transaction that could have written the lease -- each of which had to hold the row above.
         Lease lease = readLease(connection, tenant, deploymentId);
         Record record = new Record(tenant, DeploymentId.of(deploymentId), latestVersion, generation,
-                revision, desired, observed, lease, failure, tombstone, createdAt, updatedAt);
+                revision, desired, observed, lease, failure, tombstone, lastCommand, lastCommandAt,
+                createdAt, updatedAt);
         return new Aggregate(record, fence);
     }
 
     private Record recordFromJoinedRow(ResultSet rows, String tenant, String deploymentId)
             throws SQLException {
         long generation = rows.getLong("generation");
+        String lifecycleKind = rows.getString("last_lifecycle_command");
         return new Record(tenant, DeploymentId.of(deploymentId), rows.getLong("latest_version"),
                 generation, rows.getLong("revision"), desiredFrom(rows, "", generation),
                 observationFrom(rows, ""), leaseFrom(rows, "lease_", tenant, deploymentId),
-                failureFrom(rows, ""), tombstoneFrom(rows, ""), StoredInstant.read(rows, "created_at"),
+                failureFrom(rows, ""), tombstoneFrom(rows, ""), lifecycleKind == null ? null
+                        : ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.valueOf(lifecycleKind),
+                lifecycleKind == null ? null : StoredInstant.read(rows, "last_lifecycle_command_at"),
+                StoredInstant.read(rows, "created_at"),
                 StoredInstant.read(rows, "updated_at"));
     }
 
@@ -1062,7 +1087,8 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 + "observed_at_epoch_second = ?, observed_at_nano = ?, failure_code = ?, "
                 + "failure_message = ?, failure_at_epoch_second = ?, failure_at_nano = ?, "
                 + "tombstone_reason = ?, tombstone_at_epoch_second = ?, tombstone_at_nano = ?, "
-                + "updated_at_epoch_second = ?, updated_at_nano = ? "
+                + "last_lifecycle_command = ?, last_lifecycle_command_at_epoch_second = ?, "
+                + "last_lifecycle_command_at_nano = ?, updated_at_epoch_second = ?, updated_at_nano = ? "
                 + "WHERE tenant_id = ? AND deployment_id = ? AND revision = ?";
         int updated;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -1095,6 +1121,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 statement.setString(index++, null);
                 index = bindNullableInstant(statement, index, null);
             }
+            statement.setString(index++, record.lastLifecycleCommand() == null
+                    ? null : record.lastLifecycleCommand().name());
+            index = bindNullableInstant(statement, index, record.lastLifecycleCommandAt());
             index = StoredInstant.bindValue(statement, index, record.updatedAt());
             statement.setString(index++, tenant);
             statement.setString(index++, deploymentId);
@@ -1238,11 +1267,16 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
     private static Record recordFromLedgerRow(ResultSet rows, String tenant, String deploymentId)
             throws SQLException {
         long generation = rows.getLong("recorded_generation");
+        String lifecycleKind = rows.getString("recorded_last_lifecycle_command");
         return new Record(tenant, DeploymentId.of(deploymentId),
                 rows.getLong("recorded_latest_version"), generation, rows.getLong("recorded_revision"),
                 desiredFrom(rows, "recorded_", generation), observationFrom(rows, "recorded_"),
                 leaseFrom(rows, "recorded_lease_", tenant, deploymentId), failureFrom(rows, "recorded_"),
-                tombstoneFrom(rows, "recorded_"), StoredInstant.read(rows, "recorded_created_at"),
+                tombstoneFrom(rows, "recorded_"), lifecycleKind == null ? null
+                        : ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.valueOf(lifecycleKind),
+                lifecycleKind == null ? null
+                        : StoredInstant.read(rows, "recorded_last_lifecycle_command_at"),
+                StoredInstant.read(rows, "recorded_created_at"),
                 StoredInstant.read(rows, "recorded_updated_at"));
     }
 
@@ -1259,12 +1293,14 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 + "recorded_lease_expires_at_nano, recorded_failure_code, recorded_failure_message, "
                 + "recorded_failure_at_epoch_second, recorded_failure_at_nano, "
                 + "recorded_tombstone_reason, recorded_tombstone_at_epoch_second, "
-                + "recorded_tombstone_at_nano, recorded_created_at_epoch_second, "
+                + "recorded_tombstone_at_nano, recorded_last_lifecycle_command, "
+                + "recorded_last_lifecycle_command_at_epoch_second, "
+                + "recorded_last_lifecycle_command_at_nano, recorded_created_at_epoch_second, "
                 + "recorded_created_at_nano, recorded_updated_at_epoch_second, "
                 + "recorded_updated_at_nano, recorded_at_epoch_second, recorded_at_nano, "
                 + "expires_at_epoch_second, expires_at_nano) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int index = 1;
             statement.setString(index++, tenant);
@@ -1310,6 +1346,9 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
                 statement.setString(index++, null);
                 index = bindNullableInstant(statement, index, null);
             }
+            statement.setString(index++, record.lastLifecycleCommand() == null
+                    ? null : record.lastLifecycleCommand().name());
+            index = bindNullableInstant(statement, index, record.lastLifecycleCommandAt());
             index = StoredInstant.bindValue(statement, index, record.createdAt());
             index = StoredInstant.bindValue(statement, index, record.updatedAt());
             index = StoredInstant.bindValue(statement, index, recordedAt);

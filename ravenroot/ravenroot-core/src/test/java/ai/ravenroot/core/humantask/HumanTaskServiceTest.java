@@ -350,11 +350,20 @@ class HumanTaskServiceTest {
                     .toCompletableFuture().join();
             assertFalse(gate.admits(task), "Pause retains a settled response without re-entering");
 
-            deployments.command(new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Desired(
+            var drained = deployments.command(new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Desired(
                             ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.DRAINED,
                             null, null, 0), deploymentCommand(paused, "drain"))
                     .toCompletableFuture().join();
             assertTrue(gate.admits(task), "Drain must allow already accepted Human Task work to finish");
+
+            deployments.command(drained.desired(), new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Command(
+                    drained.tenantId(), drained.deploymentId(), "cancel", "c".repeat(64),
+                    RevisionExpectation.exactly(drained.revision()),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.any(),
+                    ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.CANCEL))
+                    .toCompletableFuture().join();
+            assertFalse(gate.admits(task),
+                    "a Human Task captured before graph Cancel must never re-enter its old traversal");
         }
     }
 

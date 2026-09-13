@@ -3326,6 +3326,13 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "jwkPolicyAuthorities" \
+            and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "jwkPolicyAuthorities" \
+            and path[2] in {"contracts", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] in {"candidateIds", "defaultCandidateIds"}:
+        return path[5].isdigit()
     if len(path) == 4 and path[0] == "embedEnabledAuthorities" \
             and path[2] == "candidateIds":
         return path[3].isdigit()

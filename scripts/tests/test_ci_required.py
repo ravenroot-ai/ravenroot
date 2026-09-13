@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.classify_main_change import ROUTED_INPUTS
 from scripts.ci_required import (
     ALLOWED_TIERS_BY_EVENT,
+    ADMISSION_JOBS,
     CLASSIFICATION_JOB,
     FAST_GATE_JOB,
     FAST_JOBS,
@@ -111,10 +112,14 @@ class VerifyResultsTest(unittest.TestCase):
         problems = verify_results("promotion", results_for("promotion"))
         self.assertEqual(problems, [])
 
-    def test_a_pull_request_into_dev_demands_the_end_to_end_suite(self) -> None:
-        """Criterion 1, as far as a unit test can carry it; the pull request demonstrates the rest."""
-        for job in ("full-ui-e2e", "full-ui-e2e-shard", "full-ui-e2e-harness", "full-ui-audit"):
+    def test_review_is_diagnostic_and_integration_is_full(self) -> None:
+        self.assertEqual(REQUIRED_BY_TIER["admission"], frozenset(ADMISSION_JOBS))
+        self.assertTrue(REQUIRED_BY_TIER["admission"].isdisjoint(REQUIRED_BY_TIER["full"]))
+        for job in ("full-ui-e2e", "full-ui-e2e-shard", "full-backend-tests"):
             self.assertIn(job, REQUIRED_BY_TIER["full"])
+
+    def test_postmerge_repeats_no_functional_job(self) -> None:
+        self.assertEqual(REQUIRED_BY_TIER["postmerge"], frozenset())
 
 
 class PromotionEvidenceTest(unittest.TestCase):
@@ -125,7 +130,7 @@ class PromotionEvidenceTest(unittest.TestCase):
                 "head_branch": branch}
 
     def test_a_full_run_that_passed_on_the_commit_is_evidence(self) -> None:
-        for event, branch in (("push", "dev"), ("merge_group", "gh-readonly-queue/dev/pr-313-191accac"),
+        for event, branch in (("merge_group", "gh-readonly-queue/dev/pr-313-191accac"),
                               ("workflow_dispatch", "dev")):
             with self.subTest(event=event):
                 self.assertEqual(
@@ -137,6 +142,11 @@ class PromotionEvidenceTest(unittest.TestCase):
             with self.subTest(branch=branch):
                 runs = [self.run_of("workflow_dispatch", branch=branch)]
                 self.assertTrue(verify_promotion_evidence({"workflow_runs": runs}, self.SHA))
+
+    def test_the_bare_postmerge_push_is_not_full_tier_evidence(self) -> None:
+        self.assertTrue(
+            verify_promotion_evidence({"workflow_runs": [self.run_of("push", branch="dev")]}, self.SHA)
+        )
 
     def test_the_301_case_is_refused(self) -> None:
         """Only pull-request runs, or a full run of another commit: nothing verified this one."""
@@ -218,11 +228,11 @@ class VerifyWorkflowTest(unittest.TestCase):
         broken = self.contents.replace(
             "  full-ui-e2e-shard:\n    name: full-ui-e2e-shard"
             " (${{ matrix.shard }}/${{ strategy.job-total }})\n"
-            "    needs: [release-classification, full-ui-build]\n"
+            "    needs: [release-classification, full-preflight, full-ui-build]\n"
             "    if: needs.release-classification.outputs.tier == 'full'",
             "  full-ui-e2e-shard:\n    name: full-ui-e2e-shard"
             " (${{ matrix.shard }}/${{ strategy.job-total }})\n"
-            "    needs: [release-classification, full-ui-build]\n"
+            "    needs: [release-classification, full-preflight, full-ui-build]\n"
             "    if: needs.release-classification.outputs.tier == 'nightly'",
             1,
         )
@@ -230,7 +240,8 @@ class VerifyWorkflowTest(unittest.TestCase):
         self.assertTrue(any("full-ui-e2e-shard" in problem for problem in verify_workflow(broken)))
 
     def test_a_job_dropped_from_the_gate_dependencies_is_refused(self) -> None:
-        broken = self.contents.replace("      - full-backend-tests\n", "", 1)
+        gate = job_blocks(self.contents)[GATE_JOB]
+        broken = self.contents.replace(gate, gate.replace("      - full-backend-tests\n", "", 1), 1)
         self.assertNotEqual(broken, self.contents)
         problems = verify_workflow(broken)
         self.assertTrue(any("full-backend-tests" in problem for problem in problems))
@@ -291,8 +302,9 @@ class VerifyWorkflowTest(unittest.TestCase):
                 self.assertNotIn(job, defined)
 
     def test_every_gated_job_belongs_to_exactly_one_class(self) -> None:
+        self.assertEqual(set(ADMISSION_JOBS) & (set(POLICY_JOBS) | set(PRODUCT_JOBS)), set())
         self.assertEqual(set(POLICY_JOBS) & set(PRODUCT_JOBS), set())
-        self.assertEqual(set(GATED_JOBS), set(POLICY_JOBS) | set(PRODUCT_JOBS))
+        self.assertEqual(set(GATED_JOBS), set(ADMISSION_JOBS) | set(POLICY_JOBS) | set(PRODUCT_JOBS))
 
     def test_the_declared_check_contexts_are_distinct(self) -> None:
         for tier in REQUIRED_BY_TIER:
@@ -325,14 +337,16 @@ class VerifyEventTest(unittest.TestCase):
         self.assertTrue(verify_event("pull_request", "main", "x", "promotion", "hotfix/cve", repo, repo),
                         "a hotfix never passed through dev: it may not borrow a promotion's green")
 
-    def test_an_event_headed_for_dev_never_accepts_a_lighter_tier(self) -> None:
-        for event, base, ref in (
-            ("pull_request", "dev", "feature/x"),
-            ("push", "", "dev"),
-            ("workflow_dispatch", "", "feature/x"),
-            ("merge_group", "", "gh-readonly-queue/dev/pr-1"),
+    def test_each_dev_stage_accepts_only_its_own_tier(self) -> None:
+        for event, base, ref, expected in (
+            ("pull_request", "dev", "feature/x", "admission"),
+            ("push", "", "dev", "postmerge"),
+            ("workflow_dispatch", "", "feature/x", "full"),
+            ("merge_group", "", "gh-readonly-queue/dev/pr-1", "full"),
         ):
-            for tier in ("promotion", "docs", "fast", ""):
+            for tier in ("admission", "full", "postmerge", "promotion", "docs", "fast", ""):
+                if tier == expected:
+                    continue
                 with self.subTest(event=event, tier=tier):
                     self.assertTrue(verify_event(event, base, ref, tier))
 

@@ -33,6 +33,7 @@ export function mountD3ElasticRenderer({
   fontSize = 14,
   attraction = .3,
   repulsion = 320,
+  speed = .5,
   isLive = () => true,
   onViewportChange = () => {},
   initialTransform = null,
@@ -200,6 +201,7 @@ export function mountD3ElasticRenderer({
     visualGroups?.refresh();
   };
 
+  const movementSpeed = Math.max(.1, Math.min(1, finite(speed, .5)));
   const simulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(links).id(node => node.id)
       .distance(link => link.restLen).strength(finite(attraction, .3)))
@@ -210,7 +212,10 @@ export function mountD3ElasticRenderer({
     .force('center', d3.forceCenter(initialCentroid.x, initialCentroid.y).strength(.04))
     .force('collision', d3.forceCollide().radius(node => node.r + 8))
     .alphaDecay(.012)
-    .velocityDecay(.42)
+    .velocityDecay(.65 - movementSpeed * .45)
+    // Speed controls damping, but a permanently non-zero alpha target prevents a monitoring
+    // viewport from ever settling and makes the exported/painted centroid drift indefinitely.
+    .alphaTarget(0)
     .on('tick', () => {
       if (destroyed || !isLive()) {
         simulation.stop();

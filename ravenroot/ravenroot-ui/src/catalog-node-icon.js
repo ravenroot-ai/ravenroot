@@ -17,7 +17,10 @@
 // insertion path until — textually identical at the time, so nothing was broken, but the
 // invariant this comment claims did not actually hold until that copy was replaced with this import.
 export function resolveDescriptorNodeType(descriptor) {
-  return descriptor?.visualType || (descriptor?.agentic ? 'agent' : 'actor');
+  if (descriptor?.visualType) return descriptor.visualType;
+  if (descriptor?.behavior === 'human-task') return 'human-task';
+  if (/^(trace|log|logger)$/i.test(descriptor?.behavior || '')) return 'trace';
+  return descriptor?.agentic ? 'agent' : 'actor';
 }
 
 // The catalog palette's preview icon for a descriptor, kept in lockstep with what the canvas will

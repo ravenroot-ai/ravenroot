@@ -57,7 +57,7 @@ test('inventories every panel family without native-title or unnamed glyph fallb
   await expect(page.locator('.rail-btn[data-tooltip]')).toHaveCount(11);
 
   const legend = page.locator('[data-legend-kind]');
-  await expect(legend).toHaveCount(20);
+  await expect(legend).toHaveCount(22);
   expect(await legend.evaluateAll(items => items.every(item =>
     item.tagName === 'BUTTON' && item.tabIndex === 0 && item.dataset.tooltip && item.getAttribute('aria-label')))).toBe(true);
   await expect(page.locator('[data-catalog-add][data-tooltip]')).toHaveCount(2);

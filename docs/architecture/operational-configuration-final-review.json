@@ -8533,7 +8533,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "2699c1ac0f2aa2eb29844d86476c8276c39d29ba6d8e987243f1cebe92f0c6e0",
+          "digest": "8dd885449e082ba6ddbb2151a65ef285bd65c1e09a2c7ce8821604f912859127",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -8829,7 +8829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "2699c1ac0f2aa2eb29844d86476c8276c39d29ba6d8e987243f1cebe92f0c6e0",
+          "digest": "8dd885449e082ba6ddbb2151a65ef285bd65c1e09a2c7ce8821604f912859127",
           "assertion": "UI resolves catalog entries through stable lookup tokens."
         }
       ],
@@ -8987,7 +8987,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "2699c1ac0f2aa2eb29844d86476c8276c39d29ba6d8e987243f1cebe92f0c6e0",
+          "digest": "8dd885449e082ba6ddbb2151a65ef285bd65c1e09a2c7ce8821604f912859127",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -10766,7 +10766,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "2699c1ac0f2aa2eb29844d86476c8276c39d29ba6d8e987243f1cebe92f0c6e0",
+          "digest": "8dd885449e082ba6ddbb2151a65ef285bd65c1e09a2c7ce8821604f912859127",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,7 +11429,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "2699c1ac0f2aa2eb29844d86476c8276c39d29ba6d8e987243f1cebe92f0c6e0",
+          "digest": "8dd885449e082ba6ddbb2151a65ef285bd65c1e09a2c7ce8821604f912859127",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {

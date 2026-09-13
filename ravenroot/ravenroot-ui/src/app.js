@@ -38,6 +38,8 @@ import {
   JOIN_POLICY_PROPERTY,
   JOIN_QUORUM_PROPERTY,
   JOIN_TIMEOUT_PROPERTY,
+  KNOWN_EDGE_FIELDS,
+  KNOWN_NODE_FIELDS,
   joinKindProperties,
   quorumWouldCollideWithLegacyStamp,
   kindOwnsNodeType,
@@ -8736,10 +8738,21 @@ function readPropertyEditor(form) {
 }
 
 function showReadOnlyElement(model, label) {
-  const fields = Object.entries(model).filter(([, value]) =>
-    ['string', 'number', 'boolean'].includes(typeof value) && value !== '');
+  const isNode = graphData?.nodes?.some(node => node.id === model.id);
+  const definitions = isNode ? KNOWN_NODE_FIELDS : KNOWN_EDGE_FIELDS;
+  const valueFor = name => name === 'nodeType' ? model.nodeType
+    : name === 'name' && !isNode ? model.edgeName : model[name];
+  const fields = [{ label: 'ID', value: model.id }]
+    .concat(definitions.map(field => ({ label: field.label, value: valueFor(field.name) })))
+    .concat(isNode ? [
+      { label: 'Visual type', value: model.nodeType },
+      { label: 'Catalog type', value: model.behavior },
+    ] : [])
+    .concat(Object.entries(model.properties || {}).map(([name, value]) => ({ label: name, value })))
+    .filter(field => field.value !== undefined && field.value !== null)
+    .filter((field, index, all) => all.findIndex(candidate => candidate.label === field.label) === index);
   document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(label)}</h4>
-    ${fields.map(([name, value]) => `<div class="info-row"><span class="info-k">${escapeHtml(name)}</span><span class="info-v info-mono">${escapeHtml(value)}</span></div>`).join('')}
+    ${fields.map(field => `<div class="info-row"><span class="info-k">${escapeHtml(field.label)}</span><span class="info-v info-mono">${escapeHtml(field.value === '' ? '—' : field.value)}</span></div>`).join('')}
     </div><div class="info-empty">${graphData?.format === 'graphify'
       ? 'Graphify JSON remains view-only. Export or execute a Ravenroot GraphML workflow.'
       : 'Inspect mode is active. Turn Modify ON to edit this element.'}</div>`;

@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 28.
+Checked source reconciliations: 29.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 20322 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 20132 |
-| Unchanged identities | 19454 |
-| Approved identity migrations | 660 |
-| Approved retirements | 18 |
-| Semantically classified additions | 208 |
+| Source inventory candidates | 20322 |
+| Unchanged identities | 20322 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 20322 |
 
 ## Final semantic review
@@ -3641,11 +3641,11 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-fd06a4f10b2b3a7e7c46` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java:48` `IngressRequestProjectionPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-f1f2e302759da7833b1e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRequestProjectionPolicy.java:54` `IngressRequestProjectionPolicy` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-59770b320f57f597e044` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressRouteOwner.java:17` `IngressRouteOwner` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-14c12ba5674eff205cd6` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:19` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
-| `oc-a2050978e582a8795333` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:19` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
-| `oc-f90d089a5b58de6bb8d3` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:20` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
-| `oc-1e48c6b5d1792c2fbf47` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:21` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
-| `oc-a819a458aed7749308b7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:118` `StoreException` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
+| `oc-14c12ba5674eff205cd6` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:20` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
+| `oc-a2050978e582a8795333` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:20` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
+| `oc-f90d089a5b58de6bb8d3` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:22` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
+| `oc-1e48c6b5d1792c2fbf47` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:24` `SessionMemoryStore` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
+| `oc-a819a458aed7749308b7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/memory/SessionMemoryStore.java:231` `StoreException` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
 | `oc-b816229a1867a6f67cb9` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/NodeSdk.java:39` `NodeSdk` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-950f75b42aa74ba4fdfd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/NodeSdk.java:42` `NodeSdk` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-b7c8b625d0488516659f` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/NodeSdk.java:53` `NodeSdk` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -3911,8 +3911,8 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-c8e8f9b1c7a1590124f8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:368` `Confirmation` | java | already-centralized | operator-configurable | defaultReviewTextBytes is the typed immutable Human Task review-presentation default resolved from the paired JVM property/environment binding and typed default. |
 | `oc-dad7e342145d182fec64` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:368` `Confirmation` | java | already-centralized | operator-configurable | pollAfterMillis is the typed live attention refresh base interval authority resolved from the paired JVM property/environment binding and typed default. |
 | `oc-a415bd1997ec418afe80` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReentryMapping.java:17` `HumanTaskReentryMapping` | java | retained | presentation-text | The bounded-key helper receives this field-name string only to identify expiredOutcome in a local validation exception. |
-| `oc-0e825162b60c75e0a8cd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:209` `if` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify executionLimits in a local validation exception. |
-| `oc-49184dbfa00f076825a2` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:230` `equals` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify confirmationLimits in a local validation exception. |
+| `oc-0e825162b60c75e0a8cd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:232` `if` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify executionLimits in a local validation exception. |
+| `oc-49184dbfa00f076825a2` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:253` `equals` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify confirmationLimits in a local validation exception. |
 | `oc-98c72d815f685107a88c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReviewPresentation.java:23` `HumanTaskReviewPresentation` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
 | `oc-20fafacf4f96d16f2d4a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReviewPresentation.java:25` `HumanTaskReviewPresentation` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
 | `oc-9a0332dc7e028df84e3a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReviewPresentation.java:27` `HumanTaskReviewPresentation` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |

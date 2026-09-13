@@ -8,7 +8,14 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from scripts.central_registry import RegistryError, build_bundle, publish_bundle, validate_bundle
+from scripts.central_registry import (
+    ROOT,
+    RegistryError,
+    build_bundle,
+    local_payloads,
+    publish_bundle,
+    validate_bundle,
+)
 from scripts.github_release import (
     GitHubReleaseError,
     reconcile_assets,
@@ -421,6 +428,35 @@ class CentralBundleTest(unittest.TestCase):
             build_bundle(second, VERSION)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             validate_bundle(first, VERSION, lambda *_: None)
+
+    def test_every_payload_is_the_file_maven_signed(self):
+        """Read the real POMs: the stubbed tests above never checked this mapping, and v0.2.0-alpha.1
+        failed on it. maven-gpg-plugin signs the POM as target/<finalName>.pom."""
+        payloads = dict(local_payloads(VERSION))
+        distribution = ROOT / "ravenroot/ravenroot-distribution/target"
+        self.assertEqual(payloads[f"ravenroot-distribution-{VERSION}.pom"], distribution / "ravenroot.pom")
+        self.assertEqual(payloads[f"ravenroot-distribution-{VERSION}.jar"], distribution / "ravenroot.jar")
+        self.assertEqual(payloads[f"ravenroot-core-{VERSION}.pom"],
+                         ROOT / f"ravenroot/ravenroot-core/target/ravenroot-core-{VERSION}.pom")
+        for filename, local in payloads.items():
+            with self.subTest(payload=filename):
+                self.assertNotEqual(local.name, "pom.xml", "the POM Maven signed is the copy in target/")
+                self.assertEqual(local.parent.name, "target")
+
+    @mock.patch("scripts.central_registry.local_payloads")
+    def test_a_signature_is_read_beside_the_file_maven_signed(self, payloads):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pom = root / "ravenroot.pom"
+            pom.write_bytes(b"<project/>")
+            Path(f"{pom}.asc").write_bytes(b"signature")
+            payloads.return_value = [(f"ravenroot-distribution-{VERSION}.pom", pom)]
+            bundle = root / "bundle.zip"
+            build_bundle(bundle, VERSION)
+            primary = f"ai/ravenroot/ravenroot-distribution/{VERSION}/ravenroot-distribution-{VERSION}.pom"
+            with zipfile.ZipFile(bundle) as archive:
+                self.assertEqual(archive.read(primary), b"<project/>")
+                self.assertEqual(archive.read(f"{primary}.asc"), b"signature")
 
     @mock.patch("scripts.central_registry.compare_local")
     @mock.patch("scripts.central_registry.central_state", return_value={"state": "complete"})

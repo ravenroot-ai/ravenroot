@@ -134,13 +134,19 @@ def local_payloads(version: str) -> list[tuple[str, Path]]:
         artifact = project.findtext("m:artifactId", namespaces=namespace)
         if artifact not in publishable:
             continue
-        payloads.append((f"{artifact}-{version}.pom", pom))
+        # Maven names what a module builds after its finalName, and maven-gpg-plugin signs the POM
+        # as a byte copy at target/<finalName>.pom. Every payload is therefore the file Maven
+        # signed, with its signature beside it. ravenroot-distribution keeps finalName `ravenroot`
+        # because the runtime and the image consume target/ravenroot.jar.
+        final_name = project.findtext("m:build/m:finalName", namespaces=namespace)
+        final_name = final_name or f"{artifact}-{version}"
+        if "${" in final_name:
+            raise RegistryError(f"{artifact}: finalName {final_name!r} must be literal to locate its signed files")
+        target = pom.parent / "target"
+        payloads.append((f"{artifact}-{version}.pom", target / f"{final_name}.pom"))
         packaging = project.findtext("m:packaging", default="jar", namespaces=namespace)
         if packaging != "jar":
             continue
-        final_name = project.findtext("m:build/m:finalName", namespaces=namespace)
-        final_name = final_name or f"{artifact}-{version}"
-        target = pom.parent / "target"
         payloads.extend(
             (
                 (f"{artifact}-{version}.jar", target / f"{final_name}.jar"),
@@ -181,9 +187,8 @@ def bundle_path(artifact: str, version: str, filename: str) -> str:
     return f"ai/ravenroot/{artifact}/{version}/{filename}"
 
 
-def local_signature(filename: str, payload: Path) -> Path:
-    if payload.name == "pom.xml":
-        return payload.parent / "target" / f"{filename}.asc"
+def local_signature(payload: Path) -> Path:
+    """maven-gpg-plugin writes each signature beside the file it signed."""
     return Path(f"{payload}.asc")
 
 
@@ -200,7 +205,7 @@ def build_bundle(path: Path, version: str) -> None:
         for filename, local in local_payloads(version):
             if not local.is_file():
                 raise RegistryError(f"tagged build payload is missing: {local.relative_to(ROOT)}")
-            signature = local_signature(filename, local)
+            signature = local_signature(local)
             if not signature.is_file():
                 raise RegistryError(f"tagged build signature is missing: {signature.relative_to(ROOT)}")
             primary = bundle_path(artifact_for(filename, version), version, filename)

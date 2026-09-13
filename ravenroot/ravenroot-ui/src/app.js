@@ -370,7 +370,7 @@ const NODE_ICONS = {
   terminal: '⊙ ',
   consumer: '⩓ ', handler:  '↩ ',
   agent:    '⬡ ', flow:     '⚙ ',
-  actor:    '◉ ', system:   '▪ '
+  actor:    '◉ ', system:   '▪ ', trace: '▤ ', 'human-task': '♙ '
 };
 
 /**
@@ -557,6 +557,14 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'rectangle',
     'background-color': surface.system,
     'border-color': node.system, 'border-width': 1.5,
+  }},
+  { selector: 'node[nodeType="trace"]', style: {
+    shape: 'rectangle', 'background-color': surface.trace,
+    'border-color': node.trace, 'border-width': 2,
+  }},
+  { selector: 'node[nodeType="human-task"]', style: {
+    shape: 'ellipse', 'background-color': surface['human-task'],
+    'border-color': node['human-task'], 'border-width': 2.5,
   }},
   { selector: 'node[humanTaskPending > 0]', style: {
     'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
@@ -4109,6 +4117,7 @@ const N8N_ICONS_CHAR = {
   consumer: '⧒', handler:  '↩',
   agent:    '🧠', flow:     '⚙',
   actor:    '◎', system:   '▤',
+  trace:    '▤', 'human-task': '♙',
 };
 let N8N_BG = rendererPalette.nodeSurfaceByType;
 let N8N_BORDER = rendererPalette.nodeType;

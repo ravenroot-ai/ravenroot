@@ -21,6 +21,7 @@ export const NODE_VISUAL_TYPES = Object.freeze([
   { type: 'consumer', label: 'Consumer' }, { type: 'handler', label: 'Handler' },
   { type: 'agent', label: 'Agent' }, { type: 'flow', label: 'Flow' },
   { type: 'actor', label: 'Actor' }, { type: 'system', label: 'System' },
+  { type: 'trace', label: 'Trace' }, { type: 'human-task', label: 'Human task' },
 ].map(Object.freeze));
 
 const NODE_VISUAL_TYPE_NAMES = new Set(NODE_VISUAL_TYPES.map(entry => entry.type));

@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 20132 |
+| Atomic operational candidates discovered | 20148 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 20132 |
+| Reviewed | 20148 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 245 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1819 |
-| Retained protocol or format invariants | 8267 |
+| Retained protocol or format invariants | 8273 |
 | Retained published contract descriptions | 424 |
-| Retained presentation text | 526 |
+| Retained presentation text | 525 |
 | Retained derived values | 1007 |
-| Test fixtures | 6754 |
+| Test fixtures | 6765 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1648.
+Retired source candidates preserved in inventory history: 1659.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 28.
+Checked source reconciliations: 29.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 20132 candidates.
+zero-count or unclassified rows as needed and sums to 20148 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 20132 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 18797 |
+| retained | 18813 |
 
 ### Classification counts
 
@@ -85,11 +85,11 @@ zero-count or unclassified rows as needed and sums to 20132 candidates.
 |---|---:|
 | derived | 1007 |
 | operator-configurable | 1335 |
-| presentation-text | 526 |
-| protocol-or-format-invariant | 8267 |
+| presentation-text | 525 |
+| protocol-or-format-invariant | 8273 |
 | published-contract-description | 424 |
 | security-ceiling-or-default | 1819 |
-| test-fixture | 6754 |
+| test-fixture | 6765 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 20132 candidates.
 | deployment | 2042 |
 | deployment-example | 20 |
 | java | 6330 |
-| script | 2058 |
-| test-fixture | 6754 |
+| script | 2063 |
+| test-fixture | 6765 |
 | ui | 2928 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1539 |
 | #321 | 8647 |
-| Retained; no remediation required | 8895 |
+| Retained; no remediation required | 8911 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 20132 |
-| Unchanged identities | 20131 |
-| Approved identity migrations | 0 |
-| Approved retirements | 1 |
-| Semantically classified additions | 1 |
-| Current candidates | 20132 |
+| Unchanged identities | 20101 |
+| Approved identity migrations | 20 |
+| Approved retirements | 11 |
+| Semantically classified additions | 27 |
+| Current candidates | 20148 |
 
 ## Final semantic review
 
@@ -13122,147 +13122,152 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-343b8bf6778363387a34` | `scripts/check_release_configuration.py:249` `check_oci_metadata` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-512a53aa3de7fdbdba56` | `scripts/check_release_configuration.py:261` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-876b691ad4e59be157d0` | `scripts/check_release_configuration.py:263` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-66500282286c29c3d3d4` | `scripts/ci_required.py:45` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-b570e6aaf76487f6eb65` | `scripts/ci_required.py:45` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-f5716462f484283f2eb2` | `scripts/ci_required.py:45` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-f973312ca14b9cd37f2d` | `scripts/ci_required.py:45` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-cc65c5b478dcd50b9738` | `scripts/ci_required.py:46` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-60db6b3e532b85ed80f9` | `scripts/ci_required.py:48` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-ef05359bdf66041cc0e8` | `scripts/ci_required.py:50` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-d2fd20d911d868710384` | `scripts/ci_required.py:51` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-98b9f0d06ca4e8cf7ecc` | `scripts/ci_required.py:57` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-e4188fe98bdd426d0d87` | `scripts/ci_required.py:79` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-f1fba03fcb4e56a92032` | `scripts/ci_required.py:79` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-3437671a3a7f8e62ffd1` | `scripts/ci_required.py:117` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-01d81882a7b35c6006a4` | `scripts/ci_required.py:118` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-1cfd904fe82b36acd2b0` | `scripts/ci_required.py:118` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-9f28c0a271dae57de438` | `scripts/ci_required.py:118` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-82ea69660f71f1da27aa` | `scripts/ci_required.py:119` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-04ab8681f04fc2f53807` | `scripts/ci_required.py:122` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-ef360318b47c57b2dca0` | `scripts/ci_required.py:124` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-2ed168657ffd9b716e9c` | `scripts/ci_required.py:127` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-2145afa13ccd992bcafe` | `scripts/ci_required.py:191` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-9c4879e56d030e728ae3` | `scripts/ci_required.py:191` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-f6db8b1e3cbb5d98532b` | `scripts/ci_required.py:191` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-6e35b110473d7abf97c8` | `scripts/ci_required.py:224` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-d424d0763c03a5f3549f` | `scripts/ci_required.py:243` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-405e4c474c59e8aac9cc` | `scripts/ci_required.py:245` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-f1af02053f059de3fe5c` | `scripts/ci_required.py:246` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-0c3862e83029542a3411` | `scripts/ci_required.py:266` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-7e1d02f49a2904e5043a` | `scripts/ci_required.py:266` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-dfbe8f8d1b85a690c3ce` | `scripts/ci_required.py:266` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-2770af690a0e8df8db83` | `scripts/ci_required.py:272` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-23076d0658cab6721861` | `scripts/ci_required.py:276` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-fbc67589b4458f5b289c` | `scripts/ci_required.py:277` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-3477bb4f63594a7bd981` | `scripts/ci_required.py:309` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-e65bebc61dfff9f66663` | `scripts/ci_required.py:340` `verify_dispatch_routing` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-1827edf3f502604ed2f6` | `scripts/ci_required.py:357` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-9b35b701cccc9e09b4c7` | `scripts/ci_required.py:360` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-709c27d3bca30978cb69` | `scripts/ci_required.py:367` `verify_single_publisher` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-07606031b92659b3f526` | `scripts/ci_required.py:374` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-0db5f5a4decbb4d4bad1` | `scripts/ci_required.py:374` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-21850a8eb8fabc6e507a` | `scripts/ci_required.py:374` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-da23fd05937505d3c982` | `scripts/ci_required.py:382` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-f41fc0a184e4a9cc3d28` | `scripts/ci_required.py:407` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-1f8986c3d45866ff786e` | `scripts/ci_required.py:409` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-e497f5198d92d97ed017` | `scripts/ci_required.py:448` `verify_event` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-22636d3188dc8b342d41` | `scripts/ci_required.py:455` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-54d544b5f5a8a3d59270` | `scripts/ci_required.py:455` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-e9100917b92ee4459762` | `scripts/ci_required.py:455` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-29d1b27ccdaddccf18ec` | `scripts/ci_required.py:459` `is_integration_branch` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-83232e0e16e8023d482b` | `scripts/ci_required.py:459` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-dede11e5349e15615e7f` | `scripts/ci_required.py:459` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-4aabe968069f28664f3f` | `scripts/ci_required.py:460` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-60c8733896bdb048bb3f` | `scripts/ci_required.py:460` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-574fbb0a7e8ec76cb03e` | `scripts/ci_required.py:476` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-ab44e9bdd31c9265b862` | `scripts/ci_required.py:476` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-229cbc9f1fc86b965f40` | `scripts/ci_required.py:481` `verify_promotion_evidence` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-0ea7b8566f13c0077a02` | `scripts/ci_required.py:488` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-1f91d39a504e86fd6ec2` | `scripts/ci_required.py:488` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-71ed7787c03546857f1f` | `scripts/ci_required.py:488` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-1d7fe94c43b39292ecb7` | `scripts/ci_required.py:501` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-320faf02c16a2e550bc3` | `scripts/ci_required.py:503` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-b043510bab79b528a28c` | `scripts/ci_required.py:509` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-657dd527d31fb1f76aa7` | `scripts/ci_required.py:519` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-f7be0bb34ed61a8898ac` | `scripts/ci_required.py:520` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-02bd04eabf710a86cfa0` | `scripts/ci_required.py:593` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-8ce131af2c47c7f9de66` | `scripts/ci_required.py:593` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-ceea0f32943929f0ac23` | `scripts/ci_required.py:593` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-f33c4d396e1b61e7b4eb` | `scripts/classify_main_change.py:21` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-14f2d3aaab6a4516e8db` | `scripts/classify_main_change.py:22` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-803370b155b15a32eb96` | `scripts/classify_main_change.py:23` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-47160df378993ac2e009` | `scripts/classify_main_change.py:24` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-99d01325dc0bfeb95f19` | `scripts/classify_main_change.py:35` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-2a749533ce55d0b648fa` | `scripts/classify_main_change.py:44` `is_documentation_path` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-56f95d6ec7482431bc84` | `scripts/classify_main_change.py:44` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-7e8c81820d7c0cf5c845` | `scripts/classify_main_change.py:44` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-1720fe8d37062b63ffa6` | `scripts/classify_main_change.py:48` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-2c8271b206b15ddbf2f0` | `scripts/classify_main_change.py:48` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6b3187da032b6651d1bd` | `scripts/classify_main_change.py:48` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-c5a22bf9cfa80f30df1f` | `scripts/classify_main_change.py:50` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-cf41566ef68927bf44ee` | `scripts/classify_main_change.py:50` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-defa1fe1d8309d95a311` | `scripts/classify_main_change.py:50` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f26b8b03954364e6d51f` | `scripts/classify_main_change.py:50` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-68feb61c32f18099746a` | `scripts/classify_main_change.py:53` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a97f99d7c835f8f2c50a` | `scripts/classify_main_change.py:54` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-ee94b4773bc12cf80444` | `scripts/classify_main_change.py:54` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-611012857e8fb0c574ff` | `scripts/classify_main_change.py:55` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-2c46847ed30877d1bb6a` | `scripts/classify_main_change.py:60` `documentation_only` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-928b840b7621479de5c2` | `scripts/classify_main_change.py:60` `documentation_only` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-c9a1c6194ef3fed2d40c` | `scripts/classify_main_change.py:60` `documentation_only` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-a4ecfa085ff022ca10a1` | `scripts/classify_main_change.py:91` `parse_labels` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-4e39011e05b351df402c` | `scripts/classify_main_change.py:115` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-61104de0fff580d543ca` | `scripts/classify_main_change.py:115` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-abf77035c38e254bb2d1` | `scripts/classify_main_change.py:115` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-6c0ee4b0ef8840aff808` | `scripts/classify_main_change.py:137` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6cfdb476ed57c45906a4` | `scripts/classify_main_change.py:137` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6daef90184ea8b8a1dc3` | `scripts/classify_main_change.py:137` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8adc3ca2433bc9ff18ca` | `scripts/classify_main_change.py:137` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-b31b3a3b3a964ba14795` | `scripts/classify_main_change.py:137` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-3b48e8747c9104446cac` | `scripts/classify_main_change.py:142` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-4a8151b049a782fbfe9b` | `scripts/classify_main_change.py:142` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-4aa3edca347a43ffef59` | `scripts/classify_main_change.py:142` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-72678a38d1f02bdb70d5` | `scripts/classify_main_change.py:142` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-ff57196ac738c5994b87` | `scripts/classify_main_change.py:142` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-48269f5fb894dfb9ab0c` | `scripts/classify_main_change.py:145` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-b0b4141b8d10cbfdf684` | `scripts/classify_main_change.py:145` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d018a922f7a4e0f33494` | `scripts/classify_main_change.py:145` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-fb96c393d043b4058042` | `scripts/classify_main_change.py:145` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-fddbd13f7869bf00b7c4` | `scripts/classify_main_change.py:145` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-545c7fc78785bed71827` | `scripts/classify_main_change.py:151` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-9cd2678ea1ff7f95c5e1` | `scripts/classify_main_change.py:151` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-044a21e13b60004a84da` | `scripts/classify_main_change.py:154` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-0a71e8a26595173e9948` | `scripts/classify_main_change.py:154` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-b8b5195c79563408e50a` | `scripts/classify_main_change.py:156` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-c864ed57c33648cab2b3` | `scripts/classify_main_change.py:158` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-04c247fe6cc28f837d4e` | `scripts/classify_main_change.py:159` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-9619f5a39f3b248c1c96` | `scripts/classify_main_change.py:163` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-8eaa10ef97dd57f2e548` | `scripts/classify_main_change.py:182` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-cc04aa255d19ea97a147` | `scripts/classify_main_change.py:182` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-d7f7927e6a2a621c0b3e` | `scripts/classify_main_change.py:182` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-4ee6204abbb8856e6065` | `scripts/classify_main_change.py:185` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5e5f02192d33be0ef8fd` | `scripts/classify_main_change.py:185` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6e612cb1bfe77ac41086` | `scripts/classify_main_change.py:185` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-75236b02adb5e389fd6a` | `scripts/classify_main_change.py:185` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-eaeec78d88ba1564f17e` | `scripts/classify_main_change.py:185` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-fa69db6fbd46f42fd678` | `scripts/classify_main_change.py:185` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-0b57e3d1584462acac2b` | `scripts/classify_main_change.py:187` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-3cb02b90d7374af94e08` | `scripts/classify_main_change.py:187` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-5a567faa174ed34c532e` | `scripts/classify_main_change.py:187` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-95bce16ab60bf8c074ee` | `scripts/classify_main_change.py:187` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-e0114ab7513f660bb877` | `scripts/classify_main_change.py:187` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-00e05c19cbcef291080e` | `scripts/classify_main_change.py:191` `changed_paths` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-373767d1bcf0e2508def` | `scripts/classify_main_change.py:191` `changed_paths` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f38b299148e9889f6923` | `scripts/classify_main_change.py:191` `changed_paths` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5ba99a781e30ac3f6149` | `scripts/classify_main_change.py:204` `write_github_outputs` | script | retained | protocol-or-format-invariant | GITHUB_OUTPUT is a GitHub Actions protocol binding. |
-| `oc-4892f122aae9ee47aba8` | `scripts/classify_main_change.py:207` `write_github_outputs` | script | retained | derived | The append mode/encoding is local deterministic output I/O. |
-| `oc-d2ccb4d7615671bde4e4` | `scripts/classify_main_change.py:207` `write_github_outputs` | script | retained | derived | The append mode/encoding is local deterministic output I/O. |
-| `oc-41877eccfb5e1ea424c3` | `scripts/classify_main_change.py:214` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-4adaed962c5b921b3637` | `scripts/classify_main_change.py:214` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-73b1307667892b1e5d84` | `scripts/classify_main_change.py:214` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-75dbe08cd2a3f13a7d2a` | `scripts/classify_main_change.py:214` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-62e8c7c1a170dddc6b96` | `scripts/classify_main_change.py:228` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-a93535dbba09e3bc52d3` | `scripts/classify_main_change.py:231` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-66500282286c29c3d3d4` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-b570e6aaf76487f6eb65` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-f5716462f484283f2eb2` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-f973312ca14b9cd37f2d` | `scripts/ci_required.py:43` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-cc65c5b478dcd50b9738` | `scripts/ci_required.py:44` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-60db6b3e532b85ed80f9` | `scripts/ci_required.py:46` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-ef05359bdf66041cc0e8` | `scripts/ci_required.py:48` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-d2fd20d911d868710384` | `scripts/ci_required.py:49` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-98b9f0d06ca4e8cf7ecc` | `scripts/ci_required.py:55` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-e4188fe98bdd426d0d87` | `scripts/ci_required.py:84` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-f1fba03fcb4e56a92032` | `scripts/ci_required.py:84` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-3437671a3a7f8e62ffd1` | `scripts/ci_required.py:124` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-01d81882a7b35c6006a4` | `scripts/ci_required.py:125` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-1cfd904fe82b36acd2b0` | `scripts/ci_required.py:125` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-9f28c0a271dae57de438` | `scripts/ci_required.py:125` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-82ea69660f71f1da27aa` | `scripts/ci_required.py:126` `module` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-239b7e2ba1df136195c3` | `scripts/ci_required.py:128` `module` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-04ab8681f04fc2f53807` | `scripts/ci_required.py:130` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-ef360318b47c57b2dca0` | `scripts/ci_required.py:132` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-2ed168657ffd9b716e9c` | `scripts/ci_required.py:135` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-2145afa13ccd992bcafe` | `scripts/ci_required.py:203` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-9c4879e56d030e728ae3` | `scripts/ci_required.py:203` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-f6db8b1e3cbb5d98532b` | `scripts/ci_required.py:203` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-6e35b110473d7abf97c8` | `scripts/ci_required.py:236` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-d424d0763c03a5f3549f` | `scripts/ci_required.py:255` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-405e4c474c59e8aac9cc` | `scripts/ci_required.py:257` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-f1af02053f059de3fe5c` | `scripts/ci_required.py:258` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-0c3862e83029542a3411` | `scripts/ci_required.py:278` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-7e1d02f49a2904e5043a` | `scripts/ci_required.py:278` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-dfbe8f8d1b85a690c3ce` | `scripts/ci_required.py:278` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-2770af690a0e8df8db83` | `scripts/ci_required.py:284` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-23076d0658cab6721861` | `scripts/ci_required.py:288` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-fbc67589b4458f5b289c` | `scripts/ci_required.py:289` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-3477bb4f63594a7bd981` | `scripts/ci_required.py:321` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-e65bebc61dfff9f66663` | `scripts/ci_required.py:352` `verify_dispatch_routing` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-1827edf3f502604ed2f6` | `scripts/ci_required.py:369` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-9b35b701cccc9e09b4c7` | `scripts/ci_required.py:372` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-709c27d3bca30978cb69` | `scripts/ci_required.py:379` `verify_single_publisher` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-07606031b92659b3f526` | `scripts/ci_required.py:386` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-0db5f5a4decbb4d4bad1` | `scripts/ci_required.py:386` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-21850a8eb8fabc6e507a` | `scripts/ci_required.py:386` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-da23fd05937505d3c982` | `scripts/ci_required.py:394` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-f41fc0a184e4a9cc3d28` | `scripts/ci_required.py:419` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-1f8986c3d45866ff786e` | `scripts/ci_required.py:421` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-e497f5198d92d97ed017` | `scripts/ci_required.py:460` `verify_event` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-8e12ef72dc395e961547` | `scripts/ci_required.py:468` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-b63bbbeaccde92949c63` | `scripts/ci_required.py:468` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-29d1b27ccdaddccf18ec` | `scripts/ci_required.py:472` `is_integration_branch` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-83232e0e16e8023d482b` | `scripts/ci_required.py:472` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-dede11e5349e15615e7f` | `scripts/ci_required.py:472` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-4aabe968069f28664f3f` | `scripts/ci_required.py:473` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-60c8733896bdb048bb3f` | `scripts/ci_required.py:473` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-574fbb0a7e8ec76cb03e` | `scripts/ci_required.py:489` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-ab44e9bdd31c9265b862` | `scripts/ci_required.py:489` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-b250f8de640badb859f1` | `scripts/ci_required.py:494` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-0ea7b8566f13c0077a02` | `scripts/ci_required.py:501` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-1f91d39a504e86fd6ec2` | `scripts/ci_required.py:501` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-71ed7787c03546857f1f` | `scripts/ci_required.py:501` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-1d7fe94c43b39292ecb7` | `scripts/ci_required.py:514` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-320faf02c16a2e550bc3` | `scripts/ci_required.py:516` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-b043510bab79b528a28c` | `scripts/ci_required.py:522` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-657dd527d31fb1f76aa7` | `scripts/ci_required.py:532` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-f7be0bb34ed61a8898ac` | `scripts/ci_required.py:533` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-02bd04eabf710a86cfa0` | `scripts/ci_required.py:606` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-8ce131af2c47c7f9de66` | `scripts/ci_required.py:606` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-ceea0f32943929f0ac23` | `scripts/ci_required.py:606` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-f33c4d396e1b61e7b4eb` | `scripts/classify_main_change.py:20` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-14f2d3aaab6a4516e8db` | `scripts/classify_main_change.py:21` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-803370b155b15a32eb96` | `scripts/classify_main_change.py:22` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-47160df378993ac2e009` | `scripts/classify_main_change.py:23` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-99d01325dc0bfeb95f19` | `scripts/classify_main_change.py:34` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-2a749533ce55d0b648fa` | `scripts/classify_main_change.py:43` `is_documentation_path` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-56f95d6ec7482431bc84` | `scripts/classify_main_change.py:43` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-7e8c81820d7c0cf5c845` | `scripts/classify_main_change.py:43` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-1720fe8d37062b63ffa6` | `scripts/classify_main_change.py:47` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-2c8271b206b15ddbf2f0` | `scripts/classify_main_change.py:47` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6b3187da032b6651d1bd` | `scripts/classify_main_change.py:47` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-c5a22bf9cfa80f30df1f` | `scripts/classify_main_change.py:49` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-cf41566ef68927bf44ee` | `scripts/classify_main_change.py:49` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-defa1fe1d8309d95a311` | `scripts/classify_main_change.py:49` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f26b8b03954364e6d51f` | `scripts/classify_main_change.py:49` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-68feb61c32f18099746a` | `scripts/classify_main_change.py:52` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-a97f99d7c835f8f2c50a` | `scripts/classify_main_change.py:53` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-ee94b4773bc12cf80444` | `scripts/classify_main_change.py:53` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-611012857e8fb0c574ff` | `scripts/classify_main_change.py:54` `is_documentation_path` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-2c46847ed30877d1bb6a` | `scripts/classify_main_change.py:59` `documentation_only` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-928b840b7621479de5c2` | `scripts/classify_main_change.py:59` `documentation_only` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-c9a1c6194ef3fed2d40c` | `scripts/classify_main_change.py:59` `documentation_only` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-a4ecfa085ff022ca10a1` | `scripts/classify_main_change.py:90` `parse_labels` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-4e39011e05b351df402c` | `scripts/classify_main_change.py:114` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-61104de0fff580d543ca` | `scripts/classify_main_change.py:114` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-abf77035c38e254bb2d1` | `scripts/classify_main_change.py:114` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-6c0ee4b0ef8840aff808` | `scripts/classify_main_change.py:136` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6cfdb476ed57c45906a4` | `scripts/classify_main_change.py:136` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6daef90184ea8b8a1dc3` | `scripts/classify_main_change.py:136` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8adc3ca2433bc9ff18ca` | `scripts/classify_main_change.py:136` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-b31b3a3b3a964ba14795` | `scripts/classify_main_change.py:136` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-3b48e8747c9104446cac` | `scripts/classify_main_change.py:141` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4a8151b049a782fbfe9b` | `scripts/classify_main_change.py:141` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4aa3edca347a43ffef59` | `scripts/classify_main_change.py:141` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-72678a38d1f02bdb70d5` | `scripts/classify_main_change.py:141` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-ff57196ac738c5994b87` | `scripts/classify_main_change.py:141` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-007a17ec95d5e24154ff` | `scripts/classify_main_change.py:144` `classify` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-0a6a52bc5ff0fbbc2130` | `scripts/classify_main_change.py:144` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-19abc13769db41c3ae02` | `scripts/classify_main_change.py:144` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-73ebebdf0dbf05429807` | `scripts/classify_main_change.py:144` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-b96a2ca5ab58492094d7` | `scripts/classify_main_change.py:144` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-545c7fc78785bed71827` | `scripts/classify_main_change.py:150` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-9cd2678ea1ff7f95c5e1` | `scripts/classify_main_change.py:150` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-044a21e13b60004a84da` | `scripts/classify_main_change.py:153` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-0a71e8a26595173e9948` | `scripts/classify_main_change.py:153` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-b8b5195c79563408e50a` | `scripts/classify_main_change.py:155` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-c864ed57c33648cab2b3` | `scripts/classify_main_change.py:157` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-04c247fe6cc28f837d4e` | `scripts/classify_main_change.py:158` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-9619f5a39f3b248c1c96` | `scripts/classify_main_change.py:162` `classify` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-8eaa10ef97dd57f2e548` | `scripts/classify_main_change.py:181` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-cc04aa255d19ea97a147` | `scripts/classify_main_change.py:181` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-d7f7927e6a2a621c0b3e` | `scripts/classify_main_change.py:181` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-4ee6204abbb8856e6065` | `scripts/classify_main_change.py:184` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5e5f02192d33be0ef8fd` | `scripts/classify_main_change.py:184` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6e612cb1bfe77ac41086` | `scripts/classify_main_change.py:184` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-75236b02adb5e389fd6a` | `scripts/classify_main_change.py:184` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-eaeec78d88ba1564f17e` | `scripts/classify_main_change.py:184` `classify` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-fa69db6fbd46f42fd678` | `scripts/classify_main_change.py:184` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-3cadbdec2b2b945b3e01` | `scripts/classify_main_change.py:190` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-89350073b6c1524977e5` | `scripts/classify_main_change.py:190` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-aef6ec8cca9fc6302286` | `scripts/classify_main_change.py:190` `classify` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-c12dc909b1d1eddf1fe8` | `scripts/classify_main_change.py:190` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-ead1765802144f9161a3` | `scripts/classify_main_change.py:190` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-1e8ea3ca7c2c5981eb02` | `scripts/classify_main_change.py:192` `classify` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-36179adae080ec176ca5` | `scripts/classify_main_change.py:192` `classify` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-3e317387204524e26770` | `scripts/classify_main_change.py:192` `classify` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-cacd88ea3df25175bc82` | `scripts/classify_main_change.py:192` `classify` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-d018a922f7a4e0f33494` | `scripts/classify_main_change.py:192` `classify` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-00e05c19cbcef291080e` | `scripts/classify_main_change.py:196` `changed_paths` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-373767d1bcf0e2508def` | `scripts/classify_main_change.py:196` `changed_paths` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f38b299148e9889f6923` | `scripts/classify_main_change.py:196` `changed_paths` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5ba99a781e30ac3f6149` | `scripts/classify_main_change.py:209` `write_github_outputs` | script | retained | protocol-or-format-invariant | GITHUB_OUTPUT is a GitHub Actions protocol binding. |
+| `oc-4892f122aae9ee47aba8` | `scripts/classify_main_change.py:212` `write_github_outputs` | script | retained | derived | The append mode/encoding is local deterministic output I/O. |
+| `oc-d2ccb4d7615671bde4e4` | `scripts/classify_main_change.py:212` `write_github_outputs` | script | retained | derived | The append mode/encoding is local deterministic output I/O. |
+| `oc-41877eccfb5e1ea424c3` | `scripts/classify_main_change.py:219` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-4adaed962c5b921b3637` | `scripts/classify_main_change.py:219` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-73b1307667892b1e5d84` | `scripts/classify_main_change.py:219` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-75dbe08cd2a3f13a7d2a` | `scripts/classify_main_change.py:219` `main` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-62e8c7c1a170dddc6b96` | `scripts/classify_main_change.py:233` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-a93535dbba09e3bc52d3` | `scripts/classify_main_change.py:236` `main` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-f4a1a51b129a916a2828` | `scripts/e2e_report_names.mjs:20` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-8abd56bd45c9820f8688` | `scripts/e2e_report_names.mjs:26` `if` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-3fb24323f0a1c59f5815` | `scripts/e2e_report_names.mjs:31` `if` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |

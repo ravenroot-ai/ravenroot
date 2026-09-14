@@ -3826,6 +3826,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["aiOperationalAuthorities"] = {
         AI_OPERATIONAL_AUTHORITY_ID: ai_operational_authority,
     }
+    final_review_reference = refreshed.get("finalReviewAuthority")
+    if isinstance(final_review_reference, dict) \
+            and final_review_reference.get("id") == FINAL_REVIEW_AUTHORITY_ID \
+            and final_review_reference.get("path") == FINAL_REVIEW.relative_to(ROOT).as_posix():
+        final_review_reference["digest"] = hashlib.sha256(
+            (root / FINAL_REVIEW.relative_to(ROOT)).read_bytes(),
+        ).hexdigest()
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history

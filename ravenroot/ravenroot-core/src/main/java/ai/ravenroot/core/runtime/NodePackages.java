@@ -156,7 +156,8 @@ public final class NodePackages {
             // PinnedNodePackage.of imposes no shape on either string, so in fact nothing here can
             // fail; the placement is what keeps that true if it ever changes.
             plans.add(new RegistrationPlan(packageId,
-                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()),
+                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract(),
+                            nodePackage.operationalPolicyDigest()),
                     serviceAware, packageServices, packageServices.egressCapacityProfile(),
                     List.copyOf(validated)));
         }

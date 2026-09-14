@@ -48,6 +48,7 @@ final class McpSession {
     private final McpProfile profile;
     private final NodePackageServices services;
     private final NodeMessage message;
+    private final int maximumDecompressionRatio;
     /** What is left of the whole run, asked freshly on every exchange rather than captured. */
     private final LongSupplier remainingRunMillis;
     private final AtomicLong nextId = new AtomicLong(1);
@@ -78,11 +79,12 @@ final class McpSession {
     private volatile String sessionId = "";
 
     private McpSession(McpProfile profile, NodePackageServices services, NodeMessage message,
-                       LongSupplier remainingRunMillis) {
+                       LongSupplier remainingRunMillis, int maximumDecompressionRatio) {
         this.profile = profile;
         this.services = services;
         this.message = message;
         this.remainingRunMillis = remainingRunMillis;
+        this.maximumDecompressionRatio = maximumDecompressionRatio;
     }
 
     /**
@@ -97,8 +99,10 @@ final class McpSession {
      *     {@link McpRefusal}
      */
     static CompletionStage<McpSession> open(McpProfile profile, NodePackageServices services,
-                                            NodeMessage message, LongSupplier remainingRunMillis) {
-        var session = new McpSession(profile, services, message, remainingRunMillis);
+                                            NodeMessage message, LongSupplier remainingRunMillis,
+                                            int maximumDecompressionRatio) {
+        var session = new McpSession(profile, services, message, remainingRunMillis,
+                maximumDecompressionRatio);
         return session.exchange(McpProtocol.initialize(session.nextId.getAndIncrement()), true)
                 .thenCompose(ignored -> session.exchange(McpProtocol.initialized(), false))
                 .thenCompose(ignored -> session.exchange(
@@ -171,7 +175,8 @@ final class McpSession {
                     profile.credentialBinding().orElse(null), null,
                     ExternalIoLimits.compressedHttp(profile.maxRequestBytes(),
                             profile.maxResponseBytes(), profile.maxResponseBytes(),
-                            profile.maxResponseBytes(), 100, Duration.ofMillis(remaining),
+                            profile.maxResponseBytes(), maximumDecompressionRatio,
+                            Duration.ofMillis(remaining),
                             expectsResult ? Set.of("application/json", "text/event-stream") : Set.of()),
                     ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {

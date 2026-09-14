@@ -578,7 +578,7 @@
     "aiConfiguration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["defaultMaxTurns", "maxTurns", "maxMcpServers", "maxSkillPayloadBytes", "maxSkillNameChars", "maxSkillDescriptionChars", "maxSkillInstructionsChars", "maxMcpToolsPerServer", "defaultMaxDiscoveredMcpToolsPerServer", "maxDiscoveredMcpToolsPerServer", "maxLlmProfileBytes", "maxMcpProfileBytes", "defaultLlmTimeoutMs", "maxLlmTimeoutMs", "defaultMcpTimeoutMs", "maxMcpTimeoutMs", "defaultLlmRequestBytes", "maxLlmRequestBytes", "defaultLlmResponseBytes", "maxLlmResponseBytes", "defaultMcpRequestBytes", "maxMcpRequestBytes", "defaultMcpResponseBytes", "maxMcpResponseBytes", "defaultLlmConcurrency", "maxLlmConcurrency", "defaultMcpConcurrency", "maxMcpConcurrency", "maxSystemPreambleChars"],
+      "required": ["defaultMaxTurns", "maxTurns", "maxMcpServers", "maxSkillPayloadBytes", "maxSkillNameChars", "maxSkillDescriptionChars", "maxSkillInstructionsChars", "maxMcpToolsPerServer", "defaultMaxDiscoveredMcpToolsPerServer", "maxDiscoveredMcpToolsPerServer", "maxLlmProfileBytes", "maxMcpProfileBytes", "defaultLlmTimeoutMs", "maxLlmTimeoutMs", "defaultMcpTimeoutMs", "maxMcpTimeoutMs", "defaultLlmRequestBytes", "maxLlmRequestBytes", "defaultLlmResponseBytes", "maxLlmResponseBytes", "defaultMcpRequestBytes", "maxMcpRequestBytes", "defaultMcpResponseBytes", "maxMcpResponseBytes", "defaultLlmConcurrency", "maxLlmConcurrency", "defaultMcpConcurrency", "maxMcpConcurrency", "maxSystemPreambleChars", "maxHttpDecompressionRatio", "maxModelInputProvenanceEntries"],
       "properties": {
         "defaultMaxTurns": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MAX_TURNS", "$ref": "#/definitions/aiPositive" },
         "maxTurns": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_TURNS", "$ref": "#/definitions/aiPositive" },
@@ -608,7 +608,9 @@
         "maxLlmConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_LLM_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
         "defaultMcpConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
         "maxMcpConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
-        "maxSystemPreambleChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "$ref": "#/definitions/aiPositive" }
+        "maxSystemPreambleChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "$ref": "#/definitions/aiPositive" },
+        "maxHttpDecompressionRatio": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", "$ref": "#/definitions/aiPositive" },
+        "maxModelInputProvenanceEntries": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES", "$ref": "#/definitions/aiPositive" }
       }
     }
   }

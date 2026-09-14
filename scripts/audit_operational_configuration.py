@@ -3346,6 +3346,12 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "aiOperationalAuthorities" and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "aiOperationalAuthorities" \
+            and path[2] in {"settings", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -3559,6 +3565,17 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field == "contracts":
                             remap_list(row, "defaultCandidateIds")
+
+    ai_authorities = document.get("aiOperationalAuthorities")
+    if isinstance(ai_authorities, dict):
+        for authority in ai_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("settings", "semanticPartitions"):
+                for row in authority.get(field, []):
+                    if isinstance(row, dict):
+                        remap_list(row, "candidateIds")
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -3827,6 +3844,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["aiOperationalAuthorities"] = {
             AI_OPERATIONAL_AUTHORITY_ID: ai_operational_authority,
         }
+        by_id = {str(entry["id"]): entry for entry in merged}
+        for partition in ai_operational_authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                by_id[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"], coverage=partition["coverage"],
+                    aiOperationalAuthority=AI_OPERATIONAL_AUTHORITY_ID)
     final_review_reference = refreshed.get("finalReviewAuthority")
     if isinstance(final_review_reference, dict) \
             and final_review_reference.get("id") == FINAL_REVIEW_AUTHORITY_ID \
@@ -7684,7 +7708,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'ensureProgramGraphReady',
   'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
   1),
- ('compose.yaml', 'file', '', '', '145006c289fbf3eb1f55d5973b9cffb40e7117fdae79cd74fbfb00566c1715a6', 1),
+ ('compose.yaml', 'file', '', '', '558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7', 1),
  ('deploy/dev/sandbox-supervisor.sh',
   'file',
   '',
@@ -7695,25 +7719,25 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'fd890f3506161d5890988f4bc015c9c2886c5680f76ece9278cf6702fc081d81',
+  '866c8c950817cd8ac82990907b33cca86c1c4eb79ff5bb8ddc92618d7bb6b22a',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  'fd2bae0c06a1c3a00864d67c307fde3c8742aef4a117305472fb822201d285c3',
+  'd851be43f0e17d0a8cb857ccdd6a19de716c77b5ccda7e44e89dcaa25840030f',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  'fe15d9c253e75fe101feb524d8c763466c67173345cbc9bd6c9d5cc07887740c',
+  'a36bd353f0e241f4f0796739ce8ab49aaf5cb8a40eb75eb355f2ab4eff74a27a',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
   '',
   '',
-  '7943d0400c424994ed46a3f340a4e881eab382623dfdbb82a9d489a99adcb98b',
+  'aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d',
   1),
  ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
   'file',
@@ -11792,7 +11816,68 @@ AI_OPERATIONAL_SETTINGS = (
     ("ai.default-mcp-concurrency", "defaultMcpConcurrency", "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", "4"),
     ("ai.max-mcp-concurrency", "maxMcpConcurrency", "RAVENROOT_AI_MAX_MCP_CONCURRENCY", "256"),
     ("ai.max-system-preamble-chars", "maxSystemPreambleChars", "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "8192"),
+    ("ai.max-http-decompression-ratio", "maxHttpDecompressionRatio", "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", "100"),
+    ("ai.max-model-input-provenance-entries", "maxModelInputProvenanceEntries", "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES", "4096"),
 )
+AI_OPERATIONAL_RETAINED_PARTITIONS = (
+    {"semanticPartition": "ai.model-output-projection-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes.",
+     "coverage": "AgentNodeBehaviorTest and LlmPromptNodeBehaviorTest exercise bounded model output projection and refusal.",
+     "candidateIds": ["oc-3aba38cfe203f9b3f49e", "oc-63a0108d73246ff05f46", "oc-87688d017e988172d961", "oc-b8cdf3dc00eb521149ee", "oc-a15232f6cf9188a6c271", "oc-479da44f4ca2e22dc41d", "oc-d61dcb75ce909feb893f", "oc-91a0b04901ac3e122a2d"]},
+    {"semanticPartition": "ai.model-response-json-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "OpenAI response grammar structural limits are fixed parser-safety invariants layered beneath the operator-configurable encoded response-byte limit; the minimum-one and half-body expressions are derived nonzero/value-size carriers, not independent workload defaults.",
+     "coverage": "AgentTurnTest and OpenAiCompatibleChatTest cover malformed, nested and oversized response refusal.",
+     "candidateIds": ["oc-b304ca383e681889cdad", "oc-ab050180737152e3db47", "oc-c8ad30ca50463b65dd7f", "oc-7395b4fd33ea8ab599a0", "oc-c8d3d8cc2848e890ccc0", "oc-0a9124d45147744e7625", "oc-9fe47da66b933edbe09f", "oc-52ff52588d6bda679008", "oc-fbdfcb025ba7a055e25d", "oc-75c5b834e1a5f9bf0826", "oc-ac6e4b728284c147ab9f", "oc-7b234fec362ee9c931d9", "oc-87bb69df4d6402ae6374", "oc-b3c01d47adf91bf50fd6"]},
+    {"semanticPartition": "ai.profile-json-schema-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "LLM and MCP environment profiles have closed shallow schemas. Their fixed nesting, field-count and key-size parser limits are stricter testable format invariants; decoded document bytes and dynamic MCP tool count remain independently operator-configurable.",
+     "coverage": "EnvironmentLlmProfileResolverTest and EnvironmentMcpProfileResolverTest cover exact schema, unknown fields and oversized profiles.",
+     "candidateIds": ["oc-c99966cbf3c2a9ae6a22", "oc-d08aeb4e34a2c7ee4fa5", "oc-8430bd8f6c7d9c77e0da", "oc-e1103ccb2aaca6c00feb", "oc-c3665467a01a705e73f0", "oc-d4a043e085968e89c956", "oc-5b6e7490edee77907819", "oc-97ae5ff1d3c12b1f1ccc"]},
+    {"semanticPartition": "ai.load-skill-argument-schema-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "load_skill accepts one name field. Its document allowance is derived from the configured maximum skill-name bytes with a fixed JSON framing floor; depth, collection/value and key limits describe that closed one-field wire schema.",
+     "coverage": "LoadSkillToolTest covers valid selection, unreadable arguments and configured long names.",
+     "candidateIds": ["oc-9e28fd1ab4498d75a555", "oc-2717e87fd768be6443dc", "oc-fc83f6a6057502f39e98", "oc-fb8c4f21457f70b6028c", "oc-da0cfb97aee8e2473bab", "oc-9f84f4e7ebb208cefd84", "oc-2a38f927656ddb0e54d6"]},
+    {"semanticPartition": "ai.mcp-tool-argument-json-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "Model-authored MCP arguments use a fixed correction/refusal envelope before authorization. These depth, fan-out, string and key ceilings limit parser amplification and are not server catalogue counts or deployment defaults.",
+     "coverage": "McpProtocolTest covers empty, malformed, scalar and bounded argument objects.",
+     "candidateIds": ["oc-98fcad8f7ba993e57442", "oc-a8290e051e14f2801eeb", "oc-c4a3ffef5b376e8aff9c", "oc-289a37588d57c8680dfc", "oc-ff6a0e8b4d7b90d908f2", "oc-88acd206eaf81c9229ca", "oc-23910800a6c0cd367f40", "oc-aa9aa7d0faefd822435c"]},
+    {"semanticPartition": "ai.mcp-projection-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "The model-facing MCP catalogue projection is re-measured under the managed response-byte ceiling; fixed depth/fan-out/key limits prevent local prefix/schema projection from amplifying a wire response already admitted by bytes.",
+     "coverage": "McpProtocolTest and McpToolsetTest cover projection expansion and refusal.",
+     "candidateIds": ["oc-f4386b9a20c123cbb041", "oc-19472f5234b8c555d7c5", "oc-d7724afa46ae936e695c", "oc-743afef29b48af69c2c0"]},
+    {"semanticPartition": "ai.mcp-response-json-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "MCP response collection capacity is derived from the operator-configurable discovered-tool maximum while fixed depth, value multiplier, key length and nonzero byte carriers bound JSON-RPC parser amplification.",
+     "coverage": "McpProtocolTest and McpSessionTest cover dynamic catalogues, malformed responses and configured response bounds.",
+     "candidateIds": ["oc-b40c4e7d6024ba83d129", "oc-2a2b015ed390039a879a", "oc-91c0b087437402d8bb97", "oc-0c82731c3b4ee9aa0d32", "oc-0033f52fb149e7fd5db1"]},
+)
+AI_OPERATIONAL_RETAINED_PATHS = {
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentTurn.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentLlmProfileResolver.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentMcpProfileResolver.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LoadSkillTool.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpProtocol.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/OpenAiCompatibleChat.java",
+}
+
+
+def ai_operational_retained_cohort(discovered: dict[str, Candidate]) -> set[str]:
+    """Discover the reviewed parser-envelope family without trusting inventory classifications."""
+    return {candidate.id for candidate in discovered.values()
+            if candidate.path in AI_OPERATIONAL_RETAINED_PATHS
+            and ((candidate.kind == "inline-operational-call"
+                  and candidate.role == "new-PayloadLimits"
+                  and candidate.expression[:1].isdigit())
+                 or (candidate.path.endswith("/LoadSkillTool.java")
+                     and candidate.role in {"documentBytes", "argumentLimits"}
+                     and candidate.expression != "256"))}
 AI_OPERATIONAL_PROOF_PATHS = (
     AI_OPERATIONAL_CONFIGURATION_PATH,
     Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java"),
@@ -11814,6 +11899,7 @@ AI_OPERATIONAL_TEST_METHODS = (
     "validValuesOverrideEveryDefault",
     "invalidValuesAreActionable",
     "crossFieldRelationshipsAreValidated",
+    "compatibilityDigestPinsTheCompletePolicy",
 )
 
 
@@ -11868,9 +11954,16 @@ def ai_operational_authority_from_source(
                       for method in ("value", "positive", "supportedPayload", "notAbove")}
     if any(digest is None for digest in helper_digests.values()):
         return None
+    retained = [copy.deepcopy(partition) for partition in AI_OPERATIONAL_RETAINED_PARTITIONS]
+    retained_ids = [identifier for partition in retained for identifier in partition["candidateIds"]]
+    if len(retained_ids) != 54 or len(set(retained_ids)) != 54 \
+            or set(retained_ids) != ai_operational_retained_cohort(discovered):
+        return None
+    candidate_ids.update(retained_ids)
     return {
         "kind": "java-ai-operational-configuration-v1",
         "settings": settings,
+        "semanticPartitions": retained,
         "candidateIds": sorted(candidate_ids),
         "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(text)}
                           for path, text in sources.items()],
@@ -11920,6 +12013,15 @@ def ai_operational_authority_errors(
                     or entry.get("status") != "already-centralized" \
                     or entry.get("classification") != "operator-configurable":
                 errors.append(f"{identifier}: AI operational authority metadata has drifted")
+    for partition in expected["semanticPartitions"]:
+        for identifier in partition["candidateIds"]:
+            entry = entries.get(identifier, {})
+            if entry.get("aiOperationalAuthority") != AI_OPERATIONAL_AUTHORITY_ID \
+                    or entry.get("status") != partition["status"] \
+                    or entry.get("classification") != partition["classification"] \
+                    or entry.get("rationale") != partition["rationale"] \
+                    or entry.get("coverage") != partition["coverage"]:
+                errors.append(f"{identifier}: AI retained semantic partition metadata has drifted")
     return errors
 
 

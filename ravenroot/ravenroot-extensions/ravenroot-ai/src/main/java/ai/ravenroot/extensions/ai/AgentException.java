@@ -35,6 +35,8 @@ public final class AgentException extends RuntimeException {
         RESPONSE_UNREADABLE,
         /** The response was larger than the profile's ceiling. */
         RESPONSE_TOO_LARGE,
+        /** The locally encoded request exceeded the profile's ceiling and was not dispatched. */
+        REQUEST_TOO_LARGE,
         /** The endpoint reported a content filter rather than a turn. */
         COMPLETION_REFUSED,
         /** The endpoint answered with neither an answer nor a tool call. */

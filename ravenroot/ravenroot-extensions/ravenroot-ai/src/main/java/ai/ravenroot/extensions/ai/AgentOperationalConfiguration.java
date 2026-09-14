@@ -1,7 +1,9 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.persistence.ExecutionManifestDigest;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -35,7 +37,9 @@ public record AgentOperationalConfiguration(
         int maxLlmConcurrency,
         int defaultMcpConcurrency,
         int maxMcpConcurrency,
-        int maxSystemPreambleChars) {
+        int maxSystemPreambleChars,
+        int maxHttpDecompressionRatio,
+        int maxModelInputProvenanceEntries) {
 
     public static final int DEFAULT_MAX_TURNS = 8;
     public static final int DEFAULT_MAX_TURNS_CEILING = 64;
@@ -56,6 +60,8 @@ public record AgentOperationalConfiguration(
     public static final int DEFAULT_MAX_CONCURRENCY = 256;
     public static final int DEFAULT_CONCURRENCY = 4;
     public static final int DEFAULT_MAX_SYSTEM_PREAMBLE_CHARS = 8 * 1024;
+    public static final int DEFAULT_MAX_HTTP_DECOMPRESSION_RATIO = 100;
+    public static final int DEFAULT_MAX_MODEL_INPUT_PROVENANCE_ENTRIES = 4_096;
 
     public AgentOperationalConfiguration {
         positive("RAVENROOT_AI_DEFAULT_MAX_TURNS", defaultMaxTurns);
@@ -87,6 +93,8 @@ public record AgentOperationalConfiguration(
         positive("RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", defaultMcpConcurrency);
         positive("RAVENROOT_AI_MAX_MCP_CONCURRENCY", maxMcpConcurrency);
         positive("RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", maxSystemPreambleChars);
+        positive("RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", maxHttpDecompressionRatio);
+        positive("RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES", maxModelInputProvenanceEntries);
         supportedPayload("RAVENROOT_AI_MAX_SKILL_NAME_CHARS", maxSkillNameChars);
         supportedPayload("RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS", maxSkillDescriptionChars);
         supportedPayload("RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS", maxSkillInstructionsChars);
@@ -146,7 +154,8 @@ public record AgentOperationalConfiguration(
                 DEFAULT_MCP_BYTES, DEFAULT_MAX_MCP_BYTES,
                 DEFAULT_CONCURRENCY, DEFAULT_MAX_CONCURRENCY,
                 DEFAULT_CONCURRENCY, DEFAULT_MAX_CONCURRENCY,
-                DEFAULT_MAX_SYSTEM_PREAMBLE_CHARS);
+                DEFAULT_MAX_SYSTEM_PREAMBLE_CHARS, DEFAULT_MAX_HTTP_DECOMPRESSION_RATIO,
+                DEFAULT_MAX_MODEL_INPUT_PROVENANCE_ENTRIES);
     }
 
     public static AgentOperationalConfiguration fromEnvironment(Map<String, String> environment) {
@@ -181,7 +190,36 @@ public record AgentOperationalConfiguration(
                 value(environment, "RAVENROOT_AI_MAX_LLM_CONCURRENCY", d.maxLlmConcurrency),
                 value(environment, "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", d.defaultMcpConcurrency),
                 value(environment, "RAVENROOT_AI_MAX_MCP_CONCURRENCY", d.maxMcpConcurrency),
-                value(environment, "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", d.maxSystemPreambleChars));
+                value(environment, "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", d.maxSystemPreambleChars),
+                value(environment, "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", d.maxHttpDecompressionRatio),
+                value(environment, "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES",
+                        d.maxModelInputProvenanceEntries));
+    }
+
+    /**
+     * Returns the non-secret, canonical generation fingerprint used by distributed execution.
+     *
+     * @return lowercase SHA-256 digest of this complete operational policy
+     */
+    public String compatibilityDigest() {
+        return ExecutionManifestDigest.component("ravenroot.ai.operational-policy.v1", List.of(
+                String.valueOf(defaultMaxTurns), String.valueOf(maxTurns),
+                String.valueOf(maxMcpServers), String.valueOf(maxSkillPayloadBytes),
+                String.valueOf(maxSkillNameChars), String.valueOf(maxSkillDescriptionChars),
+                String.valueOf(maxSkillInstructionsChars), String.valueOf(maxMcpToolsPerServer),
+                String.valueOf(defaultMaxDiscoveredMcpToolsPerServer),
+                String.valueOf(maxDiscoveredMcpToolsPerServer), String.valueOf(maxLlmProfileBytes),
+                String.valueOf(maxMcpProfileBytes), String.valueOf(defaultLlmTimeoutMs),
+                String.valueOf(maxLlmTimeoutMs), String.valueOf(defaultMcpTimeoutMs),
+                String.valueOf(maxMcpTimeoutMs), String.valueOf(defaultLlmRequestBytes),
+                String.valueOf(maxLlmRequestBytes), String.valueOf(defaultLlmResponseBytes),
+                String.valueOf(maxLlmResponseBytes), String.valueOf(defaultMcpRequestBytes),
+                String.valueOf(maxMcpRequestBytes), String.valueOf(defaultMcpResponseBytes),
+                String.valueOf(maxMcpResponseBytes), String.valueOf(defaultLlmConcurrency),
+                String.valueOf(maxLlmConcurrency), String.valueOf(defaultMcpConcurrency),
+                String.valueOf(maxMcpConcurrency), String.valueOf(maxSystemPreambleChars),
+                String.valueOf(maxHttpDecompressionRatio),
+                String.valueOf(maxModelInputProvenanceEntries)));
     }
 
     private static int value(Map<String, String> environment, String name, int fallback) {

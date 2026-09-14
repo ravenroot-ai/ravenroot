@@ -6158,7 +6158,7 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
         authority = audit.ai_operational_authority_from_source(ROOT, self.discovered)
         self.assertIsNotNone(authority)
         assert authority is not None
-        self.assertEqual(29, len(authority["settings"]))
+        self.assertEqual(31, len(authority["settings"]))
         environments = {environment for _setting, _field, environment, _default
                         in audit.AI_OPERATIONAL_SETTINGS}
         self.assertEqual(
@@ -6169,8 +6169,14 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
             {candidate.id for candidate in self.candidates
              if candidate.kind == "environment-binding"
              and candidate.expression in environments},
-            set(authority["candidateIds"]),
+            {identifier for contract in authority["settings"]
+             for identifier in contract["candidateIds"]},
         )
+        self.assertEqual(7, len(authority["semanticPartitions"]))
+        retained = {identifier for partition in authority["semanticPartitions"]
+                    for identifier in partition["candidateIds"]}
+        self.assertEqual(54, len(retained))
+        self.assertEqual(retained, audit.ai_operational_retained_cohort(self.discovered))
         self.assertEqual(
             [],
             audit.ai_operational_authority_errors(
@@ -6186,6 +6192,20 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
         errors = audit.ai_operational_authority_errors(
             ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered)
         self.assertTrue(any("partition" in error for error in errors), errors)
+
+    def test_retained_ai_partition_relabel_or_new_payload_limit_fails_closed(self) -> None:
+        retained_id = self.inventory["aiOperationalAuthorities"][
+            audit.AI_OPERATIONAL_AUTHORITY_ID]["semanticPartitions"][0]["candidateIds"][0]
+        entries = copy.deepcopy(self.entries)
+        entries[retained_id]["classification"] = "protocol-or-format-invariant"
+        self.assertTrue(audit.ai_operational_authority_errors(
+            ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered))
+
+        from dataclasses import replace
+        source = self.discovered[retained_id]
+        injected = replace(source, id="oc-injected-ai-envelope", expression="999")
+        changed = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.ai_operational_authority_from_source(ROOT, changed))
 
 
 class ProgramGithubPolicyAuditTest(unittest.TestCase):

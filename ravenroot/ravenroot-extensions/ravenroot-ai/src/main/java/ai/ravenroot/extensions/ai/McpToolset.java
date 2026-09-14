@@ -52,12 +52,14 @@ final class McpToolset {
     static CompletionStage<List<AgentTool>> discover(List<McpProfile> profiles,
                                                      NodePackageServices services,
                                                      NodeMessage message,
-                                                     LongSupplier remainingRunMillis) {
+                                                     LongSupplier remainingRunMillis,
+                                                     int maximumDecompressionRatio) {
         CompletionStage<List<AgentTool>> chain =
                 CompletableFuture.completedFuture(new ArrayList<AgentTool>());
         for (McpProfile profile : profiles) {
             chain = chain.thenCompose(collected ->
-                    McpSession.open(profile, services, message, remainingRunMillis)
+                    McpSession.open(profile, services, message, remainingRunMillis,
+                            maximumDecompressionRatio)
                             .thenApply(session -> add(collected, session)));
         }
         return chain.thenApply(List::copyOf);

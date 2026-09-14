@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -345,6 +346,29 @@ class NodePackageRegistrationTest {
         assertFalse(first.get(0).toString().contains("1.0 beta"),
                 "the declared string is digested rather than retained, so nothing downstream has to "
                         + "decide whether it is safe to render");
+    }
+
+    @Test
+    void operationalPolicyGenerationChangesThePinnedRuntimeIdentity() {
+        String firstDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        String secondDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var first = NodePackages.register(new BehaviorRegistry(), new PolicyPackage(firstDigest))
+                .nodePackageIdentities().getFirst();
+        var stable = NodePackages.register(new BehaviorRegistry(), new PolicyPackage(firstDigest))
+                .nodePackageIdentities().getFirst();
+        var changed = NodePackages.register(new BehaviorRegistry(), new PolicyPackage(secondDigest))
+                .nodePackageIdentities().getFirst();
+
+        assertEquals(first, stable);
+        assertNotEquals(first.identityDigest(), changed.identityDigest());
+    }
+
+    private record PolicyPackage(String policyDigest) implements NodePackage {
+        @Override public String id() { return "com.example.ravenroot.policy"; }
+        @Override public String version() { return "1"; }
+        @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+        @Override public Optional<String> operationalPolicyDigest() { return Optional.of(policyDigest); }
+        @Override public List<NodeBehavior> behaviors() { return List.of(); }
     }
 
     private record LooseVersionPackage(String declaredVersion, String contract, String packageId)

@@ -12,6 +12,12 @@ import {
 } from './layered-layout.js';
 import * as d3 from 'd3';
 import {
+  additionalPropertyGroupsValid,
+  nextAdditionalPropertyGroupItem,
+  serializeAdditionalPropertyGroups,
+  splitAdditionalPropertyGroups,
+} from './additional-property-groups.js';
+import {
   detectAndParse,
   GFY_MAX_WARN,
   GFY_SAMPLE,
@@ -6017,6 +6023,8 @@ function readNodeEditorPatch(form, model) {
   const values = new FormData(form);
   const id = String(values.get('id') || '').trim();
   const custom = readPropertyEditor(form);
+  const additionalGroups = readAdditionalPropertyGroupEditor(
+    form, catalogDescriptor(String(values.get('behavior') || '').trim()));
   const catalog = readCatalogPropertyEditor(form);
   const nature = readNatureEditor(form);
   // The bypass flag is read HERE and not at the submit site, and that placement is the
@@ -6056,11 +6064,11 @@ function readNodeEditorPatch(form, model) {
     // under a default type, which is the kind of divergence that only surfaces on a GraphML round
     // trip, so the two lists are kept in the same order to make an omission visible by eye.
     properties: {
-      ...custom.properties, ...catalog.properties, ...nature.properties,
+      ...custom.properties, ...additionalGroups.properties, ...catalog.properties, ...nature.properties,
       ...bypass.properties, ...runtimeConcurrency.properties, ...join.properties,
     },
     propertyTypes: {
-      ...custom.propertyTypes, ...catalog.propertyTypes, ...nature.propertyTypes,
+      ...custom.propertyTypes, ...additionalGroups.propertyTypes, ...catalog.propertyTypes, ...nature.propertyTypes,
       ...bypass.propertyTypes, ...runtimeConcurrency.propertyTypes, ...join.propertyTypes,
     },
   };
@@ -6478,8 +6486,11 @@ function renderNodeForm(model, creating) {
     DEFAULT_MAX_CONCURRENCY_PROPERTY, descriptor?.maxConcurrencyProperty,
     bypassPropertyName(descriptor, nodeTypeCatalog),
   ].filter(Boolean));
+  const additionalGroups = splitAdditionalPropertyGroups(
+    descriptor, model.properties || {}, model.propertyTypes || {});
   const extras = additionalProperties(model, 'node')
-    .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name));
+    .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name)
+      && !additionalGroups.claimed.has(property.name));
   const visualTypes = NODE_TYPES.map(type =>
     `<option value="${type.type}" ${type.type === model.nodeType ? 'selected' : ''}>${escapeHtml(type.label)}</option>`)
     .join('');
@@ -6510,6 +6521,7 @@ function renderNodeForm(model, creating) {
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
         catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
+      <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
         ${creating ? '' : '<button class="btn danger" type="button" id="delete-node">Delete</button>'}
@@ -6542,6 +6554,8 @@ function renderNodeForm(model, creating) {
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
       programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
+    document.getElementById('additional-property-groups').innerHTML = additionalPropertyGroupsHtml(
+      splitAdditionalPropertyGroups(selected, model.properties || {}, model.propertyTypes || {}).groups);
     bindProgramWorkspace(form, model);
   });
   // `NodeBypassValidator` refuses the key on every non-BEHAVIOR node, `false` included, so
@@ -8738,6 +8752,50 @@ function propertyEditorHtml(id, properties) {
   return `<div class="editor-section-title"><span>Additional properties</span>
       <button class="property-add" type="button" data-add-property="${escapeAttribute(id)}">＋ Add property</button></div>
     <div id="${id}" class="property-editor">${properties.map(propertyRowHtml).join('')}</div>`;
+}
+
+function additionalPropertyGroupsHtml(groups) {
+  return groups.map(group => `<section class="additional-property-group"
+      data-additional-group="${escapeAttribute(group.definition.name)}">
+    <div class="editor-section-title"><span>${escapeHtml(group.definition.displayName || group.definition.name)}</span>
+      <button class="property-add" type="button" data-add-additional-group>＋ Add</button></div>
+    ${group.definition.description ? `<p>${escapeHtml(group.definition.description)}</p>` : ''}
+    <div data-additional-group-items>${group.items.map(item => additionalPropertyGroupItemHtml(
+      group.definition, item)).join('')}</div>
+  </section>`).join('');
+}
+
+function additionalPropertyGroupItemHtml(definition, item) {
+  return `<fieldset class="additional-property-group-item"><legend>${escapeHtml(
+    definition.displayName || definition.name)}</legend>
+    ${(definition.fields || []).map(field => {
+      const entry = item.fields[field.name];
+      return `<label class="editor-field">${escapeHtml(field.displayName || field.name)}
+        <input data-additional-field="${escapeAttribute(field.name)}"
+          data-additional-type="${escapeAttribute(String(field.type || 'STRING').toLowerCase())}"
+          value="${escapeAttribute(entry?.value ?? field.defaultValue ?? '')}"
+          ${field.required ? 'required' : ''}></label>`;
+    }).join('')}
+    <button type="button" class="property-remove" data-remove-additional-group>Remove group</button>
+  </fieldset>`;
+}
+
+function readAdditionalPropertyGroupEditor(form, descriptor) {
+  const definitions = new Map((descriptor?.additionalProperties || [])
+    .map(group => [group.name, group]));
+  const groups = Array.from(form.querySelectorAll('[data-additional-group]')).map(section => ({
+    definition: definitions.get(section.dataset.additionalGroup)
+      || { name: section.dataset.additionalGroup, fields: [] },
+    items: Array.from(section.querySelectorAll('.additional-property-group-item')).map(item => ({
+      fields: Object.fromEntries(Array.from(item.querySelectorAll('[data-additional-field]'))
+        .map(input => [input.dataset.additionalField,
+          { value: input.value, type: input.dataset.additionalType }])),
+    })),
+  }));
+  if (!additionalPropertyGroupsValid(groups)) {
+    throw new TypeError('additional property group is incomplete');
+  }
+  return serializeAdditionalPropertyGroups(groups);
 }
 
 function propertyRowHtml(property = { name: '', type: 'string', value: '' }) {
@@ -14579,6 +14637,25 @@ document.addEventListener('click', event => {
     if (form === inspectorDraft?.form) {
       inspectorDraft.dirty = inspectInspectorDraft(inspectorDraft).changed;
       scheduleInspectorDraftCommit(inspectorDraft, true);
+    }
+    return;
+  }
+  const removeAdditionalGroup = event.target.closest('[data-remove-additional-group]');
+  if (removeAdditionalGroup) {
+    removeAdditionalGroup.closest('.additional-property-group-item')?.remove();
+    return;
+  }
+  const addAdditionalGroup = event.target.closest('[data-add-additional-group]');
+  if (addAdditionalGroup) {
+    const section = addAdditionalGroup.closest('[data-additional-group]');
+    const descriptor = catalogDescriptor(section.closest('form')?.elements.behavior?.value);
+    const definition = (descriptor?.additionalProperties || [])
+      .find(group => group.name === section.dataset.additionalGroup);
+    if (definition) {
+      const group = { definition, items: Array.from(
+        section.querySelectorAll('.additional-property-group-item')) };
+      section.querySelector('[data-additional-group-items]')?.insertAdjacentHTML('beforeend',
+        additionalPropertyGroupItemHtml(definition, nextAdditionalPropertyGroupItem(group)));
     }
     return;
   }

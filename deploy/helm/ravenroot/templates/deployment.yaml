@@ -166,6 +166,10 @@ spec:
               value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpConcurrency }}
             - name: RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS
               value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxSystemPreambleChars }}
+            - name: RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxHttpDecompressionRatio }}
+            - name: RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxModelInputProvenanceEntries }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultResponseBytes }}
             - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES

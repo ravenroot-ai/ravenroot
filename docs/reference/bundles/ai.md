@@ -205,6 +205,8 @@ the turn ceiling, and the permitted MCP-tool count may not exceed the discovery 
 | `RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY` | 4 | Omitted MCP profile concurrency |
 | `RAVENROOT_AI_MAX_MCP_CONCURRENCY` | 256 | Per-tenant/profile MCP concurrency ceiling |
 | `RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS` | 8,192 | Operator system preamble |
+| `RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO` | 100 | Compressed HTTP response expansion ratio |
+| `RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES` | 4,096 | Per-invocation provenance entries |
 
 Helm values live under `ai.*`; Compose and the plain Kubernetes manifest expose the same environment
 names. A Helm value change changes the Deployment pod template and therefore rolls the pods. Because

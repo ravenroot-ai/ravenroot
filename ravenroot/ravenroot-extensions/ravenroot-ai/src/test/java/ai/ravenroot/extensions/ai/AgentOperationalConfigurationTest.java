@@ -8,6 +8,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The process-startup contract for every operator-controlled AI limit. */
@@ -76,6 +77,19 @@ class AgentOperationalConfigurationTest {
         assertTrue(tools.getMessage().contains("RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER"));
     }
 
+    @Test
+    @DisplayName("the distributed policy digest is stable and covers every typed field")
+    void compatibilityDigestPinsTheCompletePolicy() {
+        AgentOperationalConfiguration defaults = AgentOperationalConfiguration.defaults();
+        assertEquals(defaults.compatibilityDigest(),
+                AgentOperationalConfiguration.fromEnvironment(Map.of()).compatibilityDigest());
+        assertNotEquals(defaults.compatibilityDigest(), AgentOperationalConfiguration.fromEnvironment(
+                Map.of("RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", "101")).compatibilityDigest());
+        assertEquals(64, defaults.compatibilityDigest().length());
+        assertEquals(new AiNodePackage(defaults).operationalPolicyDigest().orElseThrow(),
+                defaults.compatibilityDigest());
+    }
+
     private static String[] variableNames() {
         return new String[] {
                 "RAVENROOT_AI_DEFAULT_MAX_TURNS",
@@ -106,7 +120,9 @@ class AgentOperationalConfigurationTest {
                 "RAVENROOT_AI_MAX_LLM_CONCURRENCY",
                 "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY",
                 "RAVENROOT_AI_MAX_MCP_CONCURRENCY",
-                "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS"
+                "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS",
+                "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO",
+                "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES"
         };
     }
 }

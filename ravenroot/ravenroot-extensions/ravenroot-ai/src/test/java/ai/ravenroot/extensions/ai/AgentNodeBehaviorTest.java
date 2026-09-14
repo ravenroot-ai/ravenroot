@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -191,6 +192,27 @@ class AgentNodeBehaviorTest {
         assertEquals(0, resources.modelDispatches.get());
         assertEquals(1, resources.modelReleases.get());
         assertEquals(0, resources.modelIndeterminate.get());
+    }
+
+    @Test
+    @DisplayName("an oversized local request releases a retryable attempt before dispatch")
+    void oversizedRequestNeverDispatchesOrSpendsTheReservation() {
+        var resources = new AiTestSupport.TrackingAgentResources();
+        var http = new AiTestSupport.ScriptedHttp().resources(resources)
+                .then(AiTestSupport.answers("must not be sent"));
+        var tiny = new LlmProfile("local", URI.create(ENDPOINT), "test", Optional.empty(),
+                1_000, 1, 1_024 * 1_024, 1, "");
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(tiny));
+
+        AgentException failure = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.REQUEST_TOO_LARGE, failure.code());
+        assertEquals(0, http.calls());
+        assertEquals(0, resources.modelDispatches.get());
+        assertEquals(1, resources.modelReleases.get());
+        assertEquals(0, resources.modelIndeterminate.get());
+        assertEquals(1, resources.failedAttempts.get(), "local preflight remains retryable");
     }
 
     @Test

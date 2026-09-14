@@ -103,6 +103,8 @@ Detailed contract: [Bundle profile](bundles/).
 | `RAVENROOT_AI_MAX_SKILL_NAME_CHARS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AI_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CONSUMER_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |

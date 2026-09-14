@@ -72,15 +72,28 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
     public static final String BEHAVIOR = "llm-prompt";
 
     private final LlmProfileResolver profiles;
+    private final AgentOperationalConfiguration operationalConfiguration;
     /** Per (tenant, profile) admission, shared by every node of this type. */
     private final Admission profileAdmission = new Admission();
 
     public LlmPromptNodeBehavior() {
-        this(new EnvironmentLlmProfileResolver());
+        this(AgentOperationalConfiguration.fromEnvironment(System.getenv()));
+    }
+
+    LlmPromptNodeBehavior(AgentOperationalConfiguration operationalConfiguration) {
+        this(new EnvironmentLlmProfileResolver(System.getenv(), operationalConfiguration),
+                operationalConfiguration);
     }
 
     LlmPromptNodeBehavior(LlmProfileResolver profiles) {
+        this(profiles, AgentOperationalConfiguration.defaults());
+    }
+
+    private LlmPromptNodeBehavior(LlmProfileResolver profiles,
+                                  AgentOperationalConfiguration operationalConfiguration) {
         this.profiles = Objects.requireNonNull(profiles, "profiles");
+        this.operationalConfiguration = Objects.requireNonNull(
+                operationalConfiguration, "operationalConfiguration");
     }
 
     @Override
@@ -252,7 +265,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                     new LlmPromptException(LlmPromptException.Code.CAPACITY_UNAVAILABLE));
         }
         OutboundCall<OutboundHttpResponse> call;
-        ModelInputProvenance provenance = new ModelInputProvenance();
+        ModelInputProvenance provenance = new ModelInputProvenance(
+                operationalConfiguration.maxModelInputProvenanceEntries());
         try {
             String prompt = PromptTemplate.render(settings.prompt(), message.payload(),
                     message.attributes(), Map.of());
@@ -273,7 +287,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                     settings.profile().credentialBinding().orElse(null), null,
                     ExternalIoLimits.compressedHttp(settings.profile().maxRequestBytes(),
                             settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
-                            settings.profile().maxResponseBytes(), 100,
+                            settings.profile().maxResponseBytes(),
+                            operationalConfiguration.maxHttpDecompressionRatio(),
                             Duration.ofMillis(settings.timeoutMs()), Set.of("application/json")),
                     ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {

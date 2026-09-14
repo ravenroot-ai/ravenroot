@@ -157,7 +157,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
         this(AgentOperationalConfiguration.fromEnvironment(System.getenv()));
     }
 
-    private AgentNodeBehavior(AgentOperationalConfiguration configuration) {
+    AgentNodeBehavior(AgentOperationalConfiguration configuration) {
         this(new EnvironmentLlmProfileResolver(System.getenv(), configuration),
                 new EnvironmentMcpProfileResolver(System.getenv(), configuration), configuration);
     }
@@ -838,7 +838,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
         /** The one {@link LoadSkillTool} of this invocation, kept so discovery cannot replace it. */
         private final AgentTool loadSkill;
         private final List<PayloadValue> messages = new ArrayList<>();
-        private final ModelInputProvenance provenance = new ModelInputProvenance();
+        private final ModelInputProvenance provenance = new ModelInputProvenance(
+                operationalConfiguration.maxModelInputProvenanceEntries());
         /**
          * The model call currently in flight, so a cancelled run can actually stop.
          *
@@ -949,7 +950,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
             // it has not started yet is refused, and the discovery chain unwinds instead of opening
             // the next server.
             LongSupplier remaining = () -> over || result.isDone() ? 0 : remainingMillis();
-            McpToolset.discover(settings.mcpServers(), services, message, remaining)
+            McpToolset.discover(settings.mcpServers(), services, message, remaining,
+                            operationalConfiguration.maxHttpDecompressionRatio())
                     .whenComplete((discovered, failure) -> {
                         if (over || result.isDone()) {
                             return;
@@ -1002,7 +1004,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             LongSupplier remaining = () -> over || result.isDone() ? 0 : remainingMillis();
-            McpToolset.discover(settings.mcpServers(), services, message, remaining)
+            McpToolset.discover(settings.mcpServers(), services, message, remaining,
+                            operationalConfiguration.maxHttpDecompressionRatio())
                     .whenComplete((discovered, failure) -> {
                         if (failure != null) result.completeExceptionally(sanitize(failure));
                         else if (!over && !result.isDone()) continueWith.accept(discovered);
@@ -1110,6 +1113,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         settings.tuning().temperature(), settings.tuning().topP(), settings.tuning().seed());
                 body = AgentTurn.writeRequest(settings.model(), messages, tools, effectiveTuning);
                 effectiveTimeout = Math.min(remaining, permittedMillis);
+                if (body.length > settings.profile().maxRequestBytes()) {
+                    throw new AgentException(AgentException.Code.REQUEST_TOO_LARGE);
+                }
             } catch (RuntimeException failure) {
                 turnBudget.release();
                 result.completeExceptionally(sanitize(failure));
@@ -1128,10 +1134,6 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             try {
-                if (body.length > settings.profile().maxRequestBytes()) {
-                    throw new IllegalArgumentException(
-                            "model request exceeds the configured request-byte ceiling");
-                }
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
@@ -1139,7 +1141,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         settings.profile().credentialBinding().orElse(null), null,
                         ExternalIoLimits.compressedHttp(settings.profile().maxRequestBytes(),
                                 settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
-                                settings.profile().maxResponseBytes(), 100,
+                                settings.profile().maxResponseBytes(),
+                                operationalConfiguration.maxHttpDecompressionRatio(),
                                 Duration.ofMillis(effectiveTimeout), Set.of("application/json")),
                         ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             } catch (RuntimeException failure) {

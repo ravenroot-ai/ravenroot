@@ -245,6 +245,10 @@ spec:
               value: " "
             - name: RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS
               value: " "
+            - name: RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO
+              value: " "
+            - name: RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES
+              value: " "
             # Empty rate-limit values select the Java-owned defaults. Overlays provide quoted
             # integers; sibling relationships are validated together at server startup.
             - name: RAVENROOT_RATELIMIT_ADDRESS_RPS

@@ -68,11 +68,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0"
+    "20eda48b566593d750cf169d1ba552e684a012c8e331a996bad69d09738a3b02"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288"
+    "24fbe15855649688c663590a65425bf3f3e8cd9a01fb7b9ee0bfbd95b41a5ef6"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -193,7 +193,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
     EMBED_STARTUP_CHECK_PATH: "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
-    EMBED_MAIN_PATH: "9a9a05ab7ca0f076a72a47509e3738b08147845b8151584e2949ca464285c288",
+    EMBED_MAIN_PATH: "24fbe15855649688c663590a65425bf3f3e8cd9a01fb7b9ee0bfbd95b41a5ef6",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
     EMBED_MAIN_TEST_PATH: "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
@@ -209,7 +209,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "60a13454321273b46b39a3b06f36eba7afb5146860ccd2f48f2f48b929442811",
     "RavenrootServerMain.run":
-        "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0",
+        "20eda48b566593d750cf169d1ba552e684a012c8e331a996bad69d09738a3b02",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -5978,7 +5978,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0"),
+         "20eda48b566593d750cf169d1ba552e684a012c8e331a996bad69d09738a3b02"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7584,7 +7584,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  '188857c0a9f4a2009815c613a2640e03a291d1d8794eb879aa583416f6e032e6',
+  '8eae32f0f9ea49f9ffc67c1655a3b9faedc6c8db8e8e1f3c36a90cfab1c2ca43',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -7608,7 +7608,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0',
+  '20eda48b566593d750cf169d1ba552e684a012c8e331a996bad69d09738a3b02',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -7951,7 +7951,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '1932d4859d21c5a031fa4f8b4e2d63e87d353dd9c1a49187cd25a922384f4b23',
+  'e54d377c1ec4aa391599936c6fdf0edee2c022ebe7bdb1b1e2c21d95403a4163',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -12175,7 +12175,7 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
- 'scripts/publish_environment_reference.py': '1e990505413c0e500635a06674ad09894e086adb61a7391028a70944d8be8d0b',
+ 'scripts/publish_environment_reference.py': '92e757dacb2fceba8d9499ccf79863ec0d15d5fe60ae587c603be2295eb2e545',
  'scripts/tests/test_publish_environment_reference.py': '135e497abc1202d12264bba621dfb75d29854df4f59e90b5a1a994108b46bb49',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
@@ -12183,7 +12183,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
   'RavenrootServerMain',
   'run',
-  '1a67fdab92cd0a713b001dd91025b97322bab9619beb8ba2225a1138e86430b0'),
+  '20eda48b566593d750cf169d1ba552e684a012c8e331a996bad69d09738a3b02'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -13489,22 +13489,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-0b67657cac8e5b904054": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-7ab123337eeb18906fc2":
+    "oc-8f3a91d8331937f069c2": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-72841aee7973476a4ad0":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-7bab59779a16e10b10d7": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-418656067bc7b4ad0c5c": (
+    "oc-852251a422fc0f4ab7d3": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-e204fe6e8320674edd56": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-8eed875577d7d07c6447": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8310f456eaed6e56fc03": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-0b67657cac8e5b904054": "/v1/events",
-    "oc-7ab123337eeb18906fc2": "/v1/events",
-    "oc-7bab59779a16e10b10d7": "/v1/events",
-    "oc-418656067bc7b4ad0c5c": "/v1/events/recent",
-    "oc-8eed875577d7d07c6447": "/v1/events/recent",
+    "oc-8f3a91d8331937f069c2": "/v1/events",
+    "oc-72841aee7973476a4ad0": "/v1/events",
+    "oc-852251a422fc0f4ab7d3": "/v1/events",
+    "oc-e204fe6e8320674edd56": "/v1/events/recent",
+    "oc-8310f456eaed6e56fc03": "/v1/events/recent",
 }
 
 
@@ -13724,7 +13724,7 @@ def route_table_candidate_partitions(source: str) -> tuple[
         method_values: list[str] = []
         for argument, _start, _end in methods:
             value = java_literal_concatenation(argument)
-            if value is None or len(value[1]) != 1 or value[0] not in {"GET", "POST", "DELETE"}:
+            if value is None or len(value[1]) != 1 or value[0] not in {"GET", "POST", "PUT", "DELETE"}:
                 return None
             method_values.append(value[0])
         if not path[0].startswith("/") or not summary[0].strip():
@@ -14310,9 +14310,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54}
-    if len(details) != 53 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 53/515 positional shape")
+    expected_counts = {"methods": 76, "path": 66, "summary": 361, "successStatuses": 67}
+    if len(details) != 66 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 66/570 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

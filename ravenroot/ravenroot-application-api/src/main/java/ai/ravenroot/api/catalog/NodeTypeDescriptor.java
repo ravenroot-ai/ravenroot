@@ -27,6 +27,7 @@ import java.util.Set;
  * @param properties immutable property descriptors accepted by this node type
  * @param capabilities immutable capabilities declared by the behavior
  * @param runtimeConcurrency trusted default and ceiling for platform-owned per-node admission
+ * @param additionalProperties immutable dynamic property collections accepted by this node type
  */
 public record NodeTypeDescriptor(
         String behavior,
@@ -196,7 +197,12 @@ public record NodeTypeDescriptor(
                 additionalProperties);
     }
 
-    /** Returns a copy with trusted dynamic additional-property collections. */
+    /**
+     * Returns a copy with trusted dynamic additional-property collections.
+     *
+     * @param groups dynamic property collections to attach to this descriptor
+     * @return a descriptor copy carrying the supplied dynamic property collections
+     */
     public NodeTypeDescriptor withAdditionalProperties(NodePropertyGroupDescriptor... groups) {
         return new NodeTypeDescriptor(behavior, displayName, category, description, visualType, agentic,
                 properties, capabilities, defaultNature, allowedNatures, commands, outcomes,
@@ -371,7 +377,23 @@ public record NodeTypeDescriptor(
                 defaultNature, allowedNatures, commands, outcomes, NodeRuntimeConcurrency.DEFAULT, List.of());
     }
 
-    /** Compatibility constructor preserving the thirteen-argument canonical descriptor. */
+    /**
+     * Compatibility constructor preserving the thirteen-argument canonical descriptor.
+     *
+     * @param behavior unique identifier used to select the node implementation
+     * @param displayName editor-facing behavior name
+     * @param category editor category used to group the behavior
+     * @param description human-readable behavior description
+     * @param visualType renderer hint used by the visual editor
+     * @param agentic whether the editor may present the behavior as agent-oriented
+     * @param properties immutable property descriptors accepted by the node type
+     * @param capabilities immutable capabilities declared by the behavior
+     * @param defaultNature runtime nature selected when graph content declares none
+     * @param allowedNatures runtime natures graph content may select
+     * @param commands application command names admitted by this behavior
+     * @param outcomes outcomes the behavior can produce
+     * @param runtimeConcurrency trusted default and ceiling for per-node admission
+     */
     public NodeTypeDescriptor(String behavior, String displayName, String category, String description,
                               String visualType, boolean agentic, List<NodePropertyDescriptor> properties,
                               Set<String> capabilities, NodeRuntimeNature defaultNature,

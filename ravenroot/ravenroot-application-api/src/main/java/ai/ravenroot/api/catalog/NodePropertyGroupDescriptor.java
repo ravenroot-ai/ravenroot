@@ -29,6 +29,9 @@ public record NodePropertyGroupDescriptor(
         String description,
         List<NodePropertyDescriptor> fields) {
 
+    /**
+     * Validates and normalizes one trusted dynamic property collection descriptor.
+     */
     public NodePropertyGroupDescriptor {
         if (name == null || !name.matches("[A-Za-z][A-Za-z0-9_-]*")) {
             throw new IllegalArgumentException("Property group name must be a stable identifier");
@@ -56,7 +59,12 @@ public record NodePropertyGroupDescriptor(
         }
     }
 
-    /** Resolves a canonical key such as {@code skills.12.description}. */
+    /**
+     * Resolves a canonical key such as {@code skills.12.description}.
+     *
+     * @param propertyName concrete property name to resolve
+     * @return the matched positive item index and field, or empty when the key is not in this group
+     */
     public Optional<Match> match(String propertyName) {
         if (propertyName == null || !propertyName.startsWith(name + ".")) {
             return Optional.empty();
@@ -84,7 +92,13 @@ public record NodePropertyGroupDescriptor(
                 .map(field -> new Match((int) parsed, field));
     }
 
-    /** Materializes the scalar descriptor used to validate one concrete item field. */
+    /**
+     * Materializes the scalar descriptor used to validate one concrete item field.
+     *
+     * @param index positive collection item index
+     * @param field field descriptor belonging to this group
+     * @return scalar descriptor for the indexed concrete property
+     */
     public NodePropertyDescriptor property(int index, NodePropertyDescriptor field) {
         if (index < 1 || !fields.contains(field)) {
             throw new IllegalArgumentException("Property group field does not belong to this item");
@@ -96,6 +110,11 @@ public record NodePropertyGroupDescriptor(
                 field.maximumItems(), field.maximumItemUtf8Bytes());
     }
 
-    /** One trusted match in this collection. */
+    /**
+     * One trusted match in this collection.
+     *
+     * @param index positive collection item index parsed from the property name
+     * @param field matched field descriptor from the owning group
+     */
     public record Match(int index, NodePropertyDescriptor field) { }
 }

@@ -134,11 +134,23 @@ test('the shipped Human Task and Log descriptor identities reach distinct defaul
     const owner = window.ravenroot.activeDocument();
     const model = owner.graph.nodes.find(node => node.behavior === behavior);
     const node = model ? owner.cy.getElementById(model.id) : null;
-    return { behavior, nodeType: node?.data('nodeType'), shape: node?.style('shape') };
+    const backgroundImage = node?.style('background-image') || '';
+    return { behavior, nodeType: node?.data('nodeType'), shape: node?.style('shape'),
+      glyph: decodeURIComponent(backgroundImage) };
   }))).toEqual([
-    { behavior: 'human-task', nodeType: 'human-task', shape: 'ellipse' },
-    { behavior: 'log', nodeType: 'trace', shape: 'rectangle' },
+    { behavior: 'human-task', nodeType: 'human-task', shape: 'roundrectangle',
+      glyph: expect.stringContaining('👤') },
+    { behavior: 'log', nodeType: 'trace', shape: 'roundrectangle',
+      glyph: expect.stringContaining('▤') },
   ]);
+  await page.evaluate(() => {
+    const humanTask = window.cy.nodes('[behavior="human-task"]').first();
+    const trace = window.cy.nodes('[behavior="log"]').first();
+    humanTask.position({ x: 315, y: 355 });
+    trace.position({ x: 555, y: 355 });
+    window.cy.fit(humanTask.union(trace), 150);
+  });
+  await page.screenshot({ path: test.info().outputPath('common-node-geometry.png'), fullPage: true });
 });
 
 test('a service that answers 401 says so, and does not claim the catalog is unreachable', async ({ page }) => {

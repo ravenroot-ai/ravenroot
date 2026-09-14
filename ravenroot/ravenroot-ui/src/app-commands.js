@@ -54,6 +54,9 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     id: `layout.arrange.${id}`, group, order: order + 200,
     placements: ['menu.layout', 'help'], execute: () => actions.arrange(id),
     isEnabled: context => active(context) && context.renderMode === 'design',
+    isChecked: context => context.hasDocument && context.renderMode === 'design'
+      && context.designArrangement === id,
+    kind: 'radio',
   });
   const workspaceLayout = (id, mode, order) => ({
     id: `workspace.${id}`, group: 'workspace-layout', order,

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { catalogNodeIcon, nodeTypeCardShape, resolveDescriptorNodeType } from '../src/catalog-node-icon.js';
+import {
+  catalogNodeIcon,
+  COMMON_NODE_GLYPHS,
+  nodeTypeCardShape,
+  resolveDescriptorNodeType,
+} from '../src/catalog-node-icon.js';
 
 // The generic per-type glyph map, standing in for `NODE_ICONS` in app.js. `agent` deliberately maps
 // to a plain glyph here (as it does in app.js): the brain preview for agent-typed descriptors is a
@@ -28,10 +33,16 @@ describe('resolveDescriptorNodeType', () => {
 });
 
 describe('default Design card shapes', () => {
-  it('keeps Human Task and Trace recognisable without relying on colour or their glyph', () => {
-    expect(nodeTypeCardShape('human-task')).toBe('ellipse');
-    expect(nodeTypeCardShape('trace')).toBe('rectangle');
+  it('uses the common rounded card for Human Task and Trace', () => {
+    expect(nodeTypeCardShape('human-task')).toBe('roundrectangle');
+    expect(nodeTypeCardShape('trace')).toBe('roundrectangle');
     expect(nodeTypeCardShape('flow')).toBe('roundrectangle');
+  });
+
+  it('identifies Human Task with a person and Trace with a document glyph', () => {
+    expect(COMMON_NODE_GLYPHS).toEqual({ 'human-task': '👤', trace: '▤' });
+    expect(Object.values(COMMON_NODE_GLYPHS)).not.toContain('⇢');
+    expect(Object.values(COMMON_NODE_GLYPHS)).not.toContain('♙');
   });
 });
 

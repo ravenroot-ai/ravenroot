@@ -524,7 +524,7 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Display name | Human task |
 | Category | Human workflow |
 | Description | Creates durable, tenant-scoped work for a person and resumes from the pinned graph version. |
-| Visual type | flow |
+| Visual type | human-task |
 | Agentic | false |
 | Capabilities | bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe |
 | Declared default nature | Not declared |
@@ -763,7 +763,7 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Display name | Log |
 | Category | Actions |
 | Description | Writes an intentional workflow message to the server log and passes the payload through. |
-| Visual type | handler |
+| Visual type | trace |
 | Agentic | false |
 | Capabilities | deterministic,side-effect |
 | Declared default nature | Not declared |

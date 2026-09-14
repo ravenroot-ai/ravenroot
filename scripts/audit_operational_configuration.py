@@ -4031,6 +4031,27 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
             "semanticReviewHistory is not an append-only chain from the committed source inventory")
         source_reviews = []
     applied_review_ids: set[str] = set()
+    committed_review_sources: dict[str, dict[str, object] | None] = {}
+    for review in source_reviews:
+        identifier = review.get("candidateId") if isinstance(review, dict) else None
+        revision = review.get("sourceRevision") if isinstance(review, dict) else None
+        if not isinstance(identifier, str) or not isinstance(revision, str) \
+                or not isinstance(review.get("beforeMetadata"), dict) \
+                or not isinstance(review.get("afterMetadata"), dict) \
+                or review.get("approved") is not True:
+            continue
+        if revision not in committed_review_sources:
+            committed_review_sources[revision] = committed_json(
+                root, revision, str(plan["sourceInventoryPath"]))[0]
+        committed = committed_review_sources[revision]
+        committed_entry = next((item for item in committed.get("entries", [])
+                                if isinstance(item, dict) and item.get("id") == identifier), None) \
+            if isinstance(committed, dict) else None
+        source_entry = source_entries.get(identifier)
+        if committed_entry is not None and source_entry is not None \
+                and candidate_semantic_payload(committed_entry) == review["beforeMetadata"] \
+                and candidate_semantic_payload(source_entry) == review["afterMetadata"]:
+            applied_review_ids.add(identifier)
     for review in review_history[len(source_reviews):]:
         required = {"candidateId", "approved", "rationale", "sourceRevision",
                     "beforeMetadata", "afterMetadata"}

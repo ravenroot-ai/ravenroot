@@ -802,15 +802,21 @@ export function serializeGraphML(graph) {
   // A graph-level <data> is written as the first child of <graph>, before the nodes and
   // edges. GraphML's content model does not order them, but every reader and every diff in this
   // repository reads the document top-down, and a statement about the whole graph buried after two
-  // hundred nodes is one nobody finds. Never removes or overwrites a value the opened document
-  // already carried: the marker is stamped by whoever created the document, and a save is not a
-  // migration.
-  function setGraphProperty(name, value) {
+  // hundred nodes is one nobody finds. Ordinary properties are never removed or overwritten: the
+  // marker is stamped by whoever created the document, and a save is not a migration. The two
+  // editor-owned presentation keys opt into replacement because changing them is the save action.
+  function setGraphProperty(name, value, { replace = false } = {}) {
     const keyId = ensureKey('graph', name);
     const existing = Array.from(graphElement.children)
       .find(child => child.localName === 'data' && child.namespaceURI === namespace
         && child.getAttribute('key') === keyId);
-    if (existing) return;
+    if (existing) {
+      if (!replace || existing.children.length > 0
+        || existing.textContent.trim() === String(value).trim()) return;
+      while (existing.firstChild) existing.removeChild(existing.firstChild);
+      existing.appendChild(doc.createTextNode(String(value)));
+      return;
+    }
     const data = doc.createElementNS(namespace, 'data');
     data.setAttribute('key', keyId);
     data.appendChild(doc.createTextNode(String(value)));
@@ -858,7 +864,12 @@ export function serializeGraphML(graph) {
   }
   Object.entries(graph.graphProperties || {}).forEach(([name, value]) => {
     if (name === VISUAL_GROUPS_PROPERTY) return;
-    if (value != null && value !== '') setGraphProperty(name, value);
+    if (value != null && value !== '') setGraphProperty(name, value, {
+      // These two keys are editor-owned mutable view state. Ordinary graph properties still retain
+      // their source value verbatim, but changing Render or Arrange must replace the previous saved
+      // choice instead of leaving the first value permanently frozen in sourceXml.
+      replace: name === GRAPH_RENDER_MODE_PROPERTY || name === GRAPH_LAYOUT_MODE_PROPERTY,
+    });
   });
 
   function findById(localName, id) {

@@ -20,6 +20,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LogNodeBehaviorFactoryTest {
     @Test
+    void catalogDeclaresTheTraceVisualIdentity() {
+        assertEquals("trace", new LogNodeBehaviorFactory().descriptor().visualType());
+    }
+
+    @Test
     void emitsTheExactRenderedLogActionSeparatelyFromTheTraversalPayload() throws Exception {
         var node = new GraphNode("logger", NodeKind.BEHAVIOR, "log",
                 Map.of("message", "Customer {{payload.customer}} password={{payload.password}}; done"));

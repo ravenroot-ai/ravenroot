@@ -43,6 +43,7 @@ Detailed contract: [Agent authority](configuration.md#agent-authority-and-budget
 | `RAVENROOT_AGENT_RATE_CARD_VERSION` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AGENT_RUNTIME_INSTANCE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RUNNER_CONFIG` | unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart |
 
 ## Authoring assistant
 

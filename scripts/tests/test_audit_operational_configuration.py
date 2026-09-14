@@ -1920,16 +1920,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_508_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_588_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(61, len(details))
+            self.assertEqual(79, len(details))
             self.assertEqual(
-                {"methods": 68, "path": 61, "summary": 371, "successStatuses": 62},
+                {"methods": 87, "path": 79, "summary": 389, "successStatuses": 80},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(562, len(entries))
+            self.assertEqual(635, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -1940,6 +1940,53 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "2147483647 + 1", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
+
+    def test_runner_routes_include_put_without_opening_the_method_vocabulary(self) -> None:
+        source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
+        partitions, details, candidates = audit.route_table_candidate_partitions(source)
+        runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
+        self.assertEqual(18, len(runner_routes))
+        put_routes = {
+            item["path"] for item in runner_routes
+            if any(candidates[identifier].expression == '"PUT"'
+                   for identifier in item["candidateIds"]["methods"])
+        }
+        self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
+        self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
+        self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
+        self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})
+        self.assertIsNone(audit.route_table_candidate_partitions(source.replace('"PUT"', '"TRACE"', 1)))
+
+    def test_runner_inventory_distinguishes_bounds_protocol_and_presentation(self) -> None:
+        document = audit.load_inventory(audit.INVENTORY)
+        rows = document["entries"]
+        expectations = {
+            ("RunnerRegistration.java", "1"): "protocol-or-format-invariant",
+            ("RunnerCodec.java", "0x52524a31"): "protocol-or-format-invariant",
+            ("RunnerCodec.java", "0x52524a32"): "protocol-or-format-invariant",
+            ("RunnerCodec.java", "16_777_216"): "security-ceiling-or-default",
+            ("RunnerPolicy.java", "1_048_576"): "security-ceiling-or-default",
+            ("RunnerPlaneConfiguration.java", "RAVENROOT_RUNNER_CONFIG"): "protocol-or-format-invariant",
+            ("RunnerPlaneConfiguration.java", "1_048_577"): "security-ceiling-or-default",
+            ("LocalContainerRunner.java", '"--network=none"'): "security-ceiling-or-default",
+            ("runner-panel.js", "'Governed agents and runners'"): "presentation-text",
+            ("RunnerArtifactStore.java", "64"): "security-ceiling-or-default",
+            ("TelemetryBridge.java", 'ravenroot.runner.observations'): "protocol-or-format-invariant",
+            ("TelemetryBridge.java", 'ravenroot.runner.worker.active'): "protocol-or-format-invariant",
+        }
+        for (filename, expression), classification in expectations.items():
+            with self.subTest(filename=filename, expression=expression):
+                matching = [row for row in rows if Path(row["path"]).name == filename
+                            and row["expression"] == expression]
+                self.assertTrue(matching)
+                self.assertTrue(all(row["classification"] == classification and row["status"] == "retained"
+                                    for row in matching))
+        configuration = (ROOT / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java").read_text()
+        self.assertIn("if (configured == null || configured.isBlank()) return null;", configuration)
+        self.assertIn("store.supports(StoreCapability.DURABLE)", configuration)
+        command_rows = [row for row in rows if Path(row["path"]).name == "AgentCommand.java"]
+        self.assertEqual(26, sum(row["classification"] == "protocol-or-format-invariant" for row in command_rows))
+        self.assertEqual(5, sum(row["classification"] == "security-ceiling-or-default" for row in command_rows))
 
     def test_route_table_authority_rejects_metadata_and_position_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as location:
@@ -4227,7 +4274,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 371 |",
+                "| Retained published contract descriptions | 389 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4235,7 +4282,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 370 |",
+                "| Retained published contract descriptions | 388 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

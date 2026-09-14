@@ -28,7 +28,7 @@ public final class ProcessLifecycleService {
     private static final Duration IDEMPOTENCY_RETENTION = Duration.ofDays(7);
 
     public enum Command { PAUSE, RESUME, CANCEL, DRAIN, STOP }
-    public enum State { RUNNING, PAUSED, CANCELLED, DRAINING, STOPPED }
+    public enum State { RUNNING, PAUSED, CANCELLED, DRAINING, STOPPED, RECOVERY_REQUIRED }
     public enum Code { APPLIED, REPLAYED, STALE_GENERATION, NOT_FOUND, TERMINAL, IDEMPOTENCY_CONFLICT,
         PARTIALLY_SETTLED }
     public record TraversalOutcome(UUID traversalId, String outcome) { }
@@ -41,6 +41,13 @@ public final class ProcessLifecycleService {
     private final RavenrootApplication application;
     private final HumanTaskService humanTasks;
     private final Clock clock;
+    private volatile java.util.function.BiConsumer<ExecutionKey, UUID> runnerDelivery = (key, job) -> { };
+
+    /** Composes the same durable authority with runner delivery before serving process commands. */
+    public void installRunnerDelivery(ExecutionStore runnerStore, java.util.function.BiConsumer<ExecutionKey, UUID> delivery) {
+        if (runnerStore != store) throw new IllegalArgumentException("runner and lifecycle stores must be identical");
+        runnerDelivery = Objects.requireNonNull(delivery, "delivery");
+    }
 
     public ProcessLifecycleService(ExecutionStore store, RavenrootApplication application,
                                    HumanTaskService humanTasks, Clock clock) {
@@ -65,8 +72,6 @@ public final class ProcessLifecycleService {
         var inventory = await(store.findProcessInstance(key)).orElse(null);
         if (inventory == null) return new Result(Code.NOT_FOUND, processInstanceId, 0,
                 State.RUNNING, List.of(), reason);
-        if (inventory.status().terminal()) return new Result(Code.TERMINAL, processInstanceId,
-                inventory.revision(), state(command), List.of(), reason);
 
         byte[] requestBytes = (processInstanceId + "|" + command + "|" + expectedGeneration + "|" + reason)
                 .getBytes(StandardCharsets.UTF_8);
@@ -77,19 +82,63 @@ public final class ProcessLifecycleService {
         UUID eventTraversalId = await(store.load(key)).state().traversals().keySet().stream()
                 .findFirst().orElse(processInstanceId);
         boolean replay = await(store.lookupIdempotency(tenantId, idempotencyKey, clock.instant())).isPresent();
+        if (!replay && inventory.status().terminal()) return new Result(Code.TERMINAL, processInstanceId,
+                inventory.revision(), currentState(key), List.of(), reason);
         if (!replay && inventory.revision() != expectedGeneration) {
             return new Result(Code.STALE_GENERATION, processInstanceId, inventory.revision(),
                     currentState(key), List.of(), reason);
         }
         try {
-            var stored = await(store.apply(ExecutionBatch.to(key)
+            var builder = ExecutionBatch.to(key)
                     .expecting(RevisionExpectation.exactly(expectedGeneration))
+                    .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessControlChanged(
+                            ai.ravenroot.api.application.ProcessControlState.valueOf(state(command).name())))
                     .recordIdempotency(new IdempotencyWrite(idempotencyKey, fingerprint, outcome,
                             IDEMPOTENCY_RETENTION, clock.instant()))
                     .publish(EventEnvelope.of(UUID.randomUUID(), tenantId, "PROCESS_" + command.name(),
                             processInstanceId, eventTraversalId, null, null, null, idempotencyKey,
-                            inventory.graphVersionPin().reference(), clock.instant(), outcome))
-                    .build()));
+                            inventory.graphVersionPin().reference(), clock.instant(), outcome));
+            if (command == Command.CANCEL && !replay) {
+                var aggregate = await(store.load(key));
+                // The process revision arbitrates completion/cancel races. Every terminal
+                // transition, runner stop request and lifecycle event commits together.
+                for (var traversal : aggregate.state().traversals().values()) {
+                    if (traversal.status().terminal()) continue;
+                    for (var invocation : traversal.invocations().values()) {
+                        if (invocation.status().terminal()) continue;
+                        for (var attempt : invocation.attempts()) if (!attempt.status().terminal()) {
+                            builder.apply(new ai.ravenroot.api.persistence.ExecutionTransition.AttemptTransitioned(
+                                    traversal.traversalId(), invocation.invocationId(), attempt.attemptId(),
+                                    ai.ravenroot.api.application.NodeAttemptStatus.FAILED));
+                        }
+                        builder.apply(new ai.ravenroot.api.persistence.ExecutionTransition.InvocationTransitioned(
+                                traversal.traversalId(), invocation.invocationId(), ai.ravenroot.api.application.NodeInvocationStatus.FAILED));
+                    }
+                    builder.apply(new ai.ravenroot.api.persistence.ExecutionTransition.TraversalTransitioned(
+                            traversal.traversalId(), ai.ravenroot.api.application.TraversalStatus.FAILED,
+                            ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED));
+                }
+                builder.apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                        ai.ravenroot.api.application.ProcessInstanceStatus.FAILED,
+                        ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED));
+                if (store.supports(ai.ravenroot.api.persistence.StoreCapability.RUNNER_JOBS)) {
+                    var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
+                    if (workspace != null) for (var entry : workspace.jobs().values()) {
+                        var id = entry.job().identity();
+                        builder.publish(EventEnvelope.of(UUID.randomUUID(), tenantId, "RUNNER_JOB_PROCESS_CANCELLED",
+                                processInstanceId, id.traversalId(), id.invocationId(), id.attemptId(), null,
+                                idempotencyKey, inventory.graphVersionPin().reference(), clock.instant(),
+                                OpaquePayload.of(ai.ravenroot.core.runner.RunnerJson.write(java.util.Map.of(
+                                        "runnerJobId", id.runnerJobId().toString(), "fence", entry.job().fence(),
+                                        "actor", "process-lifecycle", "reason", reason)),
+                                        "application/vnd.ravenroot.runner-event.v1+json")));
+                    }
+                }
+            }
+            var stored = await(store.apply(builder.build()));
+            State effective = currentState(key);
+            if (effective != state(command)) return new Result(Code.REPLAYED, processInstanceId,
+                    await(store.load(key)).revision(), effective, List.of(), reason);
             var traversalOutcomes = settle(tenantId, processInstanceId, command, idempotencyKey);
             boolean partial = traversalOutcomes.stream().anyMatch(value -> value.outcome().startsWith("NOT_"));
             return new Result(partial ? Code.PARTIALLY_SETTLED : replay ? Code.REPLAYED : Code.APPLIED,
@@ -110,31 +159,28 @@ public final class ProcessLifecycleService {
 
     /** Durable admission reading used by asynchronous process re-entry. */
     public boolean admitsReentry(String tenantId, UUID processInstanceId) {
-        State state = currentState(new ExecutionKey(tenantId, processInstanceId));
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        var process = await(store.findProcessInstance(key)).orElse(null);
+        if (process == null || process.status().terminal()) return false;
+        State state = currentState(key);
         return state == State.RUNNING || state == State.DRAINING;
     }
 
+    /** Runner re-entry reads aggregate authority and commits through the same observed revision. */
+    public static boolean admitsRunnerDelivery(ExecutionStore store, ExecutionKey key, long revision) {
+        var process = await(store.load(key));
+        if (process.revision() != revision || process.state().status().terminal()) return false;
+        State state = State.valueOf(process.state().controlState().name());
+        return (state == State.RUNNING || state == State.DRAINING)
+                && await(store.load(key)).revision() == revision;
+    }
+
     public State currentState(ExecutionKey key) {
-        long after = 0;
-        State latest = State.RUNNING;
-        while (true) {
-            var page = await(store.readJournal(key.tenantId(), after, 500));
-            if (page.isEmpty()) return latest;
-            for (var record : page) {
-                after = record.streamSequence();
-                var event = record.envelope();
-                if (!key.processInstanceId().equals(event.processInstanceId())) continue;
-                latest = switch (event.eventType()) {
-                    case "PROCESS_PAUSE" -> State.PAUSED;
-                    case "PROCESS_RESUME" -> State.RUNNING;
-                    case "PROCESS_CANCEL" -> State.CANCELLED;
-                    case "PROCESS_DRAIN" -> State.DRAINING;
-                    case "PROCESS_STOP" -> State.STOPPED;
-                    default -> latest;
-                };
-            }
-            if (page.size() < 500) return latest;
-        }
+        return currentState(store, key);
+    }
+
+    private static State currentState(ExecutionStore store, ExecutionKey key) {
+        return State.valueOf(await(store.load(key)).state().controlState().name());
     }
 
     private List<TraversalOutcome> settle(String tenantId, UUID processInstanceId, Command command,
@@ -145,8 +191,27 @@ public final class ProcessLifecycleService {
             humanTasks.cancelProcessTasks(tenantId, processInstanceId, correlationId);
             stored = await(store.load(new ExecutionKey(tenantId, processInstanceId)));
         }
+        var workspace = store.supports(ai.ravenroot.api.persistence.StoreCapability.RUNNER_JOBS)
+                ? await(store.loadRunnerWorkspace(new ExecutionKey(tenantId, processInstanceId))).orElse(null) : null;
         for (var traversal : stored.state().traversals().values()) {
+            if (command == Command.CANCEL) {
+                application.cancelTraversal(tenantId, traversal.traversalId());
+                outcomes.add(new TraversalOutcome(traversal.traversalId(), "CANCEL"));
+                continue;
+            }
             if (traversal.status().terminal()) continue;
+            var parked = workspace == null ? List.<ai.ravenroot.api.runner.RunnerWorkspaceState.Entry>of()
+                    : new ArrayList<>(workspace.jobs().values()).reversed().stream().filter(entry -> entry.job().identity().traversalId().equals(traversal.traversalId())
+                            && traversal.status() == ai.ravenroot.api.application.TraversalStatus.WAITING).toList();
+            if (!parked.isEmpty()) {
+                if (command == Command.RESUME || command == Command.DRAIN) {
+                    for (var entry : parked) if (entry.job().state().terminal() && !entry.continuationUncertain()) {
+                        runnerDelivery.accept(workspace.execution(), entry.job().identity().runnerJobId());
+                    }
+                }
+                outcomes.add(new TraversalOutcome(traversal.traversalId(), command.name()));
+                continue;
+            }
             boolean changed = switch (command) {
                 case PAUSE -> application.pauseTraversal(traversal.traversalId());
                 case RESUME -> application.resumeTraversal(tenantId, traversal.traversalId());
@@ -182,6 +247,10 @@ public final class ProcessLifecycleService {
     }
 
     private static <T> T await(java.util.concurrent.CompletionStage<T> stage) {
-        return stage.toCompletableFuture().join();
+        try { return stage.toCompletableFuture().join(); }
+        catch (java.util.concurrent.CompletionException failed) {
+            if (failed.getCause() instanceof ExecutionStoreException storeFailure) throw storeFailure;
+            throw failed;
+        }
     }
 }

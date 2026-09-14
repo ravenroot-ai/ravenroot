@@ -27,10 +27,11 @@ import java.util.UUID;
  * @param terminationReason why a terminal {@code status} was reached when the status alone would
  *                         misdescribe it, or {@code null} when nothing distinguishes this
  *                         termination. Always {@code null} while the instance is not terminal.
+ * @param controlState non-compactable current process command authority
  */
 public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus status,
                               Map<UUID, Traversal> traversals,
-                              ExecutionTerminationReason terminationReason) {
+                              ExecutionTerminationReason terminationReason, ProcessControlState controlState) {
 /**
  * Copies the traversal map and rejects inconsistent map keys, duplicate child identities, and
  * causal-parent relationships that cannot belong to this process instance.
@@ -38,6 +39,7 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
     public ProcessInstance {
         if (processInstanceId == null) throw new IllegalArgumentException("processInstanceId cannot be null");
         if (status == null) throw new IllegalArgumentException("status cannot be null");
+        if (controlState == null) throw new IllegalArgumentException("controlState cannot be null");
         var ordered = new LinkedHashMap<UUID, Traversal>();
         if (traversals != null) {
             traversals.forEach((id, traversal) -> {
@@ -70,6 +72,31 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         this(processInstanceId, status, traversals, null);
     }
 
+    /** Compatibility construction of a new process without an explicit control command.
+     * @param processInstanceId process identity
+     * @param status execution status
+     * @param traversals contained traversals
+     * @param terminationReason recorded termination reason
+     */
+    public ProcessInstance(UUID processInstanceId, ProcessInstanceStatus status,
+                           Map<UUID, Traversal> traversals, ExecutionTerminationReason terminationReason) {
+        this(processInstanceId, status, traversals, terminationReason,
+                terminationReason == ExecutionTerminationReason.CANCELLED
+                        ? ProcessControlState.CANCELLED : ProcessControlState.RUNNING);
+    }
+
+    /** Applies a command under the containing store batch's revision/CAS.
+     * @param next new current command authority
+     * @return updated process aggregate
+     */
+    public ProcessInstance control(ProcessControlState next) {
+        requireNonTerminal();
+        if (controlState == ProcessControlState.CANCELLED && next != controlState) {
+            throw new IllegalStateException("cancelled process control cannot resume");
+        }
+        return new ProcessInstance(processInstanceId, status, traversals, terminationReason, next);
+    }
+
 /**
  * Transitions the aggregate state after verifying all traversals are consistent.
  * @param next target aggregate lifecycle state
@@ -98,7 +125,8 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
             throw new IllegalStateException(
                     "A completed process instance cannot contain incomplete traversals");
         }
-        return new ProcessInstance(processInstanceId, next, traversals, reason);
+        return new ProcessInstance(processInstanceId, next, traversals, reason,
+                reason == ExecutionTerminationReason.CANCELLED ? ProcessControlState.CANCELLED : controlState);
     }
 
 /**
@@ -114,7 +142,7 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         }
         var updated = new LinkedHashMap<>(traversals);
         updated.put(traversal.traversalId(), traversal);
-        return new ProcessInstance(processInstanceId, status, updated, terminationReason);
+        return new ProcessInstance(processInstanceId, status, updated, terminationReason, controlState);
     }
 
 /**
@@ -325,7 +353,7 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
     private ProcessInstance replaceTraversal(Traversal traversal) {
         var updated = new LinkedHashMap<>(traversals);
         updated.put(traversal.traversalId(), traversal);
-        return new ProcessInstance(processInstanceId, status, updated, terminationReason);
+        return new ProcessInstance(processInstanceId, status, updated, terminationReason, controlState);
     }
 
     private void requireNonTerminal() {

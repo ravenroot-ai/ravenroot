@@ -89,7 +89,7 @@ import java.util.function.Consumer;
  * ({@code ravenroot.join.wait}) for latency-style alerting on fan-in joins specifically.</p>
  */
 final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
-        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry {
+        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry, ai.ravenroot.core.runner.RunnerTelemetry {
 
     static final String INSTRUMENTATION_NAME = "ai.ravenroot.observability.otel";
 
@@ -164,15 +164,18 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
     static final AttributeKey<String> METRIC_ATTR_AGENT_OUTCOME =
             AttributeKey.stringKey("ravenroot.agent_budget.outcome");
 
+    static final AttributeKey<String> METRIC_ATTR_RUNNER_COUNTER = AttributeKey.stringKey("ravenroot.runner.counter");
     static final Set<AttributeKey<?>> METRIC_LABEL_ALLOWLIST =
             Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE, METRIC_ATTR_RETRY_CLASSIFICATION,
-                    METRIC_ATTR_AGENT_DIMENSION, METRIC_ATTR_AGENT_OUTCOME);
+                    METRIC_ATTR_AGENT_DIMENSION, METRIC_ATTR_AGENT_OUTCOME, METRIC_ATTR_RUNNER_COUNTER);
 
     private final Tracer tracer;
     private final LongCounter eventCounter;
     private final LongCounter orchestrationRetries;
     private final LongCounter connectorRetries;
     private final LongCounter agentBudget;
+    private final LongCounter runnerObservations;
+    private final java.util.concurrent.atomic.AtomicLong runnerActive = new java.util.concurrent.atomic.AtomicLong();
     private final DoubleHistogram nodeDuration;
     private final DoubleHistogram executionDuration;
     private final DoubleHistogram joinWait;
@@ -204,6 +207,12 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
                 .setDescription("Identifier-free agent authority and budget aggregates. Bounded: "
                         + "labeled only by fixed dimension and outcome enums.")
                 .build();
+        this.runnerObservations = meter.counterBuilder("ravenroot.runner.observations")
+                .setDescription("Process-local runner recovery, unknown-effect, conflict and worker failure observations; fixed counter enum only.")
+                .build();
+        meter.gaugeBuilder("ravenroot.runner.worker.active").ofLongs()
+                .setDescription("Current occupied local runner worker slots, bounded to four; not a fleet-wide active-job total.")
+                .buildWithCallback(measurement -> measurement.record(runnerActive.get()));
         this.nodeDuration = meter.histogramBuilder("ravenroot.node.duration")
                 .setDescription("Node invocation duration, start to terminal outcome (completed or "
                         + "bypassed or failed). Bounded: labeled only by ravenroot.event_type.")
@@ -300,8 +309,15 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         handler.run();
     }
 
-    @Override
-    public void record(ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Dimension dimension,
+    @Override public void increment(ai.ravenroot.core.runner.RunnerTelemetry.Counter counter) {
+        runnerObservations.add(1, Attributes.of(METRIC_ATTR_RUNNER_COUNTER, counter.name()));
+    }
+    @Override public void activeJobs(int count) {
+        if (count < 0 || count > 4) throw new IllegalArgumentException("invalid runner active-job measurement");
+        runnerActive.set(count);
+    }
+
+    @Override public void record(ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Dimension dimension,
                        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Outcome outcome,
                        long amount) {
         if (amount <= 0) return;

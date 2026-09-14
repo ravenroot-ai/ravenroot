@@ -176,5 +176,8 @@ public enum StoreCapability {
      * into invisibility. It still must not claim {@code DURABLE}, and a caller that needs the result
      * to survive process death must check for both.</p>
      */
-    EXECUTION_RESULTS
+    EXECUTION_RESULTS,
+
+    /** Atomic process workspace and fenced runner jobs; add DURABLE for restart survival. */
+    RUNNER_JOBS
 }

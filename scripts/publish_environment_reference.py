@@ -56,6 +56,7 @@ GROUPS = {
 }
 
 ROW_BOUNDARIES = {
+    "RAVENROOT_RUNNER_CONFIG": "unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart",
     "RAVENROOT_MATRIX_CONFIG": (
         "canonical padded Base64 of strict JSON containing bounded `store` settings and a nonempty "
         "tenant/profile map; unset or malformed configuration is tolerated while the Matrix package is "
@@ -164,6 +165,8 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name == "RAVENROOT_RUNNER_CONFIG":
+        return "agent"
     if name in {
         "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",
         "RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS",

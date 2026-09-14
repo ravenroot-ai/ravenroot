@@ -52,6 +52,18 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         if (!action.available()) {
             return deny("action is unavailable");
         }
+        if (action == AuthorizationAction.RUNNER_DISPATCH && context.principalType() != PrincipalType.WORKLOAD) {
+            return deny("runner dispatch requires a workload principal");
+        }
+        if ((action == AuthorizationAction.RUNNER_ADMIN || action == AuthorizationAction.RUNNER_CONTROL)
+                && context.principalType() != PrincipalType.USER) {
+            return deny("runner governance requires an operator principal");
+        }
+        if ((action == AuthorizationAction.RUNNER_READ || action == AuthorizationAction.RUNNER_ADMIN
+                || action == AuthorizationAction.RUNNER_CONTROL || action == AuthorizationAction.RUNNER_DISPATCH)
+                && !resource.tenantId().get().equals(context.tenantId())) {
+            return deny("runner access requires the exact tenant scope");
+        }
         if (action == AuthorizationAction.EMBED_SESSION_CREATE
                 && context.principalType() != PrincipalType.WORKLOAD) {
             return deny("embed sessions require a workload principal");
@@ -119,6 +131,11 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         put(matrix, EnumSet.of(Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.AUDIT_READ, AuthorizationAction.AUDIT_EXPORT);
         put(matrix, EnumSet.of(Role.PLATFORM_ADMIN), AuthorizationAction.AUDIT_ADMIN);
+        put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.DEVELOPER, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.RUNNER_READ);
+        put(matrix, EnumSet.of(Role.TENANT_ADMIN, Role.PLATFORM_ADMIN), AuthorizationAction.RUNNER_ADMIN);
+        put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.RUNNER_CONTROL, AuthorizationAction.RUNNER_DISPATCH);
         return Map.copyOf(matrix);
     }
 

@@ -260,6 +260,8 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     // guess why teaches them nothing. Its own status line says it in a sentence instead.
     { id: 'run.credentials', group: 'credentials', order: 110,
       placements: ['menu.run'], execute: actions.openCredentials },
+    { id: 'run.runners', group: 'credentials', order: 115,
+      placements: ['menu.run'], execute: actions.openRunners },
 
     // Its own group, same reasoning as `run.credentials` just above: a line separates
     // "sign this editor in" and "store a credential" from "manage a registered deployment", because

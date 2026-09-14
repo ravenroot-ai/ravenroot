@@ -72,6 +72,8 @@ public final class OpenApiSpecGenerator {
     }
 
     private static String operationEntry(RouteDescriptor route, String method) {
+        if (route.path().startsWith("/v1/runner-plane/")) return RunnerOpenApi.operation(route, method);
+        if (route.path().equals("/v1/processes/{processInstanceId}/{command}")) return ProcessOpenApi.operation(route, method);
         StringBuilder entry = new StringBuilder();
         entry.append("      \"").append(method.toLowerCase(java.util.Locale.ROOT)).append("\": {\n");
         entry.append("        \"summary\": \"").append(JsonStrings.escape(route.summary())).append("\",\n");

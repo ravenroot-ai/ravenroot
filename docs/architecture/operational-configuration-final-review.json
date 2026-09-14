@@ -1344,7 +1344,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "76e26982efdcad9595fbe728db183cbb24f8533bb944c2d3ebe7631b304d8dcc",
+          "digest": "7943d0400c424994ed46a3f340a4e881eab382623dfdbb82a9d489a99adcb98b",
           "assertion": "Empty values deliberately select application defaults for declared carriers."
         }
       ],
@@ -1452,7 +1452,7 @@
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "76e26982efdcad9595fbe728db183cbb24f8533bb944c2d3ebe7631b304d8dcc",
+          "digest": "7943d0400c424994ed46a3f340a4e881eab382623dfdbb82a9d489a99adcb98b",
           "assertion": "Kubernetes carries supported environment key identities."
         }
       ],
@@ -1709,7 +1709,7 @@
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "76e26982efdcad9595fbe728db183cbb24f8533bb944c2d3ebe7631b304d8dcc",
+          "digest": "7943d0400c424994ed46a3f340a4e881eab382623dfdbb82a9d489a99adcb98b",
           "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes."
         }
       ],

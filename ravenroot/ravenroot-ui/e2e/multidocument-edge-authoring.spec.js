@@ -92,8 +92,16 @@ async function finishDrag(page, target) {
 const snapshot = (page, documentId) => page.evaluate(id => {
   if (window.ravenroot.workspace.activeId === id) window.ravenroot.activeDocument();
   const owner = window.ravenroot.workspace.find(id);
+  const structuralGraph = structuredClone(owner.graph);
+  delete structuralGraph.graphProperties['ravenroot.renderMode'];
+  delete structuralGraph.graphProperties['ravenroot.layoutMode'];
   return {
     graphBytes: JSON.stringify(owner.graph),
+    structuralGraphBytes: JSON.stringify(structuralGraph),
+    presentation: {
+      renderMode: owner.graph.graphProperties['ravenroot.renderMode'],
+      layoutMode: owner.graph.graphProperties['ravenroot.layoutMode'],
+    },
     edges: owner.graph.edges.map(edge => `${edge.id}:${edge.source}>${edge.target}`).sort(),
     positions: Object.fromEntries(owner.cy.nodes().map(node => [node.id(), node.position()])),
     selected: owner.cy.$(':selected').map(element => element.id()).sort(),
@@ -394,8 +402,10 @@ test.describe('multidocument edge gesture ownership', () => {
     await beginDrag(page, second);
     await page.locator('#btn-monitoring').click();
     await page.mouse.up();
-    expect((await snapshot(page, second)).graphBytes).toBe(before.graphBytes);
-    expect((await snapshot(page, second)).depth).toBe(before.depth);
+    const afterMonitoring = await snapshot(page, second);
+    expect(afterMonitoring.structuralGraphBytes).toBe(before.structuralGraphBytes);
+    expect(afterMonitoring.presentation).toEqual({ renderMode: 'monitoring', layoutMode: 'elastic' });
+    expect(afterMonitoring.depth).toBe(before.depth);
     await expect(page.locator('#cy-wrap')).toHaveAttribute('data-edge-gesture-state', 'idle');
 
     // Return to an editable renderer and prove Escape and a semantically invalid drop both clean up.

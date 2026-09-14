@@ -15,6 +15,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -25,6 +26,9 @@ BASE_IMAGE = "python@sha256:46ee549c88617e9bc8acb843a326f1a5c0fa5608d7f9703509ef
 TEST = "writableContainerDevelopmentCycleUsesRealWorkspaceAcrossEveryRestart"
 TEST_CLASS = "ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest"
 TOOLS = ("sudo", "dockerd", "docker", "mkfs.xfs", "mount", "umount", "findmnt", "mvn")
+DAEMON_READY_SECONDS = 60
+DAEMON_PROBE_SECONDS = 5
+DIAGNOSTIC_BYTES = 16 * 1024
 
 
 def prerequisites(environment: dict[str, str]) -> Path:
@@ -48,6 +52,76 @@ def daemon_arguments(directory: Path) -> list[str]:
             "--group=" + grp.getgrgid(os.getgid()).gr_name, "--storage-driver=overlay2",
             "--feature=containerd-snapshotter=false", "--bridge=none", "--iptables=false",
             "--ip6tables=false", "--ip-masq=false"]
+
+
+def wait_for_daemon(daemon: subprocess.Popen, directory: Path, environment: dict[str, str]) -> dict:
+    """Require a live server response, not just successful CLI template rendering."""
+    deadline = time.monotonic() + DAEMON_READY_SECONDS
+    last_failure = "no server response"
+    observed = {}
+
+    def fail(reason: str) -> None:
+        # Emit evidence before run() tears down the private daemon and its log. Never
+        # dump the environment or the full info object (which includes proxy settings).
+        try:
+            with (directory / "daemon.log").open("rb") as log:
+                log.seek(0, os.SEEK_END)
+                log.seek(max(0, log.tell() - DIAGNOSTIC_BYTES))
+                tail = log.read(DIAGNOSTIC_BYTES).decode("utf-8", errors="replace")
+        except OSError as error:
+            tail = "daemon log unavailable: " + type(error).__name__
+        print("RUNNER_QUOTA_STARTUP_FAILURE=" + json.dumps({
+            "reason": reason, "daemonExitCode": daemon.poll(),
+            "lastProbe": last_failure[:DIAGNOSTIC_BYTES], "server": observed,
+            "daemonLogTail": tail,
+        }), file=sys.stderr, flush=True)
+        raise RuntimeError(reason)
+
+    while True:
+        if daemon.poll() is not None:
+            fail("the isolated quota daemon exited before readiness")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail("the isolated quota daemon did not become ready within 60 seconds")
+        try:
+            result = subprocess.run(["docker", "info", "--format", "{{json .}}"],
+                                    check=False, timeout=min(DAEMON_PROBE_SECONDS, remaining),
+                                    env=environment, text=True, capture_output=True)
+            if daemon.poll() is not None:
+                fail("the isolated quota daemon exited during readiness probe")
+            if result.returncode:
+                last_failure = "docker info exit " + str(result.returncode) + ": " + result.stderr[:DIAGNOSTIC_BYTES]
+            else:
+                info = json.loads(result.stdout)
+                if not isinstance(info, dict):
+                    last_failure = "docker info did not return an object"
+                else:
+                    fields = ("Driver", "DockerRootDir", "ServerVersion")
+                    observed = {key: str(info.get(key, ""))[:1024] for key in fields}
+                    # Docker 28 formats an empty server object and exits zero when
+                    # its socket is not ready. ServerErrors and populated server
+                    # fields, not CLI exit status alone, distinguish that response.
+                    if info.get("ServerErrors"):
+                        last_failure = "docker info server errors: " + str(info["ServerErrors"])[:DIAGNOSTIC_BYTES]
+                    elif not all(isinstance(info.get(key), str) and info[key].strip() for key in fields):
+                        last_failure = "docker info has incomplete server fields"
+                    elif time.monotonic() >= deadline:
+                        fail("the isolated quota daemon did not become ready within 60 seconds")
+                    elif (info["Driver"] != "overlay2"
+                          or Path(info["DockerRootDir"]).resolve() != directory / "xfs" / "docker"):
+                        fail("Docker is not using the fixture's classic overlay2 quota filesystem")
+                    else:
+                        return info
+        except subprocess.TimeoutExpired:
+            last_failure = "docker info probe timed out"
+        except json.JSONDecodeError:
+            last_failure = "docker info returned invalid JSON"
+        except OSError as error:
+            last_failure = "docker info could not execute: " + type(error).__name__
+            fail("the isolated quota daemon readiness probe could not execute")
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(1, remaining))
 
 
 def verify_report(path: Path) -> None:
@@ -98,18 +172,7 @@ def run() -> None:
             raise RuntimeError("the fixture filesystem does not enforce XFS project quotas")
         with (directory / "daemon.log").open("wb") as log:
             daemon = subprocess.Popen(daemon_arguments(directory), stdout=log, stderr=subprocess.STDOUT, env=environment)
-        for _ in range(60):
-            if daemon.poll() is not None:
-                raise RuntimeError("the isolated quota daemon failed to start")
-            try:
-                info = json.loads(command(["docker", "info", "--format", "{{json .}}"], 5))
-                break
-            except subprocess.CalledProcessError:
-                time.sleep(1)
-        else:
-            raise RuntimeError("the isolated quota daemon did not become ready within 60 seconds")
-        if info["Driver"] != "overlay2" or Path(info["DockerRootDir"]).resolve() != mountpoint / "docker":
-            raise RuntimeError("Docker is not using the fixture's classic overlay2 quota filesystem")
+        info = wait_for_daemon(daemon, directory, environment)
         print("RUNNER_QUOTA_SUBSTRATE=" + json.dumps({"driver": info["Driver"], "filesystem": filesystem,
               "dockerVersion": info["ServerVersion"], "baseImage": BASE_IMAGE}), flush=True)
         command(["docker", "pull", BASE_IMAGE], 180)

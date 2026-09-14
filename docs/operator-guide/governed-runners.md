@@ -183,6 +183,13 @@ Unsupported tooling, kernel, filesystem or quota behavior fails the job; it does
 an unbounded writable substrate. This fixture refuses local and self-hosted environments.
 Only a successful host-backed job is writable acceptance evidence; a passing fixture unit test
 or Docker's acceptance of a flag is not evidence of enforcement.
+Startup allows at most 60 seconds of monotonic elapsed time, including individual Docker probes
+(at most five seconds each). A successful CLI exit with server errors or empty server fields is
+not readiness. A live response using a different driver or data root fails immediately. Startup
+failures emit `RUNNER_QUOTA_STARTUP_FAILURE` before teardown with the daemon exit code, bounded
+last-probe evidence and the last 16 KiB of the private daemon log; environment variables and the
+complete Docker info response are not dumped. Readiness never substitutes for the subsequent
+production quota-enforcement probe and writable nine-job acceptance.
 The supported substrate follows Docker's documented
 [XFS project-quota requirement](https://docs.docker.com/reference/cli/dockerd/#overlay2-options)
 and [isolated-daemon contract](https://docs.docker.com/reference/cli/dockerd/#run-multiple-daemons).

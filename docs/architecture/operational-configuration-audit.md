@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 30.
+Checked source reconciliations: 31.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 20338 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 20322 |
-| Unchanged identities | 20290 |
-| Approved identity migrations | 20 |
-| Approved retirements | 12 |
-| Semantically classified additions | 28 |
+| Source inventory candidates | 20338 |
+| Unchanged identities | 20338 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 20338 |
 
 ## Final semantic review
@@ -11716,7 +11716,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-0383b0f240a37f019a9a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:127` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-9a906d3d5fcb1c27d0d4` | `ravenroot/ravenroot-ui/src/human-task-ui.js:128` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-209bf96fb51c2524d518` | `ravenroot/ravenroot-ui/src/human-task-ui.js:129` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-e73c05381ce598243274` | `ravenroot/ravenroot-ui/src/human-task-ui.js:285` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-e73c05381ce598243274` | `ravenroot/ravenroot-ui/src/human-task-ui.js:296` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-8ce7e269d717a5143c44` | `ravenroot/ravenroot-ui/src/inspector-autosave.js:1` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-61d09981b80f71c89e4d` | `ravenroot/ravenroot-ui/src/layered-drawing.js:26` `module` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
 | `oc-941ef28dfdd8e3e1da35` | `ravenroot/ravenroot-ui/src/layered-drawing.js:28` `module` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |

@@ -67,9 +67,10 @@ public final class LocalContainerRunner implements RunnerDriver {
         String proof = new String(command(Duration.ofSeconds(30), 256, "run", "--rm", "--pull=never",
                 "--network=none", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=65532:65532",
                 "--memory=67108864", "--pids-limit=16", "--storage-opt=size=4194304", "--entrypoint=/bin/sh",
-                image, "-c", "set -eu; printf x > /workspace/.ravenroot-quota-probe; "
+                image, "-c", "set -eu; command -v dd >/dev/null; "
+                        + "dd if=/dev/zero of=/workspace/.ravenroot-quota-probe bs=1048576 count=1 >/dev/null 2>&1; "
                         + "if dd if=/dev/zero of=/workspace/.ravenroot-quota-probe bs=1048576 count=8 2>/dev/null; "
-                        + "then exit 42; fi; test -s /workspace/.ravenroot-quota-probe; printf quota-enforced"),
+                        + "then exit 42; else test \"$?\" -eq 1; fi; test -s /workspace/.ravenroot-quota-probe; printf quota-enforced"),
                 java.nio.charset.StandardCharsets.UTF_8);
         if (!proof.equals("quota-enforced")) throw new IllegalStateException("runner workspace quota is not enforced");
         quotaAttested.add(image);

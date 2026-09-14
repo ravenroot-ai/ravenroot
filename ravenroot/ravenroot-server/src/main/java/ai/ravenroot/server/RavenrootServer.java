@@ -2826,6 +2826,9 @@ public final class RavenrootServer implements AutoCloseable {
                     + result.processInstanceId() + "\",\"generation\":" + result.generation()
                     + ",\"state\":\"" + result.state() + "\",\"reason\":\"" + escape(result.reason())
                     + "\",\"traversals\":[" + traversals + "]}");
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            // The shared protected boundary owns the audited 403 ACCESS_DENIED response.
+            throw denied;
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {

@@ -215,8 +215,15 @@ class RunnerProtocolHttpTest {
                         .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(200, http.send(HttpRequest.newBuilder(endpoint.resolve("/v1/runner-plane/workspaces/" + key.processInstanceId() + "/release"))
                         .header("Authorization", "Bearer runner").POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
-                store.close();
-                try (var recovery = new RunnerRecoveryLoop(service, continuations, Set.of("tenant"), clock)) {
+                var unavailable = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                        new Class<?>[]{ExecutionStore.class}, (proxy, method, arguments) -> {
+                            if (method.getName().equals("listProcessInstances")) return java.util.concurrent.CompletableFuture.failedFuture(
+                                    new IllegalStateException("inventory temporarily unavailable"));
+                            return method.invoke(store, arguments);
+                        });
+                var unavailableService = new RunnerJobService(unavailable, clock, List.of(definition), List.of(registration), Map.of("tenant", policy));
+                unavailableService.telemetry().install(service.telemetry());
+                try (var recovery = new RunnerRecoveryLoop(unavailableService, continuations, Set.of("tenant"), clock)) {
                     recovery.sweep();
                     assertEquals(1, observations.get(RunnerTelemetry.Counter.RECOVERY_CONFLICT));
                 }

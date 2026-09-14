@@ -4282,7 +4282,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 360 |",
+                "| Retained published contract descriptions | 365 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

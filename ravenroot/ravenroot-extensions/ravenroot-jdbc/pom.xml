@@ -13,6 +13,6 @@
        flat 42.7.7 jar until #280 teaches the loader multi-release jars; moving it earlier only
        reproduces that refusal. -->
   <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><version>42.7.7</version><scope>test</scope></dependency>
-  <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId><version>9.5.0</version><scope>test</scope></dependency>
+  <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId><version>26.7.0</version><scope>test</scope></dependency>
   <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
  </dependencies></project>

@@ -110,6 +110,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class InMemoryExecutionStore implements ExecutionStore {
 
     private final Object monitor = new Object();
+    private final Map<String, Map<String, ai.ravenroot.api.runner.GovernedRunnerResource>> runnerCatalog =
+            new HashMap<>();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
     private final Map<IdempotencyKey, IdempotencyRecord> idempotency = new LinkedHashMap<>();
     /**
@@ -288,7 +290,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // medium, and this adapter honours every one of them exactly. What it
                 // cannot honour is survival of process death, which is what DURABLE
                 // says and what this adapter still does not say.
-                StoreCapability.EXECUTION_RESULTS);
+                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
     }
 
     @Override
@@ -459,6 +461,17 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.executionPauses);
                 applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
 
+                var runnerWorkspace = existing == null ? null : existing.runnerWorkspace;
+                try {
+                    for (var operation : batch.runnerOperations()) {
+                        runnerWorkspace = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(
+                                key, runnerWorkspace, operation, folded, now);
+                    }
+                    if (runnerWorkspace != null) ai.ravenroot.api.runner.RunnerCodec.workspace(runnerWorkspace);
+                } catch (IllegalArgumentException | IllegalStateException invalid) {
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
@@ -468,6 +481,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         agentBudget,
                         humanTasks,
                         executionPauses,
+                        runnerWorkspace,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -1687,6 +1701,45 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
     }
 
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.runner.RunnerWorkspaceState>> loadRunnerWorkspace(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key);
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.runnerWorkspace);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.runner.GovernedRunnerResource>> runnerResources(String tenantId) {
+        return complete(() -> {
+            Objects.requireNonNull(tenantId);
+            synchronized (monitor) {
+                return List.copyOf(runnerCatalog.getOrDefault(tenantId, Map.of()).values());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.runner.GovernedRunnerResource> saveRunnerResource(
+            ai.ravenroot.api.runner.GovernedRunnerResource resource, long expectedRevision) {
+        return complete(() -> {
+            Objects.requireNonNull(resource);
+            synchronized (monitor) {
+                var catalog = runnerCatalog.computeIfAbsent(resource.tenantId(), ignored -> new LinkedHashMap<>());
+                var existing = catalog.get(resource.key());
+                if (existing == null && catalog.size() >= ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                    throw failure(ExecutionStoreFailure.invalid("runner catalog quota exceeded"));
+                }
+                var accepted = resource.accepted(existing, expectedRevision, clock.instant());
+                catalog.put(accepted.key(), accepted);
+                return accepted;
+            }
+        });
+    }
+
     // ---------------------------------------------------------------- durable execution pauses
 
     @Override
@@ -2820,6 +2873,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableHumanTask> humanTasks;
         /** Operator holds retained in commit order within this instance. */
         private final Map<UUID, DurableExecutionPause> executionPauses;
+        private final ai.ravenroot.api.runner.RunnerWorkspaceState runnerWorkspace;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -2835,6 +2889,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                       DurableAgentAuthorityBudget agentBudget,
                       Map<UUID, DurableHumanTask> humanTasks,
                       Map<UUID, DurableExecutionPause> executionPauses,
+                      ai.ravenroot.api.runner.RunnerWorkspaceState runnerWorkspace,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -2850,6 +2905,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.agentBudget = agentBudget;
             this.humanTasks = humanTasks;
             this.executionPauses = executionPauses;
+            this.runnerWorkspace = runnerWorkspace;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;

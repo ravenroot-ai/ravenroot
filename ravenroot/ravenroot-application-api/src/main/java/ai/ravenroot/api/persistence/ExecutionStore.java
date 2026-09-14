@@ -64,6 +64,36 @@ import java.util.concurrent.CompletionStage;
  * successor, the runtime, CORE-03 and PERS-04 respectively.</p>
  */
 public interface ExecutionStore extends AutoCloseable {
+    /**
+     * Reads the bounded tenant catalog, including draft and retired profiles for operator inspection.
+     * @param tenantId exact authenticated tenant scope
+     * @return immutable catalog snapshot, or a capability-not-supported failure
+     */
+    default CompletionStage<List<ai.ravenroot.api.runner.GovernedRunnerResource>> runnerResources(String tenantId) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.RUNNER_JOBS)));
+    }
+
+    /**
+     * Saves an immutable profile body or changes its approval under optimistic concurrency.
+     * @param resource validated tenant-scoped document and authenticated approval actor
+     * @param expectedRevision exact current revision, or zero for creation
+     * @return accepted document with the next revision and authoritative store timestamp
+     */
+    default CompletionStage<ai.ravenroot.api.runner.GovernedRunnerResource> saveRunnerResource(
+            ai.ravenroot.api.runner.GovernedRunnerResource resource, long expectedRevision) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.RUNNER_JOBS)));
+    }
+    /**
+     * Reads the process-scoped runner workspace, including parked jobs and pinned continuations.
+     * @param key exact tenant and process scope
+     * @return workspace snapshot, empty before admission, or a capability-not-supported failure
+     */
+    default CompletionStage<Optional<ai.ravenroot.api.runner.RunnerWorkspaceState>> loadRunnerWorkspace(ExecutionKey key) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.RUNNER_JOBS)));
+    }
 
     /**
      * Whether this view routes every managed mutation through the format-3 manifest authority.

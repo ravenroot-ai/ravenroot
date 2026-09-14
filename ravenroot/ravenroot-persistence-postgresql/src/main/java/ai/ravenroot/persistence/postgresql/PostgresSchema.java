@@ -970,6 +970,27 @@ final class PostgresSchema {
                 )
                 """)),
                 new SchemaMigration(3, "execution manifest operational policy v2", List.of(
-                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")));
+                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")),
+                new SchemaMigration(4, "governed process runner workspaces", List.of(
+                        """
+                        CREATE TABLE runner_workspace (
+                            tenant_id TEXT NOT NULL,
+                            process_instance_id UUID NOT NULL,
+                            state BYTEA NOT NULL,
+                            PRIMARY KEY (tenant_id, process_instance_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                        )
+                        """,
+                        "CREATE TABLE runner_catalog_tenant (tenant_id TEXT PRIMARY KEY)",
+                        """
+                        CREATE TABLE runner_catalog (
+                            tenant_id TEXT NOT NULL,
+                            resource_key TEXT NOT NULL,
+                            document BYTEA NOT NULL,
+                            PRIMARY KEY (tenant_id, resource_key),
+                            FOREIGN KEY (tenant_id) REFERENCES runner_catalog_tenant (tenant_id)
+                        )
+                        """)));
     }
 }

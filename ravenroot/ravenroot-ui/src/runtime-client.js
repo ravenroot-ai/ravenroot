@@ -788,6 +788,44 @@ export class RavenrootRuntimeClient {
       { method: 'POST', ...request, headers: { Accept: 'application/json', ...(request.headers || {}) } });
   }
 
+  runnerCatalog() {
+    return this.#json('/v1/runner-plane/catalog', { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerHealth(cursor = null) {
+    return this.#json('/v1/runner-plane/health' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerAudit(afterOffset = 0) {
+    if (!Number.isSafeInteger(afterOffset) || afterOffset < 0) throw new Error('Invalid runner audit offset');
+    return this.#json('/v1/runner-plane/audit?afterOffset=' + afterOffset,
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerResource(key) {
+    return this.#json('/v1/runner-plane/catalog/' + encodeURIComponent(key),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  saveRunnerResource(resource) {
+    const body = JSON.stringify(resource);
+    if (new TextEncoder().encode(body).length > 1_048_576) throw new Error('Runner definition exceeds the document limit');
+    return this.#json('/v1/runner-plane/catalog', { method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body });
+  }
+  runnerWorkspace(processId) {
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerOperation(processId, jobId, operation) {
+    if (!['cancel', 'reconcile'].includes(operation)) throw new Error('Unsupported operator runner action');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/' + operation,
+    { method: 'POST', headers: { Accept: 'application/json' } });
+  }
+  runnerArtifact(processId, jobId, artifactId) {
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodeURIComponent(artifactId),
+    { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+
   async #json(path, options) {
     if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
     const credential = await this.#requestCredential();

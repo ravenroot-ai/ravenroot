@@ -316,6 +316,50 @@ public final class ExecutionRecorder implements AutoCloseable {
         revision = applied.revision();
     }
 
+    /** Atomically parks the exact attempt with its governed runner job and continuation. */
+    public synchronized void suspendForRunner(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit,
+                                              EventEnvelope event) {
+        requireFence();
+        var id = submit.identity();
+        if (!key.equals(id.execution())) throw new IllegalArgumentException("runner admission scope mismatch");
+        var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).fencedBy(lease)
+                .apply(new ExecutionTransition.AttemptTransitioned(id.traversalId(), id.invocationId(),
+                        id.attemptId(), NodeAttemptStatus.WAITING))
+                .apply(new ExecutionTransition.InvocationTransitioned(id.traversalId(), id.invocationId(), NodeInvocationStatus.WAITING))
+                .apply(new ExecutionTransition.TraversalTransitioned(id.traversalId(), TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .runner(submit).publish(event);
+        revision = await(store.apply(batch.build())).revision();
+    }
+
+    /** Applies one runner lifecycle change and its audit event through the current process fence. */
+    public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event) {
+        requireFence();
+        revision = await(store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease).runner(operation).publish(event).build())).revision();
+    }
+
+    /** Confirms the core signal against immutable durable acceptance before unwinding engine workers. */
+    public synchronized boolean confirmsRunnerJob(UUID jobId, NodeMessage message) {
+        if (!key.tenantId().equals(message.security().tenantId()) || !key.processInstanceId().equals(message.processInstanceId())) return false;
+        var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
+        var entry = workspace == null ? null : workspace.jobs().get(jobId);
+        if (entry == null) return false;
+        var id = entry.job().identity();
+        return id.traversalId().equals(message.traversalId()) && id.invocationId().equals(message.invocationId())
+                && id.attemptId().equals(message.attemptId());
+    }
+
+    /** Atomically parks one invocation behind a first-class durable human task. */
+    public synchronized boolean confirmsRunnerTerminal(ai.ravenroot.api.runner.RunnerJob job) {
+        if (!key.equals(job.identity().execution()) || !job.state().terminal()) return false;
+        var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
+        var entry = workspace == null ? null : workspace.jobs().get(job.identity().runnerJobId());
+        return entry != null && java.util.Arrays.equals(
+                ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), job)),
+                ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), entry.job())));
+    }
+
     /** Atomically parks one invocation behind a first-class durable human task. */
     public synchronized void suspendForHumanTask(HumanTaskRegistration task,
                                                  HandlerRegistration handler,

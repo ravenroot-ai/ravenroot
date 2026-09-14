@@ -1493,7 +1493,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     if (terminalFailure instanceof
                             ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
                             || terminalFailure instanceof
-                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
+                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension
+                            || terminalFailure instanceof ai.ravenroot.core.runner.RunnerJobSuspension) {
                         // The durable aggregate is WAITING. It is neither a failed result nor live
                         // in-memory work; the handler-trigger path creates the fresh traversal.
                     } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
@@ -1555,7 +1556,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 if (agentBudgets != null && !(terminalFailure instanceof
                         ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension)
                         && !(terminalFailure instanceof
-                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension)) {
+                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension)
+                        && !(terminalFailure instanceof ai.ravenroot.core.runner.RunnerJobSuspension)) {
                     cleanupFailure = cleanup(cleanupFailure, () -> agentBudgets.finishProcess(
                             new ai.ravenroot.api.persistence.ExecutionKey(
                                     security.tenantId(), processInstanceId),

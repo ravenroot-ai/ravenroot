@@ -305,6 +305,7 @@ public final class RavenrootServer implements AutoCloseable {
     private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
+    private RunnerPlaneHttpApi runnerPlaneApi;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
     private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
@@ -768,6 +769,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
         apiContext("/v1/human-tasks", this::humanTasks);
+        apiContext("/v1/runner-plane", this::runnerPlane);
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
@@ -988,6 +990,22 @@ public final class RavenrootServer implements AutoCloseable {
         }
         managedIngress = java.util.Objects.requireNonNull(registry, "registry");
         registry.bindContextual(server, handler -> publicContext(protectedRequest(handler)));
+    }
+
+    /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
+    synchronized void installRunnerPlane(ai.ravenroot.core.runner.AuthorizedRunnerControl control,
+                                         ai.ravenroot.core.runner.PinnedRunnerContinuationExecutor continuations) {
+        if (started.get()) throw new IllegalStateException("runner plane must be installed before start");
+        if (runnerPlaneApi != null) throw new IllegalStateException("runner plane already installed");
+        runnerPlaneApi = new RunnerPlaneHttpApi(control, continuations);
+    }
+
+    private void runnerPlane(HttpExchange exchange, HttpRequestContext context) throws IOException {
+        if (runnerPlaneApi == null) {
+            json(exchange, 501, "{\"error\":\"RUNNER_PLANE_UNAVAILABLE\"}");
+            return;
+        }
+        runnerPlaneApi.handle(exchange, context);
     }
 
     /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */

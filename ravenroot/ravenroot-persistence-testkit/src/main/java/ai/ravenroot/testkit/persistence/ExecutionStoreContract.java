@@ -224,6 +224,159 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public abstract class ExecutionStoreContract {
 
+    @Test
+    final void runnerWorkspaceSurvivesLaterTraversalWhileIndependentProcessesStayIsolated() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var first = runnerSubmission(newKey());
+        var key = first.identity().execution();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(first), new GraphVersionPin("runner-graph-v1")))
+                .runner(first).build()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(first.jobId(), "runner", TTL));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(first.jobId(), "runner", 1,
+                new ai.ravenroot.api.runner.RunnerResult("completed", first.input(), List.of(), UUID.randomUUID())));
+        var next = runnerSubmission(key);
+        var continuation = new ai.ravenroot.api.runner.RunnerJobOperation.Submit(next.identity(), next.definition(), next.command(),
+                next.deployment(), next.runner(), next.input(), next.deadline(), first.workspaceId(), next.continuation());
+        var nextTraversal = runnerInitial(continuation).traversals().get(next.identity().traversalId());
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.TraversalAdded(nextTraversal)).runner(continuation).build()));
+        var independent = runnerSubmission(newKey());
+        await(store().apply(ExecutionBatch.to(independent.identity().execution()).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(independent), new GraphVersionPin("runner-graph-v1")))
+                .runner(independent).build()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(next.jobId(), "runner", TTL));
+        runnerApply(independent.identity().execution(), new ai.ravenroot.api.runner.RunnerJobOperation.Claim(independent.jobId(), "runner", TTL));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var shared = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        var separate = await(store().loadRunnerWorkspace(independent.identity().execution())).orElseThrow();
+        assertEquals(first.workspaceId(), shared.workspaceId());
+        assertEquals(2, shared.jobs().size());
+        assertNotEquals(first.identity().traversalId(), next.identity().traversalId());
+        assertNotEquals(shared.workspaceId(), separate.workspaceId());
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CLAIMED, shared.jobs().get(next.jobId()).job().state());
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CLAIMED, separate.jobs().get(independent.jobId()).job().state());
+    }
+
+    @Test
+    final void runnerJobsAreAtomicFencedAndRetainUnknownWorkspaceOwnership() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var submit = runnerSubmission(newKey());
+        var key = submit.identity().execution();
+        var initial = runnerInitial(submit);
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(initial, new GraphVersionPin("runner-graph-v1")))
+                .runner(submit).build()));
+        var state = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        assertEquals(submit.workspaceId(), state.workspaceId());
+        assertEquals(submit.definition(), state.jobs().get(submit.jobId()).job().definition());
+        assertTrue(await(store().loadRunnerWorkspace(new ExecutionKey("other", key.processInstanceId()))).isEmpty());
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL));
+        assertThrows(RuntimeException.class, () -> runnerApply(key,
+                new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL)));
+        clock().advance(TTL);
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(submit.jobId()));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        state = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.UNKNOWN, state.jobs().get(submit.jobId()).job().state());
+        assertEquals(submit.identity(), state.jobs().get(submit.jobId()).job().identity());
+        assertThrows(RuntimeException.class, () -> runnerApply(key,
+                new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL)));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ReconcileReport(submit.jobId(), "runner", TTL));
+        var result = new ai.ravenroot.api.runner.RunnerResult("completed", submit.input(), List.of(), UUID.randomUUID());
+        assertThrows(RuntimeException.class, () -> runnerApply(key,
+                new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result)));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 2, result));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 2, result));
+        var terminal = await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(submit.jobId()).job();
+        assertEquals(result, terminal.result());
+        assertFalse(terminal.retainsWorkspace());
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ContinuationUncertain(submit.jobId()));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertTrue(await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(submit.jobId()).continuationUncertain());
+    }
+
+    @Test
+    final void runnerAdmissionFailureRollsBackTheEntireGraphBatch() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var submit = runnerSubmission(newKey());
+        var key = submit.identity().execution();
+        var wrong = new ProcessInstance(key.processInstanceId(), ProcessInstanceStatus.RUNNING, Map.of());
+        assertThrows(RuntimeException.class, () -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(wrong, new GraphVersionPin("runner-graph-v1")))
+                .runner(submit).build())));
+        assertTrue(await(store().loadRunnerWorkspace(key)).isEmpty());
+        assertThrows(RuntimeException.class, () -> await(store().load(key)));
+    }
+
+    @Test
+    final void runnerCatalogIsImmutableRevisionedTenantScopedAndDurable() {
+        Assumptions.assumeTrue(store().supports(StoreCapability.RUNNER_JOBS));
+        var definition = runnerSubmission(newKey()).definition();
+        var resource = new ai.ravenroot.api.runner.GovernedRunnerResource(
+                ai.ravenroot.api.runner.GovernedRunnerResource.Kind.AGENT_DEFINITION,
+                definition.reference().tenantId(), definition.reference().name(), definition.reference().version(), true,
+                OpaquePayload.of(ai.ravenroot.api.runner.RunnerCodec.definition(definition), "application/runner-definition"),
+                0, "operator", clock().instant());
+        var saved = await(store().saveRunnerResource(resource, 0));
+        assertEquals(1, saved.revision());
+        assertTrue(await(store().runnerResources("another-tenant")).isEmpty());
+        assertThrows(RuntimeException.class, () -> await(store().saveRunnerResource(resource, 0)));
+        var revoked = new ai.ravenroot.api.runner.GovernedRunnerResource(resource.kind(), resource.tenantId(),
+                resource.name(), resource.version(), false, resource.document(), 0, "reviewer", clock().instant());
+        assertEquals(2, await(store().saveRunnerResource(revoked, 1)).revision());
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var restored = await(store().runnerResources(resource.tenantId())).getFirst();
+        assertFalse(restored.approved());
+        assertEquals("reviewer", restored.actor());
+        assertEquals(2, restored.revision());
+        var changed = new ai.ravenroot.api.runner.AgentDefinition(definition.reference(), "Different instructions",
+                definition.runtimeProfile(), definition.modelProfile(), definition.commands(), definition.skills(),
+                definition.runnerRequirements(), definition.policy(), definition.workspaceRetention(), definition.outputSchema());
+        var replacement = new ai.ravenroot.api.runner.GovernedRunnerResource(resource.kind(), resource.tenantId(),
+                resource.name(), resource.version(), true,
+                OpaquePayload.of(ai.ravenroot.api.runner.RunnerCodec.definition(changed), resource.document().contentType()),
+                0, "operator", clock().instant());
+        assertThrows(RuntimeException.class, () -> await(store().saveRunnerResource(replacement, 2)));
+        assertEquals(restored, await(store().runnerResources(resource.tenantId())).getFirst());
+    }
+
+    private void runnerApply(ExecutionKey key, ai.ravenroot.api.runner.RunnerJobOperation operation) {
+        long revision = await(store().load(key)).revision();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).runner(operation).build()));
+    }
+
+    private ai.ravenroot.api.runner.RunnerJobOperation.Submit runnerSubmission(ExecutionKey key) {
+        var policy = new ai.ravenroot.api.runner.RunnerPolicy(
+                Set.of(ai.ravenroot.api.runner.RunnerPolicy.Capability.WORKSPACE_READ,
+                        ai.ravenroot.api.runner.RunnerPolicy.Capability.WORKSPACE_WRITE),
+                Set.of(), Set.of(), Set.of(), Set.of(), new ai.ravenroot.api.runner.RunnerPolicy.Limits(
+                Duration.ofMinutes(10), 1_000_000, 1, 1_000_000, 10_000, 1_000, 512));
+        var command = new ai.ravenroot.api.runner.AgentCommand("implement", false, policy, Set.of("completed", "continue"));
+        var definition = new ai.ravenroot.api.runner.AgentDefinition(
+                new ai.ravenroot.api.runner.AgentDefinition.Reference(key.tenantId(), "developer", 1),
+                "Approved instructions", "reference", "reference", Map.of("implement", command), Set.of(),
+                Set.of(), policy, Duration.ofDays(7), "development-result");
+        var runner = new ai.ravenroot.api.runner.RunnerRegistration(1, key.tenantId(), "runner", "sandboxed", Set.of(), policy);
+        var identity = new ai.ravenroot.api.runner.RunnerJobIdentity(key, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID());
+        return new ai.ravenroot.api.runner.RunnerJobOperation.Submit(identity, definition, "implement", policy,
+                runner, OpaquePayload.of("{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"), clock().instant().plusSeconds(600),
+                UUID.randomUUID(), OpaquePayload.empty("application/vnd.ravenroot.runner-continuation.v1"));
+    }
+
+    private static ProcessInstance runnerInitial(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit) {
+        var identity = submit.identity();
+        var invocation = new NodeInvocation(identity.invocationId(), "agent", Set.of(), NodeInvocationStatus.WAITING,
+                List.of(new NodeAttempt(identity.attemptId(), 1, NodeAttemptStatus.WAITING)),
+                ai.ravenroot.api.execution.NodeCommand.application("implement"));
+        var traversal = new Traversal(identity.traversalId(), "agent", TraversalStatus.WAITING,
+                Map.of(identity.invocationId(), invocation));
+        return new ProcessInstance(identity.execution().processInstanceId(), ProcessInstanceStatus.WAITING,
+                Map.of(identity.traversalId(), traversal));
+    }
+
     /** Arbitrary, fixed epoch so every test starts from a readable, reproducible instant. */
     private static final Instant EPOCH = Instant.parse("2026-01-01T00:00:00Z");
     private static final String DEFAULT_TENANT = "acme";

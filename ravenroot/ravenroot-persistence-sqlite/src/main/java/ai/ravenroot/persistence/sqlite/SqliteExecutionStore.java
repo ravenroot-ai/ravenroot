@@ -203,7 +203,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // instance. Recording refuses a conflicting outcome rather than overwriting
             // one, and the refusal is decided from the stored fingerprint alone, so it
             // is the same answer on every retry and across a reopen.
-            StoreCapability.EXECUTION_RESULTS);
+            StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -524,6 +524,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         writeToolApprovals(key, batch, folded, pin, revision, now);
         writeAgentAuthorityBudget(key, batch, folded, now);
         writeExecutionPauses(key, batch, folded, pin, revision);
+        writeRunnerWorkspace(key, batch, folded, now);
         writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of the shared
@@ -3595,6 +3596,106 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     rows.getLong("revision"));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.runner.RunnerWorkspaceState>> loadRunnerWorkspace(ExecutionKey key) {
+        return async(() -> inReadTransaction(key, () ->
+                Optional.ofNullable(readRunnerWorkspace(Objects.requireNonNull(key)))));
+    }
+
+@Override
+    public CompletionStage<List<ai.ravenroot.api.runner.GovernedRunnerResource>> runnerResources(String tenantId) {
+        Objects.requireNonNull(tenantId);
+        return async(() -> inReadTransaction(null, () -> readRunnerResources(tenantId)));
+    }
+
+    private List<ai.ravenroot.api.runner.GovernedRunnerResource> readRunnerResources(
+            String tenantId) throws SQLException {
+        var resources = new ArrayList<ai.ravenroot.api.runner.GovernedRunnerResource>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT document FROM runner_catalog WHERE tenant_id = ? ORDER BY resource_key")) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    var value = ai.ravenroot.api.runner.RunnerCodec.resource(rows.getBytes(1));
+                    if (!tenantId.equals(value.tenantId())
+                            || resources.size() == ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                        throw failure(ExecutionStoreFailure.invalid("invalid runner catalog scope or size"));
+                    }
+                    resources.add(value);
+                }
+            }
+        }
+        return List.copyOf(resources);
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.runner.GovernedRunnerResource> saveRunnerResource(
+            ai.ravenroot.api.runner.GovernedRunnerResource resource, long expectedRevision) {
+        Objects.requireNonNull(resource);
+        return async(() -> inWriteTransaction(null, () -> {
+            try (PreparedStatement tenant = connection.prepareStatement(
+                    "INSERT INTO runner_catalog_tenant (tenant_id) VALUES (?) ON CONFLICT (tenant_id) DO NOTHING")) {
+                tenant.setString(1, resource.tenantId()); tenant.executeUpdate();
+            }
+            var resources = readRunnerResources(resource.tenantId());
+            var existing = resources.stream().filter(value -> value.key().equals(resource.key())).findFirst().orElse(null);
+            if (existing == null && resources.size() >= ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                throw failure(ExecutionStoreFailure.invalid("runner catalog quota exceeded"));
+            }
+            var accepted = resource.accepted(existing, expectedRevision, clock.instant());
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO runner_catalog (tenant_id, resource_key, document) VALUES (?, ?, ?) "
+                            + "ON CONFLICT (tenant_id, resource_key) DO UPDATE SET document = excluded.document")) {
+                statement.setString(1, accepted.tenantId()); statement.setString(2, accepted.key());
+                statement.setBytes(3, ai.ravenroot.api.runner.RunnerCodec.resource(accepted)); statement.executeUpdate();
+            }
+            return accepted;
+        }));
+    }
+
+    private ai.ravenroot.api.runner.RunnerWorkspaceState readRunnerWorkspace(ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state FROM runner_workspace WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return null;
+                try {
+                    var state = ai.ravenroot.api.runner.RunnerCodec.workspace(rows.getBytes(1));
+                    if (!key.equals(state.execution())) throw new IllegalArgumentException("runner scope mismatch");
+                    return state;
+                } catch (RuntimeException invalid) {
+                    throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                            "invalid governed runner workspace"));
+                }
+            }
+        }
+    }
+
+    private void writeRunnerWorkspace(ExecutionKey key, ExecutionBatch batch,
+                                      ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.runnerOperations().isEmpty()) return;
+        var state = readRunnerWorkspace(key);
+        byte[] bytes;
+        try {
+            for (var operation : batch.runnerOperations()) {
+                state = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(key, state, operation, folded, now);
+            }
+            bytes = ai.ravenroot.api.runner.RunnerCodec.workspace(state);
+        } catch (IllegalArgumentException | IllegalStateException invalid) {
+            throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO runner_workspace (tenant_id, process_instance_id, state) VALUES (?, ?, ?) "
+                        + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET state = excluded.state")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setBytes(3, bytes);
+            statement.executeUpdate();
         }
     }
 

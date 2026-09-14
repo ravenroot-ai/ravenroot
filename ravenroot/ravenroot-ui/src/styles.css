@@ -1,6 +1,13 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
+.runner-dialog { width: min(960px, 95vw); max-height: 90vh; overflow: auto; }
+.runner-dialog > * { margin-block: 0.5rem; }
+.runner-dialog textarea { display: block; width: 100%; min-height: 14rem; font-family: monospace; }
+.runner-dialog pre { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.runner-dialog section { border: 1px solid var(--border-default); padding: 0.75rem; margin-block: 0.75rem; }
+.runner-dialog button { margin: 0.25rem; }
+
+:root {
       color-scheme: dark;
 
       /* Application theme vocabulary. Renderer palettes mirror these semantics in

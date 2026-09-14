@@ -12,6 +12,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TelemetrySupportAgentBudgetCompositionTest {
     @Test
+    void runnerRelayUsesTheSameDisabledEnabledAndCloseLifecycle() throws Exception {
+        var relay = new ai.ravenroot.core.runner.RunnerTelemetry.Relay();
+        var staleCalls = new AtomicLong();
+        var stale = new ai.ravenroot.core.runner.RunnerTelemetry() {
+            public void increment(Counter counter) { staleCalls.incrementAndGet(); }
+            public void activeJobs(int count) { staleCalls.incrementAndGet(); }
+        };
+        relay.install(stale);
+        assertTrue(TelemetrySupport.install(TelemetryConfiguration.disabled(), new ExecutionMonitor(), null, relay).isEmpty());
+        relay.activeJobs(1);
+        relay.increment(ai.ravenroot.core.runner.RunnerTelemetry.Counter.RECOVERY_CONFLICT);
+        assertEquals(0, staleCalls.get());
+        relay.install(stale);
+        var configuration = TelemetryConfiguration.fromEnvironment(Map.of(
+                TelemetryConfiguration.ENABLED_VARIABLE, "true", TelemetryConfiguration.EXPORTER_VARIABLE, "logging"));
+        var installed = TelemetrySupport.install(configuration, new ExecutionMonitor(), null, relay).orElseThrow();
+        relay.activeJobs(4);
+        relay.increment(ai.ravenroot.core.runner.RunnerTelemetry.Counter.WORKER_FAILURE);
+        assertEquals(0, staleCalls.get());
+        installed.close();
+        relay.activeJobs(0);
+        relay.increment(ai.ravenroot.core.runner.RunnerTelemetry.Counter.UNKNOWN_OBSERVED);
+        assertEquals(0, staleCalls.get());
+    }
+
+    @Test
     void disabledTelemetryRestoresTheProductionRelayToDiscarding() {
         var relay = new AgentBudgetTelemetry.Relay();
         var staleSinkCalls = new AtomicLong();

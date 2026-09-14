@@ -79,6 +79,7 @@ import { invokesModelProvider, PROVIDER_CONFIG_POINTER } from './generative-capa
 // SECRET_REFERENCE control.
 import { RavenrootCredentialClient } from './credential-client.js';
 import { createCredentialsWindow } from './credential-panel.js';
+import { createRunnerWindow } from './runner-panel.js';
 // A construction site of the same shape as the credential window above, and for the
 // same reason: the Deployments window reaches THE SAME Ravenroot service with THE SAME runtime
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
@@ -748,6 +749,7 @@ function beginWorkspaceAuthority(client, state = 'pending') {
   suspendHumanTaskRecovery();
   humanTaskController?.configure(null, null, workspace.active);
   void credentialsWindow?.setClient(null);
+  runnerWindow?.setClient(null);
   void deploymentsWindow?.setClient(null);
   refreshCommands();
   return workspaceAuthority.generation;
@@ -1225,6 +1227,7 @@ let assistantClient = null;
 // service that answered is "you have none to choose"; an empty list because nobody asked yet is "we
 // do not know", and a value already on the node must survive it untouched.
 let credentialsWindow = null;
+let runnerWindow = null;
 let credentialReferences = { loaded: false, credentials: [] };
 
 // ── DEPLOYMENTS ────────────────────────────────────────────────────────────────────
@@ -10883,6 +10886,7 @@ async function connectRuntime(atBoot = false) {
         void credentialsWindow?.setClient(
           new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
         void deploymentsWindow?.setClient(connectedClient);
+        runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
       } else if (scope === false) {
@@ -10979,6 +10983,8 @@ async function revokeRuntimeAccess() {
   // back to preserving whatever a node already declares rather than continuing to offer a list read
   // under an authentication that has just been withdrawn.
   credentialsWindow?.close();
+  runnerWindow?.close();
+  runnerWindow?.setClient(null);
   void credentialsWindow?.setClient(null);
   // the deployment window loses its client with everything else, for the identical
   // reason -- a listing read under an authentication that has just been withdrawn must not linger.
@@ -14116,6 +14122,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   authenticate: () => authenticateRuntime(),
   forgetToken: () => revokeRuntimeAccess(),
   openCredentials: () => credentialsWindow?.open(),
+  openRunners: () => runnerWindow?.open(),
   openDeployments: () => deploymentsWindow?.open(),
   graphKey: (_context, invocation) => handleGraphKeydown(invocation.event),
   dismiss: () => dismissTransientUi(),
@@ -14744,6 +14751,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
 // `data-action` namespace. `onCredentials` is the only wire between the window and the rest of the
 // application: the node inspector's SECRET_REFERENCE control reads exactly what the last listing
 // established, and nothing else about a credential ever reaches this file.
+runnerWindow = createRunnerWindow({ dialog: document.getElementById('runner-dialog') });
 credentialsWindow = createCredentialsWindow({
   dialog: document.getElementById('credentials-dialog'),
   onCredentials: held => {

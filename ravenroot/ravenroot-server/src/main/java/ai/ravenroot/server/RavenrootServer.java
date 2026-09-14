@@ -306,6 +306,7 @@ public final class RavenrootServer implements AutoCloseable {
     private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
+    private RunnerPlaneHttpApi runnerPlaneApi;
     private ai.ravenroot.core.deployment.DurableLocalDeploymentControl durableDeploymentControl;
     private ai.ravenroot.core.process.ProcessLifecycleService processLifecycle;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
@@ -772,6 +773,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
         apiContext("/v1/human-tasks", this::humanTasks);
+        apiPrefixContext("/v1/runner-plane", this::runnerPlane);
         apiContext("/v1/admin/human-tasks", this::adminHumanTasks);
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
@@ -880,6 +882,19 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             protectedRequest(handler).handle(exchange, httpContext);
+        }));
+    }
+
+    /** A protected dispatch mount is not itself an HTTP operation in the published contract. */
+    private void apiPrefixContext(String path, HttpRequestContext.Handler handler) {
+        Set<String> methods = ai.ravenroot.server.spec.RouteTable.ALL.stream()
+                .filter(route -> route.path().startsWith(path + "/"))
+                .flatMap(route -> route.methods().stream()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (methods.isEmpty()) throw new IllegalStateException("API prefix has no published operations");
+        server.createContext(path, publicContext((exchange, context) -> {
+            if (httpSecurity.browserOrigins().handlePreflight(exchange, methods)) return;
+            if (!httpSecurity.browserOrigins().acceptActual(exchange)) return;
+            protectedRequest(handler).handle(exchange, context);
         }));
     }
 
@@ -998,6 +1013,23 @@ public final class RavenrootServer implements AutoCloseable {
     }
 
     /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
+    synchronized void installRunnerPlane(ai.ravenroot.core.runner.AuthorizedRunnerControl control,
+                                         ai.ravenroot.core.runner.PinnedRunnerContinuationExecutor continuations) {
+        if (started.get()) throw new IllegalStateException("runner plane must be installed before start");
+        if (runnerPlaneApi != null) throw new IllegalStateException("runner plane already installed");
+        runnerPlaneApi = new RunnerPlaneHttpApi(control, continuations);
+        if (processLifecycle != null) runnerPlaneApi.bindLifecycle(processLifecycle);
+    }
+
+    private void runnerPlane(HttpExchange exchange, HttpRequestContext context) throws IOException {
+        if (runnerPlaneApi == null) {
+            json(exchange, 501, "{\"error\":\"RUNNER_PLANE_UNAVAILABLE\"}");
+            return;
+        }
+        runnerPlaneApi.handle(exchange, context);
+    }
+
+    /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
     synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals) {
         installToolApprovals(approvals, ignored -> { });
     }
@@ -1032,6 +1064,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (started.get()) throw new IllegalStateException("process lifecycle must be installed before start");
         if (processLifecycle != null) throw new IllegalStateException("process lifecycle is already installed");
         processLifecycle = java.util.Objects.requireNonNull(control, "control");
+        if (runnerPlaneApi != null) runnerPlaneApi.bindLifecycle(processLifecycle);
     }
 
     synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
@@ -2793,6 +2826,9 @@ public final class RavenrootServer implements AutoCloseable {
                     + result.processInstanceId() + "\",\"generation\":" + result.generation()
                     + ",\"state\":\"" + result.state() + "\",\"reason\":\"" + escape(result.reason())
                     + "\",\"traversals\":[" + traversals + "]}");
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            // The shared protected boundary owns the audited 403 ACCESS_DENIED response.
+            throw denied;
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {

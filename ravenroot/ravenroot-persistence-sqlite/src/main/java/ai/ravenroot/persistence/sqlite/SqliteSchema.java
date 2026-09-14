@@ -1089,7 +1089,49 @@ final class SqliteSchema {
                                 + "PRIMARY KEY (tenant_id, command_key))")),
                 new SchemaMigration(27, "deployment lifecycle command reason", List.of(
                         "ALTER TABLE deployment ADD COLUMN last_lifecycle_reason TEXT",
-                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_reason TEXT")));
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_reason TEXT")),
+                new SchemaMigration(28, "governed process runner workspaces", List.of(
+                        """
+                        CREATE TABLE runner_workspace (
+                            tenant_id TEXT NOT NULL,
+                            process_instance_id TEXT NOT NULL,
+                            state BLOB NOT NULL,
+                            PRIMARY KEY (tenant_id, process_instance_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                        )
+                        """,
+                        "CREATE TABLE runner_catalog_tenant (tenant_id TEXT PRIMARY KEY)",
+                        """
+                        CREATE TABLE runner_catalog (
+                            tenant_id TEXT NOT NULL,
+                            resource_key TEXT NOT NULL,
+                            document BLOB NOT NULL,
+                            PRIMARY KEY (tenant_id, resource_key),
+                            FOREIGN KEY (tenant_id) REFERENCES runner_catalog_tenant (tenant_id)
+                        )
+                        """)),
+                new SchemaMigration(29, "non-compactable process control authority", List.of(
+                        "ALTER TABLE process_instance ADD COLUMN control_state TEXT NOT NULL DEFAULT 'RECOVERY_REQUIRED'",
+                        """
+                        UPDATE process_instance SET control_state =
+                          CASE WHEN termination_reason = 'CANCELLED' THEN 'CANCELLED'
+                          ELSE COALESCE(
+                            (SELECT CASE event_type
+                              WHEN 'PROCESS_PAUSE' THEN 'PAUSED' WHEN 'PROCESS_STOP' THEN 'STOPPED'
+                              WHEN 'PROCESS_RESUME' THEN 'RUNNING' WHEN 'PROCESS_DRAIN' THEN 'DRAINING'
+                              WHEN 'PROCESS_CANCEL' THEN 'CANCELLED' END
+                             FROM event_journal j
+                             WHERE j.tenant_id = process_instance.tenant_id
+                               AND j.process_instance_id = process_instance.process_instance_id
+                               AND j.event_type IN ('PROCESS_PAUSE', 'PROCESS_STOP', 'PROCESS_RESUME',
+                                                    'PROCESS_DRAIN', 'PROCESS_CANCEL')
+                             ORDER BY journal_offset DESC LIMIT 1),
+                            CASE WHEN COALESCE((SELECT retained_from FROM journal_watermark w
+                              WHERE w.tenant_id = process_instance.tenant_id), 1) <= 1
+                              THEN 'RUNNING' ELSE 'RECOVERY_REQUIRED' END)
+                          END
+                        """)));
     }
 
     static int currentVersion() {

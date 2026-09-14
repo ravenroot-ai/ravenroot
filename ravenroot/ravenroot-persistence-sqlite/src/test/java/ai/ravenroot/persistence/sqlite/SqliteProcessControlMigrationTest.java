@@ -18,6 +18,7 @@ class SqliteProcessControlMigrationTest {
         Path database = directory.resolve("control.db");
         java.util.function.Supplier<SqliteExecutionStore> open = () -> new SqliteExecutionStore(database, CLOCK);
         var expected = new LinkedHashMap<ExecutionKey, ProcessControlState>();
+        var before = new LinkedHashMap<ExecutionKey, ProcessInventoryEntry>();
         try (var store = open.get()) {
             for (String tenant : List.of("pause", "stop", "latest", "missing", "clean", "cancel")) {
                 var key = new ExecutionKey(tenant, UUID.randomUUID());
@@ -29,6 +30,7 @@ class SqliteProcessControlMigrationTest {
                 if (tenant.equals("cancel")) batch.apply(new ExecutionTransition.ProcessTransitioned(
                         ProcessInstanceStatus.FAILED, ExecutionTerminationReason.CANCELLED));
                 store.apply(batch.build()).toCompletableFuture().join();
+                before.put(key, store.findProcessInstance(key).toCompletableFuture().join().orElseThrow());
                 expected.put(key, switch (tenant) {
                     case "pause" -> ProcessControlState.PAUSED;
                     case "stop", "latest" -> ProcessControlState.STOPPED;
@@ -51,6 +53,9 @@ class SqliteProcessControlMigrationTest {
             for (var item : expected.entrySet()) {
                 var stored = store.load(item.getKey()).toCompletableFuture().join();
                 assertEquals(item.getValue(), stored.state().controlState());
+                assertEquals(before.get(item.getKey()),
+                        store.findProcessInstance(item.getKey()).toCompletableFuture().join().orElseThrow(),
+                        "backfill preserves every pre-existing inventory field, including revision and retention");
                 if (item.getKey().tenantId().equals("cancel")) {
                     assertEquals(ProcessInstanceStatus.FAILED, stored.state().status());
                     assertEquals(ExecutionTerminationReason.CANCELLED, stored.state().terminationReason());

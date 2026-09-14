@@ -379,7 +379,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     + "AND l.process_instance_id = p.process_instance_id ";
 
     private static final String META_COLUMNS =
-            "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, "
+            "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, control_state, "
                     + "updated_at_epoch_second, updated_at_nano, created_at_epoch_second, "
                     + "created_at_nano, lifecycle_generation, deployment_id, workload_id, "
                     + "correlation_id, retained_until_epoch_second, retained_until_nano "
@@ -2002,7 +2002,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                                 ProcessInstanceStatus status,
                                 ExecutionTerminationReason terminationReason, Instant updatedAt,
                                 Instant createdAt, long lifecycleGeneration, ExecutionOrigin origin,
-                                Instant retainedUntil) {
+                                Instant retainedUntil, String controlState) {
     }
 
     /** One instance the claim loop has locked, with the token its lease will be issued against. */
@@ -2040,7 +2040,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         rows.getLong("lifecycle_generation"),
                         ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
                                 rows.getString("correlation_id")),
-                        nullableInstant(rows, "retained_until"));
+                        nullableInstant(rows, "retained_until"), rows.getString("control_state"));
             }
         }
     }
@@ -2111,7 +2111,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private ProcessInstance readAggregate(Connection connection, ExecutionKey key, InstanceMeta meta)
             throws SQLException {
         try {
-            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason());
+            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason(),
+                    ai.ravenroot.api.application.ProcessControlState.valueOf(meta.controlState()));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             // Rows that no longer reconstruct into a legal aggregate must never escape into the runtime.
             throw new ExecutionStoreException(
@@ -2138,8 +2139,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "termination_reason, graph_version_pin, revision, fencing_token, "
                         + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
                         + "created_at_epoch_second, created_at_nano, updated_at_epoch_second, "
-                        + "updated_at_nano, retained_until_epoch_second, retained_until_nano) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "updated_at_nano, retained_until_epoch_second, retained_until_nano, control_state) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT DO NOTHING")) {
             statement.setString(1, key.tenantId());
             StoredUuid.bind(statement, 2, key.processInstanceId());
@@ -2155,6 +2156,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             int index = StoredInstant.bindValue(statement, 11, createdAt);
             index = StoredInstant.bindValue(statement, index, now);
             bindNullableInstant(statement, index, retainedUntil);
+            statement.setString(17, folded.controlState().name());
             inserted = statement.executeUpdate();
         }
         if (inserted == 0) {
@@ -2186,7 +2188,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "graph_version_pin = ?, revision = ?, lifecycle_generation = ?, "
                         + "deployment_id = ?, workload_id = ?, correlation_id = ?, "
                         + "updated_at_epoch_second = ?, updated_at_nano = ?, "
-                        + "retained_until_epoch_second = ?, retained_until_nano = ? "
+                        + "retained_until_epoch_second = ?, retained_until_nano = ?, control_state = ? "
                         + "WHERE tenant_id = ? AND process_instance_id = ? AND revision = ?")) {
             statement.setString(1, folded.status().name());
             // Assigned beside the status it qualifies and never apart from it: the pair is one fact, so
@@ -2201,6 +2203,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setString(8, origin.correlationId().orElse(null));
             int index = StoredInstant.bindValue(statement, 9, now);
             index = bindNullableInstant(statement, index, retainedUntil);
+            statement.setString(index++, folded.controlState().name());
             statement.setString(index++, key.tenantId());
             StoredUuid.bind(statement, index++, key.processInstanceId());
             statement.setLong(index, expectedRevision);

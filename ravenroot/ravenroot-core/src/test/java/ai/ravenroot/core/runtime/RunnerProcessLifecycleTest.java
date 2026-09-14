@@ -60,12 +60,26 @@ class RunnerProcessLifecycleTest {
         long heldRevision;
         var result = result();
         try (var graphs = new InMemoryGraphDefinitionStore(clock)) {
-            try (var store = new SqliteExecutionStore(database, clock); var engine = new JoinTestEngine()) {
+            try (var store = shortJournalStore(database, clock); var engine = new JoinTestEngine()) {
                 var jobs = jobs(store, clock);
                 id = park(store, graphs, engine, jobs, key);
                 jobs.mutate(ACTOR, key, new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30)));
                 var lifecycle = new ProcessLifecycleService(store, APPLICATION, null, clock);
                 assertEquals(ProcessLifecycleService.Code.APPLIED, command(lifecycle, store, key, hold, "hold").code());
+                var journal = store.readJournal("tenant", 0, 100).toCompletableFuture().join();
+                store.advanceOutboxCursor(store.outboxCursor("tenant", "test").toCompletableFuture().join(),
+                        journal.getLast().journalOffset()).toCompletableFuture().join();
+                clock.advance(2);
+                assertEquals(journal.size(), store.compactJournal("tenant").toCompletableFuture().join());
+                assertTrue(store.journalRetainedFrom("tenant").toCompletableFuture().join() > 1);
+            }
+            try (var store = shortJournalStore(database, clock); var engine = new JoinTestEngine()) {
+                var jobs = jobs(store, clock);
+                var freshKey = new ExecutionKey("tenant", UUID.randomUUID());
+                var fresh = park(store, graphs, engine, jobs, freshKey);
+                assertEquals(RunnerJob.State.CLAIMED, jobs.mutate(ACTOR, freshKey,
+                        new RunnerJobOperation.Claim(fresh.runnerJobId(), "local", Duration.ofSeconds(30)))
+                        .jobs().get(fresh.runnerJobId()).job().state());
                 jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, result));
                 jobs.mutate(ACTOR, key, new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1, result));
                 heldRevision = store.load(key).toCompletableFuture().join().revision();
@@ -310,5 +324,12 @@ class RunnerProcessLifecycleTest {
         public ZoneId getZone() { return ZoneOffset.UTC; }
         public Clock withZone(ZoneId zone) { return this; }
         public Instant instant() { return now; }
+    }
+
+    static SqliteExecutionStore shortJournalStore(Path database, Clock clock) {
+        var base = ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults();
+        return new SqliteExecutionStore(database, clock, new ai.ravenroot.persistence.sqlite.SqliteStoreConfig(
+                base.synchronousMode(), base.busyTimeout(), base.maxLeaseTtl(), base.maxPayloadBytes(), base.maxClockSkew(),
+                Duration.ofSeconds(1), base.maxInventoryPageSize(), base.terminalRetention(), base.executionResultRetention()));
     }
 }

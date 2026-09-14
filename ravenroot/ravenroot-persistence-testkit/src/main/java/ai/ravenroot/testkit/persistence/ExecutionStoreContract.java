@@ -4742,6 +4742,42 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void processControlAuthoritySurvivesCompactionRestartAndUnrelatedWrites() {
+        assumeCapability(StoreCapability.JOURNAL_COMPACTION);
+        for (var held : List.of(ai.ravenroot.api.application.ProcessControlState.PAUSED,
+                ai.ravenroot.api.application.ProcessControlState.STOPPED,
+                ai.ravenroot.api.application.ProcessControlState.RECOVERY_REQUIRED)) {
+            var key = newKey();
+            UUID traversal = UUID.randomUUID();
+            var created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+            assertEquals(ai.ravenroot.api.application.ProcessControlState.RUNNING, created.state().controlState());
+            var hold = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessControlChanged(held))
+                    .publish(event(key, traversal, "PROCESS_" + held)).build();
+            var committed = await(store().apply(hold));
+            assertEquals(held, committed.state().controlState());
+            assertThrows(RuntimeException.class, () -> await(store().apply(hold)));
+            var records = await(store().readJournal(key.tenantId(), await(store().journalRetainedFrom(key.tenantId())) - 1, 100));
+            await(store().advanceOutboxCursor(await(store().outboxCursor(key.tenantId(), "control-test")), records.getLast().journalOffset()));
+            clock().advance(store().journalRetention().plusSeconds(1));
+            assertEquals(records.size(), await(store().compactJournal(key.tenantId())));
+            if (store().supports(StoreCapability.DURABLE)) reopen();
+            assertEquals(committed.revision(), await(store().load(key)).revision());
+            assertEquals(held, await(store().load(key)).state().controlState());
+            var unrelated = await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(committed.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING)).build()));
+            assertEquals(held, unrelated.state().controlState());
+            var resumed = await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(unrelated.revision()))
+                    .apply(new ExecutionTransition.ProcessControlChanged(ai.ravenroot.api.application.ProcessControlState.RUNNING))
+                    .publish(event(key, traversal, "PROCESS_RESUME")).build()));
+            assertEquals(ai.ravenroot.api.application.ProcessControlState.RUNNING, resumed.state().controlState());
+            var other = newKey();
+            var newProcess = await(store().apply(creationBatch(other, UUID.randomUUID(), "graph-v1")));
+            assertEquals(ai.ravenroot.api.application.ProcessControlState.RUNNING, newProcess.state().controlState());
+        }
+    }
+
+    @Test
     final void compactionDoesNotDiscardDeliveredRecordsThatAreStillWithinRetention() {
         assumeCapability(StoreCapability.JOURNAL_COMPACTION);
         var key = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());

@@ -61,7 +61,8 @@ final class AggregateStorage {
      *                          would reconstruct every cancellation as a fault.
      */
     static ProcessInstance read(Connection connection, ExecutionKey key, ProcessInstanceStatus status,
-                                ExecutionTerminationReason terminationReason)
+                                ExecutionTerminationReason terminationReason,
+                                ai.ravenroot.api.application.ProcessControlState controlState)
             throws SQLException {
         String tenantId = key.tenantId();
         String instanceId = key.processInstanceId().toString();
@@ -110,7 +111,7 @@ final class AggregateStorage {
         for (UUID invocationId : attempts.keySet()) {
             StoredUuid.requireKnown(invocationIds, invocationId, "attempt", "invocation_id", key);
         }
-        return new ProcessInstance(key.processInstanceId(), status, traversals, terminationReason);
+        return new ProcessInstance(key.processInstanceId(), status, traversals, terminationReason, controlState);
     }
 
     private static Map<UUID, List<NodeInvocation>> readInvocations(

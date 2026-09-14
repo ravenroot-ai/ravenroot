@@ -165,6 +165,19 @@ this lazy migration; older binaries cannot read rewritten version-2 workspace en
 Before rolling back to an older binary, drain and reconcile runner work and follow the storage
 backup/restore procedure; do not delete runner rows to make an older process start.
 
+SQLite migration 29 and PostgreSQL migration 9 persist process control state on the process row,
+under the same revision/CAS as its audit and idempotency writes. Journal compaction cannot release
+a PAUSE/STOP or prevent a later RESUME. Stop every writer and back up before this schema upgrade;
+running old and new writer binaries against the same upgraded store is unsupported, and older
+binaries reject the newer schema on startup. Existing rows recover the last retained lifecycle
+command, or RUNNING when the tenant history is complete and contains no command for that process.
+If a compacted legacy prefix makes the state unknowable, the row becomes RECOVERY_REQUIRED:
+runner claims and continuation delivery remain parked until an authorized explicit process RESUME,
+PAUSE, STOP, DRAIN or CANCEL with the observed generation settles it. No migration guesses RUNNING
+from missing evidence. New processes start RUNNING even when older tenant history was compacted.
+The control state survives journal delivery, expiry, compaction and restart, until the process itself
+is removed by normal terminal retention. The journal remains bounded audit history, not current authority.
+
 ## Verification
 
 The documented sample deliberately fails its first unit test, applies `remediationFiles`, then

@@ -28,7 +28,7 @@ public final class ProcessLifecycleService {
     private static final Duration IDEMPOTENCY_RETENTION = Duration.ofDays(7);
 
     public enum Command { PAUSE, RESUME, CANCEL, DRAIN, STOP }
-    public enum State { RUNNING, PAUSED, CANCELLED, DRAINING, STOPPED }
+    public enum State { RUNNING, PAUSED, CANCELLED, DRAINING, STOPPED, RECOVERY_REQUIRED }
     public enum Code { APPLIED, REPLAYED, STALE_GENERATION, NOT_FOUND, TERMINAL, IDEMPOTENCY_CONFLICT,
         PARTIALLY_SETTLED }
     public record TraversalOutcome(UUID traversalId, String outcome) { }
@@ -91,6 +91,8 @@ public final class ProcessLifecycleService {
         try {
             var builder = ExecutionBatch.to(key)
                     .expecting(RevisionExpectation.exactly(expectedGeneration))
+                    .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessControlChanged(
+                            ai.ravenroot.api.application.ProcessControlState.valueOf(state(command).name())))
                     .recordIdempotency(new IdempotencyWrite(idempotencyKey, fingerprint, outcome,
                             IDEMPOTENCY_RETENTION, clock.instant()))
                     .publish(EventEnvelope.of(UUID.randomUUID(), tenantId, "PROCESS_" + command.name(),
@@ -164,11 +166,11 @@ public final class ProcessLifecycleService {
         return state == State.RUNNING || state == State.DRAINING;
     }
 
-    /** Runner re-entry must use this journal authority and commit through the same observed revision. */
+    /** Runner re-entry reads aggregate authority and commits through the same observed revision. */
     public static boolean admitsRunnerDelivery(ExecutionStore store, ExecutionKey key, long revision) {
         var process = await(store.load(key));
         if (process.revision() != revision || process.state().status().terminal()) return false;
-        State state = currentState(store, key);
+        State state = State.valueOf(process.state().controlState().name());
         return (state == State.RUNNING || state == State.DRAINING)
                 && await(store.load(key)).revision() == revision;
     }
@@ -178,26 +180,7 @@ public final class ProcessLifecycleService {
     }
 
     private static State currentState(ExecutionStore store, ExecutionKey key) {
-        long after = 0;
-        State latest = State.RUNNING;
-        while (true) {
-            var page = await(store.readJournal(key.tenantId(), after, 500));
-            if (page.isEmpty()) return latest;
-            for (var record : page) {
-                after = record.journalOffset();
-                var event = record.envelope();
-                if (!key.processInstanceId().equals(event.processInstanceId())) continue;
-                latest = switch (event.eventType()) {
-                    case "PROCESS_PAUSE" -> State.PAUSED;
-                    case "PROCESS_RESUME" -> State.RUNNING;
-                    case "PROCESS_CANCEL" -> State.CANCELLED;
-                    case "PROCESS_DRAIN" -> State.DRAINING;
-                    case "PROCESS_STOP" -> State.STOPPED;
-                    default -> latest;
-                };
-            }
-            if (page.size() < 500) return latest;
-        }
+        return State.valueOf(await(store.load(key)).state().controlState().name());
     }
 
     private List<TraversalOutcome> settle(String tenantId, UUID processInstanceId, Command command,

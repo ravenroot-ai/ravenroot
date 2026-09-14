@@ -513,7 +513,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         ? existing.retainedUntil() : plusClamped(now, config.terminalRetention()))
                 : null;
 
-        writeInstanceRow(key, folded.status(), folded.terminationReason(), pin, revision, fencingToken,
+        writeInstanceRow(key, folded.status(), folded.terminationReason(), folded.controlState(), pin, revision, fencingToken,
                 now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
         writeTimers(key, batch);
@@ -2361,7 +2361,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 ProcessInstanceStatus status,
                                 ExecutionTerminationReason terminationReason, Instant updatedAt,
                                 Instant createdAt, long lifecycleGeneration, ExecutionOrigin origin,
-                                Instant retainedUntil) {
+                                Instant retainedUntil, String controlState) {
     }
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, UUID attemptId, int ordinal,
@@ -2370,7 +2370,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private InstanceMeta readMeta(ExecutionKey key) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, "
+                "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, control_state, "
                         + "updated_at_epoch_second, "
                         + "updated_at_nano, created_at_epoch_second, created_at_nano, "
                         + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
@@ -2391,7 +2391,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         rows.getLong("lifecycle_generation"),
                         ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
                                 rows.getString("correlation_id")),
-                        nullableInstant(rows, "retained_until"));
+                        nullableInstant(rows, "retained_until"), rows.getString("control_state"));
             }
         }
     }
@@ -2462,7 +2462,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private ProcessInstance readAggregate(ExecutionKey key, InstanceMeta meta) throws SQLException {
         try {
-            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason());
+            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason(),
+                    ai.ravenroot.api.application.ProcessControlState.valueOf(meta.controlState()));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             // The detection point the in-memory adapter can only simulate: rows that no longer
             // reconstruct into a legal aggregate must never escape into the runtime.
@@ -2472,7 +2473,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     private void writeInstanceRow(ExecutionKey key, ProcessInstanceStatus status,
-                                  ExecutionTerminationReason terminationReason, GraphVersionPin pin,
+                                  ExecutionTerminationReason terminationReason,
+                                  ai.ravenroot.api.application.ProcessControlState controlState, GraphVersionPin pin,
                                   long revision, long fencingToken, Instant now, Instant createdAt,
                                   long lifecycleGeneration, ExecutionOrigin origin,
                                   Instant retainedUntil) throws SQLException {
@@ -2489,13 +2491,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "revision, fencing_token, updated_at_epoch_second, updated_at_nano, "
                         + "created_at_epoch_second, created_at_nano, lifecycle_generation, "
                         + "deployment_id, workload_id, correlation_id, retained_until_epoch_second, "
-                        + "retained_until_nano) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "retained_until_nano, control_state) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET status = excluded.status, "
                         // Assigned on conflict, beside the status it qualifies and never apart from
                         // it: the pair is one fact, so a row must never carry a new status with the
                         // previous reason still attached to it.
-                        + "termination_reason = excluded.termination_reason, "
+                        + "termination_reason = excluded.termination_reason, control_state = excluded.control_state, "
                         + "graph_version_pin = excluded.graph_version_pin, revision = excluded.revision, "
                         + "updated_at_epoch_second = excluded.updated_at_epoch_second, "
                         + "updated_at_nano = excluded.updated_at_nano, "
@@ -2523,6 +2525,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             } else {
                 StoredInstant.bindValue(statement, index, retainedUntil);
             }
+            statement.setString(18, controlState.name());
             statement.executeUpdate();
         }
     }

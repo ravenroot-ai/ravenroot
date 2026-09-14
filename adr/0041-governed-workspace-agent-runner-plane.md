@@ -47,7 +47,7 @@ recorded effects. The same-tenant user supplies the observed process revision. A
 revision CAS commit graph transitions, barrier clearance and the actor's audit event together.
 Neither stale/repeated resolution nor partial fan-out permits speculative runner or branch replay.
 
-The durable process lifecycle journal is the shared admission authority for terminal HTTP reports,
+The non-compactable process aggregate control state is the shared admission authority for terminal HTTP reports,
 operator continuation resolution and recovery delivery. PAUSE and STOP retain terminal runner
 evidence while parking delivery; process RESUME and DRAIN use the same exact invocation and CAS
 revision. Process cancellation commits graph termination with reason CANCELLED, runner stop requests,
@@ -55,6 +55,11 @@ audit and the store-clock retention anchor together. Dispatched unknown work rem
 fenced quiescence, even though its enclosing graph is terminal. Recovery therefore includes terminal
 processes with unresolved runner jobs. No cancellation path routes normal or blocked successors,
 and an older replayed lifecycle command cannot override a newer durable decision.
+Control changes, audit events and idempotency evidence share the process revision/CAS transaction.
+The journal is audit only: delivery, expiry or compaction cannot change current authority or make
+a committed lifecycle command fail while reconstructing its response. Legacy rows are backfilled
+from the last retained command; if an older compacted prefix makes their state unknowable, they
+become RECOVERY_REQUIRED until an explicit revision-protected operator command settles them.
 
 ## Reference enforcement boundary
 
@@ -96,8 +101,9 @@ The existing OpenTelemetry exporter receives fixed-enum observation counters and
 
 Existing Agent behavior, engine NodeCommand values, read-only graph traversal, model-provider SPI
 and execution-store capability defaults are unchanged. New runner operations fail closed on an
-adapter that does not implement them. SQLite migration 24 and PostgreSQL migration 4 add the new
-state. Older binaries cannot operate new workspace-agent graphs; rollback requires draining this
+adapter that does not implement them. SQLite migration 28 and PostgreSQL migration 8 add runner
+state; migrations 29 and 9 add current process control authority. Stop all writers before upgrading
+the schema; mixed old/new writer binaries are not supported. Older binaries cannot operate new workspace-agent graphs; rollback requires draining this
 plane and restoring an appropriate backup rather than deleting its rows.
 
 Benefits are explicit authority, durable identity and no speculative repeated workspace effects.

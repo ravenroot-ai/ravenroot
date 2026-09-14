@@ -34,7 +34,45 @@ class ProcessLifecycleServiceTest {
     @TempDir Path directory;
 
     @Test
-    void tenantJournalPagingUsesOffsetsNotPerProcessSequences() {
+    void commandsAndReplayUseOnlyAggregateAuthorityEvenWhenJournalReadsFail() {
+        try (var underlying = new ai.ravenroot.core.persistence.InMemoryExecutionStore(CLOCK)) {
+            var store = (ai.ravenroot.api.persistence.ExecutionStore) Proxy.newProxyInstance(
+                    ai.ravenroot.api.persistence.ExecutionStore.class.getClassLoader(),
+                    new Class<?>[]{ai.ravenroot.api.persistence.ExecutionStore.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("readJournal")) throw new AssertionError("audit cannot be current authority");
+                        try { return method.invoke(underlying, args); }
+                        catch (java.lang.reflect.InvocationTargetException failed) { throw failed.getCause(); }
+                    });
+            var application = (RavenrootApplication) Proxy.newProxyInstance(RavenrootApplication.class.getClassLoader(),
+                    new Class<?>[]{RavenrootApplication.class}, (proxy, method, args) ->
+                            method.getName().equals("stopProcessInvocations") ? 0 : false);
+            var key = new ExecutionKey("tenant", UUID.randomUUID());
+            store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                    .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
+                            ProcessInstanceStatus.RUNNING, Map.of(), null,
+                            ai.ravenroot.api.application.ProcessControlState.RECOVERY_REQUIRED), new GraphVersionPin("graph")))
+                    .build()).toCompletableFuture().join();
+            var service = new ProcessLifecycleService(store, application, null, CLOCK);
+            assertEquals(ProcessLifecycleService.State.RECOVERY_REQUIRED, service.currentState(key));
+            assertFalse(service.admitsReentry("tenant", key.processInstanceId()));
+            for (var command : new ProcessLifecycleService.Command[]{ProcessLifecycleService.Command.PAUSE,
+                    ProcessLifecycleService.Command.STOP, ProcessLifecycleService.Command.DRAIN,
+                    ProcessLifecycleService.Command.RESUME, ProcessLifecycleService.Command.CANCEL}) {
+                long revision = store.load(key).toCompletableFuture().join().revision();
+                var result = service.command("tenant", key.processInstanceId(), command, revision, command.name(), "");
+                assertEquals(ProcessLifecycleService.Code.APPLIED, result.code());
+                assertEquals(store.load(key).toCompletableFuture().join().revision(), result.generation());
+                assertEquals(result.state().name(), store.load(key).toCompletableFuture().join().state().controlState().name());
+                assertEquals(ProcessLifecycleService.Code.REPLAYED,
+                        service.command("tenant", key.processInstanceId(), command, revision, command.name(), "").code());
+                assertEquals(result.generation(), store.load(key).toCompletableFuture().join().revision());
+            }
+            assertEquals(5, underlying.readJournal("tenant", 0, 10).toCompletableFuture().join().size());
+        }
+    }
+
+    @Test
+    void currentAuthorityIgnoresUnrelatedTenantJournalHistory() {
         try (var store = new ai.ravenroot.core.persistence.InMemoryExecutionStore(CLOCK)) {
             var application = (RavenrootApplication) Proxy.newProxyInstance(RavenrootApplication.class.getClassLoader(),
                     new Class<?>[]{RavenrootApplication.class}, (proxy, method, arguments) -> false);

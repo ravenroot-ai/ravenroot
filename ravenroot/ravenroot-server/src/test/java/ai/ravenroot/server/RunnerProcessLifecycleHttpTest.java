@@ -31,7 +31,7 @@ class RunnerProcessLifecycleHttpTest {
     @ParameterizedTest
     @EnumSource(value = ProcessLifecycleService.Command.class, names = {"PAUSE", "STOP", "CANCEL"})
     void processHttpAuthorityGovernsRemoteReportsResolutionAndResume(ProcessLifecycleService.Command hold) throws Exception {
-        var clock = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC);
+        var clock = new MutableClock();
         var key = new ExecutionKey("tenant", UUID.randomUUID());
         var policy = new RunnerPolicy(Set.of(RunnerPolicy.Capability.WORKSPACE_READ), Set.of(), Set.of(), Set.of(), Set.of(),
                 new RunnerPolicy.Limits(Duration.ofMinutes(5), 64_000_000, 1, 1_000_000, 4096, 1024, 4096));
@@ -39,7 +39,11 @@ class RunnerProcessLifecycleHttpTest {
                 "reference", "reference", Map.of("plan", new AgentCommand("plan", true, policy, AgentCommand.STANDARD_OUTCOMES)),
                 Set.of(), Set.of(), policy, Duration.ofHours(1), "object");
         var registration = new RunnerRegistration(1, "tenant", "designated", "local-container-v1", Set.of(), policy);
-        try (var store = new SqliteExecutionStore(directory.resolve("http.db"), clock);
+        var base = ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults();
+        var config = new ai.ravenroot.persistence.sqlite.SqliteStoreConfig(base.synchronousMode(), base.busyTimeout(),
+                base.maxLeaseTtl(), base.maxPayloadBytes(), base.maxClockSkew(), Duration.ofSeconds(1),
+                base.maxInventoryPageSize(), base.terminalRetention(), base.executionResultRetention());
+        try (var store = new SqliteExecutionStore(directory.resolve("http.db"), clock, config);
              var graphs = new InMemoryGraphDefinitionStore(clock);
              var engine = new PekkoExecutionEngine("runner-lifecycle-http")) {
             var jobs = new RunnerJobService(store, clock, List.of(definition), List.of(registration), Map.of("tenant", policy));
@@ -110,6 +114,12 @@ class RunnerProcessLifecycleHttpTest {
                 long generation = revision(store, key);
                 var response = lifecycle(endpoint, key, hold.name().toLowerCase(Locale.ROOT), generation, "hold", "operator");
                 assertEquals(200, response.statusCode(), response.body());
+                Instant heldAt = clock.instant();
+                var journal = store.readJournal("tenant", 0, 100).toCompletableFuture().join();
+                store.advanceOutboxCursor(store.outboxCursor("tenant", "fixture").toCompletableFuture().join(),
+                        journal.getLast().journalOffset()).toCompletableFuture().join();
+                clock.now = clock.now.plusSeconds(2);
+                assertEquals(journal.size(), store.compactJournal("tenant").toCompletableFuture().join());
                 var report = new RunnerResult("answered", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID());
                 client.complete(claimed, report); client.complete(claimed, report);
                 continuations.resume(key, id.runnerJobId()).toCompletableFuture().join();
@@ -121,7 +131,7 @@ class RunnerProcessLifecycleHttpTest {
                 if (hold == ProcessLifecycleService.Command.CANCEL) {
                     assertEquals(RunnerJob.State.CANCELLED, workspace.jobs().get(id.runnerJobId()).job().state());
                     assertEquals(ExecutionTerminationReason.CANCELLED, state.terminationReason());
-                    assertEquals(clock.instant(), workspace.processTerminalAt());
+                    assertEquals(heldAt, workspace.processTerminalAt());
                     assertTrue(lifecycle(endpoint, key, "cancel", generation, "hold", "operator").body().contains("REPLAYED"));
                     assertTrue(lifecycle(endpoint, key, "resume", revision(store, key), "resume", "operator").body().contains("TERMINAL"));
                     assertEquals(409, resolve(endpoint, key, id, revision(store, key), "operator").statusCode());
@@ -148,6 +158,12 @@ class RunnerProcessLifecycleHttpTest {
     }
 
     private static long revision(ExecutionStore store, ExecutionKey key) { return store.load(key).toCompletableFuture().join().revision(); }
+    private static final class MutableClock extends Clock {
+        Instant now = Instant.parse("2026-09-01T00:00:00Z");
+        public Instant instant() { return now; }
+        public ZoneId getZone() { return ZoneOffset.UTC; }
+        public Clock withZone(ZoneId zone) { return this; }
+    }
     private static HttpResponse<String> lifecycle(URI endpoint, ExecutionKey key, String command, long generation, String idempotency, String actor) throws Exception {
         return HttpClient.newHttpClient().send(HttpRequest.newBuilder(endpoint.resolve("/v1/processes/" + key.processInstanceId() + "/" + command))
                 .header("Authorization", "Bearer " + actor).header("Idempotency-Key", idempotency)

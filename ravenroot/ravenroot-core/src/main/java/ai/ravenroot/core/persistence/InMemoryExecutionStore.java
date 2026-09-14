@@ -2941,7 +2941,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // that distinguishes a cancelled execution from a failed one -- a defence-in-depth
                 // check that quietly damaged what it was checking.
                 var revalidated = new ProcessInstance(state.processInstanceId(), state.status(),
-                        state.traversals(), state.terminationReason());
+                        state.traversals(), state.terminationReason(), state.controlState());
                 return new StoredProcessInstance(revalidated, revision, graphVersionPin, tenantId, updatedAt);
             } catch (IllegalArgumentException | IllegalStateException corrupted) {
                 throw new ExecutionStoreException(

@@ -1110,6 +1110,27 @@ final class SqliteSchema {
                             PRIMARY KEY (tenant_id, resource_key),
                             FOREIGN KEY (tenant_id) REFERENCES runner_catalog_tenant (tenant_id)
                         )
+                        """)),
+                new SchemaMigration(29, "non-compactable process control authority", List.of(
+                        "ALTER TABLE process_instance ADD COLUMN control_state TEXT NOT NULL DEFAULT 'RECOVERY_REQUIRED'",
+                        """
+                        UPDATE process_instance SET control_state =
+                          CASE WHEN termination_reason = 'CANCELLED' THEN 'CANCELLED'
+                          ELSE COALESCE(
+                            (SELECT CASE event_type
+                              WHEN 'PROCESS_PAUSE' THEN 'PAUSED' WHEN 'PROCESS_STOP' THEN 'STOPPED'
+                              WHEN 'PROCESS_RESUME' THEN 'RUNNING' WHEN 'PROCESS_DRAIN' THEN 'DRAINING'
+                              WHEN 'PROCESS_CANCEL' THEN 'CANCELLED' END
+                             FROM event_journal j
+                             WHERE j.tenant_id = process_instance.tenant_id
+                               AND j.process_instance_id = process_instance.process_instance_id
+                               AND j.event_type IN ('PROCESS_PAUSE', 'PROCESS_STOP', 'PROCESS_RESUME',
+                                                    'PROCESS_DRAIN', 'PROCESS_CANCEL')
+                             ORDER BY journal_offset DESC LIMIT 1),
+                            CASE WHEN COALESCE((SELECT retained_from FROM journal_watermark w
+                              WHERE w.tenant_id = process_instance.tenant_id), 1) <= 1
+                              THEN 'RUNNING' ELSE 'RECOVERY_REQUIRED' END)
+                          END
                         """)));
     }
 

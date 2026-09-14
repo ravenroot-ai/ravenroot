@@ -87,8 +87,8 @@ class SqliteSchemaMigrationTest {
                 statement.execute("CREATE TABLE migration_sentinel (value TEXT NOT NULL)");
                 statement.execute("INSERT INTO migration_sentinel VALUES ('preserved')");
             }
-            assertEquals(28, SqliteSchema.migrate(connection, CLOCK));
-            assertEquals(28, SqliteSchema.migrate(connection, CLOCK));
+            assertEquals(29, SqliteSchema.migrate(connection, CLOCK));
+            assertEquals(29, SqliteSchema.migrate(connection, CLOCK));
             assertTrue(tableNames(connection).containsAll(List.of("human_task", "session_memory",
                     "session_memory_command", "runner_workspace", "runner_catalog", "runner_catalog_tenant")));
             assertTrue(columnNames(connection, "deployment").contains("last_lifecycle_reason"));

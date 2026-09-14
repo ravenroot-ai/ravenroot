@@ -58,6 +58,38 @@ describe('Human Task inspector and decision dialog', () => {
     expect(selected).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-2', generation: 8 }));
   });
 
+  it('preserves the focused task across ready, loading and ready Inspector replacements', () => {
+    const doc = new JSDOM('<body><div id="host"></div></body>').window.document;
+    const host = doc.getElementById('host');
+    const ready = { kind: 'ready', items: [task, { ...task, taskId: 'task-2', generation: 8 }],
+      counts: { pending: 2, escalated: 0 } };
+    renderHumanTaskInspector(host, ready, 'human-confirmation');
+    host.querySelector('[data-human-task-id="task-2"]').focus();
+    renderHumanTaskInspector(host, ready, 'human-confirmation');
+    expect(doc.activeElement.dataset.humanTaskId).toBe('task-2');
+    renderHumanTaskInspector(host, { kind: 'loading', items: [] }, 'human-confirmation');
+    expect(doc.activeElement.classList.contains('human-task-status')).toBe(true);
+    renderHumanTaskInspector(host, ready, 'human-confirmation');
+    expect(doc.activeElement.dataset.humanTaskId).toBe('task-2');
+    renderHumanTaskInspector(host, { kind: 'ready', items: [] }, 'human-confirmation');
+    expect(doc.activeElement.classList.contains('human-task-status')).toBe(true);
+  });
+
+  it('does not reclaim focus after the user leaves the Inspector or its node changes', () => {
+    const doc = new JSDOM('<body><button id="outside">Other control</button><div id="host"></div></body>').window.document;
+    const host = doc.getElementById('host');
+    const ready = { kind: 'ready', items: [task], counts: { pending: 1, escalated: 0 } };
+    renderHumanTaskInspector(host, ready, 'human-confirmation');
+    host.querySelector('[data-human-task-id]').focus();
+    renderHumanTaskInspector(host, { kind: 'loading', items: [] }, 'human-confirmation');
+    doc.getElementById('outside').focus();
+    renderHumanTaskInspector(host, ready, 'human-confirmation');
+    expect(doc.activeElement.id).toBe('outside');
+    host.querySelector('[data-human-task-id]').focus();
+    renderHumanTaskInspector(host, ready, 'another-node');
+    expect(doc.activeElement.tagName).toBe('BODY');
+  });
+
   it('contains focus, requires the policy-bounded comment, and submits exactly once', async () => {
     const doc = dialogDocument();
     const submitted = vi.fn(async () => ({}));

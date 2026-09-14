@@ -627,6 +627,33 @@ test('a tighter current policy keeps an older task pinned to its presentation an
   await expect(page.locator('.human-task-status')).toContainText('No actionable');
 });
 
+test('reconnecting after Escape preserves Inspector focus through loading and replacement', async ({ page }) => {
+  await connectAndCreate(page);
+  await runAndSelect(page);
+  const row = page.locator('[data-human-task-id="task-1"]');
+  await row.click();
+  await expect(page.locator('[data-human-task-action="RESOLVE"]')).toBeFocused();
+  let reconnect;
+  await page.route('**/v1/events*', route => { reconnect = route; });
+  await expect.poll(() => Boolean(reconnect)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+  await expect(row).toBeFocused();
+
+  let attention;
+  await page.route('**/v1/human-tasks/attention?**', route => {
+    if (new URL(route.request().url()).searchParams.has('nodeId')) attention = route;
+    else void route.continue();
+  });
+  await reconnect.continue();
+  const status = page.locator('[data-human-task-inspector] .human-task-status');
+  await expect(status).toContainText('Loading actionable tasks');
+  await expect(status).toBeFocused();
+  await expect.poll(() => Boolean(attention)).toBe(true);
+  await attention.continue();
+  await expect(row).toBeFocused();
+});
+
 test('keyboard focus, screen-reader structure and reduced motion remain usable', async ({ page }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await connectAndCreate(page);

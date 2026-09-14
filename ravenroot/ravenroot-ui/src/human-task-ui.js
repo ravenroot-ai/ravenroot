@@ -30,10 +30,20 @@ function element(doc, name, className = '', text = '') {
 export function renderHumanTaskInspector(host, state, nodeId, {
   onSelect = () => {}, onNext = () => {}, onPrevious = () => {}, onRefresh = () => {},
 } = {}) {
-  host.querySelector('[data-human-task-inspector]')?.remove();
   const doc = host.ownerDocument;
+  const previous = host.querySelector('[data-human-task-inspector]');
+  const active = doc.activeElement;
+  // A reconnect can replace ready → loading → ready after dialog focus was restored.
+  // Carry only focus already owned by this node's Inspector, never a deferred focus claim
+  // that could steal focus from a dialog, another control, or a newly selected node.
+  const restoreFocus = previous?.contains(active) && previous.dataset.humanTaskNodeId === nodeId
+    && active.matches('[data-human-task-id], .human-task-status');
+  const focusedId = active?.dataset.humanTaskId ?? active?.dataset.humanTaskFocusId;
+  const focusedGeneration = active?.dataset.humanTaskGeneration ?? active?.dataset.humanTaskFocusGeneration;
+  previous?.remove();
   const section = element(doc, 'section', 'human-task-inspector');
   section.dataset.humanTaskInspector = '';
+  section.dataset.humanTaskNodeId = nodeId;
   section.setAttribute('aria-labelledby', 'human-task-inspector-title');
   const heading = element(doc, 'div', 'editor-section-title');
   const title = element(doc, 'h3', '', 'Human tasks');
@@ -111,6 +121,19 @@ export function renderHumanTaskInspector(host, state, nodeId, {
   // remain below it, but a long property list must not bury a time-sensitive confirmation.
   host.prepend(section);
   host.scrollTop = 0;
+  if (restoreFocus) {
+    const rows = [...section.querySelectorAll('[data-human-task-id]')];
+    const target = rows.find(row => row.dataset.humanTaskId === focusedId
+      && row.dataset.humanTaskGeneration === focusedGeneration) || rows[0] || status;
+    if (target === status) {
+      status.tabIndex = -1;
+      if (focusedId !== undefined) {
+        status.dataset.humanTaskFocusId = focusedId;
+        status.dataset.humanTaskFocusGeneration = focusedGeneration;
+      }
+    }
+    target.focus({ preventScroll: true });
+  }
   return section;
 }
 

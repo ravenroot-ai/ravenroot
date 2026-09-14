@@ -19,6 +19,10 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
         this.control = control; this.continuations = continuations;
     }
 
+    void bindLifecycle(ai.ravenroot.core.process.ProcessLifecycleService lifecycle) {
+        continuations.bindLifecycle(lifecycle);
+    }
+
     @Override public void handle(HttpExchange exchange, HttpRequestContext context) throws IOException {
         try { route(exchange, context); }
         catch (AuthorizationDeniedException denied) { error(exchange, context, 403, "RUNNER_ACCESS_DENIED"); }

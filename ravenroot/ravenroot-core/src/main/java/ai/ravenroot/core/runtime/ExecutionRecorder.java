@@ -358,12 +358,13 @@ public final class ExecutionRecorder implements AutoCloseable {
                 && id.attemptId().equals(message.attemptId());
     }
 
-    /** Atomically parks one invocation behind a first-class durable human task. */
+    /** Confirms accepted runner evidence and lifecycle admission at this recorder's CAS revision. */
     public synchronized boolean confirmsRunnerTerminal(ai.ravenroot.api.runner.RunnerJob job) {
         if (!key.equals(job.identity().execution()) || !job.state().terminal()) return false;
+        if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, revision)) return false;
         var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
         var entry = workspace == null ? null : workspace.jobs().get(job.identity().runnerJobId());
-        return entry != null && java.util.Arrays.equals(
+        return entry != null && !entry.continuationUncertain() && java.util.Arrays.equals(
                 ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), job)),
                 ai.ravenroot.api.runner.RunnerCodec.assignment(new ai.ravenroot.api.runner.RunnerAssignment(1, workspace.workspaceId(), entry.job())));
     }

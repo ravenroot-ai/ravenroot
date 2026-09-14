@@ -28,7 +28,7 @@ public final class RunnerRecoveryLoop implements AutoCloseable {
         for (String tenant : tenants) {
             try {
                 var page = jobs.store().listProcessInstances(tenant,
-                        ProcessInventoryQuery.outstanding(16).after(cursors.get(tenant))).toCompletableFuture().join();
+                        ProcessInventoryQuery.everything(16).after(cursors.get(tenant))).toCompletableFuture().join();
                 cursors.put(tenant, page.nextCursor().orElse(null));
                 for (var process : page.items()) {
                     var workspace = jobs.store().loadRunnerWorkspace(process.key()).toCompletableFuture().join().orElse(null);

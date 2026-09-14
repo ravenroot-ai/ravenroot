@@ -96,6 +96,9 @@ public final class RunnerJobService {
         Binding binding = live.get(message.attemptId());
         if (binding == null) throw new IllegalStateException("workspace-agent requires a persisted traversal");
         var key = new ExecutionKey(message.security().tenantId(), message.processInstanceId());
+        if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, binding.recorder().revision())) {
+            throw new IllegalStateException("process lifecycle does not admit runner work");
+        }
         var resources = store.runnerResources(key.tenantId()).toCompletableFuture().join();
         var definition = resources.stream().filter(value -> value.approved()
                 && value.kind() == ai.ravenroot.api.runner.GovernedRunnerResource.Kind.AGENT_DEFINITION
@@ -138,6 +141,10 @@ public final class RunnerJobService {
         var stored = store.load(key).toCompletableFuture().join();
         try (var recorder = ExecutionRecorder.open(store, key, "runner-control-" + UUID.randomUUID(),
                 Duration.ofSeconds(30), stored.revision())) {
+            if (operation instanceof RunnerJobOperation.Claim
+                    && !ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, recorder.revision())) {
+                throw new IllegalStateException("process lifecycle does not admit a runner execution claim");
+            }
             var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
             var entry = workspace.jobs().get(operation.jobId());
             if (entry == null) throw new IllegalArgumentException("runner job not found");

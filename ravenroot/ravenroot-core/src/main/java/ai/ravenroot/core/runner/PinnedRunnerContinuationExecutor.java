@@ -72,6 +72,11 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
         } catch (RuntimeException refused) { pending.remove(key); return CompletableFuture.failedFuture(refused); }
     }
 
+    /** Process RESUME and recovery deliver through the same fenced terminal-result path. */
+    public void bindLifecycle(ai.ravenroot.core.process.ProcessLifecycleService lifecycle) {
+        lifecycle.installRunnerDelivery(jobs.store(), (key, jobId) -> resume(key, jobId));
+    }
+
     /** Resolves only graph delivery uncertainty under an exact operator-observed revision. */
     public long resolve(ai.ravenroot.api.security.SecurityContext actor, ExecutionKey key, UUID jobId,
                         long expectedRevision, ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution disposition) {
@@ -82,6 +87,9 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
                 Duration.ofSeconds(30), expectedRevision)) {
             var stored = store.load(key).toCompletableFuture().join();
             if (stored.revision() != expectedRevision) throw new IllegalStateException("runner resolution revision is stale");
+            if (stored.state().terminationReason() == ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED) {
+                throw new IllegalStateException("cancelled process cannot resolve runner delivery");
+            }
             var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
             var entry = workspace.jobs().get(jobId);
             if (entry == null || !entry.continuationUncertain() || !entry.job().state().terminal()) {
@@ -140,6 +148,9 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
         var stored = store.load(key).toCompletableFuture().join();
         try (var recorder = ExecutionRecorder.open(store, key, "runner-continuation-" + UUID.randomUUID(),
                 Duration.ofSeconds(30), stored.revision())) {
+            // The admission read and every graph write share this exact process revision.
+            // A later lifecycle command wins via CAS before any successor can be dispatched.
+            if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, recorder.revision())) return;
             var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
             var entry = workspace.jobs().get(jobId);
             if (entry == null || !entry.job().state().terminal()) throw new IllegalStateException("runner result is not terminal");
@@ -191,6 +202,7 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
                 try (var runner = new GraphRunner(manager, snapshot, engine, behaviors, monitor,
                         ExecutionIdentitySource.randomUuids(), Duration.ofSeconds(10), pinnedLimits,
                         invocation.nodeId(), operational)) {
+                    if (!ai.ravenroot.core.process.ProcessLifecycleService.admitsRunnerDelivery(store, key, recorder.revision())) return;
                     Object payload = job.result() == null ? null : PayloadJson.read(job.result().payload().bytes(), PayloadLimits.DEFAULTS).toJava();
                     String outcome = job.state() == RunnerJob.State.COMPLETED ? job.result().outcome() : "blocked";
                     Runnable release = bindLive(key, recorder, runner);

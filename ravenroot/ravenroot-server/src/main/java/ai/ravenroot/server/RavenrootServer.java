@@ -1018,6 +1018,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (started.get()) throw new IllegalStateException("runner plane must be installed before start");
         if (runnerPlaneApi != null) throw new IllegalStateException("runner plane already installed");
         runnerPlaneApi = new RunnerPlaneHttpApi(control, continuations);
+        if (processLifecycle != null) runnerPlaneApi.bindLifecycle(processLifecycle);
     }
 
     private void runnerPlane(HttpExchange exchange, HttpRequestContext context) throws IOException {
@@ -1063,6 +1064,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (started.get()) throw new IllegalStateException("process lifecycle must be installed before start");
         if (processLifecycle != null) throw new IllegalStateException("process lifecycle is already installed");
         processLifecycle = java.util.Objects.requireNonNull(control, "control");
+        if (runnerPlaneApi != null) runnerPlaneApi.bindLifecycle(processLifecycle);
     }
 
     synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,

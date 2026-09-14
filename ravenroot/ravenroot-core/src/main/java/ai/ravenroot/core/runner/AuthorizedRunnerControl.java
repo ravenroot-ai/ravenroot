@@ -116,7 +116,7 @@ public final class AuthorizedRunnerControl {
     public java.util.Map<String, Object> health(RequestContext actor, String cursor) {
         authorize(actor, AuthorizationAction.RUNNER_READ, "health");
         var page = jobs.store().listProcessInstances(actor.tenantId(),
-                ai.ravenroot.api.persistence.ProcessInventoryQuery.outstanding(16).after(cursor)).toCompletableFuture().join();
+                ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(16).after(cursor)).toCompletableFuture().join();
         var counts = new java.util.TreeMap<String, Long>();
         var items = new java.util.ArrayList<java.util.Map<String, Object>>();
         for (var process : page.items()) {

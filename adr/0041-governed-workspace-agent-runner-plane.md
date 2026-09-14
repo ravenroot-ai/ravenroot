@@ -47,6 +47,15 @@ recorded effects. The same-tenant user supplies the observed process revision. A
 revision CAS commit graph transitions, barrier clearance and the actor's audit event together.
 Neither stale/repeated resolution nor partial fan-out permits speculative runner or branch replay.
 
+The durable process lifecycle journal is the shared admission authority for terminal HTTP reports,
+operator continuation resolution and recovery delivery. PAUSE and STOP retain terminal runner
+evidence while parking delivery; process RESUME and DRAIN use the same exact invocation and CAS
+revision. Process cancellation commits graph termination with reason CANCELLED, runner stop requests,
+audit and the store-clock retention anchor together. Dispatched unknown work remains owned until
+fenced quiescence, even though its enclosing graph is terminal. Recovery therefore includes terminal
+processes with unresolved runner jobs. No cancellation path routes normal or blocked successors,
+and an older replayed lifecycle command cannot override a newer durable decision.
+
 ## Reference enforcement boundary
 
 The reference driver runs an operator-installed image by digest, without a host workspace mount,

@@ -430,6 +430,85 @@ public abstract class ExecutionStoreContract {
         assertEquals(restored, await(store().runnerResources(resource.tenantId())).getFirst());
     }
 
+    @Test
+    final void processCancellationAtomicallyStopsEveryRunnerStateAndRetainsFencedEvidence() {
+        for (String state : List.of("QUEUED", "CLAIMED", "CANCELLING", "UNKNOWN", "RECONCILING", "COMPLETED")) {
+            processCancellationRetainsEvidence(ai.ravenroot.api.runner.RunnerJob.State.valueOf(state));
+        }
+    }
+
+    private void processCancellationRetainsEvidence(
+            ai.ravenroot.api.runner.RunnerJob.State before) {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var submit = runnerSubmission(newKey()); var key = submit.identity().execution();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(submit), new GraphVersionPin("runner-graph-v1")))
+                .runner(submit).build()));
+        if (before != ai.ravenroot.api.runner.RunnerJob.State.QUEUED) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL));
+        }
+        if (before == ai.ravenroot.api.runner.RunnerJob.State.CANCELLING) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Cancel(submit.jobId()));
+        }
+        if (before == ai.ravenroot.api.runner.RunnerJob.State.UNKNOWN || before == ai.ravenroot.api.runner.RunnerJob.State.RECONCILING) {
+            clock().advance(TTL);
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(submit.jobId()));
+        }
+        if (before == ai.ravenroot.api.runner.RunnerJob.State.RECONCILING) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ReconcileReport(submit.jobId(), "runner", TTL));
+        }
+        var result = new ai.ravenroot.api.runner.RunnerResult("completed", submit.input(), List.of(), UUID.randomUUID());
+        if (before == ai.ravenroot.api.runner.RunnerJob.State.COMPLETED) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ContinuationUncertain(submit.jobId()));
+        }
+        long revision = await(store().load(key)).revision();
+        var cancelledAt = clock().instant();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
+                .apply(new ExecutionTransition.TraversalTransitioned(submit.identity().traversalId(), TraversalStatus.FAILED,
+                        ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED))
+                .publish(EventEnvelope.of(UUID.randomUUID(), key.tenantId(), "PROCESS_CANCEL", key.processInstanceId(),
+                        submit.identity().traversalId(), null, null, null, "process-cancel", "runner-graph-v1",
+                        clock().instant(), OpaquePayload.empty("application/json")))
+                .build()));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var workspace = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        var entry = workspace.jobs().get(submit.jobId()); var job = entry.job();
+        assertEquals(cancelledAt, workspace.processTerminalAt());
+        assertFalse(entry.continuationUncertain());
+        assertEquals(ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED, await(store().load(key)).state().terminationReason());
+        if (before == ai.ravenroot.api.runner.RunnerJob.State.COMPLETED) assertEquals(result, job.result());
+        else assertEquals(ai.ravenroot.api.runner.RunnerJob.StopReason.CANCEL, job.stopReason());
+        assertThrows(RuntimeException.class, () -> runnerApply(key,
+                new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL)));
+        assertThrows(RuntimeException.class, () -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .runner(new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result)).build())));
+        assertThrows(RuntimeException.class, () -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING)).build())));
+        if (!job.state().terminal()) {
+            clock().advance(TTL);
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(submit.jobId()));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ReconcileReport(submit.jobId(), "runner", TTL));
+            long fence = await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(submit.jobId()).job().fence();
+            assertThrows(RuntimeException.class, () -> runnerApply(key,
+                    new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", fence - 1, result)));
+            var complete = new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", fence, result);
+            runnerApply(key, complete); runnerApply(key, complete);
+            if (store().supports(StoreCapability.DURABLE)) reopen();
+            var terminal = await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(submit.jobId()).job();
+            assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CANCELLED, terminal.state());
+            assertEquals(result, terminal.result());
+        }
+        assertEquals(cancelledAt, await(store().loadRunnerWorkspace(key)).orElseThrow().processTerminalAt());
+        assertEquals(1, await(store().readJournal(key.tenantId(), 0, 500)).stream()
+                .filter(row -> row.envelope().eventType().equals("PROCESS_CANCEL")
+                        && row.envelope().processInstanceId().equals(key.processInstanceId())).count());
+    }
+
     private void runnerApply(ExecutionKey key, ai.ravenroot.api.runner.RunnerJobOperation operation) {
         long revision = await(store().load(key)).revision();
         await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).runner(operation).build()));

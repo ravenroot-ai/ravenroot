@@ -216,6 +216,7 @@ public final class RunnerJob {
             return next(now, State.UNKNOWN, reason, fence, null, null);
         }
         State nextState = state == State.UNKNOWN || state == State.RECONCILING ? state : State.CANCELLING;
+        if (nextState == state && reason == stopReason) return this;
         return next(now, nextState, reason, fence, leaseUntil, null);
     }
 

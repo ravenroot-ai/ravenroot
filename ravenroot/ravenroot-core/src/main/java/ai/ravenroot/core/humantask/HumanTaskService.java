@@ -535,7 +535,7 @@ public final class HumanTaskService {
             }
             StoredProcessInstance stored = load(task.key());
             var traversal = stored.state().traversals().get(task.request().traversalId());
-            if (traversal == null || traversal.status().terminal()) return false;
+            if (traversal == null) return false;
             var invocation = traversal.invocations().get(task.request().invocationId());
             if (invocation == null) return false;
             var targetAttempt = invocation.attempts().stream()
@@ -555,7 +555,7 @@ public final class HumanTaskService {
                         traversal.traversalId(), invocation.invocationId(),
                         NodeInvocationStatus.FAILED));
             }
-            builder.apply(new ExecutionTransition.TraversalTransitioned(
+            if (!traversal.status().terminal()) builder.apply(new ExecutionTransition.TraversalTransitioned(
                     traversal.traversalId(), TraversalStatus.FAILED,
                     ExecutionTerminationReason.CANCELLED));
             boolean finalLiveTraversal = stored.state().traversals().values().stream()

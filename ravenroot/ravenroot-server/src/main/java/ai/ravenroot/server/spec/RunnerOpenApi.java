@@ -10,6 +10,11 @@ final class RunnerOpenApi {
     static String operation(RouteDescriptor route, String method) {
         var operation = new LinkedHashMap<String, Object>();
         operation.put("summary", route.summary());
+        if (route.path().endsWith("/complete") || route.path().endsWith("/resolve-continuation")) {
+            operation.put("description", "Terminal evidence is durable before graph delivery. Process PAUSE and STOP park delivery; "
+                    + "only process RESUME or DRAIN admits it. Runner continuation RESUME does not override process lifecycle. "
+                    + "Process CANCEL prevents normal successors while preserving fenced quiescence evidence.");
+        }
         operation.put("x-assistant-posture", route.assistantPosture().name());
         operation.put("security", List.of(Map.of("bearerAuth", List.of())));
         var parameters = new ArrayList<Map<String, Object>>();

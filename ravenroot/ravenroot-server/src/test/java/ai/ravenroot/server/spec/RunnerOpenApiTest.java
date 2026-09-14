@@ -46,5 +46,19 @@ class RunnerOpenApiTest {
         var schema = map(map(map(map(resolution.get("requestBody")).get("content")).get("application/json")).get("schema"));
         assertEquals(List.of("expectedRevision", "resolution"), schema.get("required"));
         assertEquals(List.of("RESUME", "ACKNOWLEDGE", "ABANDON"), map(map(schema.get("properties")).get("resolution")).get("enum"));
+        assertTrue(resolution.get("description").toString().contains("does not override process lifecycle"));
+        assertTrue(operation("/workspaces/{processId}/jobs/{jobId}/complete", "post").get("description").toString().contains("PAUSE and STOP"));
+    }
+    @Test void processLifecycleHeadersAndDurableCancellationAreExplicit() {
+        var document = RunnerJson.read(OpenApiSpecGenerator.generate(RouteTable.ALL).getBytes(StandardCharsets.UTF_8));
+        var operation = map(map(map(document.get("paths")).get("/v1/processes/{processInstanceId}/{command}")).get("post"));
+        assertTrue(operation.get("description").toString().contains("terminationReason CANCELLED"));
+        var parameters = (List<?>) operation.get("parameters");
+        for (String header : List.of("Idempotency-Key", "X-Ravenroot-Expected-Generation")) {
+            var value = parameters.stream().map(RunnerOpenApiTest::map).filter(parameter -> header.equals(parameter.get("name"))).findFirst().orElseThrow();
+            assertEquals("header", value.get("in")); assertEquals(true, value.get("required"));
+        }
+        var response = map(map(map(map(operation.get("responses")).get("200")).get("content")).get("application/json"));
+        assertEquals(List.of("outcome", "processInstanceId", "generation", "state", "reason", "traversals"), map(response.get("schema")).get("required"));
     }
 }

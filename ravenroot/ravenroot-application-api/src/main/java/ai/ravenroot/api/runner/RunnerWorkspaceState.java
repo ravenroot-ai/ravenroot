@@ -39,8 +39,20 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
      */
     public RunnerWorkspaceState observeProcess(ProcessInstance graph, Instant now) {
         if (!execution.processInstanceId().equals(graph.processInstanceId())) throw new IllegalArgumentException("runner process scope mismatch");
+        var observed = this;
+        if (graph.terminationReason() == ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED) {
+            // Process cancellation and every dispatched job's sticky stop request are one
+            // store transaction. Unknown effects retain ownership; terminal evidence survives.
+            for (var item : jobs.entrySet()) {
+                var entry = item.getValue();
+                var cancelled = entry.job().cancel(now);
+                if (cancelled != entry.job() || entry.continuationUncertain()) {
+                    observed = observed.replace(item.getKey(), new Entry(cancelled, entry.continuation(), false));
+                }
+            }
+        }
         return graph.status().terminal() && processTerminalAt == null
-                ? new RunnerWorkspaceState(execution, workspaceId, runnerId, jobs, now) : this;
+                ? new RunnerWorkspaceState(execution, workspaceId, runnerId, observed.jobs(), now) : observed;
     }
     /** Maximum retained job count per process workspace. */
     public static final int MAX_JOBS = 256;
@@ -102,6 +114,7 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
             throw new IllegalArgumentException("runner workspace scope mismatch");
         }
         if (operation instanceof RunnerJobOperation.Submit submit) {
+            if (graph.status().terminal()) throw new IllegalStateException("terminal process cannot admit runner work");
             if (!key.equals(submit.identity().execution())) throw new IllegalArgumentException("runner job scope mismatch");
             var traversal = graph.traversals().get(submit.identity().traversalId());
             var invocation = traversal == null ? null : traversal.invocations().get(submit.identity().invocationId());

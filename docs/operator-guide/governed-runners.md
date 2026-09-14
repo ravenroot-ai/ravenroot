@@ -80,6 +80,24 @@ deadline, outcome and bounded digest-verified artifact previews.
 - Reconciliation obtains a fresh report-only fence. It never executes the job again.
 - A quiescent accepted terminal report releases the sequential handoff barrier.
 
+Process lifecycle is authoritative over runner delivery. `POST /v1/processes/{processInstanceId}/{command}`
+requires `Idempotency-Key` and `X-Ravenroot-Expected-Generation`. `pause` and recoverable `stop`
+prevent new execution claims and keep accepted terminal reports parked, including reports arriving
+through HTTP or after restart. They do not erase evidence or prove that an already dispatched
+process tree stopped. Process `resume` (or `drain`) admits the exact parked invocation once;
+runner `RESUME` resolution alone never overrides a process hold. A racing lifecycle command wins
+or loses at the same process revision used by continuation delivery; a stale write must re-read.
+
+Process `cancel` atomically records the graph as `FAILED` with termination reason `CANCELLED`,
+the lifecycle journal event, per-job cancellation audit, runner stop requests and the process
+terminal-retention timestamp. Queued work is cancelled without execution. Claimed work becomes
+cancelling; unknown and reconciling jobs retain their sticky stop request and workspace ownership
+until a correctly fenced quiescence report arrives. Accepted terminal evidence remains unchanged.
+Cancellation clears obsolete graph-delivery uncertainty and never routes normal or blocked
+successors. Recovery and health include unresolved runner jobs even in terminal processes.
+Duplicate reports and lifecycle commands cannot restore a cancelled process or advance its retention
+anchor. Retain terminal inventory until these remote jobs and their cleanup obligations are settled.
+
 The job lifecycle is journaled with process/traversal/invocation/attempt identity. Admission is
 caused by the original node-start event; terminal reports causally precede graph completion.
 Authorization decisions use the existing audit sink. Catalogue rows retain the latest approving

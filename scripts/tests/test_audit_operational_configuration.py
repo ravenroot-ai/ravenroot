@@ -6144,6 +6144,47 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertEqual(2, failure.exception.code)
 
 
+class AiOperationalPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.candidates = audit.discover(ROOT)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.inventory = audit.load_inventory()
+        cls.entries = {entry["id"]: entry for entry in cls.inventory["entries"]}
+
+    def test_source_derived_authority_covers_every_typed_setting_and_binding(self) -> None:
+        authority = audit.ai_operational_authority_from_source(ROOT, self.discovered)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        self.assertEqual(29, len(authority["settings"]))
+        self.assertEqual(
+            {environment for _setting, _field, environment, _default
+             in audit.AI_OPERATIONAL_SETTINGS},
+            {contract["environment"] for contract in authority["settings"]},
+        )
+        self.assertEqual(
+            {candidate.id for candidate in self.candidates
+             if candidate.kind == "environment-binding"
+             and str(candidate.expression).startswith("RAVENROOT_AI_")},
+            set(authority["candidateIds"]),
+        )
+        self.assertEqual(
+            [],
+            audit.ai_operational_authority_errors(
+                ROOT, self.inventory["aiOperationalAuthorities"],
+                self.entries, self.discovered),
+        )
+
+    def test_missing_binding_marker_cannot_escape_the_closed_partition(self) -> None:
+        entries = copy.deepcopy(self.entries)
+        identifier = self.inventory["aiOperationalAuthorities"][
+            audit.AI_OPERATIONAL_AUTHORITY_ID]["candidateIds"][0]
+        entries[identifier].pop("aiOperationalAuthority")
+        errors = audit.ai_operational_authority_errors(
+            ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered)
+        self.assertTrue(any("partition" in error for error in errors), errors)
+
+
 class ProgramGithubPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

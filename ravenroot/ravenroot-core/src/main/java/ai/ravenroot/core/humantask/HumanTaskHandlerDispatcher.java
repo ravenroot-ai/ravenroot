@@ -16,12 +16,21 @@ public final class HumanTaskHandlerDispatcher implements RecoveryDispatcher {
     private final ExecutionStore store;
     private final HumanTaskService tasks;
     private final HumanTaskContinuationExecutor executor;
+    private final HumanTaskReentryGate reentryGate;
 
     public HumanTaskHandlerDispatcher(ExecutionStore store, HumanTaskService tasks,
                                       HumanTaskContinuationExecutor executor) {
+        this(store, tasks, executor, HumanTaskReentryGate.OPEN);
+    }
+
+    /** Composes dispatch with a durable graph/process lifecycle admission gate. */
+    public HumanTaskHandlerDispatcher(ExecutionStore store, HumanTaskService tasks,
+                                      HumanTaskContinuationExecutor executor,
+                                      HumanTaskReentryGate reentryGate) {
         this.store = Objects.requireNonNull(store, "store");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.reentryGate = Objects.requireNonNull(reentryGate, "reentryGate");
     }
 
     @Override
@@ -31,7 +40,8 @@ public final class HumanTaskHandlerDispatcher implements RecoveryDispatcher {
                 || !HumanTaskService.HANDLER_NAME.equals(trigger.handlerName())) return false;
         DurableHumanTask task = await(store.loadHumanTask(trigger.key().tenantId(), trigger.workItemId()))
                 .filter(candidate -> candidate.key().equals(trigger.key())).orElse(null);
-        return task != null && task.status().terminal() && executor.supports(task);
+        return task != null && task.status().terminal() && reentryGate.admits(task)
+                && executor.supports(task);
     }
 
     @Override

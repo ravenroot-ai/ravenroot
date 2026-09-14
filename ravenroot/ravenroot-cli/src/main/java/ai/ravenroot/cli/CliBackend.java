@@ -93,6 +93,12 @@ public interface CliBackend {
 
     DrainView drain() throws IOException;
 
+    /** Applies one durable process-instance lifecycle command. Remote backends expose this authority. */
+    default ProcessControlView processControl(String processInstanceId, String command, long generation,
+                                              String idempotencyKey, String reason) throws IOException {
+        throw new IOException("durable process lifecycle requires --server");
+    }
+
     /**
      * This tenant's process-local deployments, in the same order the API returns them (id
      * order). Empty for a tenant that has registered none -- there is no distinguishable "you have
@@ -423,6 +429,9 @@ public interface CliBackend {
 
     record DrainView(String outcome) {
     }
+
+    record ProcessControlView(String outcome, String processInstanceId, long generation,
+                              String state, String reason) { }
 
     /**
      * Mirrors {@code ai.ravenroot.api.application.LocalDeploymentStatus} -- a separate

@@ -90,6 +90,8 @@ humanTask:
   writeAttempts: ""
   maxConfirmationPromptBytes: ""
   maxConfirmationActionLabelBytes: ""
+  defaultReviewTextBytes: ""
+  maxReviewTextBytes: ""
   maxDecisionCommentBytes: ""
   attentionPollMillis: ""
   attentionPollBackoffMaxMillis: ""

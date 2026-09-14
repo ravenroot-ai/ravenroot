@@ -170,7 +170,7 @@ public final class DeploymentCoordinator {
                 return afterRemoval(record, command);
             }
             Optional<DeploymentCommandOutcome> stale = staleness(record, expectedGeneration);
-            if (stale.isPresent()) return stale.get();
+            if (stale.isPresent()) return replayOrStale(record, command, expectedGeneration, stale.get());
 
             Optional<DeploymentCommandOutcome> refusal = refusal(record, command);
             if (refusal.isPresent()) return refusal.get();
@@ -189,6 +189,22 @@ public final class DeploymentCoordinator {
                 if (classified.isPresent()) return classified.get();
                 if (attempt >= MAXIMUM_RACE_RETRIES) throw contended.refusal;
             }
+        }
+    }
+
+    private DeploymentCommandOutcome replayOrStale(Record record, LifecycleCommand command,
+                                                    GenerationExpectation expected,
+                                                    DeploymentCommandOutcome stale) {
+        try {
+            Record replay = await(registry.command(desiredFor(record, command),
+                    mutation(record, command, expected,
+                            RevisionExpectation.exactly(record.revision()))));
+            long generation = replay.generation();
+            return new DeploymentCommandOutcome.Replayed(new DeploymentCommandOutcome.Accepted(
+                    identity(replay), generation - 1, generation));
+        } catch (DeploymentRegistry.RegistryException refused) {
+            if (refused.reason() instanceof DeploymentRegistry.FailureReason.Conflict) return stale;
+            throw refused;
         }
     }
 
@@ -465,7 +481,7 @@ public final class DeploymentCoordinator {
                                                 RevisionExpectation revision) {
         return new DeploymentRegistry.Command(record.tenantId(), record.deploymentId(),
                 ledgerKey(command), DeploymentOwnership.digestOf(LifecycleCommand.canonicalForm(command, expected)),
-                revision, expected);
+                revision, expected, command.kind(), command.operatorReason().orElse(null));
     }
 
     /**

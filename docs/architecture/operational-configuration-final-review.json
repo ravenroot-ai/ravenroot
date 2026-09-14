@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Packaged startup composes the policy from the process environment."
         },
         {
@@ -1344,7 +1344,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "f2f8fd1c3be0fdd651a94bf2098d800ff42508047df1ab99cb5fb7def9c9ba60",
+          "digest": "052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0",
           "assertion": "Empty values deliberately select application defaults for declared carriers."
         }
       ],
@@ -1447,12 +1447,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "db747d037f2da201896a1354991e17f49ad54d0ebd6ee7113ac163c1f7eacb4b",
+          "digest": "b936c4a130113d5e10f80a6b93358d028f0d2ae8cdb9c3cb22c379959c54b7b1",
           "assertion": "Compose carries supported environment key identities."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "f2f8fd1c3be0fdd651a94bf2098d800ff42508047df1ab99cb5fb7def9c9ba60",
+          "digest": "052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0",
           "assertion": "Kubernetes carries supported environment key identities."
         }
       ],
@@ -1704,12 +1704,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "db747d037f2da201896a1354991e17f49ad54d0ebd6ee7113ac163c1f7eacb4b",
+          "digest": "b936c4a130113d5e10f80a6b93358d028f0d2ae8cdb9c3cb22c379959c54b7b1",
           "assertion": "Compose declares explicit local runtime defaults and external carriers."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "f2f8fd1c3be0fdd651a94bf2098d800ff42508047df1ab99cb5fb7def9c9ba60",
+          "digest": "052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0",
           "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes."
         }
       ],
@@ -1788,7 +1788,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation."
         },
         {
@@ -1813,7 +1813,7 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "0994206012f915c6c2f53c3261838c07f5914593fb9379a382f8d83625ad90c1",
+          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
           "assertion": "The operator reference publishes strict Boolean syntax and false default."
         }
       ],
@@ -2484,7 +2484,7 @@
         },
         {
           "path": "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/RemoteBackend.java",
-          "digest": "75252c3ef04ccd0cb803f47cdc57cba543e217bbb450612d8855b9c02e04dcbd",
+          "digest": "93a88183ec2b9374eb174c06216ae2e21ca1b17ab51f6fbd1bae2654112ced24",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5472,7 +5472,7 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "0994206012f915c6c2f53c3261838c07f5914593fb9379a382f8d83625ad90c1",
+          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
           "assertion": "Operator reference publishes supported extension bindings."
         }
       ],
@@ -5658,12 +5658,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "5815363a1f176c9388424c631e678bf39c3b18ec09967a5976ce3d53e1cf0001",
+          "digest": "f7d17f7fefc9e5efddf12ff2194861e179a3f50187dd0f79f7809cee943cf270",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "2ccd3b2a2cb2c14b0a978a8c6a777ed1f46b2bf32125af1ac771245469fafc47",
+          "digest": "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "5815363a1f176c9388424c631e678bf39c3b18ec09967a5976ce3d53e1cf0001",
+          "digest": "f7d17f7fefc9e5efddf12ff2194861e179a3f50187dd0f79f7809cee943cf270",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5724,7 +5724,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java",
-          "digest": "30541632a04b82b257568a8e43666a63cf5581ab268e5e4d61cf02050f60cc29",
+          "digest": "2b7ca6413af7c78fbca8d40eaf585d21186691bd11c50baaf8aa712d5bea5f6b",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5761,12 +5761,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "5815363a1f176c9388424c631e678bf39c3b18ec09967a5976ce3d53e1cf0001",
+          "digest": "f7d17f7fefc9e5efddf12ff2194861e179a3f50187dd0f79f7809cee943cf270",
           "assertion": "Server composition consumes exact process environment keys."
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "0994206012f915c6c2f53c3261838c07f5914593fb9379a382f8d83625ad90c1",
+          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
           "assertion": "Operator reference publishes supported server bindings."
         }
       ],
@@ -5888,7 +5888,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java",
-          "digest": "30541632a04b82b257568a8e43666a63cf5581ab268e5e4d61cf02050f60cc29",
+          "digest": "2b7ca6413af7c78fbca8d40eaf585d21186691bd11c50baaf8aa712d5bea5f6b",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "5815363a1f176c9388424c631e678bf39c3b18ec09967a5976ce3d53e1cf0001",
+          "digest": "f7d17f7fefc9e5efddf12ff2194861e179a3f50187dd0f79f7809cee943cf270",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -6359,12 +6359,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java",
-          "digest": "30541632a04b82b257568a8e43666a63cf5581ab268e5e4d61cf02050f60cc29",
+          "digest": "2b7ca6413af7c78fbca8d40eaf585d21186691bd11c50baaf8aa712d5bea5f6b",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "5815363a1f176c9388424c631e678bf39c3b18ec09967a5976ce3d53e1cf0001",
+          "digest": "f7d17f7fefc9e5efddf12ff2194861e179a3f50187dd0f79f7809cee943cf270",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -8533,7 +8533,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "a6bb3556ef97d343b9eb830852bd7bb6f3bfc995942833a17ed9c49e6db8bedc",
+          "digest": "7ab92c9b414d513081b091413fab7bce817546cc87e1d6fe3255006f9f5ec3fc",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -8829,7 +8829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "a6bb3556ef97d343b9eb830852bd7bb6f3bfc995942833a17ed9c49e6db8bedc",
+          "digest": "7ab92c9b414d513081b091413fab7bce817546cc87e1d6fe3255006f9f5ec3fc",
           "assertion": "UI resolves catalog entries through stable lookup tokens."
         }
       ],
@@ -8987,7 +8987,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "a6bb3556ef97d343b9eb830852bd7bb6f3bfc995942833a17ed9c49e6db8bedc",
+          "digest": "7ab92c9b414d513081b091413fab7bce817546cc87e1d6fe3255006f9f5ec3fc",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -10766,7 +10766,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "a6bb3556ef97d343b9eb830852bd7bb6f3bfc995942833a17ed9c49e6db8bedc",
+          "digest": "7ab92c9b414d513081b091413fab7bce817546cc87e1d6fe3255006f9f5ec3fc",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,7 +11429,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "a6bb3556ef97d343b9eb830852bd7bb6f3bfc995942833a17ed9c49e6db8bedc",
+          "digest": "7ab92c9b414d513081b091413fab7bce817546cc87e1d6fe3255006f9f5ec3fc",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11498,12 +11498,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "0994206012f915c6c2f53c3261838c07f5914593fb9379a382f8d83625ad90c1",
+          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
           "assertion": "The operator table publishes the timeout types, bounds, and defaults."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "fc5eca9a42a84d8a26d5878b989409997f9bc362783ec38f3ccb4e226c6592db",
+          "digest": "4f25915e8f8c296a3707bf1c6db5b60777d05f0e45965959f8483417e408c6e9",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],
@@ -11572,12 +11572,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "0994206012f915c6c2f53c3261838c07f5914593fb9379a382f8d83625ad90c1",
+          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
           "assertion": "The operator table publishes the timeout types, bounds, and defaults."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "fc5eca9a42a84d8a26d5878b989409997f9bc362783ec38f3ccb4e226c6592db",
+          "digest": "4f25915e8f8c296a3707bf1c6db5b60777d05f0e45965959f8483417e408c6e9",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],
@@ -11643,12 +11643,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "0994206012f915c6c2f53c3261838c07f5914593fb9379a382f8d83625ad90c1",
+          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
           "assertion": "The operator table publishes the timeout types, bounds, and defaults."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "fc5eca9a42a84d8a26d5878b989409997f9bc362783ec38f3ccb4e226c6592db",
+          "digest": "4f25915e8f8c296a3707bf1c6db5b60777d05f0e45965959f8483417e408c6e9",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],

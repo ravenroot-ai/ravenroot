@@ -63,6 +63,11 @@ class SqliteHumanTaskMigrationUpgradeTest {
             assertTrue(columnExists(connection, "human_task", "confirmation_max_action_label_bytes"));
             assertTrue(columnExists(connection, "human_task", "confirmation_max_comment_bytes"));
             assertTrue(columnExists(connection, "human_task", "decision_comment"));
+            assertTrue(columnExists(connection, "human_task", "review_version"));
+            assertTrue(columnExists(connection, "human_task", "review_content_type"));
+            assertTrue(columnExists(connection, "human_task", "review_text"));
+            assertTrue(columnExists(connection, "human_task", "review_digest"));
+            assertTrue(columnExists(connection, "human_task", "review_max_utf8_bytes"));
             assertTrue(columnExists(connection, "human_task", "created_at_epoch_second"));
             assertTrue(columnExists(connection, "human_task", "created_at_nano"));
             assertEquals(1, indexCount(connection, "human_task_live_correlation"));

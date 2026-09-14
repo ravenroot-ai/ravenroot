@@ -57,6 +57,7 @@ import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -3656,7 +3657,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(readHandler(rows, key, null));
+                    DurableHandler handler = readHandler(rows, key, null);
+                    if (handler.status().resumesProcess()) ready.add(handler);
                 }
             }
         }
@@ -4814,6 +4816,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "WHERE t.tenant_id = ? AND t.task_id = ? AND t.generation = ? "
                         + "AND t.status IN " + LIVE_HUMAN_TASK_STATUSES + " "
                         + "AND t.confirmation_version > 0";
+                HumanTaskAttentionItem item;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, tenantId);
                     StoredUuid.bind(statement, 2, locator.taskId());
@@ -4822,12 +4825,45 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         if (!rows.next()) {
                             return Optional.empty();
                         }
-                        return Optional.ofNullable(
-                                readHumanTaskAttentionItem(rows, tenantId, authorization));
+                        item = readHumanTaskAttentionItem(rows, tenantId, authorization);
+                        if (item == null) return Optional.empty();
                     }
                 }
+                // Keep the content-bearing query physically after authorization and after the
+                // summary cursor is closed. This ordering is part of the non-disclosure contract.
+                return readHumanTaskReviewPresentation(connection, tenantId, locator)
+                        .map(review -> withReviewPresentation(item, review));
             });
         });
+    }
+
+    private static Optional<HumanTaskReviewPresentation> readHumanTaskReviewPresentation(
+            Connection connection, String tenantId, HumanTaskAttentionLocator locator)
+            throws SQLException {
+        String sql = "SELECT review_version, review_content_type, review_text, review_digest, "
+                + "review_max_utf8_bytes FROM human_task WHERE tenant_id = ? AND task_id = ? "
+                + "AND generation = ? AND status IN " + LIVE_HUMAN_TASK_STATUSES;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            StoredUuid.bind(statement, 2, locator.taskId());
+            statement.setLong(3, locator.generation());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                return Optional.of(new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                        rows.getString("review_content_type"), rows.getString("review_text"),
+                        rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
+            }
+        }
+    }
+
+    private static HumanTaskAttentionItem withReviewPresentation(
+            HumanTaskAttentionItem item, HumanTaskReviewPresentation review) {
+        return new HumanTaskAttentionItem(item.taskId(), item.generation(), item.status(),
+                item.graphVersion(), item.deploymentId(), item.processInstanceId(),
+                item.traversalId(), item.nodeId(), item.createdAt(), item.expiresAt(),
+                item.escalateAt(), item.presentation(), item.promptMaxUtf8Bytes(),
+                item.actionLabelMaxUtf8Bytes(), item.commentMaxUtf8Bytes(),
+                item.availableActions(), review.present() ? Optional.of(review) : Optional.empty());
     }
 
     /**
@@ -5051,10 +5087,11 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 + "confirmation_comment_requirement, confirmation_actions, "
                 + "confirmation_resolve_label, confirmation_deny_label, confirmation_cancel_label, "
                 + "confirmation_max_prompt_bytes, confirmation_max_action_label_bytes, "
-                + "confirmation_max_comment_bytes, created_at_epoch_second, created_at_nano, status, "
+                + "confirmation_max_comment_bytes, review_version, review_content_type, review_text, "
+                + "review_digest, review_max_utf8_bytes, created_at_epoch_second, created_at_nano, status, "
                 + "actor, decision_comment, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?, ".repeat(57) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?, ".repeat(62) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             StoredUuid.bind(statement, index++, task.key().processInstanceId());
@@ -5115,6 +5152,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            HumanTaskReviewPresentation review = request.reviewPresentation();
+            statement.setInt(index++, review.version());
+            statement.setString(index++, review.contentType());
+            statement.setString(index++, review.text());
+            statement.setString(index++, review.contentDigest());
+            statement.setInt(index++, review.maxUtf8Bytes());
             index = StoredInstant.bindValue(statement, index, task.createdAt());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
@@ -5239,7 +5282,10 @@ public final class PostgresExecutionStore implements ExecutionStore {
                             rows.getString("confirmation_cancel_label")),
                     new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
                             rows.getInt("confirmation_max_action_label_bytes"),
-                            rows.getInt("confirmation_max_comment_bytes")));
+                            rows.getInt("confirmation_max_comment_bytes")),
+                    new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                            rows.getString("review_content_type"), rows.getString("review_text"),
+                            rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getString("decision_comment"), rows.getLong("generation"),

@@ -17,6 +17,13 @@ presentation, task identity, generation, timers, and decision state with the dur
    limits. The built-in confirmation response is produced by the server when Resolve succeeds; it
    does not turn the comment into execution payload.
 
+To review incoming mail before deciding, select **Review content 1**, set **Review text source** to
+`payload.body`, and keep the byte limit at or below the server-advertised maximum. For an input such
+as `{"from":"sender@example.test","subject":"Release","body":"Deploy 2.4?\nReply requested."}`,
+the dialog shows exactly the two body lines as inert plain text. It does not interpret HTML or
+Markdown, activate links, run scripts, or build a form. If the body is absent, is not text, or exceeds
+the byte limit, Ravenroot refuses creation instead of shortening or converting it.
+
 Prompt, action-label, and comment limits are measured in UTF-8 bytes. A decision comment can span
 lines; Ravenroot removes outer whitespace before applying the task's pinned comment rule and limit.
 Those pinned limits continue to govern an existing task if an operator later tightens the current
@@ -52,7 +59,8 @@ cannot be distinguished.
    the task and generation, process, traversal, optional deployment, creation time, expiry, and
    escalation state. The list never displays execution payloads, responses, continuations, secrets,
    or prior comments.
-3. Choose one row to open the central decision dialog. Review the static prompt and exact identity,
+3. Choose one row to fetch its authorized exact-generation detail and open the central decision
+   dialog. Review the static prompt, exact identity, and any pinned plain-text review content,
    enter the separate comment when allowed, then choose one server-authorized action.
 4. Wait for the authoritative result. A successful decision closes the dialog and refreshes the
    list and graph counts. The marker disappears only after the last task becomes terminal.
@@ -74,7 +82,7 @@ server. A stale or terminal task is replaced or removed from the list; an author
 reveals no cross-tenant task details. The browser may retain only the selected service origin, task
 identifier, and generation. After a reload or server restart, re-authenticate and Ravenroot uses
 that locator to fetch the task's durable presentation and current state. It never reconstructs the
-row from browser-cached task data.
+row or review content from browser-cached task data.
 
 A server restart does not reload an already open browser page, so that page keeps the deployment or
 process context the user selected earlier. Close the recovered decision and select its Human Task

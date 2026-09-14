@@ -121,7 +121,13 @@ public final class HumanTaskConfiguration {
                         defaults.attentionDefaultPageSize()),
                 integer(properties, environment, "ravenroot.human-task.max-attention-page-size",
                         "RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE",
-                        defaults.attentionMaxPageSize()));
+                        defaults.attentionMaxPageSize()),
+                integer(properties, environment, "ravenroot.human-task.default-review-text-bytes",
+                        "RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES",
+                        defaults.defaultReviewTextUtf8Bytes()),
+                integer(properties, environment, "ravenroot.human-task.max-review-text-bytes",
+                        "RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES",
+                        defaults.maxReviewTextUtf8Bytes()));
     }
 
     /** Rejects a Human Task response contract that the active graph traversal cannot carry. */
@@ -210,7 +216,9 @@ public final class HumanTaskConfiguration {
                 {"pollAfterMillis", "attention-poll-millis"},
                 {"pollBackoffMaxMillis", "attention-poll-backoff-max-millis"},
                 {"attentionDefaultPageSize", "default-attention-page-size"},
-                {"attentionMaxPageSize", "max-attention-page-size"}
+                {"attentionMaxPageSize", "max-attention-page-size"},
+                {"defaultReviewTextUtf8Bytes", "default-review-text-bytes"},
+                {"maxReviewTextUtf8Bytes", "max-review-text-bytes"}
         };
         for (String[] name : names) {
             if (message.contains(name[0])) {

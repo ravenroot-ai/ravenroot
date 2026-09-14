@@ -79,6 +79,29 @@ class SqliteSchemaMigrationTest {
     }
 
     @Test
+    void runnerMigrationAppendsAfterIntegratedLifecycleSchemaWithoutReplacingData() throws Exception {
+        try (Connection connection = open("lifecycle-to-runner.db")) {
+            var lifecycle = SqliteSchema.migrations().stream().filter(step -> step.version() <= 27).toList();
+            assertEquals(27, SqliteSchema.migrate(connection, lifecycle, CLOCK));
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("CREATE TABLE migration_sentinel (value TEXT NOT NULL)");
+                statement.execute("INSERT INTO migration_sentinel VALUES ('preserved')");
+            }
+            assertEquals(28, SqliteSchema.migrate(connection, CLOCK));
+            assertEquals(28, SqliteSchema.migrate(connection, CLOCK));
+            assertTrue(tableNames(connection).containsAll(List.of("human_task", "session_memory",
+                    "session_memory_command", "runner_workspace", "runner_catalog", "runner_catalog_tenant")));
+            assertTrue(columnNames(connection, "deployment").contains("last_lifecycle_reason"));
+            assertTrue(columnNames(connection, "human_task").contains("review_text"));
+            try (Statement statement = connection.createStatement();
+                 ResultSet row = statement.executeQuery("SELECT value FROM migration_sentinel")) {
+                assertTrue(row.next());
+                assertEquals("preserved", row.getString(1));
+            }
+        }
+    }
+
+    @Test
     void aForwardMigrationResumesFromAPartlyUpgradedFileAndPreservesTheRowsAlreadyWritten()
             throws Exception {
         try (Connection connection = open("forward.db")) {

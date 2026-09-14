@@ -136,7 +136,7 @@ Minimal lock metadata may remain to preserve cross-process synchronization.
 
 Back up the execution database, operator configuration, control-plane artifact volume and worker
 state/container snapshots consistently. A database-only restore cannot reconstruct a workspace
-whose physical effects were lost. SQLite migration 24 and PostgreSQL migration 4 add runner workspace
+whose physical effects were lost. SQLite migration 28 and PostgreSQL migration 8 add runner workspace
 and catalogue tables. Existing bounded Agent graphs do not migrate to workspace agents implicitly.
 Workspace storage envelope version 2 adds the store-clock terminal timestamp without changing
 runner wire protocol version 1 or SQL table layouts. All adapters read version 1 and write version 2.

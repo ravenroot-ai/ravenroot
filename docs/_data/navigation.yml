@@ -119,6 +119,8 @@
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
+    - title: Session memory
+      url: /reference/session-memory.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: Interaction WebSocket protocol

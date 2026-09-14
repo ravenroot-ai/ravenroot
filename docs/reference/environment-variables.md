@@ -195,6 +195,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | See the linked contract for exact type, default, and applicability. |
@@ -208,6 +209,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |

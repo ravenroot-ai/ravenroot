@@ -257,7 +257,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 insertVersionRow(tenant, deploymentId, version, content);
                 Record next = new Record(current.tenantId(), current.deploymentId(), version, current.generation(),
                         current.revision() + 1, current.desired(), current.observed(), current.lease(),
-                        current.failure(), current.tombstone(), current.createdAt(), now);
+                        current.failure(), current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.APPEND, command.key(),
                         command.digest(), now);
             });
@@ -289,7 +290,12 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                         newGeneration);
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         newGeneration, current.revision() + 1, stamped, current.observed(), current.lease(), null,
-                        current.tombstone(), current.createdAt(), now);
+                        current.tombstone(), command.lifecycleKind() == null
+                                ? current.lastLifecycleCommand() : command.lifecycleKind(),
+                        command.lifecycleKind() == null ? current.lastLifecycleReason()
+                                : command.lifecycleReason(),
+                        command.lifecycleKind() == null ? current.lastLifecycleCommandAt() : now,
+                        current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.COMMAND, command.key(),
                         command.digest(), now);
             });
@@ -324,7 +330,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 }
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), observation,
-                        current.lease(), current.failure(), current.tombstone(), current.createdAt(), now);
+                        current.lease(), current.failure(), current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.OBSERVE, command.key(),
                         command.digest(), now);
             });
@@ -352,7 +359,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 evidenceTime(current, reported.at(), now);
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(),
-                        current.lease(), reported, current.tombstone(), current.createdAt(), now);
+                        current.lease(), reported, current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.FAIL, command.key(),
                         command.digest(), now);
             });
@@ -381,7 +389,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 evidenceTime(current, tombstone.at(), now);
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(), null,
-                        current.failure(), tombstone, current.createdAt(), now);
+                        current.failure(), tombstone, current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.TOMBSTONE, command.key(),
                         command.digest(), now);
             });
@@ -487,7 +496,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 Lease lease = new Lease(tenant, current.deploymentId(), owner, newFence, now, now.plus(ttl));
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(), lease,
-                        current.failure(), current.tombstone(), current.createdAt(), now);
+                        current.failure(), current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, newFence), Action.ACQUIRE, command.key(), command.digest(), now);
             });
         });
@@ -515,7 +525,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                         lease.acquiredAt(), now.plus(ttl));
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(),
-                        renewed, current.failure(), current.tombstone(), current.createdAt(), now);
+                        renewed, current.failure(), current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.RENEW, command.key(),
                         command.digest(), now);
             });
@@ -550,7 +561,8 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 Record current = aggregate.record();
                 Record next = new Record(current.tenantId(), current.deploymentId(), current.latestVersion(),
                         current.generation(), current.revision() + 1, current.desired(), current.observed(), null,
-                        current.failure(), current.tombstone(), current.createdAt(), now);
+                        current.failure(), current.tombstone(), current.lastLifecycleCommand(),
+                        current.lastLifecycleCommandAt(), current.createdAt(), now);
                 return persist(new Aggregate(next, aggregate.fence()), Action.RELEASE, command.key(),
                         command.digest(), now);
             });
@@ -714,9 +726,15 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
         Tombstone tombstone = tombstoneFrom(rows, "");
         Instant createdAt = StoredInstant.read(rows, "created_at");
         Instant updatedAt = StoredInstant.read(rows, "updated_at");
+        String lifecycleKind = rows.getString("last_lifecycle_command");
+        var lastCommand = lifecycleKind == null ? null
+                : ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.valueOf(lifecycleKind);
+        Instant lastCommandAt = lifecycleKind == null ? null
+                : StoredInstant.read(rows, "last_lifecycle_command_at");
         Lease lease = loadLease(tenant, deploymentId);
         return new Record(tenant, DeploymentId.of(deploymentId), latestVersion, generation, revision, desired,
-                observed, lease, failure, tombstone, createdAt, updatedAt);
+                observed, lease, failure, tombstone, lastCommand,
+                rows.getString("last_lifecycle_reason"), lastCommandAt, createdAt, updatedAt);
     }
 
     private Lease loadLease(String tenant, String deploymentId) throws SQLException {
@@ -766,7 +784,9 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 + "observed_version = ?, observed_generation = ?, observed_at_epoch_second = ?, "
                 + "observed_at_nano = ?, failure_code = ?, failure_message = ?, failure_at_epoch_second = ?, "
                 + "failure_at_nano = ?, tombstone_reason = ?, tombstone_at_epoch_second = ?, "
-                + "tombstone_at_nano = ?, updated_at_epoch_second = ?, updated_at_nano = ? "
+                + "tombstone_at_nano = ?, last_lifecycle_command = ?, last_lifecycle_reason = ?, "
+                + "last_lifecycle_command_at_epoch_second = ?, last_lifecycle_command_at_nano = ?, "
+                + "updated_at_epoch_second = ?, updated_at_nano = ? "
                 + "WHERE tenant_id = ? AND deployment_id = ?";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int i = 1;
@@ -797,6 +817,10 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 statement.setString(i++, null);
                 i = bindNullableInstant(statement, i, null);
             }
+            statement.setString(i++, r.lastLifecycleCommand() == null
+                    ? null : r.lastLifecycleCommand().name());
+            statement.setString(i++, r.lastLifecycleReason());
+            i = bindNullableInstant(statement, i, r.lastLifecycleCommandAt());
             i = StoredInstant.bindValue(statement, i, r.updatedAt());
             statement.setString(i++, tenant);
             statement.setString(i, deploymentId);
@@ -936,6 +960,9 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 + "recorded_lease_expires_at_nano, recorded_failure_code, recorded_failure_message, "
                 + "recorded_failure_at_epoch_second, recorded_failure_at_nano, recorded_tombstone_reason, "
                 + "recorded_tombstone_at_epoch_second, recorded_tombstone_at_nano, "
+                + "recorded_last_lifecycle_command, recorded_last_lifecycle_reason, "
+                + "recorded_last_lifecycle_command_at_epoch_second, "
+                + "recorded_last_lifecycle_command_at_nano, "
                 + "recorded_created_at_epoch_second, recorded_created_at_nano, "
                 + "recorded_updated_at_epoch_second, recorded_updated_at_nano";
     }
@@ -951,9 +978,15 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
         Tombstone tombstone = tombstoneFrom(rows, "recorded_");
         Instant createdAt = StoredInstant.read(rows, "recorded_created_at");
         Instant updatedAt = StoredInstant.read(rows, "recorded_updated_at");
+        String lifecycleKind = rows.getString("recorded_last_lifecycle_command");
+        var lastCommand = lifecycleKind == null ? null
+                : ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.valueOf(lifecycleKind);
+        Instant lastCommandAt = lifecycleKind == null ? null
+                : StoredInstant.read(rows, "recorded_last_lifecycle_command_at");
         Lease lease = leaseFrom(rows, "recorded_lease_", tenant, deploymentId);
         return new Record(tenant, DeploymentId.of(deploymentId), latestVersion, generation, revision, desired,
-                observed, lease, failure, tombstone, createdAt, updatedAt);
+                observed, lease, failure, tombstone, lastCommand,
+                rows.getString("recorded_last_lifecycle_reason"), lastCommandAt, createdAt, updatedAt);
     }
 
     private void insertLedgerEntry(String tenant, String deploymentId, Action action, String key, String digest,
@@ -967,11 +1000,14 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 + "recorded_lease_expires_at_epoch_second, recorded_lease_expires_at_nano, "
                 + "recorded_failure_code, recorded_failure_message, recorded_failure_at_epoch_second, "
                 + "recorded_failure_at_nano, recorded_tombstone_reason, recorded_tombstone_at_epoch_second, "
-                + "recorded_tombstone_at_nano, recorded_created_at_epoch_second, recorded_created_at_nano, "
+                + "recorded_tombstone_at_nano, recorded_last_lifecycle_command, "
+                + "recorded_last_lifecycle_reason, "
+                + "recorded_last_lifecycle_command_at_epoch_second, recorded_last_lifecycle_command_at_nano, "
+                + "recorded_created_at_epoch_second, recorded_created_at_nano, "
                 + "recorded_updated_at_epoch_second, recorded_updated_at_nano, recorded_at_epoch_second, "
                 + "recorded_at_nano, expires_at_epoch_second, expires_at_nano) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                + "?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int i = 1;
             statement.setString(i++, tenant);
@@ -1017,6 +1053,10 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 statement.setString(i++, null);
                 i = bindNullableInstant(statement, i, null);
             }
+            statement.setString(i++, record.lastLifecycleCommand() == null
+                    ? null : record.lastLifecycleCommand().name());
+            statement.setString(i++, record.lastLifecycleReason());
+            i = bindNullableInstant(statement, i, record.lastLifecycleCommandAt());
             i = StoredInstant.bindValue(statement, i, record.createdAt());
             i = StoredInstant.bindValue(statement, i, record.updatedAt());
             i = StoredInstant.bindValue(statement, i, recordedAt);

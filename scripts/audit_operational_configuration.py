@@ -3820,12 +3820,13 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["interactionWebSocketAuthorities"] = {
             INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
-    ai_operational_authority = ai_operational_authority_from_source(root, current)
-    if ai_operational_authority is None:
-        return None, ["cannot derive the closed AI operational configuration authority"]
-    refreshed["aiOperationalAuthorities"] = {
-        AI_OPERATIONAL_AUTHORITY_ID: ai_operational_authority,
-    }
+    if ai_operational_source_present(root):
+        ai_operational_authority = ai_operational_authority_from_source(root, current)
+        if ai_operational_authority is None:
+            return None, ["cannot derive the closed AI operational configuration authority"]
+        refreshed["aiOperationalAuthorities"] = {
+            AI_OPERATIONAL_AUTHORITY_ID: ai_operational_authority,
+        }
     final_review_reference = refreshed.get("finalReviewAuthority")
     if isinstance(final_review_reference, dict) \
             and final_review_reference.get("id") == FINAL_REVIEW_AUTHORITY_ID \
@@ -11816,6 +11817,14 @@ AI_OPERATIONAL_TEST_METHODS = (
 )
 
 
+def ai_operational_source_present(root: Path) -> bool:
+    """Keep the authority mandatory while any typed AI owner or consumer remains."""
+    return any((root / path).exists() for path in (
+        *AI_OPERATIONAL_PROOF_PATHS[:8],
+        AI_OPERATIONAL_TEST_PATH,
+    ))
+
+
 def ai_operational_authority_from_source(
         root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
     """Derive the complete AI startup-policy family from typed code and deployment carriers."""
@@ -11879,13 +11888,19 @@ def ai_operational_authority_from_source(
 def ai_operational_authority_errors(
         root: Path, authorities: object, entries: dict[str, dict[str, object]],
         discovered: dict[str, Candidate]) -> list[str]:
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("aiOperationalAuthority") is not None}
+    if not ai_operational_source_present(root):
+        errors = ([] if authorities in (None, {})
+                  else ["AI operational authority exists without its typed source family"])
+        if marked:
+            errors.append("AI operational authority markers exist without their typed source family")
+        return errors
     expected = ai_operational_authority_from_source(root, discovered)
     if expected is None:
         return ["AI operational configuration source family is incomplete or unsupported"]
     if authorities != {AI_OPERATIONAL_AUTHORITY_ID: expected}:
         return ["AI operational configuration requires its exact source-derived authority"]
-    marked = {identifier for identifier, entry in entries.items()
-              if entry.get("aiOperationalAuthority") is not None}
     expected_ids = set(str(identifier) for identifier in expected["candidateIds"])
     errors: list[str] = []
     if marked != expected_ids:

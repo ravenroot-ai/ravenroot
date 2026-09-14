@@ -82,11 +82,11 @@ class RunnerProtocolHttpTest {
                          new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), directory, headers -> {
                              String token = headers.getFirst("Authorization");
                              if (token == null) throw new AuthenticationException("required");
-                             boolean user = token.equals("Bearer operator");
+                             boolean user = token.equals("Bearer operator") || token.equals("Bearer other-tenant-operator");
                              return new AuthenticatedPrincipal(user ? "operator" : "designated",
                                      user ? AuthenticatedPrincipal.Type.USER : AuthenticatedPrincipal.Type.WORKLOAD,
                                      token.equals("Bearer wrong-issuer") ? "other" : "trusted",
-                                     token.equals("Bearer other-tenant") ? "other" : "tenant", Set.of(Role.TENANT_ADMIN),
+                                     token.startsWith("Bearer other-tenant") ? "other" : "tenant", Set.of(Role.TENANT_ADMIN),
                                      Set.of("ravenroot.runner.read", "ravenroot.runner.admin", "ravenroot.runner.dispatch", "ravenroot.runner.control"));
                          })) {
                 server.installRunnerPlane(control, continuations); server.start();
@@ -196,11 +196,11 @@ class RunnerProtocolHttpTest {
                 long revision = store.load(key).toCompletableFuture().join().revision();
                 String resolutionBody = "{\"expectedRevision\":" + revision + ",\"resolution\":\"ABANDON\"}";
                 for (int index = 0; index < 3; index++) {
-                    String token = index == 0 ? "other-tenant" : "operator";
+                    String token = index == 0 ? "other-tenant-operator" : "operator";
                     var resolved = http.send(HttpRequest.newBuilder(endpoint.resolve(jobPath + "/resolve-continuation"))
                             .header("Authorization", "Bearer " + token).header("Content-Type", "application/json")
                             .POST(HttpRequest.BodyPublishers.ofString(resolutionBody)).build(), HttpResponse.BodyHandlers.ofString());
-                    assertEquals(List.of(403, 200, 409).get(index), resolved.statusCode(), resolved.body());
+                    assertEquals(List.of(404, 200, 409).get(index), resolved.statusCode(), resolved.body());
                 }
                 assertFalse(store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().get(identity.runnerJobId()).continuationUncertain());
                 assertEquals(ProcessInstanceStatus.FAILED, store.load(key).toCompletableFuture().join().state().status());

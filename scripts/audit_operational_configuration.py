@@ -3121,10 +3121,10 @@ def final_review_authority_errors(
         and str(entry["retirementRationale"]).strip()
     }
     for identifier in assigned:
-        if identifier in retired_entries and identifier not in active_entries \
-                and identifier not in replacements:
-            continue
         active_id = active_identifier(identifier)
+        if (identifier in retired_entries or active_id in retired_entries) \
+                and active_id not in active_entries:
+            continue
         active = active_entries.get(active_id)
         if active is None or candidate_semantic_payload(active) != expected_metadata.get(active_id):
             errors.append(f"final review candidate {identifier} lost its marker or approved classification")

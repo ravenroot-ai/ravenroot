@@ -6013,7 +6013,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

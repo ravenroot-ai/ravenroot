@@ -52,16 +52,12 @@ describe('Elastic renderer lifecycle source contract', () => {
     expect(body).toContain('settleOwnedLayout(token);');
   });
 
-  it('replaces a Monitoring view with canonical Design state without moving loaded coordinates', () => {
+  it('replaces a view with its saved presentation without moving loaded coordinates', () => {
     const body = functionBody(APP_SOURCE, 'function completeReplaceActiveDocument(');
-    const install = functionBody(APP_SOURCE, 'function installActiveRenderModePresentation(');
-    expect(install).toContain('const presentation = renderModePresentation(mode);');
-    expect(install).toContain('Object.assign(owner, presentation);');
-    expect(install).toContain('renderMode = presentation.renderMode;');
-    expect(install).toContain('layoutMode = presentation.layoutMode;');
-    expect(install).toContain('visualStyle = presentation.visualStyle;');
-    expect(body).toContain('installActiveRenderModePresentation(target, DEFAULT_RENDER_MODE);');
-    expect(body.indexOf('installActiveRenderModePresentation(target, DEFAULT_RENDER_MODE);'))
+    expect(body).toContain('const incomingPresentation = documentPresentationState({ graph });');
+    expect(body).toContain('Object.assign(target, incomingPresentation);');
+    expect(body).toContain("if (renderMode === 'monitoring') reconcileActiveRenderModeRenderer();");
+    expect(body.indexOf('Object.assign(target, incomingPresentation);'))
       .toBeLessThan(body.indexOf('initLoadedGraph(graph, visualStyle);'));
     expect(body).not.toContain('setLayout(');
   });

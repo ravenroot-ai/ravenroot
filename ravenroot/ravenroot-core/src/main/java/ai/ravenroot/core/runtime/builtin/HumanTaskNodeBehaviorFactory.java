@@ -155,7 +155,7 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                         "Outcome selected after cancellation.", "cancelled")));
         return new NodeTypeDescriptor("human-task", "Human task", "Human workflow",
                 "Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.",
-                "flow", false, properties,
+                "human-task", false, properties,
                 Set.copyOf(capabilities))
                 .withOutcomes(
                         NodeOutcomeDescriptor.fromProperty("resolvedOutcome", "A responder supplied a valid response."),

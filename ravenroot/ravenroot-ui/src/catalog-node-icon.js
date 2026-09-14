@@ -17,10 +17,22 @@
 // insertion path until — textually identical at the time, so nothing was broken, but the
 // invariant this comment claims did not actually hold until that copy was replaced with this import.
 export function resolveDescriptorNodeType(descriptor) {
-  if (descriptor?.visualType) return descriptor.visualType;
+  // These two core behaviours have semantic visual identities of their own. Keep the behaviour
+  // fallback ahead of `visualType` so a current editor connected to an older server repairs the
+  // former generic `flow`/`handler` declarations instead of reproducing the shipped mismatch.
   if (descriptor?.behavior === 'human-task') return 'human-task';
   if (/^(trace|log|logger)$/i.test(descriptor?.behavior || '')) return 'trace';
+  if (descriptor?.visualType) return descriptor.visualType;
   return descriptor?.agentic ? 'agent' : 'actor';
+}
+
+// The default Design renderer writes a per-node inline shape after Cytoscape applies its semantic
+// stylesheet. Preserve the two non-colour identities there as well: a Human Task is round and a
+// Trace is rectangular, while ordinary catalog nodes retain the established rounded card.
+export function nodeTypeCardShape(nodeType) {
+  if (nodeType === 'human-task') return 'ellipse';
+  if (nodeType === 'trace') return 'rectangle';
+  return 'roundrectangle';
 }
 
 // The catalog palette's preview icon for a descriptor, kept in lockstep with what the canvas will

@@ -22,6 +22,8 @@ const LOOPBACK_CATALOG = JSON.stringify([
   { behavior: 'template', displayName: 'Template', category: 'core', description: 'Renders a template', visualType: 'flow', agentic: false, capabilities: [], properties: [] },
   { behavior: 'delay', displayName: 'Delay', category: 'Control flow', description: 'Pauses without blocking a worker', visualType: 'flow', agentic: false, capabilities: [], properties: [] },
   { behavior: 'json-path', displayName: 'JSONPath', category: 'Transformations', description: 'Selects data from JSON', visualType: 'flow', agentic: false, capabilities: [], properties: [] },
+  { behavior: 'human-task', displayName: 'Human task', category: 'Human workflow', description: 'Waits for a person', visualType: 'human-task', agentic: false, capabilities: [], properties: [] },
+  { behavior: 'log', displayName: 'Log', category: 'Actions', description: 'Records a trace message', visualType: 'trace', agentic: false, capabilities: [], properties: [] },
 ]);
 const SERVICE_CONFIGURATION = JSON.stringify({
   schemaVersion: 1,
@@ -112,10 +114,31 @@ test('an unauthenticated loopback service fills the palette with every type it a
   await expect(catalog.locator('[data-catalog-add="template"]')).toBeVisible();
   await expect(catalog.locator('[data-catalog-add="delay"]')).toBeVisible();
   await expect(catalog.locator('[data-catalog-add="json-path"]')).toBeVisible();
+  await expect(catalog.locator('[data-catalog-add="human-task"]')).toBeVisible();
+  await expect(catalog.locator('[data-catalog-add="log"]')).toBeVisible();
   await expect(catalog.locator('.catalog-empty')).toHaveCount(0);
   // No token was ever pasted: the access token field is still empty and revocation stays disabled.
   await expect(page.locator('#access-token')).toHaveValue('');
   await expect(page.locator('#btn-revoke')).toBeDisabled();
+});
+
+test('the shipped Human Task and Log descriptor identities reach distinct default Design cards', async ({ page }) => {
+  await connectWithoutToken(page);
+
+  for (const behavior of ['human-task', 'log']) {
+    await page.locator(`[data-catalog-add="${behavior}"]`).click();
+    await page.locator('#node-editor button[type="submit"]').click();
+  }
+
+  await expect.poll(() => page.evaluate(() => ['human-task', 'log'].map(behavior => {
+    const owner = window.ravenroot.activeDocument();
+    const model = owner.graph.nodes.find(node => node.behavior === behavior);
+    const node = model ? owner.cy.getElementById(model.id) : null;
+    return { behavior, nodeType: node?.data('nodeType'), shape: node?.style('shape') };
+  }))).toEqual([
+    { behavior: 'human-task', nodeType: 'human-task', shape: 'ellipse' },
+    { behavior: 'log', nodeType: 'trace', shape: 'rectangle' },
+  ]);
 });
 
 test('a service that answers 401 says so, and does not claim the catalog is unreachable', async ({ page }) => {

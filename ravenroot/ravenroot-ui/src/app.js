@@ -48,10 +48,11 @@ import {
   planJoinSemanticsMigration,
   serializeGraphML,
   setEdgeFailureRoute,
+  setGraphPresentation,
   validateWorkflow,
 } from './graph-document.js';
 import { catalogEmptyState } from './catalog-empty-state.js';
-import { catalogNodeIcon, resolveDescriptorNodeType } from './catalog-node-icon.js';
+import { catalogNodeIcon, nodeTypeCardShape, resolveDescriptorNodeType } from './catalog-node-icon.js';
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
@@ -2352,6 +2353,9 @@ function captureActiveDocument() {
   document_.renderMode = renderMode;
   document_.layoutMode = layoutMode;
   document_.visualStyle = visualStyle;
+  if (document_.graph?.format === 'graphml') {
+    setGraphPresentation(document_.graph, { renderMode, layoutMode });
+  }
   document_.layoutBusy = layoutBusy;
   document_.filterActive = filterActive;
   document_.traceActive = traceActive;
@@ -3302,10 +3306,14 @@ function completeReplaceActiveDocument(target, graph, name) {
   graphDisplayName = allocateDocumentDisplayName(name);
   target.name = graphName;
   target.displayName = graphDisplayName;
-  // Replacement starts in the canonical Design view without moving the incoming persisted
-  // coordinates. Install that projection on the owner before `initCy`: its internal paint calls
-  // `setVisualStyle`, which must not observe the retired Monitoring layout and rewrite it to preset.
-  installActiveRenderModePresentation(target, DEFAULT_RENDER_MODE);
+  // Restore an explicitly saved presentation, while legacy documents still normalize to Design,
+  // without moving the incoming persisted coordinates. Install it before `initCy`: its internal
+  // paint calls `setVisualStyle`, which must not observe the retired renderer's layout.
+  const incomingPresentation = documentPresentationState({ graph });
+  Object.assign(target, incomingPresentation);
+  renderMode = incomingPresentation.renderMode;
+  layoutMode = incomingPresentation.layoutMode;
+  visualStyle = incomingPresentation.visualStyle;
   filterActive = null;
   traceActive = false;
   n8nActive = false;
@@ -3323,6 +3331,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   recentRuntimeEvents = [];
   editHistory = createCommandHistory();
   initLoadedGraph(graph, visualStyle);
+  if (renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   clearActivity();
   addActivityMessage('editor', `Loaded ${name}`, 'completed');
   captureActiveDocument();
@@ -4140,7 +4149,7 @@ const N8N_ICONS_CHAR = {
   consumer: '⧒', handler:  '↩',
   agent:    '🧠', flow:     '⚙',
   actor:    '◎', system:   '▤',
-  trace:    '▤', 'human-task': '♙',
+  trace:    '⇢', 'human-task': '♙',
 };
 let N8N_BG = rendererPalette.nodeSurfaceByType;
 let N8N_BORDER = rendererPalette.nodeType;
@@ -4599,7 +4608,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
     const bg = N8N_BG[t]         || rendererPalette.nodeSurface;
     const bd = N8N_BORDER[t]     || rendererPalette.nodeBorder;
     n.style({
-      shape:                  'roundrectangle',
+      shape:                  nodeTypeCardShape(t),
       width:                   80,
       height:                  80,
       'background-color':      bg,

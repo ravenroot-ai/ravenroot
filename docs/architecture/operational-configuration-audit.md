@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 20860 |
+| Atomic operational candidates discovered | 20863 |
 | Source-proven Helm operator fields | 25 |
 | Helm operator fields represented by lexical inventory rows | 22 |
 | Source-proven Helm fields outside lexical candidate patterns | 3 |
-| Reviewed | 20860 |
+| Reviewed | 20863 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 247 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1916 |
-| Retained protocol or format invariants | 8587 |
+| Retained protocol or format invariants | 8590 |
 | Retained published contract descriptions | 467 |
 | Retained presentation text | 535 |
 | Retained derived values | 1034 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 32.
+Checked source reconciliations: 33.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 20860 candidates.
+zero-count or unclassified rows as needed and sums to 20863 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 20860 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 19499 |
+| retained | 19502 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 20860 candidates.
 | derived | 1034 |
 | operator-configurable | 1361 |
 | presentation-text | 535 |
-| protocol-or-format-invariant | 8587 |
+| protocol-or-format-invariant | 8590 |
 | published-contract-description | 467 |
 | security-ceiling-or-default | 1916 |
 | test-fixture | 6960 |
@@ -101,7 +101,7 @@ zero-count or unclassified rows as needed and sums to 20860 candidates.
 | java | 6742 |
 | script | 2069 |
 | test-fixture | 6960 |
-| ui | 2983 |
+| ui | 2986 |
 
 ### Owning remediation counts
 
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1487 |
 | #321 | 8634 |
-| Retained; no remediation required | 10203 |
+| Retained; no remediation required | 10206 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 20338 |
-| Unchanged identities | 19385 |
-| Approved identity migrations | 949 |
-| Approved retirements | 4 |
-| Semantically classified additions | 526 |
-| Current candidates | 20860 |
+| Source inventory candidates | 20860 |
+| Unchanged identities | 20860 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 3 |
+| Current candidates | 20863 |
 
 ## Final semantic review
 
@@ -11972,49 +11972,52 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-463c43ad854471dae73f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:4` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-8024509c6009e45b0618` | `ravenroot/ravenroot-ui/src/human-task-ui.js:4` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-8a16dc4ce07a71a863d2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:4` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-42ffb99e22159285101f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:35` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-4a2da92e416b15a6bcc2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:35` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-068f075c3d4bc5f01afc` | `ravenroot/ravenroot-ui/src/human-task-ui.js:38` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-bb3e472fe2dde6272a05` | `ravenroot/ravenroot-ui/src/human-task-ui.js:38` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-35edf009d0dfab860e35` | `ravenroot/ravenroot-ui/src/human-task-ui.js:39` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-a29de729c20a67a24dfb` | `ravenroot/ravenroot-ui/src/human-task-ui.js:39` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-d4db7a49d3a2c1485130` | `ravenroot/ravenroot-ui/src/human-task-ui.js:39` `element` | ui | retained | presentation-text | These strings are human-facing labels, messages, descriptions, or help text outside the central message catalog. |
-| `oc-2e10cbc72ec531b44020` | `ravenroot/ravenroot-ui/src/human-task-ui.js:44` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-8fa4e60193957a7a0f9f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:44` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-7ad23d761fd6c8b4a60a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:52` `if` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-bcb4e9f9aaec05e73de0` | `ravenroot/ravenroot-ui/src/human-task-ui.js:72` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-cc0ab87fe99d2d3cfdfa` | `ravenroot/ravenroot-ui/src/human-task-ui.js:72` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-bfb23a0386d23743b777` | `ravenroot/ravenroot-ui/src/human-task-ui.js:78` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-c82fb64438d92c8f42e0` | `ravenroot/ravenroot-ui/src/human-task-ui.js:78` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-6051387b2f838327f392` | `ravenroot/ravenroot-ui/src/human-task-ui.js:81` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-ef4ef521194c4c526a0c` | `ravenroot/ravenroot-ui/src/human-task-ui.js:81` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-9d41366a5ade2d45199d` | `ravenroot/ravenroot-ui/src/human-task-ui.js:84` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-27d7fd76faf377d025aa` | `ravenroot/ravenroot-ui/src/human-task-ui.js:86` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-d14a379678e77f5d08a8` | `ravenroot/ravenroot-ui/src/human-task-ui.js:86` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-1902efd605687288e31c` | `ravenroot/ravenroot-ui/src/human-task-ui.js:98` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-92e23acbe60a62edc0ac` | `ravenroot/ravenroot-ui/src/human-task-ui.js:98` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-cefeab5a09166c3c679b` | `ravenroot/ravenroot-ui/src/human-task-ui.js:98` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-151ab3763b55abe71a67` | `ravenroot/ravenroot-ui/src/human-task-ui.js:101` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-61c7e291a0665ed8e462` | `ravenroot/ravenroot-ui/src/human-task-ui.js:101` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-8dee0d08ef07ee190460` | `ravenroot/ravenroot-ui/src/human-task-ui.js:101` `if` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-1e84bfa98573aab26b49` | `ravenroot/ravenroot-ui/src/human-task-ui.js:102` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-43b4bfc5248c5600b06e` | `ravenroot/ravenroot-ui/src/human-task-ui.js:102` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-fde240e20985cace0395` | `ravenroot/ravenroot-ui/src/human-task-ui.js:102` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-7d2d64479720eaf281fb` | `ravenroot/ravenroot-ui/src/human-task-ui.js:105` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-8d0b2a7ab983ca5654cb` | `ravenroot/ravenroot-ui/src/human-task-ui.js:105` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-c0df4ad17207d16917ba` | `ravenroot/ravenroot-ui/src/human-task-ui.js:105` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-d39fe699e0f7e6dbab63` | `ravenroot/ravenroot-ui/src/human-task-ui.js:119` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-2fe0a29a29f4ac3a78ba` | `ravenroot/ravenroot-ui/src/human-task-ui.js:120` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-df5e2d5cc2fa091b526e` | `ravenroot/ravenroot-ui/src/human-task-ui.js:121` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-6fed9a14fbb5bdff8fdc` | `ravenroot/ravenroot-ui/src/human-task-ui.js:122` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-00cba89904ce28095755` | `ravenroot/ravenroot-ui/src/human-task-ui.js:123` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-ffc0ba840647e7f72dd9` | `ravenroot/ravenroot-ui/src/human-task-ui.js:124` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-6ebdc39b6c481ba07bf2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:125` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-99ad64f1a71bb7ff3fad` | `ravenroot/ravenroot-ui/src/human-task-ui.js:126` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-0383b0f240a37f019a9a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:127` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-9a906d3d5fcb1c27d0d4` | `ravenroot/ravenroot-ui/src/human-task-ui.js:128` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-209bf96fb51c2524d518` | `ravenroot/ravenroot-ui/src/human-task-ui.js:129` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-e73c05381ce598243274` | `ravenroot/ravenroot-ui/src/human-task-ui.js:296` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-b122accdd4b7a84c3c2b` | `ravenroot/ravenroot-ui/src/human-task-ui.js:34` `element` | ui | retained | protocol-or-format-invariant | Inspector DOM selector or non-tabbable status focus marker used only to preserve existing keyboard focus during same-node view replacement; it grants no authority and is not an operational setting. |
+| `oc-061069511a719a6c5917` | `ravenroot/ravenroot-ui/src/human-task-ui.js:40` `element` | ui | retained | protocol-or-format-invariant | Inspector DOM selector or non-tabbable status focus marker used only to preserve existing keyboard focus during same-node view replacement; it grants no authority and is not an operational setting. |
+| `oc-42ffb99e22159285101f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:44` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-4a2da92e416b15a6bcc2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:44` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-068f075c3d4bc5f01afc` | `ravenroot/ravenroot-ui/src/human-task-ui.js:48` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-bb3e472fe2dde6272a05` | `ravenroot/ravenroot-ui/src/human-task-ui.js:48` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-35edf009d0dfab860e35` | `ravenroot/ravenroot-ui/src/human-task-ui.js:49` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-a29de729c20a67a24dfb` | `ravenroot/ravenroot-ui/src/human-task-ui.js:49` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-d4db7a49d3a2c1485130` | `ravenroot/ravenroot-ui/src/human-task-ui.js:49` `element` | ui | retained | presentation-text | These strings are human-facing labels, messages, descriptions, or help text outside the central message catalog. |
+| `oc-2e10cbc72ec531b44020` | `ravenroot/ravenroot-ui/src/human-task-ui.js:54` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-8fa4e60193957a7a0f9f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:54` `element` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-7ad23d761fd6c8b4a60a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:62` `if` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-bcb4e9f9aaec05e73de0` | `ravenroot/ravenroot-ui/src/human-task-ui.js:82` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-cc0ab87fe99d2d3cfdfa` | `ravenroot/ravenroot-ui/src/human-task-ui.js:82` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-bfb23a0386d23743b777` | `ravenroot/ravenroot-ui/src/human-task-ui.js:88` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-c82fb64438d92c8f42e0` | `ravenroot/ravenroot-ui/src/human-task-ui.js:88` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-6051387b2f838327f392` | `ravenroot/ravenroot-ui/src/human-task-ui.js:91` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-ef4ef521194c4c526a0c` | `ravenroot/ravenroot-ui/src/human-task-ui.js:91` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-9d41366a5ade2d45199d` | `ravenroot/ravenroot-ui/src/human-task-ui.js:94` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-27d7fd76faf377d025aa` | `ravenroot/ravenroot-ui/src/human-task-ui.js:96` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-d14a379678e77f5d08a8` | `ravenroot/ravenroot-ui/src/human-task-ui.js:96` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-1902efd605687288e31c` | `ravenroot/ravenroot-ui/src/human-task-ui.js:108` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-92e23acbe60a62edc0ac` | `ravenroot/ravenroot-ui/src/human-task-ui.js:108` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-cefeab5a09166c3c679b` | `ravenroot/ravenroot-ui/src/human-task-ui.js:108` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-151ab3763b55abe71a67` | `ravenroot/ravenroot-ui/src/human-task-ui.js:111` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-61c7e291a0665ed8e462` | `ravenroot/ravenroot-ui/src/human-task-ui.js:111` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-8dee0d08ef07ee190460` | `ravenroot/ravenroot-ui/src/human-task-ui.js:111` `if` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-1e84bfa98573aab26b49` | `ravenroot/ravenroot-ui/src/human-task-ui.js:112` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-43b4bfc5248c5600b06e` | `ravenroot/ravenroot-ui/src/human-task-ui.js:112` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-fde240e20985cace0395` | `ravenroot/ravenroot-ui/src/human-task-ui.js:112` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-7d2d64479720eaf281fb` | `ravenroot/ravenroot-ui/src/human-task-ui.js:115` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-8d0b2a7ab983ca5654cb` | `ravenroot/ravenroot-ui/src/human-task-ui.js:115` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-c0df4ad17207d16917ba` | `ravenroot/ravenroot-ui/src/human-task-ui.js:115` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-0c2745214214abf8972f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:127` `if` | ui | retained | protocol-or-format-invariant | Inspector DOM selector or non-tabbable status focus marker used only to preserve existing keyboard focus during same-node view replacement; it grants no authority and is not an operational setting. |
+| `oc-d39fe699e0f7e6dbab63` | `ravenroot/ravenroot-ui/src/human-task-ui.js:142` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-2fe0a29a29f4ac3a78ba` | `ravenroot/ravenroot-ui/src/human-task-ui.js:143` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-df5e2d5cc2fa091b526e` | `ravenroot/ravenroot-ui/src/human-task-ui.js:144` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-6fed9a14fbb5bdff8fdc` | `ravenroot/ravenroot-ui/src/human-task-ui.js:145` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-00cba89904ce28095755` | `ravenroot/ravenroot-ui/src/human-task-ui.js:146` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-ffc0ba840647e7f72dd9` | `ravenroot/ravenroot-ui/src/human-task-ui.js:147` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-6ebdc39b6c481ba07bf2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:148` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-99ad64f1a71bb7ff3fad` | `ravenroot/ravenroot-ui/src/human-task-ui.js:149` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-0383b0f240a37f019a9a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:150` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-9a906d3d5fcb1c27d0d4` | `ravenroot/ravenroot-ui/src/human-task-ui.js:151` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-209bf96fb51c2524d518` | `ravenroot/ravenroot-ui/src/human-task-ui.js:152` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-e73c05381ce598243274` | `ravenroot/ravenroot-ui/src/human-task-ui.js:319` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-8ce7e269d717a5143c44` | `ravenroot/ravenroot-ui/src/inspector-autosave.js:1` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-61d09981b80f71c89e4d` | `ravenroot/ravenroot-ui/src/layered-drawing.js:26` `module` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
 | `oc-941ef28dfdd8e3e1da35` | `ravenroot/ravenroot-ui/src/layered-drawing.js:28` `module` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |

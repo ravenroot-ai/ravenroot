@@ -39,10 +39,15 @@ label against the changed paths before any merge is allowed.
 
 | Label | Meaning | CI tier | Version, tag, and deliverables |
 |---|---|---|---|
-| `release:none` | Documentation or public-content promotion only | Policy, documentation, and security checks | Unchanged; no tag or publication |
-| `release:patch` | Backward-compatible correction | Complete release gate | Patch increment and publication |
-| `release:minor` | Backward-compatible feature or incompatible `0.x` change | Complete release gate | Minor increment and publication |
-| `release:major` | Stable-series incompatible change | Complete release gate | Major increment and publication |
+| `release:none` | Documentation or public-content promotion only | Promotion | Unchanged; no tag or publication |
+| `release:patch` | Backward-compatible correction | Promotion | Patch increment and publication |
+| `release:minor` | Backward-compatible feature or incompatible `0.x` change | Promotion | Minor increment and publication |
+| `release:major` | Stable-series incompatible change | Promotion | Major increment and publication |
+
+The promotion tier belongs to the internal `dev` branch alone. A protected `hotfix/*` branch never
+passed through `dev`, so a pull request from one runs the complete functional suite; a pull request
+into `main` from any other head is refused by `release-classification`, as `main-source-policy`
+refuses it.
 
 `release:none` is deliberately fail-closed. Every changed path must be in the reviewed documentation
 and public-content allowlist. Product source, build configuration, deployment configuration, workflow
@@ -55,6 +60,56 @@ content-only promotion is possible only when `dev` contains no unreleased produc
 changes are already accumulated on `dev`, publish them through a correctly classified release first
 or prepare the content update from the synchronized released state under the normal protected branch
 rules.
+
+## Where the checks run
+
+`dev` is the verification point and `main` is a promotion. Verification happens upstream, on the work
+branch, where it costs whoever produced the work and blocks nobody else.
+
+The full tier is the complete functional suite: the policy and documentation gates, the UI audit,
+unit and end-to-end suites, the backend build and test suites, the support modules, the plugin
+boundary, the API documentation gate, and the runtime smoke tests. It runs on:
+
+- a review candidate, dispatched once on the exact commit about to be reviewed:
+  `gh workflow run ci.yml --ref <branch> -f tier=full`. The dispatch offers `full` alone;
+- every pull request into `dev`;
+- every merge-group commit, when a merge queue is enabled on `dev`;
+- every push to `dev`.
+
+A push to a `feature/**` branch runs the fast feedback workflow instead: the policy, Python and shell
+contracts, the UI unit suite and build, and a backend compile. It is feedback for whoever is working,
+not a gate, and a newer push to the same branch cancels it.
+
+The `dev` to `main` promotion re-verifies none of it. By then the behaviour has already been
+verified, commit by commit, on the branch where a fix is cheap, so the promotion carries only:
+
+- code scanning, which analyses the default branch and the pull requests into it;
+- `main-source-policy`, a structural gate that refuses a promotion from a fork or from any branch
+  that is not `dev` or a protected `hotfix/*`;
+- `release-classification`, which produces the tier and enforces the mandatory `release:*` label;
+- `ci-required`, the single aggregating context both rulesets require. On a promotion it runs no
+  functional job, so it is green only when a complete `ci.yml` run on `dev` — its push, its merge
+  queue, or a dispatch on `dev` — has already passed on exactly the promoted commit. Its green is
+  borrowed from a run that verified this commit, never from whichever run happens to be green. A
+  dispatch may not redirect its checkout to another commit unless it is a validated Dependabot
+  routing, so such a run always tested the commit it is recorded on.
+
+Code scanning runs on `main` alone by deliberate decision. Static analysis costs time on every pull
+request and raises a genuine finding rarely, so it is analysed at the moment of a real release, where
+a finding is still correctable after the code has been approved on `dev`.
+
+`ci-required` decides which jobs an event demanded and refuses anything less. Its expectations live
+in `scripts/ci_required.py`, which is also what holds `.github/workflows/ci.yml` to them: a required
+job that reports `skipped` is a failure, not a pass, and so is a job that is removed, re-gated, or
+left unobserved. It also checks the tier against the event independently of the classifier, so an
+event headed for `dev` can never be vouched for on a lighter tier. A green `ci-required` therefore
+means the jobs the event required actually ran.
+
+Only `.github/workflows/ci.yml` may publish `ci-required`, and it is green only on a commit the full
+tier has passed — in that run, or, for a promotion, in the full run on the same commit it verifies. A
+check run belongs to the commit rather than to the event that produced it, and a skipped job counts
+as passed for a required check. The fast feedback workflow therefore publishes its own `ci-fast`
+context, and `scripts/ci_required.py` refuses any other workflow that defines `ci-required`.
 
 ## Integrating changes on `dev`
 
@@ -72,13 +127,16 @@ private project-management material are outside the public repository boundary.
 When the changes accumulated on `dev` form a coherent release, prepare a pull request from the
 repository's `dev` branch to `main`. The release pull request:
 
-1. selects the version from the highest-impact unconsumed change fragment;
-2. updates the authoritative product version and every derived release surface consistently;
-3. assembles and removes the consumed fragments;
-4. updates the changelog and GitHub release notes, including compatibility boundaries, migrations,
-   operator actions, and security notices;
+1. takes its version from its `release:*` label, which authorizes the increment;
+2. carries the preparation `scripts/prepare_release.py` produced from that label on `dev`: every
+   version surface moved consistently, the release notes assembled, the consumed fragments removed;
+3. is refused before merge if the version and the label disagree;
+4. carries release notes stating compatibility boundaries, migrations, operator actions, security
+   notices and known issues — written in the change fragments the notes are assembled from, which is
+   where each of them has to be recorded;
 5. contains no development-only version such as `SNAPSHOT` in a published coordinate;
-6. passes the complete test, compatibility, packaging, documentation, and release-readiness gates;
+6. carries the release-readiness evidence already produced on `dev`, since the promotion itself runs
+   the security gate and the two release-coherence checks rather than the functional suite;
 7. proves that the requested version is greater than the latest release and that its tag does not
    already exist.
 
@@ -198,14 +256,23 @@ gpg --verify artifact.jar.asc artifact.jar
 
 ### Maintainer procedure
 
-1. On `dev`, choose the version from the highest-impact unconsumed fragment. Update the root Maven
-   version, every child POM, the UI package and lockfile versions, and both Helm version fields. Run
-   `python3 scripts/check_product_version.py`.
-2. Assemble the changelog and commit reviewed GitHub Release notes at
-   `docs/releases/v<version>.md`; remove only the fragments consumed by that release.
-3. Open the internal `dev` to `main` pull request. Apply exactly one of `release:patch`,
-   `release:minor`, or `release:major`. The first `0.1.0-alpha.1` promotion uses `release:minor`.
-   Never add an automated or post-merge version-bump commit.
+1. Apply exactly one of `release:patch`, `release:minor`, or `release:major` to the internal `dev`
+   to `main` pull request. **The label is the instruction to increment the version**: it authorizes
+   the bump, and nothing else needs to confirm it. The first `0.1.0-alpha.1` promotion used
+   `release:minor`.
+2. The bump is produced on `dev` from that label by
+   `python3 scripts/prepare_release.py --intent <patch|minor|major>`, and merged through an ordinary
+   pull request into `dev`, verified and reviewed like any other change. The script moves every
+   version surface — the root and child Maven POMs, the UI package and lockfile, both Helm version
+   fields, and the install coordinates derived from them — from the latest release to the version the
+   label authorizes; assembles `docs/releases/v<version>.md` from the unconsumed change fragments; and
+   removes exactly those fragments. It refuses a second run, a checkout whose version is not the latest
+   release, an unknown fragment kind, and a release with nothing to consume.
+3. The promotion is refused **before it merges** if its version is not the transition its label
+   authorizes: `release-classification` runs `release_contract.py check-promotion`, the same rule
+   authorization applies after the merge. A version bump is never committed anywhere else — not after
+   the promotion merges, not directly to a protected branch, and not without a release label — because
+   the reviewed merge commit must remain the exact source that authorization validates and tags.
 4. Obtain the required review and merge with a merge commit. The resulting merge commit is the exact
    source that authorization validates and tags.
 5. Wait for `authorize-release` to confirm the merged pull request, version transition, absence of a
@@ -321,9 +388,11 @@ and [artifact attestations](https://docs.github.com/actions/how-tos/secure-your-
 
 ## Synchronizing after a release
 
-After a normal release or content-only promotion, fast-forward `dev` to the resulting `main` merge
-commit before integrating more work. This gives both branches the same public boundary without
-replaying commits.
+After a normal release or content-only promotion, bring the resulting `main` merge commit into `dev`
+before integrating more work. No ruleset allows a direct push, so this is a pull request into `dev`
+whose merge changes no content — the diff between `dev` and its head is empty — opened and merged
+as soon as the promotion merges, like any other pull request into `dev`. It gives both branches the same
+public boundary, and it is what lets the next release find the last release tag from `dev`.
 
 For an urgent correction:
 

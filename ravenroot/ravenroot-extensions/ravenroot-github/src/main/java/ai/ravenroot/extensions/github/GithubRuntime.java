@@ -114,7 +114,7 @@ final class GithubRuntime {
         String requestDigest = GithubValues.sha256(GithubValues.jsonBytes(canonicalInput));
         GithubOperationStore store = store();
         GithubOperationStore.Lease operation = store.begin(message.tenantId(), profile.name(), kind, key,
-                requestDigest, deadlineEpochMs, beginPolicy);
+                requestDigest, profile.semanticContractDigest(), deadlineEpochMs, beginPolicy);
         if (operation.owner().isEmpty()) {
             if (!operation.record().terminal() || operation.record().resultJson().isEmpty())
                 return CompletableFuture.failedFuture(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));

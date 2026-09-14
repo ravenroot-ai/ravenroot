@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Minimal GitHub wire adapter; every request still passes through Ravenroot's managed HTTP authority. */
 final class GithubApi {
-    static final String API_VERSION = "2022-11-28";
+    static final String API_VERSION = GithubProtocol.API_VERSION;
     private final NodePackageServices services;
     private final NodeMessage message;
     private final GithubProfile profile;
@@ -51,19 +51,21 @@ final class GithubApi {
     private Response request(String method, String path, byte[] body) {
         control.check(); fence.run(); control.check();
         Map<String, List<String>> headers = body.length == 0
-                ? Map.of("accept", List.of("application/vnd.github+json"),
-                         "x-github-api-version", List.of(API_VERSION), "user-agent", List.of("ravenroot-github/1"))
-                : Map.of("accept", List.of("application/vnd.github+json"),
-                         "content-type", List.of("application/json"),
-                         "x-github-api-version", List.of(API_VERSION), "user-agent", List.of("ravenroot-github/1"));
+                ? Map.of(GithubProtocol.ACCEPT, List.of(GithubProtocol.GITHUB_JSON),
+                         GithubProtocol.API_VERSION_HEADER, List.of(API_VERSION),
+                         GithubProtocol.USER_AGENT, List.of(GithubProtocol.USER_AGENT_VALUE))
+                : Map.of(GithubProtocol.ACCEPT, List.of(GithubProtocol.GITHUB_JSON),
+                         GithubProtocol.CONTENT_TYPE, List.of(GithubProtocol.JSON),
+                         GithubProtocol.API_VERSION_HEADER, List.of(API_VERSION),
+                         GithubProtocol.USER_AGENT, List.of(GithubProtocol.USER_AGENT_VALUE));
         OutboundCall<OutboundHttpResponse> call;
         try {
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(profile.rest(path), method,
                     headers, body, Duration.ofMillis(profile.timeoutMs()), profile.credential(), null,
                     ExternalIoLimits.compressedHttp(Math.max(1, body.length), profile.maxResponseBytes(),
                             profile.maxResponseBytes(), profile.maxResponseBytes(), 100,
-                            Duration.ofMillis(profile.timeoutMs()), Set.of("application/json",
-                                    "application/vnd.github+json")),
+                            Duration.ofMillis(profile.timeoutMs()), Set.of(GithubProtocol.JSON,
+                                    GithubProtocol.GITHUB_JSON)),
                     ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             control.attach(call);
         } catch (RuntimeException failure) { throw sanitize(failure); }

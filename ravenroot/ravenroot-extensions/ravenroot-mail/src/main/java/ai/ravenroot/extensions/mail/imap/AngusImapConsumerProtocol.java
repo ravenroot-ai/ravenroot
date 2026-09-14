@@ -122,6 +122,22 @@ final class AngusImapConsumerProtocol implements ImapConsumerProtocol {
         @Override public String sourceFolder() { return sourceFolder; }
         @Override public long uidValidity() { return initialValidity; }
 
+        @Override public Poll snapshot() throws Failure {
+            if (closed.get()) throw new Failure(false, "imap-session-closed");
+            try {
+                folder.doCommand(protocol -> { protocol.noop(); return null; });
+                long validity = folder.getUIDValidity();
+                requireUnsigned32(validity, "imap-uidvalidity-invalid");
+                int count = folder.getMessageCount();
+                if (count < 0) throw new Failure(false, "imap-message-count-unavailable");
+                long upper = count == 0 ? 0 : folder.getUID(folder.getMessage(count));
+                if (count > 0) requireUnsigned32(upper, "imap-uid-invalid");
+                return new Poll(validity, upper, List.of());
+            } catch (MessagingException | RuntimeException failure) {
+                throw new Failure(false, "imap-snapshot-unavailable");
+            }
+        }
+
         @Override public Poll pollAfter(long afterUid, int batchSize, int scanWindow)
                 throws Failure {
             if (closed.get()) throw new Failure(false, "imap-session-closed");

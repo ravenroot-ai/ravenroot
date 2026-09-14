@@ -111,9 +111,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private final ArtifactRegistry artifacts;
     private final ProgramRuntime programRuntime;
     private volatile boolean artifactDualControl;
+    private final ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits;
     private final ConcurrentHashMap<String, BuildLock> programBuildLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Thread> programBuildTasks = new ConcurrentHashMap<>();
     private final ExecutionIdentitySource identitySource;
+
+    @Override
+    public ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
+        return programAuthoringLimits;
+    }
 
     /**
      * Whether a graph naming a behavior the trusted catalog lacks may run (SEC-09).
@@ -309,6 +315,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
                                        ArtifactRegistry artifacts, ProgramRuntime programRuntime) {
         this(engine, monitor, behaviors, artifacts, programRuntime, ExecutionIdentitySource.randomUuids());
+    }
+
+    /** Embedded composition with one immutable authoring policy and otherwise compatible defaults. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, ExecutionIdentitySource.randomUuids(), null,
+                0, UnknownBehaviorPolicy.passThrough(), null, null, null, GraphExecutionLimits.DEFAULTS, null,
+                null, GraphRunner.DEFAULT_SHUTDOWN_BOUND, ExecutionOwnership.defaults(), programAuthoringLimits);
     }
 
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
@@ -602,6 +617,26 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
                                        Duration runnerShutdownStepBound,
                                        ExecutionOwnership executionOwnership) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionManifestStore, runnerShutdownStepBound,
+                executionOwnership, ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS);
+    }
+
+    /** Full production composition with one immutable program-authoring admission policy. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
+                                       Duration runnerShutdownStepBound,
+                                       ExecutionOwnership executionOwnership,
+                                       ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits) {
         java.util.Objects.requireNonNull(executionOwnership, "executionOwnership");
         if (executionOwnership.identity().role() != WorkerIdentity.Role.RUNTIME) {
             // The application advances traversals it accepted; that is the RUNTIME role by
@@ -633,6 +668,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         this.behaviors = behaviors;
         this.artifacts = artifacts;
         this.programRuntime = programRuntime;
+        this.programAuthoringLimits = java.util.Objects.requireNonNull(
+                programAuthoringLimits, "programAuthoringLimits");
         this.identitySource = java.util.Objects.requireNonNull(identitySource, "identitySource");
         if (executionStore != null && !executionStore.supports(StoreCapability.TRANSACTIONAL_BATCH)) {
             throw new IllegalArgumentException(
@@ -712,6 +749,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public GeneratedArtifact createProgramArtifact(String language, String source, Map<String, String> metadata) {
         if (language == null || language.isBlank()) throw new IllegalArgumentException("Language cannot be blank");
         if (source == null || source.isBlank()) throw new IllegalArgumentException("Program source cannot be blank");
+        programAuthoringLimits.requireSource(source);
         return artifacts.create(language, source, metadata);
     }
 
@@ -788,6 +826,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public CompletionStage<ai.ravenroot.api.programming.ProgramBuildResult> buildProgramArtifact(
             String nodeId, String tenantId, String language, String source, Object testPayload,
             boolean dualControl, Map<String, String> trustedMetadata) {
+        programAuthoringLimits.requireSource(source);
         var result = new java.util.concurrent.CompletableFuture<ai.ravenroot.api.programming.ProgramBuildResult>();
         Thread.startVirtualThread(() -> {
             try {
@@ -805,11 +844,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             String tenantId, List<ai.ravenroot.api.programming.ProgramBuildRequest> programs,
             boolean dualControl, Map<String, String> trustedMetadata) {
         if (tenantId == null || tenantId.isBlank()) throw new IllegalArgumentException("tenant is required");
-        if (programs == null || programs.isEmpty() || programs.size() > 256
+        if (programs == null) throw new IllegalArgumentException("programs are required");
+        programAuthoringLimits.requireProgramCount(programs.size());
+        if (programs.stream().anyMatch(java.util.Objects::isNull)
                 || programs.stream().map(ai.ravenroot.api.programming.ProgramBuildRequest::nodeId)
                 .distinct().count() != programs.size()) {
-            throw new IllegalArgumentException("one to 256 uniquely identified programs are required");
+            throw new IllegalArgumentException("programs must be non-null and uniquely identified");
         }
+        programs.forEach(program -> programAuthoringLimits.requireSource(program.source()));
         var plans = programs.stream().map(program -> {
             var payload = ai.ravenroot.api.payload.PayloadValue.fromJava(program.testPayload(),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
@@ -1431,7 +1473,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
+                            security.tenantId(), processInstanceId), recorder, runner);
             execution = java.util.Objects.requireNonNull(
                     runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
                             null, null, recorder),
@@ -1846,6 +1888,21 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         active.runner.cancelTraversal(traversalId);
         Thread.startVirtualThread(active::close);
         return true;
+    }
+
+    @Override
+    public int stopProcessInvocations(String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        int stopped = 0;
+        for (var entry : activeExecutions.entrySet()) {
+            ActiveExecution active = entry.getValue();
+            if (!tenantId.equals(active.tenantId) || !processInstanceId.equals(active.processInstanceId)
+                    || !activeExecutions.remove(entry.getKey(), active)) continue;
+            stopped++;
+            Thread.startVirtualThread(active::close);
+        }
+        return stopped;
     }
 
     /**
@@ -2442,7 +2499,40 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // working registration. A count of zero is not an error on this surface, which admits
         // source-less graphs; it is only an error for a source session.
         int sourceCount = inspectEffectiveSources(graphBytes);
-        return localDeploymentStatus(key.deploymentId(), register(key, graphBytes, sourceCount).record());
+        Registration registration = register(key, graphBytes, sourceCount,
+                DeploymentId.of(key.deploymentId()));
+        bindLifecycleIdentity(registration.record(), security);
+        return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    /**
+     * Registers the caller-facing local alias against a separately minted durable lifecycle id.
+     *
+     * <p>This composition seam keeps the local HTTP name stable while ensuring executions, Human
+     * Tasks, and {@link #localDeploymentTargets()} all carry the registry's opaque identity. The
+     * durable authority must create or replay {@code lifecycleId} before calling this method.</p>
+     */
+    public LocalDeploymentStatus registerDurableLocalDeployment(SecurityContext security,
+                                                                 String deploymentId,
+                                                                 DeploymentId lifecycleId,
+                                                                 InputStream graphMl) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(lifecycleId, "lifecycleId");
+        java.util.Objects.requireNonNull(graphMl, "graphMl");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()),
+                requireLocalDeploymentId(deploymentId));
+        byte[] graphBytes = readGraphMlBytes(graphMl);
+        int sourceCount = inspectEffectiveSources(graphBytes);
+        Registration registration = register(key, graphBytes, sourceCount, lifecycleId);
+        bindLifecycleIdentity(registration.record(), security);
+        return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    private void bindLifecycleIdentity(LocalDeploymentRecord record, SecurityContext security) {
+        GraphDeployment deployment = deployments.get(record.engineId());
+        if (deployment instanceof DefaultGraphDeployment hosted) {
+            hosted.bindLifecycleIdentity(security);
+        }
     }
 
     /**
@@ -2472,8 +2562,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return (tenantId, deploymentId) -> {
             java.util.Objects.requireNonNull(tenantId, "tenantId");
             java.util.Objects.requireNonNull(deploymentId, "deploymentId");
-            LocalDeploymentRecord record =
-                    localDeployments.get(new LocalDeploymentKey(requireTenant(tenantId), deploymentId.value()));
+            String tenant = requireTenant(tenantId);
+            LocalDeploymentRecord record = localDeployments.entrySet().stream()
+                    .filter(entry -> entry.getKey().tenantId().equals(tenant)
+                            && entry.getValue().lifecycleId().equals(deploymentId))
+                    .map(java.util.Map.Entry::getValue)
+                    .findFirst().orElse(null);
             if (record == null) {
                 return java.util.Optional.empty();
             }
@@ -2606,6 +2700,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * silently bringing it back.</p>
      */
     private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount) {
+        return register(key, graphBytes, sourceCount, DeploymentId.of(key.deploymentId()));
+    }
+
+    private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount,
+                                  DeploymentId lifecycleId) {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
@@ -2618,6 +2717,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 if (!existing.graphHash().equals(graphHash)) {
                     throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
                 }
+                if (!existing.lifecycleId().equals(lifecycleId)) {
+                    throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
+                }
                 return new Registration(existing, false);
             }
             DeploymentId engineId = localDeploymentId(key);
@@ -2627,8 +2729,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // behavior: its start path refuses on the *active* count, so a tenant whose sessions are all stopped
             // could always start another, and a per-record cap would have started answering 429 there.
             // A published route's limits are not something to tighten as a side effect.
-            var created = new LocalDeploymentRecord(graphHash, engineId, sourceCount);
-            registerDeployment(engineId, graphBytes, key.deploymentId());
+            var created = new LocalDeploymentRecord(graphHash, engineId, lifecycleId, sourceCount);
+            registerDeployment(engineId, graphBytes, lifecycleId.value());
             localDeployments.put(key, created);
             return new Registration(created, true);
         }
@@ -2894,7 +2996,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         }
     }
 
-    private record LocalDeploymentRecord(String graphHash, DeploymentId engineId, int sourceCount) { }
+    private record LocalDeploymentRecord(String graphHash, DeploymentId engineId,
+                                         DeploymentId lifecycleId, int sourceCount) { }
 
     /** A registration plus whether this call is the one that created it. */
     private record Registration(LocalDeploymentRecord record, boolean created) { }

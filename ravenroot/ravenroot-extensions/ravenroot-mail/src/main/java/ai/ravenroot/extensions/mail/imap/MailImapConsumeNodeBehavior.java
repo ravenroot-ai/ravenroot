@@ -25,7 +25,7 @@ public final class MailImapConsumeNodeBehavior implements NodeBehavior, InboundS
     public static final String BEHAVIOR = "mail.imap.consume";
     private static final Set<String> CONFIGURATION = Set.of("profile", "folder", "pollIntervalMs",
             "batchSize", "maxInFlight", "retryBackoffMs", "maxRetryBackoffMs", "poisonAttempts",
-            "contentMode", "previewChars", "allowedHeaders", "checkpointPolicy");
+            "contentMode", "previewChars", "allowedHeaders", "checkpointPolicy", "consumerId", "initialPosition");
 
     private final CredentialResolver credentials;
     private final ImapProfileResolver profiles;
@@ -56,6 +56,12 @@ public final class MailImapConsumeNodeBehavior implements NodeBehavior, InboundS
         List<NodePropertyDescriptor> properties = new ArrayList<>();
         properties.add(NodePropertyDescriptor.required("profile", "Mail profile", NodePropertyType.STRING,
                 "Opaque tenant-scoped operator profile; endpoint and credentials never enter the graph."));
+        properties.add(NodePropertyDescriptor.boundedText("consumerId", "Consumer identity", NodePropertyType.STRING, false,
+                "Stable case-sensitive token (1–128 ASCII letters, digits, dot, underscore or hyphen; "
+                        + "first character alphanumeric). Empty keeps legacy deployment-scoped identity.", "", 128, 0, 0));
+        properties.add(new NodePropertyDescriptor("initialPosition", "Initial position", NodePropertyType.STRING,
+                false, "Used only without a checkpoint: earliest reads history; latest starts after the current mailbox.",
+                "earliest", List.of("earliest", "latest")));
         properties.add(optional("folder", "Source folder", NodePropertyType.STRING,
                 "Optional confirmation of the exact operator-authorized source folder."));
         properties.add(optional("pollIntervalMs", "Poll interval (ms)", NodePropertyType.INTEGER,

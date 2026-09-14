@@ -49,4 +49,4 @@ docker run --rm \
     -Dravenroot.mail.imapFixturePort=31443 \
     test
 
-echo "PASSED: installed mail bundle reached READY, traversed through Pekko, stopped cleanly, reopened its durable checkpoint without duplication, and traversed the next UID."
+echo "PASSED: installed mail bundle verified earliest/latest and empty bootstrap, stable checkpoints across new deployments and store reopen, mail received while stopped, independent consumers, and Pekko traversal."

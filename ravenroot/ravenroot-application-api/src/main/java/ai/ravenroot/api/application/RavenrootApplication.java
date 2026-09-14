@@ -17,6 +17,14 @@ import java.util.function.Consumer;
 
 /** Use cases shared by HTTP, CLI and future UI adapters. */
 public interface RavenrootApplication extends AutoCloseable {
+    /**
+     * Effective operator-owned limits used by every program-authoring boundary.
+     *
+     * @return the limits shared by program source and build admission
+     */
+    default ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
+        return ai.ravenroot.api.programming.ProgramAuthoringLimits.DEFAULTS;
+    }
 /**
  * Reports whether the application can accept work and its current lifecycle state.
  * @return an immutable application status snapshot
@@ -464,6 +472,18 @@ public interface RavenrootApplication extends AutoCloseable {
  */
     default boolean cancelTraversal(UUID traversalId) {
         return false;
+    }
+
+    /**
+     * Abruptly releases only runtime resources owned by one process instance, without recording
+     * cancellation. Durable recovery may therefore reclaim its unfinished invocations.
+     *
+     * @param tenantId authenticated tenant boundary
+     * @param processInstanceId exact durable process identity
+     * @return number of locally active traversal runtimes released
+     */
+    default int stopProcessInvocations(String tenantId, UUID processInstanceId) {
+        return 0;
     }
 
     /**

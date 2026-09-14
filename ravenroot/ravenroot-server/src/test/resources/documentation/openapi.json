@@ -24,6 +24,42 @@
         }
       }
     },
+    "/v1/admin/human-tasks": {
+      "get": {
+        "summary": "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. Filters cover task and execution identity, lifecycle, age, and actionable, terminal, orphaned, or non-resumable classification.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/admin/human-tasks/purge": {
+      "post": {
+        "summary": "Dry-runs or applies a bounded, idempotent administrative reconciliation. CANCEL uses normal task re-entry semantics; FORCE_ABANDON atomically closes inconsistent work without re-entry. An unfiltered operation is refused.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/agent-authority": {
       "post": {
         "summary": "Dispatch context for the authenticated durable agent-authority trip/reset controls. Bare and unknown operations are nondisclosing 404 responses.",
@@ -293,6 +329,69 @@
         }
       }
     },
+    "/v1/deployments/{id}/cancel": {
+      "post": {
+        "summary": "Commits a generation barrier that cooperatively ends work captured before it without stopping the deployment domain. Requires Idempotency-Key, X-Ravenroot-Expected-Generation, and X-Ravenroot-Reason headers.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"}
+        }
+      }
+    },
+    "/v1/deployments/{id}/drain": {
+      "post": {
+        "summary": "Durably closes admission and lets accepted work reach its ordinary terminal state within the configured drain bound. Requires Idempotency-Key and X-Ravenroot-Expected-Generation headers.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"}
+        }
+      }
+    },
+    "/v1/deployments/{id}/pause": {
+      "post": {
+        "summary": "Durably closes admission for one tenant-scoped deployment generation while retaining accepted work for Resume. Requires Idempotency-Key and X-Ravenroot-Expected-Generation headers and a bounded X-Ravenroot-Reason.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"}
+        }
+      }
+    },
     "/v1/deployments/{id}/restart": {
       "post": {
         "summary": "A completed stop followed by a start, never the two overlapping, so no source subscription is duplicated across the restart.",
@@ -312,6 +411,27 @@
           "404": {"description": "UNKNOWN_RESOURCE"},
           "400": {"description": "INVALID_REQUEST"},
           "503": {"description": "REQUEST_INTERRUPTED"}
+        }
+      }
+    },
+    "/v1/deployments/{id}/resume": {
+      "post": {
+        "summary": "Durably reopens a paused deployment under a new fenced generation. Requires Idempotency-Key and X-Ravenroot-Expected-Generation headers.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"}
         }
       }
     },
@@ -733,7 +853,7 @@
     },
     "/v1/human-tasks/attention": {
       "get": {
-        "summary": "Lists authorized actionable embedded Human Tasks for an exact durable graph context, or recovers one actionable task by its exact task and generation locator.",
+        "summary": "Lists authorized actionable embedded Human Tasks for an exact durable graph context without review content, or recovers one actionable task by its exact task and generation locator with its immutable plain-text review presentation.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -824,6 +944,47 @@
           "431": {"description": "HEADER_VALUE_TOO_LARGE"},
           "414": {"description": "QUERY_TOO_LARGE"},
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
+        }
+      }
+    },
+    "/v1/processes": {
+      "post": {
+        "summary": "Authenticated dispatch context for process-instance lifecycle commands.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"}
+        }
+      }
+    },
+    "/v1/processes/{processInstanceId}/{command}": {
+      "post": {
+        "summary": "Applies Pause, Resume, Cancel, Drain, or recoverable Stop to one durable process and all contained traversals. Idempotency-Key and X-Ravenroot-Expected-Generation are mandatory; outcomes distinguish replay, stale generation, partial settlement, terminal state, and absence.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "processInstanceId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "command", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
         }
       }
     },
@@ -1154,7 +1315,8 @@
       "HumanTaskInboxPage": {"type": "object", "required": ["items", "nextCursor"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskInboxItem"}}, "nextCursor": {"type": "string", "format": "uuid", "nullable": true}}},
       "HumanTaskConfirmationRequest": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "comment"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "comment": {"type": "string"}}},
       "HumanTaskConfirmationPresentation": {"type": "object", "required": ["version", "prompt", "commentRequirement", "actions", "resolveLabel", "denyLabel", "cancelLabel"], "properties": {"version": {"type": "integer", "enum": [1]}, "prompt": {"type": "string"}, "commentRequirement": {"type": "string", "enum": ["DISALLOWED", "OPTIONAL", "REQUIRED"]}, "actions": {"type": "array", "items": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}}, "resolveLabel": {"type": "string"}, "denyLabel": {"type": "string"}, "cancelLabel": {"type": "string"}}},
-      "HumanTaskAttentionItem": {"type": "object", "required": ["taskId", "generation", "status", "graphVersion", "deploymentId", "processInstanceId", "traversalId", "nodeId", "createdAt", "expiresAt", "escalateAt", "promptMaxUtf8Bytes", "actionLabelMaxUtf8Bytes", "commentMaxUtf8Bytes", "presentation", "availableActions"], "properties": {"taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "status": {"type": "string"}, "graphVersion": {"type": "string"}, "deploymentId": {"type": "string", "nullable": true}, "processInstanceId": {"type": "string", "format": "uuid"}, "traversalId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}, "expiresAt": {"type": "string", "format": "date-time"}, "escalateAt": {"type": "string", "format": "date-time", "nullable": true}, "promptMaxUtf8Bytes": {"type": "integer"}, "actionLabelMaxUtf8Bytes": {"type": "integer"}, "commentMaxUtf8Bytes": {"type": "integer"}, "presentation": {"$ref": "#/components/schemas/HumanTaskConfirmationPresentation"}, "availableActions": {"type": "array", "items": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}}}},
+      "HumanTaskReviewPresentation": {"type": "object", "additionalProperties": false, "required": ["version", "contentType", "text", "contentDigest", "maxUtf8Bytes"], "properties": {"version": {"type": "integer", "enum": [1]}, "contentType": {"type": "string", "enum": ["text/plain"]}, "text": {"type": "string"}, "contentDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "maxUtf8Bytes": {"type": "integer", "minimum": 1, "maximum": 1048576}}},
+      "HumanTaskAttentionItem": {"type": "object", "required": ["taskId", "generation", "status", "graphVersion", "deploymentId", "processInstanceId", "traversalId", "nodeId", "createdAt", "expiresAt", "escalateAt", "promptMaxUtf8Bytes", "actionLabelMaxUtf8Bytes", "commentMaxUtf8Bytes", "presentation", "availableActions"], "properties": {"taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "status": {"type": "string"}, "graphVersion": {"type": "string"}, "deploymentId": {"type": "string", "nullable": true}, "processInstanceId": {"type": "string", "format": "uuid"}, "traversalId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}, "expiresAt": {"type": "string", "format": "date-time"}, "escalateAt": {"type": "string", "format": "date-time", "nullable": true}, "promptMaxUtf8Bytes": {"type": "integer"}, "actionLabelMaxUtf8Bytes": {"type": "integer"}, "commentMaxUtf8Bytes": {"type": "integer"}, "presentation": {"$ref": "#/components/schemas/HumanTaskConfirmationPresentation"}, "reviewPresentation": {"$ref": "#/components/schemas/HumanTaskReviewPresentation"}, "availableActions": {"type": "array", "items": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}}}},
       "HumanTaskAttentionCounts": {"type": "object", "required": ["pending", "escalated"], "properties": {"pending": {"type": "integer"}, "escalated": {"type": "integer"}}},
       "HumanTaskNodeCount": {"allOf": [{"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, {"type": "object", "required": ["nodeId"], "properties": {"nodeId": {"type": "string"}}}]},
       "HumanTaskAttentionPage": {"type": "object", "required": ["schemaVersion", "items", "nextCursor", "counts", "nodeCounts"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}, "nextCursor": {"type": "string", "nullable": true}, "counts": {"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, "nodeCounts": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskNodeCount"}}}},

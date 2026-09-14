@@ -21,6 +21,7 @@ Use one of these kinds:
 | `security` | Security correction; normally requires a patch increment and coordinated disclosure when necessary |
 | `docs` | User-relevant documentation change; does not determine a version increment by itself |
 | `other` | User-relevant maintenance change; the release pull request classifies its version impact explicitly |
+| `known-issue` | A defect the release ships with knowingly; rendered under *Known issues* and does not determine a version increment |
 
 Examples are `.changes/142.fix.md` and `.changes/grid-editor.feature.md`.
 

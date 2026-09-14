@@ -194,6 +194,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | See the linked contract for exact type, default, and applicability. |
@@ -207,6 +208,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |
@@ -225,6 +227,8 @@ Detailed contract: [Identity and HTTP boundary](configuration.md#identity-and-br
 | `RAVENROOT_AUTH_CLOCK_SKEW_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_ISSUER` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_JWKS_URI` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_LOCAL_TOKEN` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AUTH_MODE` | See the linked contract for exact type, default, and applicability. |
@@ -331,6 +335,9 @@ Detailed contract: [Programs and artifacts](configuration.md#programmable-artifa
 | `RAVENROOT_GRAAL_JAVA` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAAL_RESOURCE_CACHE_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAAL_SANDBOX_SUPERVISOR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_PROGRAM_MAX_HEAP_MB` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_PROGRAM_RUNTIME` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_PROGRAM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |

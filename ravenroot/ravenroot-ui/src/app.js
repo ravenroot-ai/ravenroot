@@ -37,6 +37,8 @@ import {
   JOIN_POLICY_PROPERTY,
   JOIN_QUORUM_PROPERTY,
   JOIN_TIMEOUT_PROPERTY,
+  KNOWN_EDGE_FIELDS,
+  KNOWN_NODE_FIELDS,
   joinKindProperties,
   quorumWouldCollideWithLegacyStamp,
   kindOwnsNodeType,
@@ -369,7 +371,7 @@ const NODE_ICONS = {
   terminal: '⊙ ',
   consumer: '⩓ ', handler:  '↩ ',
   agent:    '⬡ ', flow:     '⚙ ',
-  actor:    '◉ ', system:   '▪ '
+  actor:    '◉ ', system:   '▪ ', trace: '▤ ', 'human-task': '♙ '
 };
 
 /**
@@ -556,6 +558,14 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'rectangle',
     'background-color': surface.system,
     'border-color': node.system, 'border-width': 1.5,
+  }},
+  { selector: 'node[nodeType="trace"]', style: {
+    shape: 'rectangle', 'background-color': surface.trace,
+    'border-color': node.trace, 'border-width': 2,
+  }},
+  { selector: 'node[nodeType="human-task"]', style: {
+    shape: 'ellipse', 'background-color': surface['human-task'],
+    'border-color': node['human-task'], 'border-width': 2.5,
   }},
   { selector: 'node[humanTaskPending > 0]', style: {
     'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
@@ -931,7 +941,6 @@ let runtimeConfiguration = null;
 let runtimeConnectionGeneration = 0;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
-const PROGRAM_BUILD_BATCH_LIMIT = 256;
 const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;
 const PROGRAM_OUTPUT_DISPLAY_LIMIT = 8 * 1024;
 const PROGRAM_WORKSPACE_PROPERTY_NAMES = new Set(['language', 'source', 'testPayload', 'artifactId']);
@@ -1097,7 +1106,14 @@ function renderSelectedHumanTasks(owner = workspace.active) {
       const capability = currentHumanTaskCapability();
       if (!capability || !tenantAuthorityAllows(owner)) return;
       rememberHumanTaskSelection(task);
-      humanTaskDecisionDialog.open(task, capability);
+      // The summary row deliberately has no service origin. Exact-detail reconciliation must use
+      // the opaque locator we just persisted, otherwise sameHumanTaskSelection compares that absent
+      // field with the stored origin and silently retires every successful explicit selection.
+      const locator = readHumanTaskSelection();
+      if (!locator) return;
+      const recoveryGeneration = humanTaskRecoveryGeneration;
+      humanTaskDecisionDialog.loading(task, capability, { show: true });
+      void loadHumanTaskDetail(owner, locator, capability, recoveryGeneration);
     },
     onNext: () => humanTaskController?.nextPage(),
     onPrevious: () => humanTaskController?.previousPage(),
@@ -1160,6 +1176,12 @@ async function recoverHumanTaskSelection(owner) {
   if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
       || typeof locator.taskId !== 'string'
       || !Number.isSafeInteger(locator.generation) || locator.generation < 1) return;
+  humanTaskDecisionDialog.loading(locator, capability);
+  return loadHumanTaskDetail(owner, locator, capability, recoveryGeneration);
+}
+
+async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneration) {
+  const client = runtimeClient;
   try {
     // The locator deliberately carries no graph, deployment, process, presentation, or auth data.
     // The authenticated exact-task projection reconstructs those durable details after reload,
@@ -1171,11 +1193,20 @@ async function recoverHumanTaskSelection(owner) {
         || !sameHumanTaskSelection(readHumanTaskSelection(), locator)) return;
     const task = page.items.find(item => item.taskId === locator.taskId
       && item.generation === locator.generation);
-    if (!task) { clearHumanTaskSelection(); return; }
-    if (!humanTaskDecisionDialog.selected()) humanTaskDecisionDialog.open(task, capability);
-  } catch {
+    if (!task) {
+      humanTaskDecisionDialog.unavailable(
+        'This task detail is unavailable. It may be stale, settled, or outside your current authority.');
+      clearHumanTaskSelection();
+      return;
+    }
+    humanTaskDecisionDialog.open(task, capability);
+  } catch (error) {
     // A rejected or unreachable lookup carries no proof that the durable task disappeared. Keep
     // only the locator and let the next authenticated reconnect try again; never cache the row.
+    if (recoveryGeneration === humanTaskRecoveryGeneration) {
+      humanTaskDecisionDialog.unavailable(
+        'Authorized task detail could not be loaded. Refresh or reconnect before deciding.');
+    }
   }
 }
 
@@ -3185,8 +3216,10 @@ function initLoadedGraph(graph, currentStyle) {
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
   mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null } = {}) {
+  const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
-    documentId, tenantId, mode, provenance, presentation,
+    documentId, tenantId, mode, provenance,
+    presentation: presentation || graphPresentation,
   });
   if (graph) {
     graphName = name;
@@ -4107,6 +4140,7 @@ const N8N_ICONS_CHAR = {
   consumer: '⧒', handler:  '↩',
   agent:    '🧠', flow:     '⚙',
   actor:    '◎', system:   '▤',
+  trace:    '▤', 'human-task': '♙',
 };
 let N8N_BG = rendererPalette.nodeSurfaceByType;
 let N8N_BORDER = rendererPalette.nodeType;
@@ -4431,6 +4465,7 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
 
   const initAttr = parseInt(document.getElementById('attr-slider')?.value || '30', 10) / 100;
   const initRep  = parseInt(document.getElementById('rep-slider')?.value  || '320', 10);
+  const initSpeed = parseInt(document.getElementById('speed-slider')?.value || '50', 10) / 100;
   const designViewport = { k: target.zoom(), x: target.pan().x, y: target.pan().y };
   const elasticMount = mountD3ElasticRenderer({
     svg: svgEl,
@@ -4444,6 +4479,7 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     fontSize: fontPx,
     attraction: initAttr,
     repulsion: initRep,
+    speed: initSpeed,
     initialTransform: designViewport,
     // Mount eligibility belongs to the layout request; a mounted simulation belongs to the
     // renderer generation. Presentation toggles may retire pending layouts without retiring it.
@@ -5558,6 +5594,14 @@ function onElasticAttraction(val) {
   if (!renderer?.simulation) return;
   renderer.simulation.force('link').strength(strength);
   renderer.simulation.alpha(0.5).restart();
+}
+
+function onElasticSpeed(val) {
+  const speed = Math.max(0.1, Math.min(1, parseInt(val, 10) / 100));
+  document.getElementById('speed-val').textContent = Math.round(speed * 100);
+  const renderer = elasticRendererFor(workspace.active);
+  if (!renderer?.simulation) return;
+  renderer.simulation.velocityDecay(0.65 - speed * 0.45).alphaTarget(0).restart();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7836,6 +7880,14 @@ function programBuildPlan(owner) {
   return { nodes, programs, signature: JSON.stringify(programs) };
 }
 
+function currentProgramAuthoringLimits() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient
+      || !runtimeConfiguration.configuration?.programAuthoring) {
+    throw new Error('Program authoring is unavailable until the connected service returns valid configuration');
+  }
+  return runtimeConfiguration.configuration.programAuthoring;
+}
+
 function resetProgramGeneration(owner, state, plan) {
   state.phases.clear();
   state.activeBuildId = null;
@@ -8025,8 +8077,10 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   if (state.settledGeneration === generation) {
     return plan.nodes.every(node => state.phases.get(node.id)?.phase === 'READY');
   }
-  if (plan.programs.length > PROGRAM_BUILD_BATCH_LIMIT) {
-    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${PROGRAM_BUILD_BATCH_LIMIT}`;
+  const authoringLimits = currentProgramAuthoringLimits();
+  const batchLimit = authoringLimits.maxProgramsPerBuild;
+  if (plan.programs.length > batchLimit) {
+    const message = `Program graph has ${plan.programs.length} nodes; one server build accepts at most ${batchLimit}`;
     plan.nodes.forEach(node => programPhase(owner, node.id, {
       phase: '', ready: false, reused: false, transportError: true,
       diagnostic: message, detail: `Readiness request failed · ${message}`,
@@ -8037,7 +8091,7 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
   }
   return startProgramReadinessFlight(owner, plan, generation, {
     automatic,
-    start: client => client.buildProgramArtifacts(plan.programs),
+    start: client => client.buildProgramArtifacts(plan.programs, authoringLimits),
   });
 }
 
@@ -8241,7 +8295,8 @@ function bindProgramWorkspace(form, model) {
         propertyTypes: { ...(model?.propertyTypes || {}) },
       };
       const client = runtimeClient;
-      const started = await client.buildProgramArtifacts([programBuildSubmission(draft)]);
+      const started = await client.buildProgramArtifacts(
+        [programBuildSubmission(draft)], currentProgramAuthoringLimits());
       const settled = await observeProgramBuildSnapshots(client, started, {
         current: () => runtimeClient === client && panel.isConnected,
         onSnapshot: snapshot => {
@@ -8701,10 +8756,21 @@ function readPropertyEditor(form) {
 }
 
 function showReadOnlyElement(model, label) {
-  const fields = Object.entries(model).filter(([, value]) =>
-    ['string', 'number', 'boolean'].includes(typeof value) && value !== '');
+  const isNode = graphData?.nodes?.some(node => node.id === model.id);
+  const definitions = isNode ? KNOWN_NODE_FIELDS : KNOWN_EDGE_FIELDS;
+  const valueFor = name => name === 'nodeType' ? model.nodeType
+    : name === 'name' && !isNode ? model.edgeName : model[name];
+  const fields = [{ label: 'ID', value: model.id }]
+    .concat(definitions.map(field => ({ label: field.label, value: valueFor(field.name) })))
+    .concat(isNode ? [
+      { label: 'Visual type', value: model.nodeType },
+      { label: 'Catalog type', value: model.behavior },
+    ] : [])
+    .concat(Object.entries(model.properties || {}).map(([name, value]) => ({ label: name, value })))
+    .filter(field => field.value !== undefined && field.value !== null)
+    .filter((field, index, all) => all.findIndex(candidate => candidate.label === field.label) === index);
   document.getElementById('info-body').innerHTML = `<div class="info-sec"><h4>${escapeHtml(label)}</h4>
-    ${fields.map(([name, value]) => `<div class="info-row"><span class="info-k">${escapeHtml(name)}</span><span class="info-v info-mono">${escapeHtml(value)}</span></div>`).join('')}
+    ${fields.map(field => `<div class="info-row"><span class="info-k">${escapeHtml(field.label)}</span><span class="info-v info-mono">${escapeHtml(field.value === '' ? '—' : field.value)}</span></div>`).join('')}
     </div><div class="info-empty">${graphData?.format === 'graphify'
       ? 'Graphify JSON remains view-only. Export or execute a Ravenroot GraphML workflow.'
       : 'Inspect mode is active. Turn Modify ON to edit this element.'}</div>`;
@@ -14564,6 +14630,7 @@ document.addEventListener('input', event => {
   if (action === 'font-size') onFontSize(event.target.value);
   else if (action === 'elastic-repulsion') onElasticRepulsion(event.target.value);
   else if (action === 'elastic-attraction') onElasticAttraction(event.target.value);
+  else if (action === 'elastic-speed') onElasticSpeed(event.target.value);
   else if (action === 'search') onSearch(event.target.value);
 });
 

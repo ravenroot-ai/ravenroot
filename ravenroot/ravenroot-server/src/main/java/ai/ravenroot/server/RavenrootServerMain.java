@@ -125,11 +125,11 @@ public final class RavenrootServerMain {
         // bound it checks against is the store's own, readable only once the store is open.
         executionOwnershipConfiguration.requireCompatible(managedExecutionStore);
         var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
-        ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
-            case "graalvm" -> GraalVmProgramRuntime.fromEnvironment();
-            case "disabled" -> new DisabledProgramRuntime();
-            default -> throw new IllegalArgumentException("Unknown program runtime: "
-                    + System.getenv("RAVENROOT_PROGRAM_RUNTIME"));
+        var programRuntimeConfiguration = ProgramRuntimeConfiguration.resolve(
+                System.getProperties(), System.getenv());
+        ProgramRuntime programRuntime = switch (programRuntimeConfiguration.runtime()) {
+            case GRAALVM -> GraalVmProgramRuntime.fromEnvironment(System.getProperties(), System.getenv());
+            case DISABLED -> new DisabledProgramRuntime();
         };
         // Reading the mode and announcing it are the same call, deliberately -- see
         // artifactProvenance. Refused values throw from here, before the HTTP listener exists and
@@ -270,6 +270,8 @@ public final class RavenrootServerMain {
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
         var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
+        var programAuthoringLimits = ai.ravenroot.api.programming.ProgramAuthoringLimits.resolve(
+                System.getProperties(), System.getenv());
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 executionIdentities, executionStore,
@@ -277,7 +279,12 @@ public final class RavenrootServerMain {
                 executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
                 graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore(),
                 executionRuntime.applicationRunnerShutdownStepBound(),
-                executionOwnershipConfiguration.runtimeOwnership());
+                executionOwnershipConfiguration.runtimeOwnership(), programAuthoringLimits);
+        var processLifecycle = executionStore == null ? null
+                : new ai.ravenroot.core.process.ProcessLifecycleService(
+                        executionStore, application, humanTasks, java.time.Clock.systemUTC());
+        var deploymentRegistry = executionStoreOwner.deploymentRegistry();
+        var deploymentSingleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
         // two composition sites was updated and the other was not, and the refusals that followed
@@ -329,8 +336,16 @@ public final class RavenrootServerMain {
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
                         executionManifests, executionRuntime.humanTaskRunnerShutdownStepBound());
+                var deploymentReentryGate = deploymentRegistry == null
+                        ? ai.ravenroot.core.humantask.HumanTaskReentryGate.OPEN
+                        : new ai.ravenroot.core.humantask.DeploymentHumanTaskReentryGate(
+                                executionStore, deploymentRegistry);
+                ai.ravenroot.core.humantask.HumanTaskReentryGate reentryGate = task ->
+                        deploymentReentryGate.admits(task)
+                                && processLifecycle.admitsReentry(task.key().tenantId(),
+                                        task.key().processInstanceId());
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
-                        executionStore, humanTasks, continuationExecutor));
+                        executionStore, humanTasks, continuationExecutor, reentryGate));
             }
             // One authority over the pinned document and the manifest, shared by the coordinator's
             // fail-closed gate and by the declaration source below, so the answer a sweep acts on
@@ -367,6 +382,30 @@ public final class RavenrootServerMain {
         // by the shutdown sequence further down.
         var readinessConfiguration = ai.ravenroot.server.readiness.ReadinessConfiguration.fromEnvironment(
                 System.getenv());
+        ai.ravenroot.core.deployment.DurableLocalDeploymentControl durableDeploymentControl = null;
+        if (deploymentRegistry != null) {
+            var deploymentClock = java.time.Clock.systemUTC();
+            var deploymentOwner = executionOwnershipConfiguration.runtimeOwnership();
+            var applicationTargets = application.localDeploymentTargets();
+            ai.ravenroot.core.deployment.DeploymentTargets lifecycleTargets = (tenantId, deploymentId) ->
+                    applicationTargets.resolve(tenantId, deploymentId).map(target -> humanTasks == null
+                            ? target
+                            : new ai.ravenroot.core.deployment.HumanTaskCancellingLifecycleTarget(
+                                    tenantId, deploymentId, target, humanTasks));
+            var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(
+                    deploymentRegistry, lifecycleTargets, deploymentSingleFlight,
+                    ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING,
+                    deploymentOwner.identity().value(), deploymentOwner.leaseTtl(),
+                    readinessConfiguration.drainGracePeriod(), deploymentClock);
+            var reconciler = new ai.ravenroot.core.deployment.DeploymentReconciler(
+                    deploymentRegistry, lifecycleTargets, deploymentSingleFlight,
+                    java.util.List.of(), deploymentOwner.identity().value(), deploymentOwner.leaseTtl(),
+                    readinessConfiguration.drainGracePeriod(), 100, deploymentClock);
+            durableDeploymentControl = new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
+                    application, deploymentRegistry, coordinator, reconciler,
+                    java.time.Duration.ofSeconds(1), deploymentClock);
+        }
+        var installedDeploymentControl = durableDeploymentControl;
         // Both required durable dependencies contribute to readiness. The execution-store probe is
         // omitted only under the explicit disabled configuration, preserving the supported ephemeral
         // mode without pretending a nonexistent store can be checked.
@@ -410,7 +449,8 @@ public final class RavenrootServerMain {
         // Effectively final, and null when the embed is off, so the shutdown hook below can close it
         // on the same line userCredentials is closed on. Both are their own database with their own
         // lifecycle, neither is a table in the execution store, and neither closes inside its scope.
-        final var embedRegistrations = "true".equals(System.getenv("RAVENROOT_EMBED_ENABLED"))
+        final var embedRegistrations = ai.ravenroot.server.embed.EmbedBrowserConfiguration
+                .enabledFromEnvironment(System.getenv())
                 ? openEmbedRegistrationStore()
                 : null;
         var embedConfiguration = embedRegistrations == null
@@ -485,6 +525,12 @@ public final class RavenrootServerMain {
                 }
                 if (executionManifests != null) {
                     server.installExecutionManifests(executionManifests);
+                }
+                if (installedDeploymentControl != null) {
+                    server.installDurableDeploymentControl(installedDeploymentControl);
+                }
+                if (processLifecycle != null) {
+                    server.installProcessLifecycle(processLifecycle);
                 }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(

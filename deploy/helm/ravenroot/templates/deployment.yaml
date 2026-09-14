@@ -152,6 +152,10 @@ spec:
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxConfirmationPromptBytes }}
             - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxConfirmationActionLabelBytes }}
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultReviewTextBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxReviewTextBytes }}
             - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxDecisionCommentBytes }}
             - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
@@ -168,6 +172,14 @@ spec:
               value: {{ include "ravenroot.graphLimitValue" .Values.assistant.maxOutputTokens }}
             - name: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS
               value: {{ include "ravenroot.graphLimitValue" .Values.assistant.maxToolIterations }}
+            # Blank authoring limits preserve the typed Java defaults. Explicit chart values are
+            # validated as positive integers bounded by the public artifact/build contracts.
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.programAuthoring.maxSourceBytes }}
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.programAuthoring.maxBuildRequestBytes }}
+            - name: RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD
+              value: {{ include "ravenroot.graphLimitValue" .Values.programAuthoring.maxProgramsPerBuild }}
             # Empty rate-limit values select RateLimitConfiguration.DEFAULTS at startup.
             - name: RAVENROOT_RATELIMIT_ADDRESS_RPS
               value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.addressRequestsPerSecond }}

@@ -58,7 +58,7 @@ public final class ManagedExecutionStore implements InvocationHandler {
             "maxHumanTaskResponsePayloadBytes", "loadHumanTask", "listHumanTasks",
             "listHumanTaskAttention", "findHumanTaskAttention", "loadExecutionPause", "executionPauses",
             "findHeldExecutionPause", "journalRetention", "readJournal", "journalRetainedFrom",
-            "outboxCursor", "advanceOutboxCursor", "recordInboxDelivery", "inboxRecordCount",
+            "openSourceCheckpointStore", "outboxCursor", "advanceOutboxCursor", "recordInboxDelivery", "inboxRecordCount",
             "compactJournal", "maxInventoryPageSize", "terminalRetention", "listProcessInstances",
             "findProcessInstance", "listTraversals", "inventoryRetainedFrom",
             "purgeExpiredProcessInstances", "executionResultRetention", "maxExecutionResultPayloadBytes",

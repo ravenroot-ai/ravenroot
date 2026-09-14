@@ -64,6 +64,7 @@ import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -3498,6 +3499,8 @@ public abstract class ExecutionStoreContract {
         assertEquals(first.registration().taskId(), page.items().getFirst().taskId());
         assertEquals(orderedActions, page.items().getFirst().availableActions(),
                 "the safe projection must preserve pinned authored action order");
+        assertTrue(page.items().getFirst().reviewPresentation().isEmpty(),
+                "collection projections must never disclose review content");
         assertEquals(4096, page.items().getFirst().promptMaxUtf8Bytes());
         assertEquals(64, page.items().getFirst().actionLabelMaxUtf8Bytes());
         assertEquals(4096, page.items().getFirst().commentMaxUtf8Bytes());
@@ -3562,6 +3565,9 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.of("deployment-c"), recovered.deploymentId());
         assertEquals(fixture.key().processInstanceId(), recovered.processInstanceId());
         assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), recovered.availableActions());
+        assertEquals("Mail body\nsecond line", recovered.reviewPresentation().orElseThrow().text());
+        assertEquals(HumanTaskReviewPresentation.TEXT_PLAIN,
+                recovered.reviewPresentation().orElseThrow().contentType());
         assertTrue(await(store().findHumanTaskAttention(tenant,
                 new HumanTaskAttentionLocator(fixture.registration().taskId(), 2L), requester)).isEmpty(),
                 "a stale generation must be indistinguishable from an absent task");
@@ -3619,7 +3625,8 @@ public abstract class ExecutionStoreContract {
                 digest(new byte[] {1, 2, 3}),
                 new HumanTaskConfirmationPresentation(1, "Confirm after review.",
                         HumanTaskCommentRequirement.OPTIONAL, actions,
-                        "Confirm", "Deny", "Cancel"), limits);
+                        "Confirm", "Deny", "Cancel"), limits,
+                HumanTaskReviewPresentation.plainText("Mail body\nsecond line", 4096));
         await(store().apply(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.exactly(running.revision()))
                 .registerHumanTask(registration).build()));

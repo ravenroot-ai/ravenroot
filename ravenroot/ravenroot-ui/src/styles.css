@@ -487,16 +487,18 @@
        ICON-ONLY ALONE SAVES NOTHING, AND THAT IS THE WHOLE POINT OF THIS BLOCK. Stripping labels
        from a list makes each row NARROWER, NOT SHORTER — measured, it comes out WORSE than the
        full form. The saving exists only if the layout also REFLOWS FROM A LIST INTO A WRAPPED
-       GRID, so that ten rows become two.
+       GRID, so that many rows collapse into a few adaptive rows.
 
        Geometry, and why each number is what it is:
          * 32px cell — matches `.zbtn`, and exceeds the 24px WCAG 2.5.8 floor. The full-form `.li`
            row is 23px tall and clickable, one pixel UNDER that floor; the short form clears it.
-         * 4px gap, 8px content padding. At a 195px body that leaves 179px, which carries
-           floor((179 + 4) / 36) = 5 cells per row. Ten node types and nine edge types both become
-           TWO ROWS: 2 x 32 + 4 = 68px of grid, 84px of content, 116px of panel against 291px and
-           268px full. The 8px padding is load-bearing — at the full form's 14px only four cells
-           fit per row, which costs a third row and gives most of the saving back.
+         * 4px column gap, 1px row gap, and 8px inline content padding. At a 195px body that leaves
+           179px, which carries floor((179 + 4) / 36) = 5 cells per row. Twelve node types become
+           three rows and nine edge types become two; narrower compact columns naturally reflow
+           down to one cell per
+           row without clipping any choice. The 8px padding is load-bearing — at the full form's
+           14px only four cells fit per row, which costs another row and gives more of the saving
+           back.
 
        The Node Catalog uses the same geometry below. Its server-provided glyphs need not be
        unique, so its buttons also keep explicit accessible names and identity-bearing tooltips. */
@@ -504,8 +506,15 @@
     .panel--short #leg-nodes, .panel--short #leg-edges {
       display: grid;
       grid-template-columns: repeat(auto-fill, var(--panel-short-cell));
-      gap: 4px;
+      column-gap: 4px;
+      row-gap: 1px;
     }
+    /* Twelve adaptive node cells need a third row at the ordinary 195px body. Keep every 32px
+       target visible and recover the added row's height from spacing, not from a fixed column count
+       that clips at narrower widths: 1px block padding plus 1px row gaps saves 37px across the two
+       palette panels compared with the former 8px/4px spacing. */
+    .panel--short[data-panel-id="node-types"] .panel-content,
+    .panel--short[data-panel-id="edge-types"] .panel-content { padding-block: 1px; }
     .panel--short .li {
       width: var(--panel-short-cell); height: var(--panel-short-cell);
       padding: 0; justify-content: center; gap: 0;
@@ -1913,6 +1922,13 @@
     .human-task-decision-form { display: grid; gap: 12px; padding: 14px; }
     .human-task-decision-form .credentials-hd { margin: -14px -14px 0; }
     .human-task-prompt { margin: 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .human-task-review { display: grid; gap: 6px; min-width: 0; }
+    .human-task-review h3 { margin: 0; font-size: 12px; }
+    .human-task-review-status, .human-task-review-digest { margin: 0; color: var(--tx-2); font-size: 10px; }
+    .human-task-review-text { max-height: min(42vh, 420px); margin: 0; overflow: auto; padding: 10px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); color: var(--tx-1);
+      font: 12px/1.55 'SFMono-Regular', Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+      unicode-bidi: plaintext; }
     .human-task-dialog-identity { margin: 0; color: var(--tx-2); font: 10px/1.45 'SFMono-Regular', Consolas, monospace; overflow-wrap: anywhere; }
     .human-task-dialog textarea { width: 100%; min-height: 96px; resize: vertical; }
     .human-task-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
@@ -2389,23 +2405,23 @@
       background: var(--amber); border: 2px solid var(--bg-1);
       cursor: pointer;
     }
-    #attr-icon { font-size: 14px; color: var(--tx-2); user-select: none; line-height: 1; flex-shrink: 0; }
-    #attr-val { font-size: 11px; color: var(--tx-2); min-width: 30px;
+    #attr-icon, #speed-icon { font-size: 14px; color: var(--tx-2); user-select: none; line-height: 1; flex-shrink: 0; }
+    #attr-val, #speed-val { font-size: 11px; color: var(--tx-2); min-width: 30px;
                  text-align: right; font-variant-numeric: tabular-nums; }
-    #attr-slider {
+    #attr-slider, #speed-slider {
       -webkit-appearance: none; appearance: none;
       width: 80px; height: 4px;
       background: var(--bd); border-radius: 2px; outline: none;
       cursor: pointer;
     }
-    #attr-slider::-webkit-slider-thumb {
+    #attr-slider::-webkit-slider-thumb, #speed-slider::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none;
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--cyan); border: 2px solid var(--bg-1);
       cursor: pointer; transition: background .15s;
     }
-    #attr-slider::-webkit-slider-thumb:hover { background: var(--cyan); }
-    #attr-slider::-moz-range-thumb {
+    #attr-slider::-webkit-slider-thumb:hover, #speed-slider::-webkit-slider-thumb:hover { background: var(--cyan); }
+    #attr-slider::-moz-range-thumb, #speed-slider::-moz-range-thumb {
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--cyan); border: 2px solid var(--bg-1);
       cursor: pointer;

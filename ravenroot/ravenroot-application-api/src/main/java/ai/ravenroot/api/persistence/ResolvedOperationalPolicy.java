@@ -23,6 +23,13 @@ import java.util.Optional;
  * <p>Every component is a bounded number, duration, Boolean or package identifier. Authorization
  * grants and secret material have no representation here. The fixed binary encoding is used only as
  * the durable SQL value; callers always receive this typed form.</p>
+ *
+ * @param graph graph parsing, payload, traversal and recovery limits
+ * @param results execution-result durability and payload limits
+ * @param builtInHttp capacity for the core HTTP behavior, when used
+ * @param nodePackages managed external-I/O capacity for each resolved node package
+ * @param persistence generic persistence capacity, when the store supplies it
+ * @param nodeExternalIo capacity resolved for each exact node binding
  */
 public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                         Optional<BuiltInHttpCapacity> builtInHttp,
@@ -35,6 +42,7 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
     private static final int MAX_POLICY_BYTES = 512 * 1024;
     private static final int MAX_BASE64_CHARACTERS = ((MAX_POLICY_BYTES + 2) / 3) * 4;
 
+    /** Canonicalizes and validates one complete operational policy snapshot. */
     public ResolvedOperationalPolicy {
         Objects.requireNonNull(graph, "graph");
         Objects.requireNonNull(results, "results");
@@ -70,7 +78,15 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         nodeExternalIo = List.copyOf(sortedIo);
     }
 
-    /** Compatibility constructor for policies before node-bound external-I/O snapshots. */
+    /**
+     * Compatibility constructor for policies before node-bound external-I/O snapshots.
+     *
+     * @param graph graph and traversal limits
+     * @param results result persistence limits
+     * @param builtInHttp core HTTP capacity, when used
+     * @param nodePackages resolved node-package capacities
+     * @param persistence generic persistence capacity, when available
+     */
     public ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                      Optional<BuiltInHttpCapacity> builtInHttp,
                                      List<PackageCapacity> nodePackages,
@@ -78,20 +94,37 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         this(graph, results, builtInHttp, nodePackages, persistence, List.of());
     }
 
-    /** Compatibility constructor for policies whose graphs do not use core HTTP. */
+    /**
+     * Compatibility constructor for policies whose graphs do not use core HTTP.
+     *
+     * @param graph graph and traversal limits
+     * @param results result persistence limits
+     * @param nodePackages resolved node-package capacities
+     */
     public ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                      List<PackageCapacity> nodePackages) {
         this(graph, results, Optional.empty(), nodePackages, Optional.empty(), List.of());
     }
 
-    /** Compatibility constructor for the v2 layout, which had no generic persistence capacity. */
+    /**
+     * Compatibility constructor for the v2 layout, which had no generic persistence capacity.
+     *
+     * @param graph graph and traversal limits
+     * @param results result persistence limits
+     * @param builtInHttp core HTTP capacity, when used
+     * @param nodePackages resolved node-package capacities
+     */
     public ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                                      Optional<BuiltInHttpCapacity> builtInHttp,
                                      List<PackageCapacity> nodePackages) {
         this(graph, results, builtInHttp, nodePackages, Optional.empty(), List.of());
     }
 
-    /** Canonical durable value, with no free-form policy or secret field. */
+    /**
+     * Canonical durable value, with no free-form policy or secret field.
+     *
+     * @return canonical URL-safe Base64 representation of the legacy policy layout
+     */
     public String encode() {
         if (persistence.isPresent() || !nodeExternalIo.isEmpty()) {
             throw new IllegalStateException("new operational capacity requires manifest format 4");
@@ -102,7 +135,12 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         return encodeVersion(ENCODING_VERSION_1);
     }
 
-    /** Encodes the policy layout required by the containing manifest format. */
+    /**
+     * Encodes the policy layout required by the containing manifest format.
+     *
+     * @param manifestFormatVersion execution-manifest format that will contain the value
+     * @return canonical URL-safe Base64 representation for that manifest format
+     */
     public String encodeForManifest(int manifestFormatVersion) {
         if (manifestFormatVersion == ExecutionManifest.FORMAT_VERSION_2 && persistence.isEmpty()
                 && nodeExternalIo.isEmpty()
@@ -155,12 +193,23 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
     }
 
-    /** Decodes and canonicalizes one stored value, rejecting unknown or trailing data. */
+    /**
+     * Decodes and canonicalizes one stored value, rejecting unknown or trailing data.
+     *
+     * @param encoded canonical legacy policy value
+     * @return decoded immutable operational policy
+     */
     public static ResolvedOperationalPolicy decode(String encoded) {
         return decodeVersion(encoded, ENCODING_VERSION_1);
     }
 
-    /** Decodes the exact policy layout selected by its containing manifest. */
+    /**
+     * Decodes the exact policy layout selected by its containing manifest.
+     *
+     * @param encoded canonical policy value
+     * @param manifestFormatVersion containing execution-manifest format
+     * @return decoded immutable operational policy
+     */
     public static ResolvedOperationalPolicy decodeForManifest(String encoded, int manifestFormatVersion) {
         return decodeVersion(encoded, switch (manifestFormatVersion) {
             case ExecutionManifest.FORMAT_VERSION_2 -> ENCODING_VERSION_1;
@@ -233,7 +282,35 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                 .allMatch(limits -> limits.maximumDecompressionRatio().orElse(-1) == 1_000);
     }
 
-    /** The graph parser, payload and live traversal budgets used by runtime consumers. */
+    /**
+     * The graph parser, payload and live traversal budgets used by runtime consumers.
+     *
+     * @param graphMlMaxBytes maximum GraphML document bytes
+     * @param graphMlMaxNodes maximum GraphML nodes
+     * @param graphMlMaxEdges maximum GraphML edges
+     * @param graphMlMaxProperties maximum GraphML properties
+     * @param graphMlMaxDepth maximum GraphML element depth
+     * @param graphMlMaxStringLength maximum GraphML string length
+     * @param graphMlMaxKeys maximum GraphML key declarations
+     * @param graphMlMaxElements maximum XML elements in GraphML
+     * @param graphMlMaxAttributes maximum XML attributes in GraphML
+     * @param graphMlMaxNamespaceDeclarations maximum XML namespace declarations in GraphML
+     * @param payloadMaxEncodedBytes maximum encoded payload bytes
+     * @param payloadMaxDepth maximum payload nesting depth
+     * @param payloadMaxCollectionSize maximum elements in one payload collection
+     * @param payloadMaxValueCount maximum values in one payload
+     * @param payloadMaxTextLength maximum text length in one payload value
+     * @param payloadMaxKeyLength maximum payload map-key length
+     * @param maxFanOut maximum fan-out from one node
+     * @param maxResidentActors maximum resident actor instances
+     * @param maxLiveActorsPerTraversal maximum live actors for one traversal
+     * @param maxInFlightHopsPerTraversal maximum in-flight hops for one traversal
+     * @param maxQueuedAdmissionsPerNode maximum queued admissions for one node
+     * @param maxTraversalSteps maximum steps for one traversal
+     * @param maxAmplifiedDeliveries maximum amplified deliveries for one traversal
+     * @param maxCumulativePayloadBytes maximum cumulative payload bytes for one traversal
+     * @param maxRecoveryDeliveriesPerAttempt maximum recovery deliveries for one attempt
+     */
     public record GraphLimits(int graphMlMaxBytes, int graphMlMaxNodes, int graphMlMaxEdges,
                               int graphMlMaxProperties, int graphMlMaxDepth,
                               int graphMlMaxStringLength, int graphMlMaxKeys,
@@ -246,6 +323,7 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
                               int maxQueuedAdmissionsPerNode, long maxTraversalSteps,
                               long maxAmplifiedDeliveries, long maxCumulativePayloadBytes,
                               int maxRecoveryDeliveriesPerAttempt) {
+        /** Validates that every graph, payload and traversal budget is positive. */
         public GraphLimits {
             if (java.util.stream.IntStream.of(graphMlMaxBytes, graphMlMaxNodes, graphMlMaxEdges,
                     graphMlMaxProperties, graphMlMaxDepth, graphMlMaxStringLength, graphMlMaxKeys,
@@ -284,8 +362,14 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
     }
 
-    /** Result persistence decision resolved from the composed execution store. */
+    /**
+     * Result persistence decision resolved from the composed execution store.
+     *
+     * @param durable whether execution results are stored durably
+     * @param maximumPayloadBytes maximum encoded result payload bytes
+     */
     public record ResultLimits(boolean durable, int maximumPayloadBytes) {
+        /** Validates one result-persistence decision. */
         public ResultLimits {
             if (maximumPayloadBytes < 1) {
                 throw new IllegalArgumentException("maximumPayloadBytes must be positive");
@@ -293,8 +377,13 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
     }
 
-    /** Generic opaque-payload capacity of the execution store used by this execution. */
+    /**
+     * Generic opaque-payload capacity of the execution store used by this execution.
+     *
+     * @param maximumPayloadBytes maximum opaque payload bytes accepted by the store
+     */
     public record PersistenceLimits(int maximumPayloadBytes) {
+        /** Validates one generic persistence capacity. */
         public PersistenceLimits {
             if (maximumPayloadBytes < 1) {
                 throw new IllegalArgumentException("maximumPayloadBytes must be positive");
@@ -302,9 +391,16 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
     }
 
-    /** Quantitative policy for the core {@code http-request} behavior, when the graph uses it. */
+    /**
+     * Quantitative policy for the core {@code http-request} behavior, when the graph uses it.
+     *
+     * @param maximumRequestBytes maximum request-body bytes
+     * @param maximumResponseBytes maximum response-body bytes
+     * @param maximumTimeout maximum duration of one HTTP request
+     */
     public record BuiltInHttpCapacity(long maximumRequestBytes, long maximumResponseBytes,
                                       Duration maximumTimeout) {
+        /** Validates one finite core HTTP capacity. */
         public BuiltInHttpCapacity {
             if (maximumRequestBytes < 1) {
                 throw new IllegalArgumentException("maximumRequestBytes must be positive");
@@ -334,8 +430,14 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
     }
 
-    /** Quantitative service policy for one package used by the accepted graph. */
+    /**
+     * Quantitative service policy for one package used by the accepted graph.
+     *
+     * @param packageId stable node-package identifier
+     * @param capacity resolved managed external-I/O capacity for the package
+     */
     public record PackageCapacity(String packageId, NodePackageEgressCapacityProfile capacity) {
+        /** Validates one identified package-capacity entry. */
         public PackageCapacity {
             if (packageId == null || packageId.length() > 200
                     || !packageId.matches("[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")) {
@@ -390,8 +492,14 @@ public record ResolvedOperationalPolicy(GraphLimits graph, ResultLimits results,
         }
     }
 
-    /** Capacity snapshot for one exact graph node, package and behavior binding. */
+    /**
+     * Capacity snapshot for one exact graph node, package and behavior binding.
+     *
+     * @param bindingDigest digest of the graph node, package and behavior binding
+     * @param capacity quantitative external-I/O capacity pinned for that binding
+     */
     public record NodeIoCapacity(String bindingDigest, NodeExternalIoCapacity capacity) {
+        /** Validates one identified node-bound capacity entry. */
         public NodeIoCapacity {
             bindingDigest = ManifestTokens.requireSha256Hex(bindingDigest, "node I/O binding digest");
             Objects.requireNonNull(capacity, "capacity");

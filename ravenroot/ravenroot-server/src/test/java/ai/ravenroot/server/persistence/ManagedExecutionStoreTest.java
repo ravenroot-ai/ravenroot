@@ -37,6 +37,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ManagedExecutionStoreTest {
     @Test
+    void stableSourceOwnershipIsDelegatedWithoutBypassingTheAdaptersExclusiveScope(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        try (var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(
+                directory.resolve("source.db"), java.time.Clock.systemUTC())) {
+            var managed = ManagedExecutionStore.protect(store, manifestStore(Map.of()));
+            try (var source = managed.openSourceCheckpointStore("tenant", "consumer")) {
+                var initial = source.checkpoint("mailbox").toCompletableFuture().join();
+                org.junit.jupiter.api.Assertions.assertEquals(1,
+                        source.advance(initial, 1).toCompletableFuture().join().deliveredThrough());
+                assertThrows(IllegalStateException.class,
+                        () -> managed.openSourceCheckpointStore("tenant", "consumer"));
+            }
+            try (var resumed = managed.openSourceCheckpointStore("tenant", "consumer")) {
+                org.junit.jupiter.api.Assertions.assertEquals(1,
+                        resumed.checkpoint("mailbox").toCompletableFuture().join().deliveredThrough());
+            }
+        }
+    }
+
+    @Test
     void everyExecutionStoreMethodHasAnExplicitManagedRoute() throws Exception {
         var field = ManagedExecutionStore.class.getDeclaredField("SAFE_DELEGATE_METHODS");
         field.setAccessible(true);

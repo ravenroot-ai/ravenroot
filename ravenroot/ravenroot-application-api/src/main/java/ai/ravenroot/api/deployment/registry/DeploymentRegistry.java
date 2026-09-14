@@ -1,6 +1,7 @@
 package ai.ravenroot.api.deployment.registry;
 
 import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.lifecycle.LifecycleCommand;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 
 import java.time.Duration;
@@ -224,11 +225,16 @@ public interface DeploymentRegistry extends AutoCloseable {
  * @param lease currently held lease, or {@code null} when unleased.
  * @param failure latest sanitized runtime failure, or {@code null}.
  * @param tombstone removal marker, or {@code null} for a live deployment.
+ * @param lastLifecycleCommand latest accepted lifecycle command, or {@code null}.
+ * @param lastLifecycleReason retained operator reason, or {@code null}.
+ * @param lastLifecycleCommandAt instant of the latest lifecycle command, or {@code null}.
  * @param createdAt instant at which this aggregate was created.
  * @param updatedAt instant of its most recent accepted mutation.
  */
     record Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation, long revision,
                   Desired desired, Observation observed, Lease lease, Failure failure, Tombstone tombstone,
+                  LifecycleCommand.Kind lastLifecycleCommand, String lastLifecycleReason,
+                  Instant lastLifecycleCommandAt,
                   Instant createdAt, Instant updatedAt) {
 /**
  * Preserves the aggregate ordering and requires the update instant not to precede creation.
@@ -238,6 +244,64 @@ public interface DeploymentRegistry extends AutoCloseable {
                     || generation < 0 || revision < 1 || desired == null || observed == null
                     || createdAt == null || updatedAt == null || updatedAt.isBefore(createdAt))
                 throw new IllegalArgumentException("invalid record");
+            if ((lastLifecycleCommand == null) != (lastLifecycleCommandAt == null)
+                    || lastLifecycleCommandAt != null
+                    && (lastLifecycleCommandAt.isBefore(createdAt) || lastLifecycleCommandAt.isAfter(updatedAt))) {
+                throw new IllegalArgumentException("invalid lifecycle command evidence");
+            }
+            if (lastLifecycleReason != null && (lastLifecycleReason.isBlank()
+                    || lastLifecycleReason.length() > LifecycleCommand.MAXIMUM_REASON_LENGTH
+                    || lastLifecycleReason.chars().anyMatch(Character::isISOControl))) {
+                throw new IllegalArgumentException("invalid lifecycle command reason");
+            }
+        }
+
+        /**
+         * Compatibility shape for records written before command reason was retained.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param latestVersion latest deployed version.
+         * @param generation desired-state generation.
+         * @param revision compare-and-set revision.
+         * @param desired requested lifecycle state.
+         * @param observed latest runtime observation.
+         * @param lease current lease, or {@code null}.
+         * @param failure latest failure, or {@code null}.
+         * @param tombstone removal marker, or {@code null}.
+         * @param lastLifecycleCommand latest lifecycle command, or {@code null}.
+         * @param lastLifecycleCommandAt command instant, or {@code null}.
+         * @param createdAt creation instant.
+         * @param updatedAt latest mutation instant.
+         */
+        public Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation,
+                      long revision, Desired desired, Observation observed, Lease lease, Failure failure,
+                      Tombstone tombstone, LifecycleCommand.Kind lastLifecycleCommand,
+                      Instant lastLifecycleCommandAt, Instant createdAt, Instant updatedAt) {
+            this(tenantId, deploymentId, latestVersion, generation, revision, desired, observed, lease,
+                    failure, tombstone, lastLifecycleCommand, null, lastLifecycleCommandAt,
+                    createdAt, updatedAt);
+        }
+
+        /**
+         * Compatibility shape for records written before command identity was retained.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param latestVersion latest deployed version.
+         * @param generation desired-state generation.
+         * @param revision compare-and-set revision.
+         * @param desired requested lifecycle state.
+         * @param observed latest runtime observation.
+         * @param lease current lease, or {@code null}.
+         * @param failure latest failure, or {@code null}.
+         * @param tombstone removal marker, or {@code null}.
+         * @param createdAt creation instant.
+         * @param updatedAt latest mutation instant.
+         */
+        public Record(String tenantId, DeploymentId deploymentId, long latestVersion, long generation,
+                      long revision, Desired desired, Observation observed, Lease lease, Failure failure,
+                      Tombstone tombstone, Instant createdAt, Instant updatedAt) {
+            this(tenantId, deploymentId, latestVersion, generation, revision, desired, observed, lease,
+                    failure, tombstone, null, null, null, createdAt, updatedAt);
         }
     }
 /**
@@ -273,9 +337,12 @@ public interface DeploymentRegistry extends AutoCloseable {
  * @param digest content digest of the graph artifact to deploy.
  * @param expectedRevision exact aggregate revision required for compare-and-set.
  * @param expectedGeneration deployment generation this mutation was decided against.
+ * @param lifecycleKind lifecycle command represented by the mutation, or {@code null}.
+ * @param lifecycleReason retained operator reason, or {@code null}.
  */
     record Command(String tenantId, DeploymentId deploymentId, String key, String digest,
-                   RevisionExpectation.Exactly expectedRevision, GenerationExpectation expectedGeneration) {
+                   RevisionExpectation.Exactly expectedRevision, GenerationExpectation expectedGeneration,
+                   LifecycleCommand.Kind lifecycleKind, String lifecycleReason) {
 /**
  * Requires a deployment target, an exact revision, and a stated generation expectation.
  */
@@ -283,6 +350,43 @@ public interface DeploymentRegistry extends AutoCloseable {
             validate(tenantId, key, digest);
             if (deploymentId == null || expectedRevision == null || expectedGeneration == null)
                 throw new IllegalArgumentException("invalid command");
+            if (lifecycleReason != null && (lifecycleKind == null || lifecycleReason.isBlank()
+                    || lifecycleReason.length() > LifecycleCommand.MAXIMUM_REASON_LENGTH
+                    || lifecycleReason.chars().anyMatch(Character::isISOControl))) {
+                throw new IllegalArgumentException("invalid lifecycle command reason");
+            }
+        }
+
+        /**
+         * Compatibility shape for lifecycle commands that predate retained reasons.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision exact aggregate revision.
+         * @param expectedGeneration expected lifecycle generation.
+         * @param lifecycleKind lifecycle command represented by the mutation.
+         */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation.Exactly expectedRevision,
+                       GenerationExpectation expectedGeneration, LifecycleCommand.Kind lifecycleKind) {
+            this(tenantId, deploymentId, key, digest, expectedRevision, expectedGeneration,
+                    lifecycleKind, null);
+        }
+
+        /**
+         * Compatibility shape for mutations that do not represent a lifecycle decision.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision exact aggregate revision.
+         * @param expectedGeneration expected lifecycle generation.
+         */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation.Exactly expectedRevision,
+                       GenerationExpectation expectedGeneration) {
+            this(tenantId, deploymentId, key, digest, expectedRevision, expectedGeneration, null, null);
         }
 
         /**
@@ -296,7 +400,7 @@ public interface DeploymentRegistry extends AutoCloseable {
          */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation.Exactly expectedRevision) {
-            this(tenantId, deploymentId, key, digest, expectedRevision, GenerationExpectation.any());
+            this(tenantId, deploymentId, key, digest, expectedRevision, GenerationExpectation.any(), null, null);
         }
 
         /**
@@ -310,7 +414,8 @@ public interface DeploymentRegistry extends AutoCloseable {
          */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation expectedRevision) {
-            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision), GenerationExpectation.any());
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
+                    GenerationExpectation.any(), null, null);
         }
 
         /**
@@ -324,7 +429,43 @@ public interface DeploymentRegistry extends AutoCloseable {
          */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration) {
-            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision), expectedGeneration);
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
+                    expectedGeneration, null);
+        }
+
+        /**
+         * Lifecycle-command shape accepting the shared revision expectation boundary.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision shared expectation narrowed to an exact revision.
+         * @param expectedGeneration expected lifecycle generation.
+         * @param lifecycleKind lifecycle command represented by the mutation.
+         */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration,
+                       LifecycleCommand.Kind lifecycleKind) {
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
+                    expectedGeneration, lifecycleKind);
+        }
+
+        /**
+         * Lifecycle-command shape with a retained reason at the shared revision boundary.
+         * @param tenantId stable tenant id.
+         * @param deploymentId stable deployment id.
+         * @param key client-chosen idempotency key.
+         * @param digest graph artifact digest.
+         * @param expectedRevision shared expectation narrowed to an exact revision.
+         * @param expectedGeneration expected lifecycle generation.
+         * @param lifecycleKind lifecycle command represented by the mutation.
+         * @param lifecycleReason retained operator reason, or {@code null}.
+         */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration,
+                       LifecycleCommand.Kind lifecycleKind, String lifecycleReason) {
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision),
+                    expectedGeneration, lifecycleKind, lifecycleReason);
         }
 
         private static RevisionExpectation.Exactly requireExact(RevisionExpectation expectation) {

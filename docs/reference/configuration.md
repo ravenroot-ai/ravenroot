@@ -151,6 +151,8 @@ the default below. Values are read at process startup and require a restart to c
 | `ravenroot.human-task.write-attempts` / `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | 3 | 1–32 | durable Human Task write retries |
 | `ravenroot.human-task.max-confirmation-prompt-bytes` / `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES` | 4,096 | 1–65,536 | UTF-8 bytes in a built-in confirmation prompt |
 | `ravenroot.human-task.max-confirmation-action-label-bytes` / `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES` | 64 | 1–256 | UTF-8 bytes in one built-in action label |
+| `ravenroot.human-task.default-review-text-bytes` / `RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES` | 65,536 | 1–1,048,576; no greater than `max-review-text-bytes` | default exact review-text ceiling authored into a confirmation |
+| `ravenroot.human-task.max-review-text-bytes` / `RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES` | 262,144 | 1–1,048,576 | largest graph-authored exact review-text ceiling |
 | `ravenroot.human-task.max-decision-comment-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES` | 4,096 | 1–16,384 | UTF-8 bytes in separately stored decision metadata |
 | `ravenroot.human-task.attention-poll-millis` / `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS` | 1,000 | 250–300,000 | client attention refresh base interval |
 | `ravenroot.human-task.attention-poll-backoff-max-millis` / `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS` | 10,000 | 250–300,000; no lower than `attention-poll-millis` | client attention refresh backoff ceiling |
@@ -208,6 +210,7 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_AUTH_ISSUER`, `RAVENROOT_AUTH_AUDIENCE`, `RAVENROOT_AUTH_JWKS_URI` | required nonblank OIDC values in `oidc` mode |
 | `RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM` | claim name; `token_kind` |
 | `RAVENROOT_AUTH_CLOCK_SKEW_SECONDS`, `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | whole seconds; `30`, `300` |
+| `RAVENROOT_AUTH_JWKS_CONNECT_TIMEOUT_SECONDS`, `RAVENROOT_AUTH_JWKS_REQUEST_TIMEOUT_SECONDS` | whole seconds from `1` through `300`; `3`, `5` |
 | `RAVENROOT_BROWSER_ALLOWED_ORIGINS` | comma-separated exact origins; defaults to loopback `http://127.0.0.1:<port>` and `http://localhost:<port>` |
 | `RAVENROOT_CONTAINER_LOOPBACK_ONLY`, `RAVENROOT_LOCAL_HOST_BIND_ADDRESS` | explicit container-proxy proof; `false` and absent. The latter must be exactly `127.0.0.1` when used. |
 | `RAVENROOT_TRUSTED_TLS_TERMINATOR` | strict Boolean; `false` |
@@ -232,6 +235,35 @@ default. Its complete limits, protocol contract, and secure proxy topology are d
 | `RAVENROOT_ARTIFACT_STORE_DIR` | `/opt/ravenroot/data/artifact-store` | Durable artifact lifecycle store |
 | `RAVENROOT_ARTIFACT_DUAL_CONTROL` | strict Boolean `false` | `true` requires a second approval authority |
 | `RAVENROOT_ARTIFACT_PROVENANCE` | `refusing` | `unverified` is an explicit unsafe-development opt-out; other values refuse |
+
+The runtime and Graal settings in the first six rows also have system-property spellings. Presence is
+resolved before parsing: the property wins even when blank, an absent property delegates to the
+environment, and an absent environment selects the typed default. The aliases are `ravenroot.program.runtime`,
+`ravenroot.graal.sandbox-supervisor`, `ravenroot.graal.java`, `ravenroot.graal.resource-cache-dir`,
+`ravenroot.program.timeout-ms`, and `ravenroot.program.max-heap-mb`. A blank runtime selector is
+invalid; blank supervisor means unavailable; blank Java, timeout, heap, and Ravenroot cache values
+select their documented defaults. A present non-string property refuses startup.
+
+The standard Graal property `polyglot.engine.userResourceCache` has precedence over the Ravenroot
+cache alias and environment and preserves its exact value, including blank or relative values. An
+explicit cache override is sent only after the supervisor attests the optional `resource-cache-v1`
+extension. A strict v1 supervisor keeps its prior invocation for legacy placement and refuses an
+explicit override before a worker or program source is started. Cache placement is live deployment
+configuration; it does not change execution compatibility fingerprints or persisted manifests.
+
+Program authoring uses one immutable policy in the server, core, authorization facade, transport,
+and connected editor. Its property/environment pairs are:
+
+| Property | Environment | Default and accepted range |
+|---|---|---|
+| `ravenroot.program.authoring.max-source-bytes` | `RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES` | `1048576`; `1..1048576` UTF-8 bytes |
+| `ravenroot.program.authoring.max-build-request-bytes` | `RAVENROOT_PROGRAM_AUTHORING_MAX_BUILD_REQUEST_BYTES` | `10485760`; at least the source cap and at most `10485760` bytes |
+| `ravenroot.program.authoring.max-programs-per-build` | `RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD` | `256`; `1..256` programs |
+
+These authoring properties use the same presence-first precedence; a selected blank value delegates
+to its typed default. The configuration endpoint emits schema version 2 with all three effective
+values. The editor accepts schema version 1 only through its frozen historical defaults, while every
+version 2 response must carry the current values.
 
 The Java baseline for `RAVENROOT_PROGRAM_TIMEOUT_MS` is `5000` ms. The Helm chart deliberately sets
 `programTimeoutMs: 15000` as its F30 cold-start bridge, while Compose uses a `30000` ms local-development

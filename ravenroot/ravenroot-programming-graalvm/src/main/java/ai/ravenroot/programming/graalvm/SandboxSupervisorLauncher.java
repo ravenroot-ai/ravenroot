@@ -11,6 +11,21 @@ public interface SandboxSupervisorLauncher {
 
     SandboxSupervisorSession launch(SandboxPolicy policy) throws IOException;
 
+    /** Optional cache-placement capability; legacy implementations must never silently ignore it. */
+    default void verifyPlacement(SandboxLaunchPlacement placement) throws IOException {
+        if (placement == null) throw new IllegalArgumentException("Launch placement is required");
+        if (placement.hasOverride()) throw new IOException("SANDBOX_RESOURCE_CACHE_UNSUPPORTED");
+    }
+
+    /** Keeps existing v1 implementations compatible for default placement and closed for overrides. */
+    default SandboxSupervisorSession launch(SandboxPolicy policy, SandboxLaunchPlacement placement) throws IOException {
+        if (placement == null) throw new IllegalArgumentException("Launch placement is required");
+        // Do not delegate this guard to overridable verification: a legacy launch implementation
+        // cannot apply placement merely because a custom verifier says it supports the extension.
+        if (placement.hasOverride()) throw new IOException("SANDBOX_RESOURCE_CACHE_UNSUPPORTED");
+        return launch(policy);
+    }
+
     /**
      * Identifies this launcher in the operational log when {@link #verifyCapability()} fails --
      * for the process launcher, the configured script's own path, so the operator reading the log does

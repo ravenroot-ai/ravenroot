@@ -55,21 +55,27 @@ class ServedConfigurationTest {
 
     @Test
     void refusesUnknownSchemasAndBoundsOutsideTheSharedSafetyContract() {
-        assertThrows(IllegalArgumentException.class, () -> new ServedConfiguration(2, 1));
-        assertThrows(IllegalArgumentException.class, () -> new ServedConfiguration(1, 0));
+        assertThrows(IllegalArgumentException.class, () -> new ServedConfiguration(3, 1));
+        assertThrows(IllegalArgumentException.class, () -> new ServedConfiguration(2, 0));
         assertThrows(IllegalArgumentException.class, () -> new ServedConfiguration(
-                1, GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES + 1));
+                2, GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES + 1));
     }
 
     private static void assertConfiguration(String encoded, String tenant, HumanTaskPolicy policy)
             throws IOException {
         JsonObject configuration = parseExactlyOneObject(encoded);
-        var expectedKeys = new HashSet<>(Set.of("schemaVersion", "graphDocumentMaxBytes"));
+        var expectedKeys = new HashSet<>(Set.of("schemaVersion", "graphDocumentMaxBytes", "programAuthoring"));
         if (tenant != null) expectedKeys.add("workspace");
         if (policy != null) expectedKeys.add("humanTasks");
         assertEquals(expectedKeys, configuration.keySet());
-        assertEquals(1, configuration.get("schemaVersion").getAsInt());
+        assertEquals(2, configuration.get("schemaVersion").getAsInt());
         assertEquals(32 * 1024 * 1024, configuration.get("graphDocumentMaxBytes").getAsInt());
+        JsonObject authoring = configuration.getAsJsonObject("programAuthoring");
+        assertEquals(Set.of("maxSourceBytes", "maxBuildRequestBytes", "maxProgramsPerBuild"),
+                authoring.keySet());
+        assertEquals(1024 * 1024, authoring.get("maxSourceBytes").getAsInt());
+        assertEquals(10 * 1024 * 1024, authoring.get("maxBuildRequestBytes").getAsInt());
+        assertEquals(256, authoring.get("maxProgramsPerBuild").getAsInt());
 
         if (tenant == null) {
             assertFalse(configuration.has("workspace"));
@@ -84,18 +90,23 @@ class ServedConfigurationTest {
         } else {
             JsonObject humanTasks = configuration.getAsJsonObject("humanTasks");
             assertEquals(Set.of("schemaVersion", "confirmationPresentationVersions",
+                    "reviewPresentationVersions", "reviewTextMaxUtf8Bytes",
                     "confirmationPromptMaxUtf8Bytes", "confirmationActionLabelMaxUtf8Bytes",
                     "commentMaxUtf8Bytes", "attentionPollMillis", "attentionBackoffMaxMillis",
                     "attentionPageSize", "attentionPageSizeMax"), humanTasks.keySet());
             assertEquals(1, humanTasks.get("schemaVersion").getAsInt());
             assertEquals(1, humanTasks.getAsJsonArray("confirmationPresentationVersions").size());
             assertEquals(1, humanTasks.getAsJsonArray("confirmationPresentationVersions").get(0).getAsInt());
+            assertEquals(1, humanTasks.getAsJsonArray("reviewPresentationVersions").size());
+            assertEquals(1, humanTasks.getAsJsonArray("reviewPresentationVersions").get(0).getAsInt());
             var confirmation = policy.confirmation();
             assertEquals(confirmation.maxPromptUtf8Bytes(),
                     humanTasks.get("confirmationPromptMaxUtf8Bytes").getAsInt());
             assertEquals(confirmation.maxActionLabelUtf8Bytes(),
                     humanTasks.get("confirmationActionLabelMaxUtf8Bytes").getAsInt());
             assertEquals(confirmation.maxCommentUtf8Bytes(), humanTasks.get("commentMaxUtf8Bytes").getAsInt());
+            assertEquals(confirmation.maxReviewTextUtf8Bytes(),
+                    humanTasks.get("reviewTextMaxUtf8Bytes").getAsInt());
             assertEquals(confirmation.pollAfterMillis(), humanTasks.get("attentionPollMillis").getAsInt());
             assertEquals(confirmation.pollBackoffMaxMillis(),
                     humanTasks.get("attentionBackoffMaxMillis").getAsInt());

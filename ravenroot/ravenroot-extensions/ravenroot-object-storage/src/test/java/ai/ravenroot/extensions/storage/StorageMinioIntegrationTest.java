@@ -66,6 +66,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -121,10 +122,21 @@ class StorageMinioIntegrationTest {
             clock.advance(LEASE_TTL.plusSeconds(1));
 
             NodePackageServices restartedServices = services(minio);
+            // This manual recovery dispatcher owns its direct service instance. Catalog registration
+            // binds a different instance to its policy registry, matching the production fail-closed seam.
+            NodePackageServices catalogServices = services(minio);
+            RepeatabilityDeclarations recoveryDeclarations = declarations(profile, catalogServices);
             Map<?, ?> pageTwo;
             try (var reopened = new SqliteExecutionStore(database, clock)) {
                 pageTwo = list(profile, restartedServices, cursor, 2);
                 assertFalse(pageTwo.containsKey("cursor"));
+
+                CompletionException unboundCatalogDispatch = assertThrows(CompletionException.class,
+                        () -> listAction(profile, catalogServices, 100).handle(StorageTestSupport.message(TENANT,
+                                Map.of("version", "object.list.v1"))).toCompletableFuture().join());
+                assertEquals(StorageException.Code.CAPACITY_UNAVAILABLE,
+                        ((StorageException) unboundCatalogDispatch.getCause()).code(),
+                        "catalog-bound services must fail closed for a message outside their policy registry");
 
                 AtomicReference<Map<?, ?>> recoveredProviderResult = new AtomicReference<>();
                 NodeAction recoveredList = listAction(profile, restartedServices, 100);
@@ -137,7 +149,7 @@ class StorageMinioIntegrationTest {
                     }
                 };
                 List<RecoveryOutcome> outcomes = new ExecutionRecoveryService(reopened, List.of(TENANT),
-                        "replacement-runtime", 10, LEASE_TTL, declarations(profile, restartedServices), dispatcher)
+                        "replacement-runtime", 10, LEASE_TTL, recoveryDeclarations, dispatcher)
                         .sweepOnce();
                 assertInstanceOf(RecoveryOutcome.ReDispatched.class, outcomes.stream()
                         .filter(outcome -> outcome.key().equals(abandoned.key)).findFirst().orElseThrow());

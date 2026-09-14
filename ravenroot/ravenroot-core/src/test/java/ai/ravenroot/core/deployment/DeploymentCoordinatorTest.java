@@ -204,6 +204,23 @@ class DeploymentCoordinatorTest {
                         + "was attempted, so idempotence does not depend on the runtime being idempotent");
     }
 
+    @Test
+    void exactGenerationRetryReplaysBeforeReportingThatItsAcceptedMoveMadeTheGenerationStale() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "exact-replay");
+        DeploymentId id = fixture.idOf(target);
+        var coordinator = fixture.coordinator("owner-a");
+        coordinator.submit(TENANT, id, new LifecycleCommand.Start("s", 1,
+                DeploymentRegistry.UpdateStrategy.STOP_FIRST), GenerationExpectation.exactly(0));
+        var cancel = new LifecycleCommand.Cancel("same-key", "duplicate delivery");
+
+        var first = coordinator.submit(TENANT, id, cancel, GenerationExpectation.exactly(1));
+        var second = coordinator.submit(TENANT, id, cancel, GenerationExpectation.exactly(1));
+
+        assertEquals(first, assertInstanceOf(DeploymentCommandOutcome.Replayed.class, second).original());
+        assertEquals(2, fixture.record(TENANT, id).generation());
+    }
+
     /**
      * Issue 91 criterion 5, second half: two clients that reuse one key for different decisions are
      * told so, rather than one of them being handed the other's outcome.

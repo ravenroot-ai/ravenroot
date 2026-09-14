@@ -3,8 +3,8 @@ package ai.ravenroot.extensions.github;
 import java.util.Optional;
 
 interface GithubOperationStore extends AutoCloseable {
-    Lease begin(String tenant, String profile, String kind, String key, String requestDigest, long deadlineEpochMs,
-                BeginPolicy policy);
+    Lease begin(String tenant, String profile, String kind, String key, String requestDigest,
+                String profileContractDigest, long deadlineEpochMs, BeginPolicy policy);
     Optional<Record> find(String tenant, String profile, String kind, String key);
     void save(Lease lease, String state, long generation, long attempts, long deadlineEpochMs,
               String remoteId, String detailDigest, String resultJson, boolean terminal);
@@ -22,6 +22,7 @@ interface GithubOperationStore extends AutoCloseable {
 
     record Record(String state, long generation, long attempts, long deadlineEpochMs,
                   String remoteId, String detailDigest, String resultJson, String requestDigest,
+                  String profileContractDigest,
                   boolean owned, boolean expiredLease, long updatedEpochMs) {
         boolean terminal() { return SetNames.TERMINAL.contains(state); }
     }

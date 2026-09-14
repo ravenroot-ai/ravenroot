@@ -141,6 +141,20 @@ public final class DeploymentReconciler {
         return List.copyOf(outcomes);
     }
 
+    /** Reconciles a newly re-hosted runtime even when an old runtime reported this generation. */
+    public DeploymentReconcileOutcome reconcileHosted(String tenantId,
+                                                       ai.ravenroot.api.deployment.DeploymentId deploymentId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(deploymentId, "deploymentId");
+        Optional<Record> found = DeploymentOwnership.await(registry.get(tenantId, deploymentId));
+        if (found.isEmpty() || found.orElseThrow().tombstone() != null) {
+            return new DeploymentReconcileOutcome.Deferred(
+                    tenantId, deploymentId, 0, "deployment is absent or removed");
+        }
+        return singleFlight.inFlight(tenantId, deploymentId,
+                () -> reconcile(found.orElseThrow(), true));
+    }
+
     /**
      * Whether durable intent is ahead of durable evidence for this deployment.
      *
@@ -155,12 +169,16 @@ public final class DeploymentReconciler {
     }
 
     private DeploymentReconcileOutcome reconcile(Record read) {
+        return reconcile(read, false);
+    }
+
+    private DeploymentReconcileOutcome reconcile(Record read, boolean hostedRuntime) {
         // Re-read under the deployment's own single-flight: the page was assembled before this
         // process took the lock, so a command accepted in between would otherwise be applied against
         // a revision that has already moved, and every such attempt would be a wasted CAS refusal.
         Optional<Record> current = DeploymentOwnership.await(
                 registry.get(read.tenantId(), read.deploymentId()));
-        if (current.isEmpty() || !outstanding(current.get())) {
+        if (current.isEmpty() || !hostedRuntime && !outstanding(current.get())) {
             return new DeploymentReconcileOutcome.Deferred(read.tenantId(), read.deploymentId(),
                     read.generation(), "already current");
         }
@@ -182,7 +200,7 @@ public final class DeploymentReconciler {
 
         long generation = owned.generation();
         try {
-            LifecycleEffects.converge(target.get(), owned.desired(), generation, drainBound);
+            converge(target.get(), owned, generation, hostedRuntime);
         } catch (RuntimeException failure) {
             ownership.report(owned, failure);
             return new DeploymentReconcileOutcome.Failed(record.tenantId(), record.deploymentId(),
@@ -192,5 +210,30 @@ public final class DeploymentReconciler {
         Record evidenced = ownership.observe(owned, target.get(), generation);
         return new DeploymentReconcileOutcome.Reconciled(record.tenantId(), record.deploymentId(),
                 generation, evidenced.lease().fence());
+    }
+
+    private void converge(DeploymentLifecycleTarget target, Record record, long generation,
+                          boolean hostedRuntime) {
+        if (!hostedRuntime && record.lastLifecycleCommand() != null) {
+            switch (record.lastLifecycleCommand()) {
+                case CANCEL -> {
+                    DeploymentOwnership.await(target.barrier(generation));
+                    return;
+                }
+                case RESTART -> {
+                    DeploymentOwnership.await(target.terminateDomain(generation));
+                    DeploymentOwnership.await(target.start(record.latestVersion(), generation));
+                    return;
+                }
+                default -> { }
+            }
+        }
+        DeploymentLifecycleTarget.Reading reading = DeploymentOwnership.await(target.observe());
+        if ((record.desired().kind() == DeploymentRegistry.DesiredKind.PAUSED
+                || record.desired().kind() == DeploymentRegistry.DesiredKind.DRAINED)
+                && reading.state() == DeploymentRegistry.ObservedKind.COLD) {
+            DeploymentOwnership.await(target.start(record.latestVersion(), generation));
+        }
+        LifecycleEffects.converge(target, record.desired(), generation, drainBound);
     }
 }

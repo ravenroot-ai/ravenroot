@@ -160,7 +160,7 @@ public final class ReplicaTopologyStartupCheck {
         // one. Listed unconditionally for the same reason as the two above: the variable selects
         // where it is written, never whether it is.
         authorities.add("audit trail");
-        if ("true".equals(environment.get("RAVENROOT_EMBED_ENABLED"))) {
+        if (ai.ravenroot.server.embed.EmbedBrowserConfiguration.enabledFromEnvironment(environment)) {
             // Conditional, unlike the four above, and already refused on its own terms by
             // EmbedStartupCheck. Named here as well so an operator who reads this refusal sees the
             // whole list rather than fixing four things and meeting a fifth.

@@ -182,6 +182,11 @@ Set `RAVENROOT_GITHUB_CONFIG` to canonical Base64 of strict JSON. Unknown fields
 Base64, unsafe identifiers, plaintext API origins, overlapping authority, excessive limits, and
 incomplete profiles fail package activation. The top-level shape is:
 
+The system property `ravenroot.github.config` is the corresponding process-level carrier. Property
+presence takes precedence over the environment; a present non-string or blank property refuses
+configuration rather than falling through. The encoded document contains credential binding and
+reference identifiers, never credential values.
+
 ```json
 {
   "authority": {
@@ -256,6 +261,13 @@ The package-level hard maxima are 16 MiB managed ingress, 2 MiB GitHub request/r
 concurrent operations per profile, 1,000 workflow polls, 60 seconds between polls, one million
 retained operations, and one year of retained package evidence. Profiles may only lower those
 bounds; graphs cannot change them.
+
+Each durable operation stores a separate versioned digest of the profile fields that determine its
+repository, workflow, project, release, transition, and retry semantics. Restart refuses a legacy
+unbound row or any semantic mismatch before replay, takeover, pruning, or terminal Project rollover,
+and leaves the existing row unchanged. Credential binding and secret references are deliberately
+excluded from that digest so credential rotation remains live authorization and cannot disclose or
+pin secret material.
 
 The current Node SDK `NodeTypeDescriptor` exposes behavior identity, properties, capabilities, and
 execution flags, but has no machine-readable input/output payload-schema fields. This bundle instead

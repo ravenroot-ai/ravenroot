@@ -1,0 +1,187 @@
+package ai.ravenroot.core.process;
+
+import ai.ravenroot.api.application.RavenrootApplication;
+import ai.ravenroot.api.persistence.EventEnvelope;
+import ai.ravenroot.api.persistence.ExecutionBatch;
+import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.ExecutionStoreException;
+import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.IdempotencyWrite;
+import ai.ravenroot.api.persistence.OpaquePayload;
+import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.core.humantask.HumanTaskService;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+/** Durable, process-scoped lifecycle command authority over every contained traversal. */
+public final class ProcessLifecycleService {
+    private static final String CONTENT_TYPE = "application/vnd.ravenroot.process-lifecycle+json";
+    private static final Duration IDEMPOTENCY_RETENTION = Duration.ofDays(7);
+
+    public enum Command { PAUSE, RESUME, CANCEL, DRAIN, STOP }
+    public enum State { RUNNING, PAUSED, CANCELLED, DRAINING, STOPPED }
+    public enum Code { APPLIED, REPLAYED, STALE_GENERATION, NOT_FOUND, TERMINAL, IDEMPOTENCY_CONFLICT,
+        PARTIALLY_SETTLED }
+    public record TraversalOutcome(UUID traversalId, String outcome) { }
+    public record Result(Code code, UUID processInstanceId, long generation, State state,
+                         List<TraversalOutcome> traversals, String reason) {
+        public Result { traversals = List.copyOf(traversals); reason = reason == null ? "" : reason; }
+    }
+
+    private final ExecutionStore store;
+    private final RavenrootApplication application;
+    private final HumanTaskService humanTasks;
+    private final Clock clock;
+
+    public ProcessLifecycleService(ExecutionStore store, RavenrootApplication application,
+                                   HumanTaskService humanTasks, Clock clock) {
+        this.store = Objects.requireNonNull(store, "store");
+        this.application = Objects.requireNonNull(application, "application");
+        this.humanTasks = humanTasks;
+        this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    public Result command(String tenantId, UUID processInstanceId, Command command,
+                          long expectedGeneration, String idempotencyKey, String reason) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        Objects.requireNonNull(command, "command");
+        if (expectedGeneration < 1) throw new IllegalArgumentException("expected generation must be positive");
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 200) {
+            throw new IllegalArgumentException("a bounded idempotency key is required");
+        }
+        reason = reason == null ? "" : reason.strip();
+        if (reason.length() > 500) throw new IllegalArgumentException("reason is too long");
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        var inventory = await(store.findProcessInstance(key)).orElse(null);
+        if (inventory == null) return new Result(Code.NOT_FOUND, processInstanceId, 0,
+                State.RUNNING, List.of(), reason);
+        if (inventory.status().terminal()) return new Result(Code.TERMINAL, processInstanceId,
+                inventory.revision(), state(command), List.of(), reason);
+
+        byte[] requestBytes = (processInstanceId + "|" + command + "|" + expectedGeneration + "|" + reason)
+                .getBytes(StandardCharsets.UTF_8);
+        OpaquePayload fingerprint = OpaquePayload.of(
+                ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(requestBytes)
+                        .getBytes(StandardCharsets.UTF_8), "text/plain");
+        OpaquePayload outcome = payload(command, expectedGeneration + 1);
+        UUID eventTraversalId = await(store.load(key)).state().traversals().keySet().stream()
+                .findFirst().orElse(processInstanceId);
+        boolean replay = await(store.lookupIdempotency(tenantId, idempotencyKey, clock.instant())).isPresent();
+        if (!replay && inventory.revision() != expectedGeneration) {
+            return new Result(Code.STALE_GENERATION, processInstanceId, inventory.revision(),
+                    currentState(key), List.of(), reason);
+        }
+        try {
+            var stored = await(store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(expectedGeneration))
+                    .recordIdempotency(new IdempotencyWrite(idempotencyKey, fingerprint, outcome,
+                            IDEMPOTENCY_RETENTION, clock.instant()))
+                    .publish(EventEnvelope.of(UUID.randomUUID(), tenantId, "PROCESS_" + command.name(),
+                            processInstanceId, eventTraversalId, null, null, null, idempotencyKey,
+                            inventory.graphVersionPin().reference(), clock.instant(), outcome))
+                    .build()));
+            var traversalOutcomes = settle(tenantId, processInstanceId, command, idempotencyKey);
+            boolean partial = traversalOutcomes.stream().anyMatch(value -> value.outcome().startsWith("NOT_"));
+            return new Result(partial ? Code.PARTIALLY_SETTLED : replay ? Code.REPLAYED : Code.APPLIED,
+                    processInstanceId, stored.revision(), state(command), traversalOutcomes, reason);
+        } catch (ExecutionStoreException failure) {
+            if (failure.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict) {
+                var current = await(store.findProcessInstance(key)).orElse(inventory);
+                return new Result(Code.STALE_GENERATION, processInstanceId, current.revision(),
+                        currentState(key), List.of(), reason);
+            }
+            if (failure.failure() instanceof ExecutionStoreFailure.IdempotencyConflict) {
+                return new Result(Code.IDEMPOTENCY_CONFLICT, processInstanceId, inventory.revision(),
+                        currentState(key), List.of(), reason);
+            }
+            throw failure;
+        }
+    }
+
+    /** Durable admission reading used by asynchronous process re-entry. */
+    public boolean admitsReentry(String tenantId, UUID processInstanceId) {
+        State state = currentState(new ExecutionKey(tenantId, processInstanceId));
+        return state == State.RUNNING || state == State.DRAINING;
+    }
+
+    public State currentState(ExecutionKey key) {
+        long after = 0;
+        State latest = State.RUNNING;
+        while (true) {
+            var page = await(store.readJournal(key.tenantId(), after, 500));
+            if (page.isEmpty()) return latest;
+            for (var record : page) {
+                after = record.streamSequence();
+                var event = record.envelope();
+                if (!key.processInstanceId().equals(event.processInstanceId())) continue;
+                latest = switch (event.eventType()) {
+                    case "PROCESS_PAUSE" -> State.PAUSED;
+                    case "PROCESS_RESUME" -> State.RUNNING;
+                    case "PROCESS_CANCEL" -> State.CANCELLED;
+                    case "PROCESS_DRAIN" -> State.DRAINING;
+                    case "PROCESS_STOP" -> State.STOPPED;
+                    default -> latest;
+                };
+            }
+            if (page.size() < 500) return latest;
+        }
+    }
+
+    private List<TraversalOutcome> settle(String tenantId, UUID processInstanceId, Command command,
+                                          String correlationId) {
+        var stored = await(store.load(new ExecutionKey(tenantId, processInstanceId)));
+        var outcomes = new ArrayList<TraversalOutcome>();
+        if (command == Command.CANCEL && humanTasks != null) {
+            humanTasks.cancelProcessTasks(tenantId, processInstanceId, correlationId);
+            stored = await(store.load(new ExecutionKey(tenantId, processInstanceId)));
+        }
+        for (var traversal : stored.state().traversals().values()) {
+            if (traversal.status().terminal()) continue;
+            boolean changed = switch (command) {
+                case PAUSE -> application.pauseTraversal(traversal.traversalId());
+                case RESUME -> application.resumeTraversal(tenantId, traversal.traversalId());
+                case CANCEL -> application.cancelTraversal(tenantId, traversal.traversalId());
+                case DRAIN, STOP -> true;
+            };
+            String value = changed ? command.name() : switch (command) {
+                case PAUSE -> application.executionPaused(tenantId, traversal.traversalId())
+                        ? "ALREADY_PAUSED" : "NOT_ACTIVE";
+                case RESUME -> "NOT_PAUSED";
+                case CANCEL -> traversal.status().terminal() ? "ALREADY_TERMINAL" : "NOT_ACTIVE";
+                case DRAIN, STOP -> command.name();
+            };
+            outcomes.add(new TraversalOutcome(traversal.traversalId(), value));
+        }
+        if (command == Command.STOP) application.stopProcessInvocations(tenantId, processInstanceId);
+        return outcomes;
+    }
+
+    private static State state(Command command) {
+        return switch (command) {
+            case PAUSE -> State.PAUSED;
+            case RESUME -> State.RUNNING;
+            case CANCEL -> State.CANCELLED;
+            case DRAIN -> State.DRAINING;
+            case STOP -> State.STOPPED;
+        };
+    }
+
+    private static OpaquePayload payload(Command command, long generation) {
+        return OpaquePayload.of(("{\"generation\":" + generation + ",\"state\":\"" + state(command)
+                + "\"}").getBytes(StandardCharsets.UTF_8), CONTENT_TYPE);
+    }
+
+    private static <T> T await(java.util.concurrent.CompletionStage<T> stage) {
+        return stage.toCompletableFuture().join();
+    }
+}

@@ -12,6 +12,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -79,8 +80,12 @@ class EmbedBrowserConfigurationTest {
 
     @Test
     void invalidBooleanCapacityAndTtlFailAtStartup() {
-        assertThrows(IllegalArgumentException.class,
-                () -> configuration(Map.of("RAVENROOT_EMBED_ENABLED", "yes")));
+        for (String invalid : java.util.List.of("yes", "TRUE", " true", "false ", "")) {
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> configuration(Map.of("RAVENROOT_EMBED_ENABLED", invalid)));
+            assertEquals("RAVENROOT_EMBED_ENABLED must be true or false", failure.getMessage());
+            assertNull(failure.getCause());
+        }
         var enabled = Map.of(
                 "RAVENROOT_EMBED_ENABLED", "true",
                 "RAVENROOT_EMBED_VIEWER_ORIGIN", "https://viewer.example",

@@ -2,6 +2,7 @@ package ai.ravenroot.server;
 
 import ai.ravenroot.api.programming.GeneratedArtifact;
 import ai.ravenroot.api.programming.ProgramAdmission;
+import ai.ravenroot.api.programming.ProgramAuthoringLimits;
 import ai.ravenroot.api.programming.ProgramRequest;
 import ai.ravenroot.api.programming.ProgramRuntime;
 import ai.ravenroot.api.security.Role;
@@ -158,6 +159,48 @@ class ContentAddressedProgramBuildHttpIntegrationTest {
         }
     }
 
+    @Test
+    void buildRouteMakesTheSelectedRequestAndUtf8SourceCeilingsReachable() throws Exception {
+        String defaultBoundarySource = "a".repeat(ProgramAuthoringLimits.DEFAULTS.maxSourceBytes());
+        String defaultBoundaryBody = one("default-boundary", "javascript", defaultBoundarySource, "test payload");
+        assertTrue(defaultBoundaryBody.getBytes(StandardCharsets.UTF_8).length
+                        > ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes(),
+                "the HTTP proof must cross the generic payload envelope that used to preempt authoring policy");
+        var defaultRuntime = new CountingRuntime();
+        try (var fixture = new Fixture(storeDirectory.resolve("default-boundary"), defaultRuntime,
+                false, ProgramAuthoringLimits.DEFAULTS)) {
+            assertEquals(200, fixture.build(defaultBoundaryBody).statusCode());
+            assertEquals(1, defaultRuntime.validations.get());
+        }
+
+        String requestBoundarySource = "b".repeat(300 * 1024);
+        String requestBoundaryBody = one("request-boundary", "javascript", requestBoundarySource, "test payload");
+        int requestBoundaryBytes = requestBoundaryBody.getBytes(StandardCharsets.UTF_8).length;
+        var exactRuntime = new CountingRuntime();
+        try (var fixture = new Fixture(storeDirectory.resolve("request-exact"), exactRuntime, false,
+                new ProgramAuthoringLimits(300 * 1024, requestBoundaryBytes, 1))) {
+            assertEquals(200, fixture.build(requestBoundaryBody).statusCode());
+            assertEquals(1, exactRuntime.validations.get());
+        }
+        var narrowedRuntime = new CountingRuntime();
+        try (var fixture = new Fixture(storeDirectory.resolve("request-one-over"), narrowedRuntime, false,
+                new ProgramAuthoringLimits(300 * 1024, requestBoundaryBytes - 1, 1))) {
+            assertEquals(413, fixture.postBuild(requestBoundaryBody).statusCode());
+            assertEquals(0, narrowedRuntime.validations.get(),
+                    "an over-limit build envelope must refuse before artifact work");
+        }
+
+        var utf8Runtime = new CountingRuntime();
+        try (var fixture = new Fixture(storeDirectory.resolve("utf8-boundary"), utf8Runtime, false,
+                new ProgramAuthoringLimits(7, 1024, 1))) {
+            assertEquals(200, fixture.build(one("utf8", "javascript", "€€a", "test payload")).statusCode());
+            assertEquals(400, fixture.postBuild(one("utf8-wide", "javascript", "€€aa", "test payload"))
+                    .statusCode());
+            assertEquals(1, utf8Runtime.validations.get(),
+                    "UTF-8 source bytes must refuse before a second artifact build starts");
+        }
+    }
+
     private static String one(String nodeId, String language, String source, String payload) {
         return "{\"programs\":[{\"nodeId\":\"" + nodeId + "\",\"language\":\"" + language
                 + "\",\"source\":\"" + source + "\",\"testPayload\":\"" + payload + "\"}]}";
@@ -267,13 +310,20 @@ class ContentAddressedProgramBuildHttpIntegrationTest {
         }
 
         private Fixture(Path directory, ProgramRuntime runtime, boolean dualControl) {
+            this(directory, runtime, dualControl, ProgramAuthoringLimits.DEFAULTS);
+        }
+
+        private Fixture(Path directory, ProgramRuntime runtime, boolean dualControl,
+                        ProgramAuthoringLimits authoringLimits) {
             engine = new PekkoExecutionEngine("program-build-http-test");
             var artifacts = SqliteArtifactRegistry.openUnder(directory, artifact -> { });
             var environment = new BehaviorEnvironment(new ModelProviderRegistry(), new AgentRuntimeRegistry(),
                     artifacts, runtime, ignored -> Optional.empty(),
                     ignored -> new ToolDecision(ToolDecision.Disposition.ALLOW, "test", ""),
                     OutboundHttpPolicy.disabled());
-            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), environment);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                    ai.ravenroot.core.runtime.BehaviorRegistry.standard(environment), artifacts, runtime,
+                    authoringLimits);
             application.configureArtifactDualControl(dualControl);
             server = new RavenrootServer(application,
                     new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, authenticator(), dualControl);
@@ -282,11 +332,7 @@ class ContentAddressedProgramBuildHttpIntegrationTest {
         }
 
         private HttpResponse<String> build(String body) throws Exception {
-            HttpResponse<String> started = client.send(HttpRequest.newBuilder(URI.create(base + "/build"))
-                            .header("Authorization", "Bearer creator")
-                            .header("Content-Type", "application/json")
-                            .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> started = postBuild(body);
             String buildId = started.body().split("\"buildId\":\"")[1].split("\"")[0];
             HttpResponse<String> status = started;
             for (int attempt = 0; attempt < 200; attempt++) {
@@ -299,6 +345,14 @@ class ContentAddressedProgramBuildHttpIntegrationTest {
                 Thread.sleep(10);
             }
             return status;
+        }
+
+        private HttpResponse<String> postBuild(String body) throws Exception {
+            return client.send(HttpRequest.newBuilder(URI.create(base + "/build"))
+                            .header("Authorization", "Bearer creator")
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.ofString());
         }
 
         private HttpResponse<String> retire(String id) throws Exception {

@@ -5,6 +5,7 @@ import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpointException;
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -45,6 +46,20 @@ class GraphExecutionContinuationCheckpointTest {
         assertReason(GraphExecutionContinuationCheckpointException.Reason.UNSAFE_REENTRY_STATE,
                 () -> GraphExecutionContinuationCheckpoint.read(
                         GraphExecutionContinuationCheckpoint.VERSION, noReservedHop));
+
+        byte[] versionTwo = versionTwoCheckpoint(new byte[] {4, 2});
+        assertArrayEquals(new byte[] {4, 2},
+                GraphExecutionContinuationCheckpoint.read(2, versionTwo).inner());
+        assertReason(GraphExecutionContinuationCheckpointException.Reason.MALFORMED,
+                () -> GraphExecutionContinuationCheckpoint.read(
+                        GraphExecutionContinuationCheckpoint.VERSION, versionTwo));
+    }
+
+    private static byte[] versionTwoCheckpoint(byte[] inner) {
+        return ByteBuffer.allocate(48 + inner.length)
+                .putInt(0x52524232).putInt(1).putInt(1)
+                .putLong(3).putLong(2).putLong(1)
+                .putInt(1).putInt(0).putInt(inner.length).put(inner).array();
     }
 
     private static void assertReason(GraphExecutionContinuationCheckpointException.Reason expected,

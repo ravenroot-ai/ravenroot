@@ -5,6 +5,8 @@ import ai.ravenroot.api.application.NodeInvocationStatus;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
+import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadJson;
@@ -32,6 +34,7 @@ import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskSettlement;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -45,6 +48,7 @@ import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
 import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
+import ai.ravenroot.core.runtime.GraphRunner;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -105,7 +109,8 @@ public final class HumanTaskService {
     }
 
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
-        return bindLive(key, recorder, null);
+        return bindLive(key, recorder,
+                (java.util.function.Function<NodeMessage, GraphExecutionBudgetSnapshot>) null);
     }
 
     /** Binds the recorder and trusted graph-budget source used by durable production re-entry. */
@@ -118,7 +123,23 @@ public final class HumanTaskService {
                 || !key.processInstanceId().equals(recorder.processInstanceId())) {
             throw new IllegalArgumentException("recorder belongs to a different execution");
         }
-        var binding = new LiveBinding(recorder, budgetSnapshot);
+        var binding = new LiveBinding(recorder, budgetSnapshot, null);
+        if (liveRecorders.putIfAbsent(key, binding) != null) {
+            throw new IllegalStateException("a live recorder is already bound for this execution");
+        }
+        return () -> liveRecorders.remove(key, binding);
+    }
+
+    /** Binds the runner that owns both the graph budget and pending join-arrival checkpoint. */
+    public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder, GraphRunner runner) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(recorder, "recorder");
+        Objects.requireNonNull(runner, "runner");
+        if (!key.tenantId().equals(recorder.tenantId())
+                || !key.processInstanceId().equals(recorder.processInstanceId())) {
+            throw new IllegalArgumentException("recorder belongs to a different execution");
+        }
+        var binding = new LiveBinding(recorder, runner::continuationBudget, runner);
         if (liveRecorders.putIfAbsent(key, binding) != null) {
             throw new IllegalStateException("a live recorder is already bound for this execution");
         }
@@ -145,14 +166,23 @@ public final class HumanTaskService {
         if (binding == null) return new HumanTaskResult(HumanTaskResult.Code.UNAVAILABLE, null, null);
         ExecutionRecorder recorder = binding.recorder();
         UUID taskId = taskId(message);
+        DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         Instant now = clock.instant();
         int continuationVersion = 1;
         byte[] continuation = new byte[0];
-        if (binding.budgetSnapshot() != null) {
+        if (binding.runner() != null) {
+            continuation = binding.runner().humanTaskContinuation(message, 1, new byte[0]);
+            continuationVersion = GraphExecutionContinuationCheckpoint.VERSION;
+        } else if (binding.budgetSnapshot() != null) {
             continuation = GraphExecutionContinuationCheckpoint.write(
                     1, new byte[0], binding.budgetSnapshot().apply(message));
             continuationVersion = GraphExecutionContinuationCheckpoint.VERSION;
         }
+        // Do not re-read a retry's mutable source path. The deterministic identity owns the first
+        // admitted bytes, including when the later payload is missing, non-text, or oversized.
+        var reviewPresentation = existing == null
+                ? definition.reviewDefinition().presentation(message.payload())
+                : existing.request().reviewPresentation();
         var registration = new HumanTaskRegistration(taskId, message.traversalId(),
                 message.invocationId(), message.attemptId(), message.nodeId(), taskId.toString(),
                 "human-task:" + message.attemptId(), definition.metadata(), definition.responseSchema(),
@@ -163,9 +193,11 @@ public final class HumanTaskService {
                 ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation),
                 definition.confirmationPresentation(), definition.confirmationPresentation().embedded()
                         ? policy.confirmationLimits()
-                        : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC);
-        DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
+                        : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC,
+                reviewPresentation);
         if (existing != null) {
+            // A deterministic retry reuses the first committed review bytes even when its
+            // upstream payload has since changed. Nothing re-derives or overwrites the review.
             return new HumanTaskResult(existing.request().sameRequest(registration)
                     ? HumanTaskResult.Code.ALREADY_APPLIED : HumanTaskResult.Code.ALREADY_SETTLED,
                     existing, resumeTraversalOf(existing));
@@ -201,7 +233,8 @@ public final class HumanTaskService {
 
     private record LiveBinding(ExecutionRecorder recorder,
                                java.util.function.Function<NodeMessage,
-                                       GraphExecutionBudgetSnapshot> budgetSnapshot) { }
+                                       GraphExecutionBudgetSnapshot> budgetSnapshot,
+                               GraphRunner runner) { }
 
     public HumanTaskPage inbox(RequestContext context, HumanTaskQuery query) {
         Objects.requireNonNull(context, "context");
@@ -211,6 +244,350 @@ public final class HumanTaskService {
                     + policy.inboxMaxPageSize());
         }
         return await(store.listHumanTasks(context.tenantId(), query));
+    }
+
+    /** Administrative consistency classes, ordered from ordinary to unsafe. */
+    public enum AdminClassification { ACTIONABLE, TERMINAL, ORPHANED, NON_RESUMABLE }
+
+    /** A payload-free diagnostic row. Timer values describe the task-owned timer contract only. */
+    public record AdminItem(UUID taskId, HumanTaskStatus status, long generation,
+                            AdminClassification classification, String reason,
+                            String tenantId, String graphVersion, Optional<String> deploymentId,
+                            UUID processInstanceId, UUID traversalId, String nodeId,
+                            String processStatus, String traversalStatus, String handlerStatus,
+                            String escalationTimer, String expiryTimer,
+                            Instant createdAt, Instant expiresAt) { }
+
+    /** Bounded administrative selector. At least one narrowing selector is required for mutation. */
+    public record AdminQuery(Optional<UUID> taskId, Set<HumanTaskStatus> statuses,
+                             Optional<String> deploymentId, Optional<String> graphVersion,
+                             Optional<UUID> processInstanceId, Optional<UUID> traversalId,
+                             Optional<String> nodeId, Set<AdminClassification> classifications,
+                             Optional<Instant> createdBefore, Optional<Instant> expiresBefore,
+                             Optional<UUID> cursor, int limit) {
+        public AdminQuery {
+            taskId = taskId == null ? Optional.empty() : taskId;
+            statuses = statuses == null ? Set.of() : Set.copyOf(statuses);
+            deploymentId = deploymentId == null ? Optional.empty() : deploymentId;
+            graphVersion = graphVersion == null ? Optional.empty() : graphVersion;
+            processInstanceId = processInstanceId == null ? Optional.empty() : processInstanceId;
+            traversalId = traversalId == null ? Optional.empty() : traversalId;
+            nodeId = nodeId == null ? Optional.empty() : nodeId;
+            classifications = classifications == null ? Set.of() : Set.copyOf(classifications);
+            createdBefore = createdBefore == null ? Optional.empty() : createdBefore;
+            expiresBefore = expiresBefore == null ? Optional.empty() : expiresBefore;
+            cursor = cursor == null ? Optional.empty() : cursor;
+            if (limit < 1 || limit > 100) throw new IllegalArgumentException("admin task limit must be 1..100");
+        }
+
+        public boolean bounded() {
+            return taskId.isPresent() || !statuses.isEmpty() || deploymentId.isPresent()
+                    || graphVersion.isPresent() || processInstanceId.isPresent()
+                    || traversalId.isPresent() || nodeId.isPresent() || !classifications.isEmpty()
+                    || createdBefore.isPresent() || expiresBefore.isPresent();
+        }
+    }
+
+    public record AdminPage(List<AdminItem> items, Optional<UUID> nextCursor) {
+        public AdminPage { items = List.copyOf(items); nextCursor = nextCursor == null ? Optional.empty() : nextCursor; }
+    }
+
+    public enum AdminPurgeMode { CANCEL, FORCE_ABANDON }
+
+    public record AdminPurgeItem(UUID taskId, long generation, String outcome, String plannedTransition) { }
+
+    public record AdminPurgeResult(boolean dryRun, AdminPurgeMode mode, List<AdminPurgeItem> items) {
+        public AdminPurgeResult { items = List.copyOf(items); }
+    }
+
+    /** Lists a bounded safe projection without response, continuation, credential, or payload bytes. */
+    public AdminPage adminInventory(String tenantId, AdminQuery query) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(query, "query");
+        var result = new ArrayList<AdminItem>();
+        HumanTaskQuery scan = new HumanTaskQuery(Set.of(), true, query.cursor(), policy.inboxMaxPageSize());
+        Optional<UUID> next = Optional.empty();
+        while (result.size() < query.limit()) {
+            HumanTaskPage page = await(store.listHumanTasks(tenantId, scan));
+            UUID lastScanned = null;
+            for (DurableHumanTask task : page.items()) {
+                lastScanned = task.request().taskId();
+                AdminItem item = adminItem(task);
+                if (adminMatches(item, query)) {
+                    result.add(item);
+                    if (result.size() == query.limit()) break;
+                }
+            }
+            if (result.size() == query.limit()) {
+                next = Optional.ofNullable(lastScanned);
+                break;
+            }
+            if (page.nextCursor().isEmpty()) {
+                break;
+            }
+            scan = scan.after(page.nextCursor().orElseThrow());
+        }
+        return new AdminPage(result, next);
+    }
+
+    /** Dry-runs or atomically reconciles each bounded candidate using ordinary or forced semantics. */
+    public AdminPurgeResult adminPurge(RequestContext context, AdminQuery query,
+                                       AdminPurgeMode mode, boolean dryRun, String idempotencyKey) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(mode, "mode");
+        if (!query.bounded()) throw new IllegalArgumentException("an administrative purge requires a selector");
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 200) {
+            throw new IllegalArgumentException("a bounded idempotency key is required");
+        }
+        AdminPage candidates = adminInventory(context.tenantId(), query);
+        var outcomes = new ArrayList<AdminPurgeItem>();
+        for (AdminItem item : candidates.items()) {
+            String planned = mode == AdminPurgeMode.CANCEL ? "CANCEL_AND_REENTER" : "ABANDON_WITHOUT_REENTRY";
+            if (dryRun) {
+                outcomes.add(new AdminPurgeItem(item.taskId(), item.generation(), "PLANNED", planned));
+                continue;
+            }
+            DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), item.taskId())).orElse(null);
+            if (task == null) {
+                outcomes.add(new AdminPurgeItem(item.taskId(), item.generation(), "NOT_FOUND", planned));
+            } else if (task.generation() != item.generation()) {
+                outcomes.add(new AdminPurgeItem(item.taskId(), task.generation(), "STALE_GENERATION", planned));
+            } else if (task.status().terminal()) {
+                outcomes.add(new AdminPurgeItem(item.taskId(), task.generation(), "ALREADY_TERMINAL", planned));
+            } else if (mode == AdminPurgeMode.CANCEL) {
+                HumanTaskResult settled = commitTerminal(task, task.generation(), HumanTaskStatus.CANCELLED,
+                        SecurityContext.of(context).qualifiedIdentity(), null, "",
+                        idempotencyKey + ":" + task.request().taskId(), null);
+                outcomes.add(new AdminPurgeItem(item.taskId(), settled.task().generation(),
+                        settled.code().name(), planned));
+            } else {
+                boolean changed = abandon(task, SecurityContext.of(context).qualifiedIdentity(),
+                        idempotencyKey + ":" + task.request().taskId());
+                DurableHumanTask current = await(store.loadHumanTask(context.tenantId(), item.taskId())).orElse(task);
+                outcomes.add(new AdminPurgeItem(item.taskId(), current.generation(),
+                        changed ? "ABANDONED" : "ALREADY_SETTLED", planned));
+            }
+        }
+        return new AdminPurgeResult(dryRun, mode, outcomes);
+    }
+
+    private AdminItem adminItem(DurableHumanTask task) {
+        var process = await(store.findProcessInstance(task.key())).orElse(null);
+        DurableHandler handler = await(store.loadHandler(task.key(), task.request().taskId())).orElse(null);
+        var traversal = process == null ? null : load(task.key()).state().traversals().get(task.request().traversalId());
+        AdminClassification classification;
+        String reason;
+        if (task.status().terminal()) {
+            classification = AdminClassification.TERMINAL;
+            reason = "task lifecycle is terminal";
+        } else if (process == null || traversal == null) {
+            classification = AdminClassification.ORPHANED;
+            reason = process == null ? "owning process is absent" : "owning traversal is absent";
+        } else if (process.status().terminal() || traversal.status().terminal()
+                || handler == null || handler.status().terminal()) {
+            classification = AdminClassification.NON_RESUMABLE;
+            reason = process.status().terminal() ? "owning process is terminal"
+                    : traversal.status().terminal() ? "owning traversal is terminal"
+                    : handler == null ? "durable handler is absent" : "durable handler is terminal";
+        } else {
+            classification = AdminClassification.ACTIONABLE;
+            reason = "process, traversal, and durable handler can resume";
+        }
+        String timer = task.status().terminal() ? "SETTLED" : "SCHEDULED_OR_CLAIMED";
+        return new AdminItem(task.request().taskId(), task.status(), task.generation(), classification,
+                reason, task.key().tenantId(), process == null ? task.request().graphVersionPin().reference()
+                        : process.graphVersionPin().reference(),
+                process == null ? Optional.empty() : process.deploymentId(), task.key().processInstanceId(),
+                task.request().traversalId(), task.request().nodeId(),
+                process == null ? "ABSENT" : process.status().name(),
+                traversal == null ? "ABSENT" : traversal.status().name(),
+                handler == null ? "ABSENT" : handler.status().name(),
+                task.request().escalateAt().isEmpty() ? "NOT_CONFIGURED" : timer, timer,
+                task.createdAt(), task.request().expiresAt());
+    }
+
+    private static boolean adminMatches(AdminItem item, AdminQuery query) {
+        return query.taskId().map(item.taskId()::equals).orElse(true)
+                && (query.statuses().isEmpty() || query.statuses().contains(item.status()))
+                && query.deploymentId().map(value -> item.deploymentId().map(value::equals).orElse(false)).orElse(true)
+                && query.graphVersion().map(item.graphVersion()::equals).orElse(true)
+                && query.processInstanceId().map(item.processInstanceId()::equals).orElse(true)
+                && query.traversalId().map(item.traversalId()::equals).orElse(true)
+                && query.nodeId().map(item.nodeId()::equals).orElse(true)
+                && (query.classifications().isEmpty() || query.classifications().contains(item.classification()))
+                && query.createdBefore().map(instant -> item.createdAt().isBefore(instant)).orElse(true)
+                && query.expiresBefore().map(instant -> item.expiresAt().isBefore(instant)).orElse(true);
+    }
+
+    private boolean abandon(DurableHumanTask original, String actor, String correlationId) {
+        int maxAttempts = original.request().executionLimits().writeAttempts();
+        for (int attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber++) {
+            DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
+                    original.request().taskId())).orElse(null);
+            if (task == null || !task.key().equals(original.key()) || task.status().terminal()) return false;
+            StoredProcessInstance stored = load(task.key());
+            var traversal = stored.state().traversals().get(task.request().traversalId());
+            var builder = ExecutionBatch.to(task.key()).expecting(RevisionExpectation.exactly(stored.revision()));
+            if (traversal != null && !traversal.status().terminal()) {
+                var invocation = traversal.invocations().get(task.request().invocationId());
+                if (invocation != null && !invocation.status().terminal()) {
+                    var targetAttempt = invocation.attempts().stream()
+                            .filter(candidate -> candidate.attemptId().equals(task.request().attemptId()))
+                            .findFirst().orElse(null);
+                    if (targetAttempt != null && !targetAttempt.status().terminal()) {
+                        builder.apply(new ExecutionTransition.AttemptTransitioned(traversal.traversalId(),
+                                invocation.invocationId(), targetAttempt.attemptId(), NodeAttemptStatus.FAILED));
+                    }
+                    builder.apply(new ExecutionTransition.InvocationTransitioned(traversal.traversalId(),
+                            invocation.invocationId(), NodeInvocationStatus.FAILED));
+                }
+                builder.apply(new ExecutionTransition.TraversalTransitioned(traversal.traversalId(),
+                        TraversalStatus.FAILED, ExecutionTerminationReason.CANCELLED));
+            }
+            boolean otherLive = stored.state().traversals().values().stream()
+                    .anyMatch(candidate -> (traversal == null || !candidate.traversalId().equals(traversal.traversalId()))
+                            && !candidate.status().terminal());
+            if (!stored.state().status().terminal() && !otherLive) {
+                builder.apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        ExecutionTerminationReason.CANCELLED));
+            }
+            try {
+                await(store.apply(builder
+                        .applyHumanTask(new HumanTaskTransition.Cancelled(task.request().taskId(),
+                                task.generation(), actor, ""))
+                        .applyHandler(new HandlerTransition.Cancelled(task.request().taskId(), actor))
+                        .cancelTimer(escalationTimerId(task.request().taskId()))
+                        .cancelTimer(expiryTimerId(task.request().taskId()))
+                        .publish(event(task.key(), stored, task.request(), "HUMAN_TASK_ABANDONED",
+                                correlationId, task.request().traversalId(), HumanTaskStatus.CANCELLED,
+                                task.generation() + 1)).build()));
+                return true;
+            } catch (ExecutionStoreException conflict) {
+                if (conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
+                        && attemptNumber < maxAttempts) continue;
+                throw conflict;
+            }
+        }
+        throw new IllegalStateException("human-task abandonment retry budget exhausted");
+    }
+
+    /**
+     * Terminally closes every outstanding task owned by one deployment generation.
+     *
+     * <p>This is an internal lifecycle action, not a human decision: it creates no re-entry
+     * traversal and therefore cannot execute graph work after the deployment cancellation barrier.
+     * Each task, handler, timer cancellation, traversal termination, and (when this is its final
+     * live traversal) process termination is one compare-and-set batch.</p>
+     *
+     * @param tenantId tenant authority of the deployment
+     * @param deploymentId durable deployment identity recorded on process admission
+     * @param correlationId lifecycle command idempotency key used in emitted events
+     * @return number of tasks this call moved to the terminal cancelled state
+     */
+    public int cancelDeploymentTasks(String tenantId, DeploymentId deploymentId,
+                                     String correlationId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(deploymentId, "deploymentId");
+        Objects.requireNonNull(correlationId, "correlationId");
+        int cancelled = 0;
+        HumanTaskQuery query = HumanTaskQuery.outstanding(policy.inboxMaxPageSize());
+        while (true) {
+            HumanTaskPage page = await(store.listHumanTasks(tenantId, query));
+            for (DurableHumanTask task : page.items()) {
+                var process = await(store.findProcessInstance(task.key())).orElse(null);
+                if (process == null || process.deploymentId().isEmpty()
+                        || !deploymentId.value().equals(process.deploymentId().orElseThrow())) {
+                    continue;
+                }
+                if (cancelForDeployment(task, correlationId)) cancelled++;
+            }
+            if (page.nextCursor().isEmpty()) return cancelled;
+            query = query.after(page.nextCursor().orElseThrow());
+        }
+    }
+
+    /** Terminally cancels outstanding tasks belonging to one exact process, without re-entry. */
+    public int cancelProcessTasks(String tenantId, UUID processInstanceId, String correlationId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        Objects.requireNonNull(correlationId, "correlationId");
+        int cancelled = 0;
+        HumanTaskQuery query = HumanTaskQuery.outstanding(policy.inboxMaxPageSize());
+        while (true) {
+            HumanTaskPage page = await(store.listHumanTasks(tenantId, query));
+            for (DurableHumanTask task : page.items()) {
+                if (processInstanceId.equals(task.key().processInstanceId())
+                        && cancelForDeployment(task, correlationId)) cancelled++;
+            }
+            if (page.nextCursor().isEmpty()) return cancelled;
+            query = query.after(page.nextCursor().orElseThrow());
+        }
+    }
+
+    private boolean cancelForDeployment(DurableHumanTask original, String correlationId) {
+        int maxAttempts = original.request().executionLimits().writeAttempts();
+        for (int attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber++) {
+            DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
+                    original.request().taskId())).orElse(null);
+            if (task == null || !task.key().equals(original.key()) || task.status().terminal()) {
+                return false;
+            }
+            StoredProcessInstance stored = load(task.key());
+            var traversal = stored.state().traversals().get(task.request().traversalId());
+            if (traversal == null || traversal.status().terminal()) return false;
+            var invocation = traversal.invocations().get(task.request().invocationId());
+            if (invocation == null) return false;
+            var targetAttempt = invocation.attempts().stream()
+                    .filter(candidate -> candidate.attemptId().equals(task.request().attemptId()))
+                    .findFirst().orElse(null);
+            if (targetAttempt == null) return false;
+
+            var builder = ExecutionBatch.to(task.key())
+                    .expecting(RevisionExpectation.exactly(stored.revision()));
+            if (!targetAttempt.status().terminal()) {
+                builder.apply(new ExecutionTransition.AttemptTransitioned(
+                        traversal.traversalId(), invocation.invocationId(),
+                        targetAttempt.attemptId(), NodeAttemptStatus.FAILED));
+            }
+            if (!invocation.status().terminal()) {
+                builder.apply(new ExecutionTransition.InvocationTransitioned(
+                        traversal.traversalId(), invocation.invocationId(),
+                        NodeInvocationStatus.FAILED));
+            }
+            builder.apply(new ExecutionTransition.TraversalTransitioned(
+                    traversal.traversalId(), TraversalStatus.FAILED,
+                    ExecutionTerminationReason.CANCELLED));
+            boolean finalLiveTraversal = stored.state().traversals().values().stream()
+                    .filter(candidate -> !candidate.status().terminal()).count() == 1;
+            if (!stored.state().status().terminal() && finalLiveTraversal) {
+                builder.apply(new ExecutionTransition.ProcessTransitioned(
+                        ProcessInstanceStatus.FAILED, ExecutionTerminationReason.CANCELLED));
+            }
+            var batch = builder
+                    .applyHumanTask(new HumanTaskTransition.Cancelled(task.request().taskId(),
+                            task.generation(), "deployment-lifecycle", ""))
+                    .applyHandler(new HandlerTransition.Cancelled(
+                            task.request().taskId(), "deployment-lifecycle"))
+                    .cancelTimer(escalationTimerId(task.request().taskId()))
+                    .cancelTimer(expiryTimerId(task.request().taskId()))
+                    .publish(event(task.key(), stored, task.request(), "HUMAN_TASK_CANCELLED",
+                            correlationId, traversal.traversalId(), HumanTaskStatus.CANCELLED,
+                            task.generation() + 1))
+                    .build();
+            try {
+                await(store.apply(batch));
+                return true;
+            } catch (ExecutionStoreException conflict) {
+                if (conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
+                        && attemptNumber < maxAttempts) continue;
+                if (conflict.failure() instanceof ExecutionStoreFailure.HumanTaskNotResolvable) {
+                    return false;
+                }
+                throw conflict;
+            }
+        }
+        return false;
     }
 
     /**
@@ -360,7 +737,7 @@ public final class HumanTaskService {
 
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response) {
-        return resolve(context, taskId, expectedGeneration, response, "");
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.resolve(response, ""));
     }
 
     /**
@@ -374,7 +751,8 @@ public final class HumanTaskService {
      */
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response, String comment) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response, comment);
+        return settle(context, taskId, expectedGeneration,
+                HumanTaskSettlement.resolve(response, comment));
     }
 
     /**
@@ -396,7 +774,7 @@ public final class HumanTaskService {
     }
 
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration) {
-        return deny(context, taskId, expectedGeneration, "");
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.deny(""));
     }
 
     /**
@@ -409,11 +787,11 @@ public final class HumanTaskService {
      */
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration,
                                 String comment) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null, comment);
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.deny(comment));
     }
 
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration) {
-        return cancel(context, taskId, expectedGeneration, "");
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.cancel(""));
     }
 
     /**
@@ -426,7 +804,21 @@ public final class HumanTaskService {
      */
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration,
                                   String comment) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null, comment);
+        return settle(context, taskId, expectedGeneration, HumanTaskSettlement.cancel(comment));
+    }
+
+    /** Applies the canonical versioned action/response/comment settlement contract. */
+    public HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
+                                  HumanTaskSettlement settlement) {
+        Objects.requireNonNull(settlement, "settlement");
+        return switch (settlement.action()) {
+            case RESOLVE -> settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED,
+                    settlement.response().orElseThrow(), settlement.comment());
+            case DENY -> settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED,
+                    null, settlement.comment());
+            case CANCEL -> settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED,
+                    null, settlement.comment());
+        };
     }
 
     public HumanTaskResult escalate(ExecutionKey key, UUID taskId, long expectedGeneration,

@@ -174,10 +174,10 @@ jobs:
           cp -R ravenroot/ravenroot-ui/dist/. ci-artifacts/ui/
           cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
             "release-assets/ravenroot-$version.jar"
-          distribution_zip=$(find ravenroot/ravenroot-distribution/target -maxdepth 1 \
-            -type f -name '*.zip' -print -quit)
-          test -n "$distribution_zip"
-          cp "$distribution_zip" "release-assets/ravenroot-$version.zip"
+          # The same file the Central bundle carries as ravenroot-distribution-<version>-bin.zip:
+          # the module's finalName plus the assembly's classifier. Taking the first zip found would
+          # choose by directory order the day a second one appears.
+          cp ravenroot/ravenroot-distribution/target/ravenroot-bin.zip "release-assets/ravenroot-$version.zip"
           cp ravenroot/target/ravenroot-sbom.json release-assets/ravenroot-sbom.json
           cp docs/security/release-signing-key.asc release-assets/ravenroot-release-signing-key.asc
       - name: Build the provenance-bearing OCI layout once

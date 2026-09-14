@@ -176,15 +176,18 @@
            aria-label="Node minibar size" aria-describedby="node-action-scale-val">
     <output id="node-action-scale-val" for="node-action-scale-slider">115</output>
   </div>
-  <!-- Monitoring repulsion + attraction controls. -->
+  <!-- Monitoring elastic controls: spacing, attraction, and simulation movement speed. -->
   <div id="elastic-ctrl" title="Monitoring forces — node spacing and link attraction">
     <span id="rep-icon" title="Node spacing">⇔</span>
-    <input id="rep-slider" type="range" min="30" max="1200" value="320" step="10" data-input-action="elastic-repulsion">
+    <input id="rep-slider" type="range" min="30" max="1200" value="320" step="10" aria-label="Node spacing" data-input-action="elastic-repulsion">
     <span id="rep-val">320</span>
     <span style="width:1px;height:14px;background:var(--bd);margin:0 6px;flex-shrink:0"></span>
     <span id="attr-icon" title="Link attraction">⇕</span>
-    <input id="attr-slider" type="range" min="5" max="150" value="30" step="5" data-input-action="elastic-attraction">
+    <input id="attr-slider" type="range" min="5" max="150" value="30" step="5" aria-label="Link attraction" data-input-action="elastic-attraction">
     <span id="attr-val">0.30</span>
+    <span id="speed-icon" title="Movement speed">↯</span>
+    <input id="speed-slider" type="range" min="10" max="100" value="50" step="5" aria-label="Elastic movement speed" data-input-action="elastic-speed">
+    <span id="speed-val">50</span>
   </div>
   <div class="vr command-mirrors file-mirrors"></div>
   <button class="btn primary command-mirrors file-mirrors" id="btn-open" data-command-id="file.open"
@@ -924,6 +927,12 @@
     </header>
     <p id="human-task-dialog-prompt" class="human-task-prompt" data-human-task-prompt></p>
     <p class="human-task-dialog-identity" data-human-task-identity></p>
+    <section class="human-task-review" data-human-task-review hidden aria-labelledby="human-task-review-title">
+      <h3 id="human-task-review-title">Review content</h3>
+      <p class="human-task-review-status" data-human-task-review-status></p>
+      <pre class="human-task-review-text" data-human-task-review-text dir="auto" tabindex="0"></pre>
+      <small class="human-task-review-digest" data-human-task-review-digest></small>
+    </section>
     <div class="editor-field full" data-human-task-comment-field>
       <label for="human-task-comment">Comment</label>
       <textarea id="human-task-comment" data-human-task-comment

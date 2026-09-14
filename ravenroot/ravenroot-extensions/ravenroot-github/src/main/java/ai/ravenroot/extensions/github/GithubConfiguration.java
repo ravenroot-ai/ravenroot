@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 
 /** Strict operator configuration; graph content can select but never construct these authorities. */
@@ -19,6 +20,7 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
                                   IngressRequestProjectionPolicy projection,
                                   StorePolicy store, Map<String, GithubProfile> profiles) {
     public static final String PACKAGE_ID = "ai.ravenroot.extensions.github";
+    public static final String PROPERTY = "ravenroot.github.config";
     public static final String ENVIRONMENT = "RAVENROOT_GITHUB_CONFIG";
 
     public GithubConfiguration {
@@ -26,8 +28,7 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
         store = java.util.Objects.requireNonNull(store);
         profiles = Map.copyOf(profiles);
         if (profiles.isEmpty() || profiles.size() > authority.maxRoutes()) throw invalid();
-        if (!projection.allowedHeaders().containsAll(Set.of("x-hub-signature-256", "x-github-delivery",
-                "x-github-event"))) throw invalid();
+        if (!projection.allowedHeaders().containsAll(GithubProtocol.WEBHOOK_HEADERS)) throw invalid();
         profiles.forEach((key, value) -> {
             if (!key.equals(value.tenantId() + "\u0000" + value.name())) throw invalid();
             if (value.maxRequestBytes() > authority.maxRequestBytes()
@@ -35,11 +36,27 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
         });
     }
 
+    public static GithubConfiguration fromSystem() { return fromSystem(System.getProperties(), System.getenv()); }
+
     public static GithubConfiguration fromEnvironment() { return fromEnvironment(System.getenv()); }
 
     static GithubConfiguration fromEnvironment(Map<String, String> environment) {
+        return fromSources(null, environment);
+    }
+
+    static GithubConfiguration fromSystem(Properties properties, Map<String, String> environment) {
+        java.util.Objects.requireNonNull(properties, "properties");
+        if (!properties.containsKey(PROPERTY)) return fromSources(null, environment);
+        Object selected = properties.get(PROPERTY);
+        if (!(selected instanceof String value)) throw invalid();
+        return fromSources(value, environment);
+    }
+
+    private static GithubConfiguration fromSources(String property, Map<String, String> environment) {
         try {
-            byte[] bytes = GithubValues.canonicalBase64(environment.get(ENVIRONMENT), 4 * 1024 * 1024);
+            java.util.Objects.requireNonNull(environment, "environment");
+            String selected = property != null ? property : environment.get(ENVIRONMENT);
+            byte[] bytes = GithubValues.canonicalBase64(selected, 4 * 1024 * 1024);
             Map<String, Object> root = GithubValues.json(bytes);
             GithubValues.exact(root, Set.of("authority", "projection", "store", "profiles"));
             IngressAuthorityDeclaration authority = authority(GithubValues.object(root.get("authority")));
@@ -76,7 +93,7 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
         GithubValues.exact(value, Set.of("maxRelativePathBytes", "maxQueryParameters", "maxQueryBytes",
                 "maxHeaderCount", "maxHeaderBytes", "maxHeaderValueBytes"));
         return new IngressRequestProjectionPolicy(PACKAGE_ID,
-                Set.of("x-hub-signature-256", "x-github-delivery", "x-github-event"), "x-github-delivery",
+                GithubProtocol.WEBHOOK_HEADERS, GithubProtocol.DELIVERY,
                 (int) GithubValues.number(value.get("maxRelativePathBytes"), 1, 8_192),
                 (int) GithubValues.number(value.get("maxQueryParameters"), 1, 256),
                 (int) GithubValues.number(value.get("maxQueryBytes"), 1, 16_384),
@@ -153,6 +170,13 @@ public record GithubConfiguration(IngressAuthorityDeclaration authority,
     }
 
     public record StorePolicy(Path path, int maxOperations, int retentionHours, int leaseMs) {
-        public StorePolicy { path = path.toAbsolutePath().normalize(); }
+        public StorePolicy {
+            if (path == null || path.toString().isBlank() || path.toString().length() > 4_096
+                    || path.toString().codePoints().anyMatch(character -> character < 0x20 || character == 0x7f)
+                    || maxOperations < 1 || maxOperations > 1_000_000
+                    || retentionHours < 1 || retentionHours > 24 * 365
+                    || leaseMs < 1_000 || leaseMs > 300_000) throw invalid();
+            path = path.toAbsolutePath().normalize();
+        }
     }
 }

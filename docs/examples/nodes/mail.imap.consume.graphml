@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Admission-ready mail.imap.consume graph. Supply an input payload at execution.
      Replace any replace-with-operator-profile value with a configured profile before Run.
+     Keep consumerId stable to resume after restart; choose a new value for an independent consumer.
      Success reaches end through the documented descriptor outcome; failure reaches error. -->
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
   <key id="kind" for="node" attr.name="kind" attr.type="string"/>
   <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
   <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
   <key id="property-profile" for="node" attr.name="profile" attr.type="string"/>
+  <key id="property-consumerId" for="node" attr.name="consumerId" attr.type="string"/>
+  <key id="property-initialPosition" for="node" attr.name="initialPosition" attr.type="string"/>
   <graph id="example-mail.imap.consume" edgedefault="directed">
     <node id="start"><data key="kind">START</data></node>
     <node id="action">
       <data key="kind">BEHAVIOR</data>
       <data key="behavior">mail.imap.consume</data>
       <data key="property-profile">replace-with-operator-profile</data>
+      <data key="property-consumerId">incoming-mail</data>
+      <data key="property-initialPosition">earliest</data>
     </node>
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>

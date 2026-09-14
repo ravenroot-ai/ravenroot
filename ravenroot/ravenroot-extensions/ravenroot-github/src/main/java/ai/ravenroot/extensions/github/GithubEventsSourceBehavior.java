@@ -100,8 +100,8 @@ public final class GithubEventsSourceBehavior implements NodeBehavior, InboundSo
             if (context == null || !request.principal().tenantId().equals(context.identity().tenantId())) return response(503);
             if (!"POST".equals(request.method()) || request.body().length > source.profile.maxRequestBytes()) return response(400);
             String signature = request.headers().getOrDefault("x-hub-signature-256", "");
-            String delivery = request.headers().getOrDefault("x-github-delivery", "");
-            String event = request.headers().getOrDefault("x-github-event", "");
+            String delivery = request.headers().getOrDefault(GithubProtocol.DELIVERY, "");
+            String event = request.headers().getOrDefault(GithubProtocol.EVENT, "");
             if (!signature.matches("sha256=[0-9a-f]{64}") || !delivery.matches("[A-Za-z0-9-]{1,128}")
                     || !event.matches("[A-Za-z0-9_]{1,64}")) return response(400);
             if (!source.profile.webhookEvents().containsKey(event)) return response(403);
@@ -179,7 +179,7 @@ public final class GithubEventsSourceBehavior implements NodeBehavior, InboundSo
             Duration ceiling = Duration.ofMillis(ceilingMs); return remaining.compareTo(ceiling) < 0 ? remaining : ceiling;
         }
         private static IngressResponse receipt(String delivery, String disposition) {
-            return new IngressResponse(202, Map.of("Content-Type", "application/json"), GithubValues.jsonBytes(Map.of(
+            return new IngressResponse(202, Map.of("Content-Type", GithubProtocol.JSON), GithubValues.jsonBytes(Map.of(
                     "version", "github.event.receipt.v1", "deliveryId", delivery, "receipt", disposition)));
         }
         private static CompletionStage<IngressResponse> response(int status) { return CompletableFuture.completedFuture(empty(status)); }

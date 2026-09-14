@@ -20,7 +20,8 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
@@ -39,7 +40,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Separate container gate: installed bundle bytes drive a real durable graph lifecycle. */
 class InstalledMailImapConsumeContainerTest {
-    private static final String DEPLOYMENT_ID = "installed-mail-consumer";
     private static final String WORKER_ID = "installed-mail-consumer-worker";
     private static final SecurityContext IDENTITY = new SecurityContext("installed-mail-consumer",
             "tenant", "container", PrincipalType.WORKLOAD, "ravenroot-container-test");
@@ -49,10 +49,12 @@ class InstalledMailImapConsumeContainerTest {
               <key id="kind" for="node" attr.name="kind" attr.type="string"/>
               <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
               <key id="profile" for="node" attr.name="profile" attr.type="string"/>
+              <key id="consumer" for="node" attr.name="consumerId" attr.type="string"/>
+              <key id="initial" for="node" attr.name="initialPosition" attr.type="string"/>
               <key id="content" for="node" attr.name="contentMode" attr.type="string"/>
               <graph id="installed-mail-consumer" edgedefault="directed">
                 <node id="start"><data key="kind">start</data></node>
-                <node id="consume"><data key="kind">behavior</data><data key="behavior">mail.imap.consume</data><data key="profile">reader</data><data key="content">metadata</data></node>
+                <node id="consume"><data key="kind">behavior</data><data key="behavior">mail.imap.consume</data><data key="profile">reader</data><data key="content">metadata</data><data key="consumer">CONSUMER_TOKEN</data><data key="initial">INITIAL_POSITION</data></node>
                 <node id="capture"><data key="kind">behavior</data><data key="behavior">test.mail.capture</data></node>
                 <node id="end"><data key="kind">end</data></node>
                 <node id="error"><data key="kind">error</data></node>
@@ -63,7 +65,9 @@ class InstalledMailImapConsumeContainerTest {
 
     @TempDir Path directory;
 
-    @Test void installedBundleTraversesAndDurableCheckpointSurvivesStoreAndDeploymentReopen() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"earliest", "latest", "latest-empty"})
+    void installedBundleBootstrapsOnceAndResumesAcrossNewDeploymentIds(String mode) throws Exception {
         String installedRoot = System.getProperty("ravenroot.mail.installedBundleRoot", "");
         Assumptions.assumeTrue(!installedRoot.isBlank(),
                 "run scripts/verify-mail-imap-consumer-container.sh for installed-bundle proof");
@@ -103,37 +107,63 @@ class InstalledMailImapConsumeContainerTest {
                     });
             var user = fixture.server().setUser("reader@example.test", "reader", "secret");
 
+            boolean empty = mode.equals("latest-empty");
+            String initialPosition = mode.equals("earliest") ? "earliest" : "latest";
+            int committed = 0;
+            if (!empty) user.deliver(message("existing-history", "history"));
+            String firstId = java.util.UUID.randomUUID().toString();
             try (var store = new SqliteExecutionStore(database, Clock.systemUTC());
                  var engine = new PekkoExecutionEngine("installed-mail-consumer-first")) {
-                var deployment = deployment(engine, registry, monitor, store);
+                var deployment = deployment(engine, registry, monitor, store, firstId, "reader-stream", initialPosition);
                 assertEquals(DeploymentState.READY,
                         deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS).state());
-                user.deliver(message("installed-after-ready-one", "first"));
-                awaitCount(consumeCompletions, 1);
-                awaitCount(executionCompletions, 1);
-                awaitCount(captured, 1);
-                assertMessage(captured.getFirst(), 1L, "installed-after-ready-one");
-                assertActorTraversal(events, 1);
+                if (initialPosition.equals("earliest")) {
+                    awaitCount(captured, ++committed);
+                    assertMessage(captured.getLast(), 1L, "existing-history");
+                }
+                if (!empty) {
+                    user.deliver(message("after-ready", "new"));
+                    awaitCount(captured, ++committed);
+                    awaitCount(executionCompletions, committed);
+                    assertMessage(captured.getLast(), 2L, "after-ready");
+                    assertActorTraversal(events, committed, firstId);
+                }
                 assertEquals(DeploymentState.STOPPED,
                         deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
                 assertNoSourceResidue(installedLoader);
             }
 
+            // In the empty case no message has ever been acknowledged: the stored zero baseline
+            // alone must prevent latest from being applied again after a process/store restart.
+            user.deliver(message("arrived-while-stopped", "offline"));
+            String secondId = java.util.UUID.randomUUID().toString();
+            assertNotEquals(firstId, secondId);
+            String restartPosition = initialPosition.equals("earliest") ? "latest"
+                    : empty ? "latest" : "earliest";
             try (var reopened = new SqliteExecutionStore(database, Clock.systemUTC());
                  var engine = new PekkoExecutionEngine("installed-mail-consumer-reopened")) {
-                var deployment = deployment(engine, registry, monitor, reopened);
+                var deployment = deployment(engine, registry, monitor, reopened, secondId, "reader-stream", restartPosition);
                 assertEquals(DeploymentState.READY,
                         deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS).state());
-                TimeUnit.MILLISECONDS.sleep(350);
-                assertEquals(1, consumeCompletions.get(),
-                        "the reopened durable checkpoint must suppress the already committed UID");
-                assertEquals(1, captured.size(), "a restart must not dispatch UID 1 twice");
-                user.deliver(message("installed-after-reopen-two", "second"));
-                awaitCount(consumeCompletions, 2);
-                awaitCount(executionCompletions, 2);
-                awaitCount(captured, 2);
-                assertMessage(captured.getLast(), 2L, "installed-after-reopen-two");
-                assertActorTraversal(events, 2);
+                awaitCount(captured, ++committed);
+                awaitCount(executionCompletions, committed);
+                assertMessage(captured.getLast(), empty ? 1L : 3L, "arrived-while-stopped");
+                assertActorTraversal(events, committed, secondId);
+                assertEquals(DeploymentState.STOPPED,
+                        deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
+                assertNoSourceResidue(installedLoader);
+            }
+
+            String thirdId = java.util.UUID.randomUUID().toString();
+            try (var reopened = new SqliteExecutionStore(database, Clock.systemUTC());
+                 var engine = new PekkoExecutionEngine("installed-mail-consumer-independent")) {
+                var deployment = deployment(engine, registry, monitor, reopened, thirdId, "independent-reader", "earliest");
+                assertEquals(DeploymentState.READY,
+                        deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS).state());
+                int historySize = empty ? 1 : 3;
+                awaitCount(captured, committed + historySize);
+                awaitCount(executionCompletions, committed + historySize);
+                assertMessage(captured.get(committed), 1L, empty ? "arrived-while-stopped" : "existing-history");
                 assertEquals(DeploymentState.STOPPED,
                         deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
                 assertNoSourceResidue(installedLoader);
@@ -143,9 +173,11 @@ class InstalledMailImapConsumeContainerTest {
 
     private static DefaultGraphDeployment deployment(PekkoExecutionEngine engine,
                                                       BehaviorRegistry registry, ExecutionMonitor monitor,
-                                                      SqliteExecutionStore store) {
-        return new DefaultGraphDeployment(DeploymentId.of(DEPLOYMENT_ID), engine, registry, monitor,
-                ExecutionIdentitySource.randomUuids(), GRAPH.getBytes(StandardCharsets.UTF_8),
+                                                      SqliteExecutionStore store, String deploymentId,
+                                                      String consumerId, String initialPosition) {
+        String graph = GRAPH.replace("CONSUMER_TOKEN", consumerId).replace("INITIAL_POSITION", initialPosition);
+        return new DefaultGraphDeployment(DeploymentId.of(deploymentId), engine, registry, monitor,
+                ExecutionIdentitySource.randomUuids(), graph.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                 DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, WORKER_ID, Duration.ofSeconds(30));
     }
@@ -180,7 +212,7 @@ class InstalledMailImapConsumeContainerTest {
         assertFalse(payload.toString().contains("secret"));
     }
 
-    private static void assertActorTraversal(List<ExecutionEvent> events, int expected) {
+    private static void assertActorTraversal(List<ExecutionEvent> events, int expected, String deploymentId) {
         List<ExecutionEvent> starts = events.stream().filter(event -> event.type() == ExecutionEventType.NODE_STARTED
                 && "capture".equals(event.nodeId())).toList();
         List<ExecutionEvent> completions = events.stream().filter(event -> event.type() == ExecutionEventType.NODE_COMPLETED
@@ -190,7 +222,7 @@ class InstalledMailImapConsumeContainerTest {
         ExecutionEvent started = starts.get(expected - 1), completed = completions.get(expected - 1);
         assertEquals(started.traversalId(), completed.traversalId());
         assertEquals(started.workloadId(), completed.workloadId());
-        assertEquals(DEPLOYMENT_ID, started.deploymentId());
+        assertEquals(deploymentId, started.deploymentId());
         assertEquals("test.mail.capture", started.nodeCatalogKey());
     }
 

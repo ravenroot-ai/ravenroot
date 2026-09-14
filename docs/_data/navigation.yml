@@ -115,6 +115,8 @@
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
+    - title: Session memory
+      url: /reference/session-memory.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: Interaction WebSocket protocol
@@ -212,6 +214,10 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.3.0-alpha.1 release notes
+      url: /releases/v0.3.0-alpha.1.html
+    - title: Ravenroot 0.2.0-alpha.1 release notes
+      url: /releases/v0.2.0-alpha.1.html
     - title: Ravenroot 0.1.0-alpha.1 release notes
       url: /releases/v0.1.0-alpha.1.html
     - title: Compatibility and release policy

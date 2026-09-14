@@ -51,6 +51,7 @@ import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -1980,6 +1981,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
         } catch (RuntimeException ignored) {
             // Already reported through the connection's own state; closing twice must not throw.
         } finally {
+            java.util.List<OwnedSourceCheckpoints> owners;
+            synchronized (sourceCheckpointOwners) { owners = java.util.List.copyOf(sourceCheckpointOwners); }
+            owners.forEach(OwnedSourceCheckpoints::close);
             worker.shutdown();
         }
     }
@@ -3997,18 +4001,51 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "WHERE t.tenant_id = ? AND t.task_id = ? AND t.generation = ? "
                         + "AND t.status IN ('WAITING', 'ESCALATED') "
                         + "AND t.confirmation_version > 0";
+                HumanTaskAttentionItem item;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, tenantId);
                     statement.setString(2, locator.taskId().toString());
                     statement.setLong(3, locator.generation());
                     try (ResultSet rows = statement.executeQuery()) {
                         if (!rows.next()) return Optional.empty();
-                        return Optional.ofNullable(readHumanTaskAttentionItem(
-                                rows, tenantId, authorization));
+                        item = readHumanTaskAttentionItem(rows, tenantId, authorization);
+                        if (item == null) return Optional.empty();
                     }
                 }
+                // Keep the content-bearing query physically after authorization and after the
+                // summary cursor is closed. This ordering is part of the non-disclosure contract.
+                return readHumanTaskReviewPresentation(tenantId, locator)
+                        .map(review -> withReviewPresentation(item, review));
             });
         });
+    }
+
+    private Optional<HumanTaskReviewPresentation> readHumanTaskReviewPresentation(
+            String tenantId, HumanTaskAttentionLocator locator) throws SQLException {
+        String sql = "SELECT review_version, review_content_type, review_text, review_digest, "
+                + "review_max_utf8_bytes FROM human_task WHERE tenant_id = ? AND task_id = ? "
+                + "AND generation = ? AND status IN ('WAITING', 'ESCALATED')";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, locator.taskId().toString());
+            statement.setLong(3, locator.generation());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                return Optional.of(new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                        rows.getString("review_content_type"), rows.getString("review_text"),
+                        rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
+            }
+        }
+    }
+
+    private static HumanTaskAttentionItem withReviewPresentation(
+            HumanTaskAttentionItem item, HumanTaskReviewPresentation review) {
+        return new HumanTaskAttentionItem(item.taskId(), item.generation(), item.status(),
+                item.graphVersion(), item.deploymentId(), item.processInstanceId(),
+                item.traversalId(), item.nodeId(), item.createdAt(), item.expiresAt(),
+                item.escalateAt(), item.presentation(), item.promptMaxUtf8Bytes(),
+                item.actionLabelMaxUtf8Bytes(), item.commentMaxUtf8Bytes(),
+                item.availableActions(), review.present() ? Optional.of(review) : Optional.empty());
     }
 
     private static boolean after(HumanTaskAttentionItem item,
@@ -4176,10 +4213,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "confirmation_actions, confirmation_resolve_label, confirmation_deny_label, "
                 + "confirmation_cancel_label, confirmation_max_prompt_bytes, "
                 + "confirmation_max_action_label_bytes, confirmation_max_comment_bytes, "
+                + "review_version, review_content_type, review_text, review_digest, "
+                + "review_max_utf8_bytes, "
                 + "created_at_epoch_second, created_at_nano, "
                 + "status, actor, decision_comment, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(57) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(62) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             statement.setString(index++, task.key().processInstanceId().toString());
@@ -4237,6 +4276,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            HumanTaskReviewPresentation review = request.reviewPresentation();
+            statement.setInt(index++, review.version());
+            statement.setString(index++, review.contentType());
+            statement.setString(index++, review.text());
+            statement.setString(index++, review.contentDigest());
+            statement.setInt(index++, review.maxUtf8Bytes());
             index = StoredInstant.bindValue(statement, index, task.createdAt());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
@@ -4361,7 +4406,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             rows.getString("confirmation_cancel_label")),
                     new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
                             rows.getInt("confirmation_max_action_label_bytes"),
-                            rows.getInt("confirmation_max_comment_bytes")));
+                            rows.getInt("confirmation_max_comment_bytes")),
+                    new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                            rows.getString("review_content_type"), rows.getString("review_text"),
+                            rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getString("decision_comment"), rows.getLong("generation"),
@@ -4445,7 +4493,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(readHandler(rows, key, null));
+                    DurableHandler handler = readHandler(rows, key, null);
+                    if (handler.status().resumesProcess()) ready.add(handler);
                 }
             }
         }
@@ -4681,6 +4730,156 @@ public final class SqliteExecutionStore implements ExecutionStore {
             requireTenantId(tenantId);
             return inReadTransaction(null, () -> readRetainedFrom(tenantId));
         });
+    }
+
+    /**
+     * Uses host-local OS ownership over a stable, hashed sidecar; the file is never unlinked, which
+     * avoids replacing a locked inode. Like SQLite itself this requires a local filesystem.
+     */
+    @Override
+    public ai.ravenroot.api.persistence.SourceCheckpointStore openSourceCheckpointStore(
+            String tenantId, String namespace) {
+        requireTenantId(tenantId);
+        requireDestination(namespace);
+        if (closed.get()) throw new IllegalStateException("source checkpoint store is closed");
+        java.nio.channels.FileChannel channel = null;
+        Path reservedPath = null;
+        Object reservation = new Object();
+        try {
+            // Resolve parent symlinks so aliases of the same database choose the same lock file.
+            Path database = databaseFile.toRealPath();
+            byte[] identity = (tenantId.length() + ":" + tenantId + namespace)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String hash = java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(identity));
+            Path lockPath = database.resolveSibling(database.getFileName() + ".source-" + hash + ".lock");
+            // Closing a second descriptor can release this JVM's POSIX locks on some platforms.
+            // Reserve locally before opening any descriptor; the OS lock still excludes other JVMs.
+            if (SOURCE_FILE_OWNERS.putIfAbsent(lockPath, reservation) != null)
+                throw new IllegalStateException("source checkpoint owner is active");
+            reservedPath = lockPath;
+            requireSafeSourceLock(lockPath);
+            channel = java.nio.channels.FileChannel.open(lockPath,
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS);
+            requireSafeSourceLock(lockPath);
+            java.nio.channels.FileLock ownership = channel.tryLock();
+            if (ownership == null) throw new IllegalStateException("source checkpoint owner is active");
+            var handle = new OwnedSourceCheckpoints(tenantId, namespace, channel, ownership, lockPath, reservation);
+            synchronized (sourceCheckpointOwners) {
+                if (closed.get()) {
+                    ownership.release(); channel.close();
+                    throw new IllegalStateException("source checkpoint store is closed");
+                }
+                sourceCheckpointOwners.add(handle);
+            }
+            return handle;
+        } catch (java.io.IOException | java.security.NoSuchAlgorithmException | RuntimeException failure) {
+            if (channel != null) try { channel.close(); } catch (java.io.IOException ignored) { }
+            if (reservedPath != null) SOURCE_FILE_OWNERS.remove(reservedPath, reservation);
+            throw new IllegalStateException("exclusive source checkpoint ownership unavailable");
+        }
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<Path, Object> SOURCE_FILE_OWNERS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void requireSafeSourceLock(Path path) throws java.io.IOException {
+        if (java.nio.file.Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && !java.nio.file.Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS).isRegularFile())
+            throw new IllegalStateException("unsafe source lock artifact");
+    }
+
+    private final java.util.Set<OwnedSourceCheckpoints> sourceCheckpointOwners = new java.util.HashSet<>();
+
+    private final class OwnedSourceCheckpoints implements ai.ravenroot.api.persistence.SourceCheckpointStore {
+        private final String tenant;
+        private final String prefix;
+        private final java.nio.channels.FileChannel channel;
+        private final java.nio.channels.FileLock ownership;
+        private final Path lockPath;
+        private final Object reservation;
+        private boolean retired;
+        private int pending;
+
+        OwnedSourceCheckpoints(String tenant, String namespace, java.nio.channels.FileChannel channel,
+                               java.nio.channels.FileLock ownership, Path lockPath, Object reservation) {
+            this.lockPath = lockPath;
+            this.reservation = reservation;
+            this.tenant = tenant;
+            // Legacy deployment destinations always contain '/'; this alphabet never does.
+            this.prefix = "source-v1:" + java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(namespace.getBytes(java.nio.charset.StandardCharsets.UTF_8)) + ".";
+            this.channel = channel;
+            this.ownership = ownership;
+        }
+
+        private String destination(String sourceId) {
+            if (sourceId == null || sourceId.isBlank() || sourceId.length() > 4096)
+                throw new IllegalArgumentException("invalid source identity");
+            return prefix + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    sourceId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        private synchronized <T> CompletionStage<T> admitted(
+                java.util.function.Supplier<CompletionStage<T>> operation) {
+            if (retired || closed.get() || !ownership.isValid())
+                return CompletableFuture.failedFuture(new IllegalStateException("source ownership is retired"));
+            pending++;
+            try {
+                CompletionStage<T> underlying = operation.get();
+                // Never expose the underlying future: cancellation must not release ownership before
+                // the already queued JDBC operation actually settles.
+                var result = new CompletableFuture<T>();
+                underlying.whenComplete((value, failure) -> {
+                    synchronized (OwnedSourceCheckpoints.this) {
+                        pending--;
+                        if (retired && pending == 0) releaseOwnership();
+                    }
+                    if (failure == null) result.complete(value); else result.completeExceptionally(failure);
+                });
+                return result;
+            } catch (RuntimeException failure) {
+                pending--;
+                return CompletableFuture.failedFuture(failure);
+            }
+        }
+
+        @Override public CompletionStage<JournalCursor> checkpoint(String sourceId) {
+            return admitted(() -> outboxCursor(tenant, destination(sourceId)));
+        }
+        @Override public CompletionStage<JournalCursor> advance(JournalCursor expected, long position) {
+            return admitted(() -> {
+                if (expected == null || !tenant.equals(expected.tenantId())
+                        || !expected.destination().startsWith(prefix)
+                        || !canonicalSuffix(expected.destination().substring(prefix.length())))
+                    throw new IllegalArgumentException("foreign source checkpoint");
+                return advanceOutboxCursor(expected, position);
+            });
+        }
+        private boolean canonicalSuffix(String suffix) {
+            if (suffix.isEmpty() || suffix.length() > 21846 || !suffix.matches("[A-Za-z0-9_-]+")) return false;
+            try {
+                byte[] decoded = java.util.Base64.getUrlDecoder().decode(suffix);
+                String source = java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(
+                        java.nio.ByteBuffer.wrap(decoded)).toString();
+                return destination(source).equals(prefix + suffix);
+            } catch (RuntimeException | java.nio.charset.CharacterCodingException invalid) { return false; }
+        }
+        @Override public CompletionStage<Boolean> recordInbox(String sourceId, UUID eventId, Duration retention) {
+            return admitted(() -> recordInboxDelivery(tenant, destination(sourceId), eventId, retention));
+        }
+        @Override public synchronized void close() {
+            retired = true;
+            if (pending == 0) releaseOwnership();
+        }
+        private void releaseOwnership() {
+            try { ownership.release(); } catch (java.io.IOException ignored) { }
+            try { channel.close(); } catch (java.io.IOException ignored) { }
+            SOURCE_FILE_OWNERS.remove(lockPath, reservation);
+            synchronized (sourceCheckpointOwners) { sourceCheckpointOwners.remove(this); }
+        }
     }
 
     @Override

@@ -1,6 +1,7 @@
 import unittest
 
 from scripts.classify_main_change import (
+    ROUTED_INPUTS,
     ClassificationError,
     classify,
     documentation_only,
@@ -39,13 +40,18 @@ class ParseLabelsTest(unittest.TestCase):
             parse_labels('{}')
 
 
+REPOSITORY = "ravenroot-ai/ravenroot"
+PROMOTION_HEAD = {"head_ref": "dev", "head_repository": REPOSITORY, "repository": REPOSITORY}
+
+
 class ClassifyTest(unittest.TestCase):
-    def test_pull_request_to_dev_is_fast(self):
+    def test_pull_request_to_dev_is_admission(self):
+        """Review gets quick diagnostics; the queue verifies the integration commit in full."""
         self.assertEqual(
             classify(event_name="pull_request", base_ref="dev", ref_name="feature/x", labels=set(), paths=[])[
                 "tier"
             ],
-            "fast",
+            "admission",
         )
 
     def test_main_requires_exactly_one_release_label(self):
@@ -55,20 +61,22 @@ class ClassifyTest(unittest.TestCase):
                     event_name="pull_request",
                     base_ref="main",
                     ref_name="dev",
+                    **PROMOTION_HEAD,
                     labels=labels,
                     paths=["README.md"],
                 )
 
-    def test_main_content_promotion_uses_docs_tier(self):
+    def test_main_content_promotion_keeps_its_intent_without_a_functional_tier(self):
         self.assertEqual(
             classify(
                 event_name="pull_request",
                 base_ref="main",
                 ref_name="dev",
+                **PROMOTION_HEAD,
                 labels={"release:none"},
                 paths=["README.md", "docs/index.md"],
             ),
-            {"tier": "docs", "release_intent": "none", "docs_only": "true"},
+            {"tier": "promotion", "release_intent": "none", "docs_only": "true"},
         )
 
     def test_release_none_rejects_product_or_workflow_changes(self):
@@ -78,6 +86,7 @@ class ClassifyTest(unittest.TestCase):
                     event_name="pull_request",
                     base_ref="main",
                     ref_name="dev",
+                    **PROMOTION_HEAD,
                     labels={"release:none"},
                     paths=[path],
                 )
@@ -88,20 +97,39 @@ class ClassifyTest(unittest.TestCase):
                 event_name="pull_request",
                 base_ref="main",
                 ref_name="dev",
+                **PROMOTION_HEAD,
                 labels={"release:patch"},
                 paths=["docs/index.md"],
             )
 
-    def test_release_change_uses_full_tier(self):
-        result = classify(
-            event_name="pull_request",
-            base_ref="main",
-            ref_name="dev",
-            labels={"release:minor"},
-            paths=["ravenroot/pom.xml", "docs/index.md"],
-        )
-        self.assertEqual(result["tier"], "full")
-        self.assertEqual(result["release_intent"], "minor")
+    def test_every_promotion_to_main_uses_the_promotion_tier(self):
+        """The promotion re-verifies nothing; the release intent still has to survive it."""
+        for label, intent in (("release:patch", "patch"), ("release:minor", "minor"), ("release:major", "major")):
+            with self.subTest(label=label):
+                result = classify(
+                    event_name="pull_request",
+                    base_ref="main",
+                    ref_name="dev",
+                    **PROMOTION_HEAD,
+                    labels={label},
+                    paths=["ravenroot/pom.xml", "docs/index.md"],
+                )
+                self.assertEqual(result["tier"], "promotion")
+                self.assertEqual(result["release_intent"], intent)
+
+    def test_only_this_repositorys_dev_is_a_promotion(self):
+        """Antares's finding on #313: the promotion tier went to any head into main."""
+        def into_main(head_ref, head_repository):
+            return classify(event_name="pull_request", base_ref="main", ref_name="x", labels={"release:patch"},
+                            paths=["ravenroot/pom.xml"], head_ref=head_ref, head_repository=head_repository,
+                            repository=REPOSITORY)
+        self.assertEqual(into_main("dev", REPOSITORY)["tier"], "promotion")
+        self.assertEqual(into_main("hotfix/cve", REPOSITORY)["tier"], "full",
+                         "a hotfix never passed through dev, so it is verified in full")
+        for head_ref, head_repository in (("feature/x", REPOSITORY), ("dev", "fork/ravenroot"), ("", "")):
+            with self.subTest(head=f"{head_repository}:{head_ref}"):
+                with self.assertRaises(ClassificationError):
+                    into_main(head_ref, head_repository)
 
     def test_push_to_main_infers_docs_tier_from_paths(self):
         result = classify(
@@ -114,16 +142,64 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(result["tier"], "docs")
         self.assertEqual(result["release_intent"], "none")
 
-    def test_push_to_dev_and_manual_dispatch_are_full(self):
-        for event_name, ref_name in (("push", "dev"), ("workflow_dispatch", "main")):
-            result = classify(
-                event_name=event_name,
-                base_ref="",
-                ref_name=ref_name,
+    def test_a_routed_dependabot_run_is_classified_as_its_pull_request_into_dev(self):
+        """The routing workflow replays the event as `pull_request` into `dev`, so it earns the suite."""
+        self.assertEqual(
+            classify(
+                event_name="pull_request",
+                base_ref="dev",
+                ref_name="dependabot/npm_and_yarn/example",
                 labels=set(),
-                paths=["docs/index.md"],
-            )
-            self.assertEqual(result["tier"], "full")
+                paths=["ravenroot/ravenroot-ui/package-lock.json"],
+            )["tier"],
+            "admission",
+        )
+
+    def test_a_merge_group_commit_is_full(self):
+        self.assertEqual(
+            classify(event_name="merge_group", base_ref="", ref_name="gh-readonly-queue/dev/pr-1",
+                     labels=set(), paths=["README.md"])["tier"],
+            "full",
+        )
+
+    def test_a_dispatch_runs_the_full_tier_and_nothing_lighter(self):
+        """The result lands on the dispatched commit, where a pull request into `dev` reads it."""
+        for requested in ("", "full"):
+            with self.subTest(requested=requested):
+                self.assertEqual(
+                    classify(event_name="workflow_dispatch", base_ref="", ref_name="feature/x",
+                             labels=set(), paths=[], dispatch_tier=requested)["tier"],
+                    "full",
+                )
+        for requested in ("docs", "promotion", "fast", "FULL"):
+            with self.subTest(requested=requested):
+                with self.assertRaises(ClassificationError):
+                    classify(event_name="workflow_dispatch", base_ref="", ref_name="feature/x",
+                             labels=set(), paths=[], dispatch_tier=requested)
+
+    def test_a_dispatch_without_routing_may_not_redirect_the_checkout(self):
+        """Every job checks out `merge_sha` when set; the result would land on a commit it never tested."""
+        unrouted = {name: "" for name in ROUTED_INPUTS}
+        self.assertEqual(
+            classify(event_name="workflow_dispatch", base_ref="", ref_name="dev", labels=set(), paths=[],
+                     routed_inputs=unrouted)["tier"],
+            "full",
+        )
+        for name in ROUTED_INPUTS:
+            with self.subTest(input=name):
+                with self.assertRaises(ClassificationError):
+                    classify(event_name="workflow_dispatch", base_ref="", ref_name="dev", labels=set(), paths=[],
+                             routed_inputs={**unrouted, name: "9e75c71c061bdc7390dace58be761d21db4b4ad3"})
+
+    def test_push_to_dev_is_postmerge(self):
+        result = classify(event_name="push", base_ref="", ref_name="dev", labels=set(), paths=[])
+        self.assertEqual(result["tier"], "postmerge")
+
+    def test_manual_dispatch_is_full(self):
+        result = classify(
+            event_name="workflow_dispatch", base_ref="", ref_name="main", labels=set(), paths=[]
+        )
+        self.assertEqual(result["tier"], "full")
 
 
 if __name__ == "__main__":

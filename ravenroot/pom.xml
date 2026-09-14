@@ -172,9 +172,19 @@
         <!-- Jetty is used only by the optional, independently bound interaction WebSocket listener. -->
         <jetty.version>12.1.12</jetty.version>
         <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
-        <!-- Same driver artifact ravenroot-extensions/ravenroot-jdbc already pins as a test
-             fixture; one property so the two never drift apart. -->
-        <postgresql-jdbc.version>42.7.7</postgresql-jdbc.version>
+        <!--
+            The PostgreSQL driver ravenroot-persistence-postgresql ships at runtime; ravenroot-server
+            depends on the adapter at compile scope, so the distribution bundles it. 42.7.12 is the
+            first release that fixes both high advisories: GHSA-98qh-xjc8-98pq (fixed in 42.7.11)
+            and GHSA-j92g-9f8w-j867 (fixed in 42.7.12). Do not move it below 42.7.12.
+
+            The 42.7.12 driver is a multi-release jar. That is harmless here: the runtime
+            loads it from the application classpath, where the JVM resolves multi-release jars
+            natively. It is not harmless for the JDBC extension, whose isolated driver loader
+            refuses multi-release jars, so ravenroot-extensions/ravenroot-jdbc pins its own
+            operator-driver fixture instead of reading this property.
+        -->
+        <postgresql-jdbc.version>42.7.12</postgresql-jdbc.version>
         <!--
             Apache 2.0. The connection pool the composition root builds when the shared execution
             store is selected, and a runtime dependency of ravenroot-server only. It is not a

@@ -6157,15 +6157,16 @@ class AiOperationalPolicyAuditTest(unittest.TestCase):
         self.assertIsNotNone(authority)
         assert authority is not None
         self.assertEqual(29, len(authority["settings"]))
+        environments = {environment for _setting, _field, environment, _default
+                        in audit.AI_OPERATIONAL_SETTINGS}
         self.assertEqual(
-            {environment for _setting, _field, environment, _default
-             in audit.AI_OPERATIONAL_SETTINGS},
+            environments,
             {contract["environment"] for contract in authority["settings"]},
         )
         self.assertEqual(
             {candidate.id for candidate in self.candidates
              if candidate.kind == "environment-binding"
-             and str(candidate.expression).startswith("RAVENROOT_AI_")},
+             and candidate.expression in environments},
             set(authority["candidateIds"]),
         )
         self.assertEqual(

@@ -6,5 +6,16 @@ package ai.ravenroot.api.application;
  * only an explicit revision-protected operator command can restore admission.
  */
 public enum ProcessControlState {
-    RUNNING, PAUSED, CANCELLED, DRAINING, STOPPED, RECOVERY_REQUIRED
+    /** Process execution and continuation admission are enabled, subject to execution status and policy. */
+    RUNNING,
+    /** Process execution is paused; runner claims and continuation delivery remain held until resumed. */
+    PAUSED,
+    /** Cancellation is irreversible; normal process re-entry is forbidden. */
+    CANCELLED,
+    /** Already-admitted process work may finish, including its durable continuations. */
+    DRAINING,
+    /** Process invocations are stopped; runner claims and continuation delivery remain held. */
+    STOPPED,
+    /** Legacy authority is unknowable; an explicit revision-protected operator command must settle it. */
+    RECOVERY_REQUIRED
 }

@@ -3820,6 +3820,12 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["interactionWebSocketAuthorities"] = {
             INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
+    ai_operational_authority = ai_operational_authority_from_source(root, current)
+    if ai_operational_authority is None:
+        return None, ["cannot derive the closed AI operational configuration authority"]
+    refreshed["aiOperationalAuthorities"] = {
+        AI_OPERATIONAL_AUTHORITY_ID: ai_operational_authority,
+    }
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history
@@ -7681,13 +7687,13 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '6c261d1857acd9202c25046a95bd223e2f412a52007e55baf3f849f01b453218',
+  'fd890f3506161d5890988f4bc015c9c2886c5680f76ece9278cf6702fc081d81',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  '119da0e3ae927d08fe712fd0740b7580d78d26d4a3292e6c0e23aeb3798faa0d',
+  'fd2bae0c06a1c3a00864d67c307fde3c8742aef4a117305472fb822201d285c3',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
@@ -7699,7 +7705,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'e77b3bbd8b7e61b07736886b3950f667999e2c1bb8f5e0d239bfa820b4659e05',
+  '7943d0400c424994ed46a3f340a4e881eab382623dfdbb82a9d489a99adcb98b',
   1),
  ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
   'file',
@@ -9221,15 +9227,13 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                                      'numeric ceilings are validated against '
                                                                      'the Java compatibility bounds and '
                                                                      'never supply an independent default.',
-                                                        'candidateIds': ['oc-6f7d50273c34ee716649',
-                                                                         'oc-96af436dcc300b9b4218',
-                                                                         'oc-35491f73e2124ab33c98',
+                                                        'candidateIds': ['oc-58b6bb91c334fd93fde4',
+                                                                         'oc-028b110b3e69a78601e2',
+                                                                         'oc-c37b4abf1ed08575bd3f',
                                                                          'oc-c8ad782792d62e076403',
                                                                          'oc-32f6fc40a5ad8cda0865',
                                                                          'oc-8d3ae97717c09bd94bdf',
-                                                                         'oc-b3abcee105c4fc0a01bb',
-                                                                         'oc-d7a60baa1e87dd172e05',
-                                                                         'oc-9bd6a78abf03d5ff22ce',
+                                                                         'oc-f40aa7e38502f19a48f6',
                                                                          'oc-8e4ba14419b5241c9fa3',
                                                                          'oc-9bfdc2a14c32a1174adc',
                                                                          'oc-5ef226f1f314a1077bbb',
@@ -9257,9 +9261,11 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                                                          'oc-5376b61ad32aeafad5d3',
                                                                          'oc-052316feb792e1972fa7',
                                                                          'oc-4942637a324f09327014',
-                                                                         'oc-da969c40e3428cd0cea7',
-                                                                         'oc-e9319265c8a7925c4af8',
-                                                                         'oc-67bc0426d0813224e07b']},
+                                                                         'oc-f120ad4ec10c3d698df7',
+                                                                         'oc-37b02f1420d719a39a00',
+                                                                         'oc-523ff553b5c26f494921',
+                                                                         'oc-bf14e452f6c48a172a9e',
+                                                                         'oc-cb1155ca3c6ddd4a8c37']},
  'program.authoring.deployment-schema-and-delegation.security-ceiling-or-default': {'classification': 'security-ceiling-or-default',
                                                                                     'status': 'retained',
                                                                                     'rationale': 'Closed '
@@ -11737,6 +11743,162 @@ def program_github_deployment_candidate(root: Path, candidate: Candidate) -> boo
             and "RAVENROOT_PROGRAM_AUTHORING_" in lines[candidate.line - 2])
     except (OSError, UnicodeError, IndexError):
         return False
+
+
+AI_OPERATIONAL_AUTHORITY_ID = "ai-operational-configuration-v1"
+AI_OPERATIONAL_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/"
+    "AgentOperationalConfiguration.java"
+)
+AI_OPERATIONAL_TEST_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/test/java/ai/ravenroot/extensions/ai/"
+    "AgentOperationalConfigurationTest.java"
+)
+AI_OPERATIONAL_SETTINGS = (
+    ("ai.default-max-turns", "defaultMaxTurns", "RAVENROOT_AI_DEFAULT_MAX_TURNS", "8"),
+    ("ai.max-turns", "maxTurns", "RAVENROOT_AI_MAX_TURNS", "64"),
+    ("ai.max-mcp-servers", "maxMcpServers", "RAVENROOT_AI_MAX_MCP_SERVERS", "8"),
+    ("ai.max-skill-payload-bytes", "maxSkillPayloadBytes", "RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES", "2097152"),
+    ("ai.max-skill-name-chars", "maxSkillNameChars", "RAVENROOT_AI_MAX_SKILL_NAME_CHARS", "64"),
+    ("ai.max-skill-description-chars", "maxSkillDescriptionChars", "RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS", "512"),
+    ("ai.max-skill-instructions-chars", "maxSkillInstructionsChars", "RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS", "16384"),
+    ("ai.max-mcp-tools-per-server", "maxMcpToolsPerServer", "RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER", "64"),
+    ("ai.default-max-discovered-mcp-tools-per-server", "defaultMaxDiscoveredMcpToolsPerServer", "RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "1024"),
+    ("ai.max-discovered-mcp-tools-per-server", "maxDiscoveredMcpToolsPerServer", "RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "1024"),
+    ("ai.max-llm-profile-bytes", "maxLlmProfileBytes", "RAVENROOT_AI_MAX_LLM_PROFILE_BYTES", "8192"),
+    ("ai.max-mcp-profile-bytes", "maxMcpProfileBytes", "RAVENROOT_AI_MAX_MCP_PROFILE_BYTES", "8192"),
+    ("ai.default-llm-timeout-ms", "defaultLlmTimeoutMs", "RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS", "60000"),
+    ("ai.max-llm-timeout-ms", "maxLlmTimeoutMs", "RAVENROOT_AI_MAX_LLM_TIMEOUT_MS", "600000"),
+    ("ai.default-mcp-timeout-ms", "defaultMcpTimeoutMs", "RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS", "30000"),
+    ("ai.max-mcp-timeout-ms", "maxMcpTimeoutMs", "RAVENROOT_AI_MAX_MCP_TIMEOUT_MS", "600000"),
+    ("ai.default-llm-request-bytes", "defaultLlmRequestBytes", "RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES", "8388608"),
+    ("ai.max-llm-request-bytes", "maxLlmRequestBytes", "RAVENROOT_AI_MAX_LLM_REQUEST_BYTES", "8388608"),
+    ("ai.default-llm-response-bytes", "defaultLlmResponseBytes", "RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES", "8388608"),
+    ("ai.max-llm-response-bytes", "maxLlmResponseBytes", "RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES", "8388608"),
+    ("ai.default-mcp-request-bytes", "defaultMcpRequestBytes", "RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES", "1048576"),
+    ("ai.max-mcp-request-bytes", "maxMcpRequestBytes", "RAVENROOT_AI_MAX_MCP_REQUEST_BYTES", "4194304"),
+    ("ai.default-mcp-response-bytes", "defaultMcpResponseBytes", "RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES", "1048576"),
+    ("ai.max-mcp-response-bytes", "maxMcpResponseBytes", "RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES", "4194304"),
+    ("ai.default-llm-concurrency", "defaultLlmConcurrency", "RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY", "4"),
+    ("ai.max-llm-concurrency", "maxLlmConcurrency", "RAVENROOT_AI_MAX_LLM_CONCURRENCY", "256"),
+    ("ai.default-mcp-concurrency", "defaultMcpConcurrency", "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", "4"),
+    ("ai.max-mcp-concurrency", "maxMcpConcurrency", "RAVENROOT_AI_MAX_MCP_CONCURRENCY", "256"),
+    ("ai.max-system-preamble-chars", "maxSystemPreambleChars", "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "8192"),
+)
+AI_OPERATIONAL_PROOF_PATHS = (
+    AI_OPERATIONAL_CONFIGURATION_PATH,
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentSkill.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentLlmProfileResolver.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentMcpProfileResolver.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpProtocol.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpSession.java"),
+    Path("compose.yaml"),
+    Path("deploy/helm/ravenroot/templates/_helpers.tpl"),
+    Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+    Path("deploy/helm/ravenroot/values.schema.json"),
+    Path("deploy/helm/ravenroot/values.yaml"),
+    Path("deploy/kubernetes/ravenroot.yaml"),
+)
+AI_OPERATIONAL_TEST_METHODS = (
+    "missingAndBlankSettingsUseDefaults",
+    "validValuesOverrideEveryDefault",
+    "invalidValuesAreActionable",
+    "crossFieldRelationshipsAreValidated",
+)
+
+
+def ai_operational_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the complete AI startup-policy family from typed code and deployment carriers."""
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8")
+                   for path in AI_OPERATIONAL_PROOF_PATHS}
+        test_source = (root / AI_OPERATIONAL_TEST_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    source = sources[AI_OPERATIONAL_CONFIGURATION_PATH]
+    components = java_record_components(source, "AgentOperationalConfiguration")
+    if components != tuple(field for _setting, field, _environment, _default in AI_OPERATIONAL_SETTINGS):
+        return None
+    factory_span = java_method_span(source, "AgentOperationalConfiguration", "fromEnvironment")
+    defaults_span = java_method_span(source, "AgentOperationalConfiguration", "defaults")
+    constructor_span = java_compact_constructor_span(source, "AgentOperationalConfiguration")
+    if factory_span is None or defaults_span is None or constructor_span is None:
+        return None
+    factory = normalized(source[slice(*factory_span)])
+    constructor = normalized(source[slice(*constructor_span)])
+    settings: list[dict[str, object]] = []
+    candidate_ids: set[str] = set()
+    for setting, field, environment, default in AI_OPERATIONAL_SETTINGS:
+        if factory.count(normalized(f'value(environment, "{environment}", d.{field})')) != 1 \
+                or constructor.count(normalized(f'positive("{environment}", {field})')) != 1:
+            return None
+        ids = sorted(candidate.id for candidate in discovered.values()
+                     if candidate.kind == "environment-binding"
+                     and candidate.expression == environment)
+        if not ids or any(identifier in candidate_ids for identifier in ids):
+            return None
+        candidate_ids.update(ids)
+        settings.append({"setting": setting, "field": field, "environment": environment,
+                         "default": default, "candidateIds": ids})
+    test_digests = {method: java_method_digest(
+        test_source, "AgentOperationalConfigurationTest", method)
+        for method in AI_OPERATIONAL_TEST_METHODS}
+    if any(digest is None for digest in test_digests.values()):
+        return None
+    helper_digests = {method: java_method_digest(source, "AgentOperationalConfiguration", method)
+                      for method in ("value", "positive", "supportedPayload", "notAbove")}
+    if any(digest is None for digest in helper_digests.values()):
+        return None
+    return {
+        "kind": "java-ai-operational-configuration-v1",
+        "settings": settings,
+        "candidateIds": sorted(candidate_ids),
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(text)}
+                          for path, text in sources.items()],
+        "factoryBodyDigest": java_method_digest(
+            source, "AgentOperationalConfiguration", "fromEnvironment"),
+        "defaultsBodyDigest": java_method_digest(
+            source, "AgentOperationalConfiguration", "defaults"),
+        "compactConstructorDigest": java_span_digest(source, constructor_span),
+        "helperBodyDigests": helper_digests,
+        "testPath": AI_OPERATIONAL_TEST_PATH.as_posix(),
+        "testMethodDigests": test_digests,
+    }
+
+
+def ai_operational_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    expected = ai_operational_authority_from_source(root, discovered)
+    if expected is None:
+        return ["AI operational configuration source family is incomplete or unsupported"]
+    if authorities != {AI_OPERATIONAL_AUTHORITY_ID: expected}:
+        return ["AI operational configuration requires its exact source-derived authority"]
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("aiOperationalAuthority") is not None}
+    expected_ids = set(str(identifier) for identifier in expected["candidateIds"])
+    errors: list[str] = []
+    if marked != expected_ids:
+        errors.append("AI operational authority candidate partition is missing, duplicated, or foreign")
+    owner = f"{AI_OPERATIONAL_CONFIGURATION_PATH.as_posix()}#AgentOperationalConfiguration"
+    for contract in expected["settings"]:
+        setting = str(contract["setting"])
+        ids = set(str(identifier) for identifier in contract["candidateIds"])
+        for identifier in ids:
+            entry = entries.get(identifier, {})
+            if entry.get("aiOperationalAuthority") != AI_OPERATIONAL_AUTHORITY_ID \
+                    or entry.get("setting") != setting \
+                    or entry.get("owner") != owner \
+                    or entry.get("field") != contract["field"] \
+                    or entry.get("bindings") != [contract["environment"]] \
+                    or entry.get("default") != contract["default"] \
+                    or entry.get("status") != "already-centralized" \
+                    or entry.get("classification") != "operator-configurable":
+                errors.append(f"{identifier}: AI operational authority metadata has drifted")
+    return errors
 
 
 def program_github_policy_cohort_candidate_ids(root: Path, discovered: dict[str, Candidate]) -> set[str]:
@@ -15418,6 +15580,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             entry.get("helmAuthority"),
             entry.get("persistenceAuthority"),
             entry.get("externalIoPolicyAuthority"),
+            entry.get("aiOperationalAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -15495,6 +15658,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
+    errors.extend(ai_operational_authority_errors(
+        root, document.get("aiOperationalAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -15525,6 +15691,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            continue
+        if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
             continue
         if representative.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID \
                 and representative.get("finalReviewGroup") == "embed-enabled-operator-setting":

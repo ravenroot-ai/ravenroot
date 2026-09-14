@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Official Python 3.13.15 / Alpine 3.24, linux/amd64; immutable manifest inspected during review.
 BASE_IMAGE = "python@sha256:46ee549c88617e9bc8acb843a326f1a5c0fa5608d7f9703509efe6d53b55f318"
 TEST = "writableContainerDevelopmentCycleUsesRealWorkspaceAcrossEveryRestart"
+TEST_CLASS = "ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest"
 TOOLS = ("sudo", "dockerd", "docker", "mkfs.xfs", "mount", "umount", "findmnt", "mvn")
 
 
@@ -51,8 +52,18 @@ def daemon_arguments(directory: Path) -> list[str]:
 
 def verify_report(path: Path) -> None:
     suite = ET.parse(path).getroot()
-    cases = [case for case in suite.iter("testcase") if case.get("name") == TEST]
-    if len(cases) != 1 or any(cases[0].find(tag) is not None for tag in ("skipped", "error", "failure")):
+    cases = list(suite.iter("testcase"))
+    # Surefire includes the JUnit @TempDir parameter type in the XML name, although
+    # Maven's -Dtest selector takes the bare method name. Pin both identities;
+    # never accept a prefix match or an unrelated green test from a stale report.
+    if (suite.tag != "testsuite" or suite.get("name") != TEST_CLASS
+            or any(suite.get(key) != value for key, value in
+                   (("tests", "1"), ("errors", "0"), ("failures", "0"), ("skipped", "0")))
+            or suite.get("flakes", "0") != "0"
+            or len(cases) != 1 or cases[0] not in list(suite)
+            or cases[0].get("classname") != TEST_CLASS
+            or cases[0].get("name") != TEST + "(Path)"
+            or any(child.tag not in ("system-out", "system-err") for child in cases[0])):
         raise RuntimeError("the writable nine-job acceptance did not execute successfully exactly once")
 
 

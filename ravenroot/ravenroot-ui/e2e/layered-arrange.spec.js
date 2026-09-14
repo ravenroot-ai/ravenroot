@@ -43,7 +43,7 @@ async function openLayoutMenu(page) {
 async function arrange(page, label) {
   await openLayoutMenu(page);
   const started = Date.now();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await page.getByRole('menuitemradio', { name: label, exact: true }).click();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 15_000 });
   const wallMs = Date.now() - started;
   // Edge geometry is projected during the next paint; give the renderer two frames.
@@ -294,7 +294,8 @@ test.describe('Layered arrangements on the test bench', () => {
     await page.getByRole('menuitemradio', { name: 'Monitoring' }).click();
     await openLayoutMenu(page);
     for (const label of LAYERED) {
-      await expect(page.getByRole('menuitem', { name: label, exact: true })).toHaveAttribute('aria-disabled', 'true');
+      await expect(page.getByRole('menuitemradio', { name: label, exact: true }))
+        .toHaveAttribute('aria-disabled', 'true');
     }
   });
 });

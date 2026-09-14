@@ -5485,10 +5485,10 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   // arrangement; Monitoring owns the continuous D3 lifecycle.
   const style = 'cyto';
   const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
-  const restoringKeptPositions = semanticMode === 'design' && designArrangement === 'keep';
-  const layout = semanticMode === 'design' ? (arrangement?.layout || 'cyto') : 'elastic';
   target.batch(() => applyVisualStyle(style, target, owner));
-  setLayout(layout, restoringKeptPositions ? { preservePositions: true, keepPositions: true } : {});
+  setLayout(semanticMode === 'design' ? (arrangement?.layout || 'cyto') : 'elastic',
+    semanticMode === 'design' && designArrangement === 'keep'
+      ? { preservePositions: true, keepPositions: true } : {});
   scheduleWorkspacePersistence();
 }
 

@@ -25,6 +25,15 @@ export function createNodeActionCatalog({ targetLabel, capabilities, handlers })
   }));
 }
 
+function asSelectableArrangement(command, id) {
+  return {
+    ...command,
+    isChecked: context => context.hasDocument && context.renderMode === 'design'
+      && context.designArrangement === id,
+    kind: 'radio',
+  };
+}
+
 function localizeCommand(command, t) {
   const labelKey = `commands.${command.id}.label`;
   const helpKey = `commands.${command.id}.help`;
@@ -54,9 +63,6 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     id: `layout.arrange.${id}`, group, order: order + 200,
     placements: ['menu.layout', 'help'], execute: () => actions.arrange(id),
     isEnabled: context => active(context) && context.renderMode === 'design',
-    isChecked: context => context.hasDocument && context.renderMode === 'design'
-      && context.designArrangement === id,
-    kind: 'radio',
   });
   const workspaceLayout = (id, mode, order) => ({
     id: `workspace.${id}`, group: 'workspace-layout', order,
@@ -200,14 +206,16 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     renderMode('design', 10),
     renderMode('monitoring', 20),
-    arrangement('hierarchical', 10),
-    arrangement('flow', 20),
-    arrangement('organic', 30),
-    arrangement('keep', 40),
+    asSelectableArrangement(arrangement('hierarchical', 10), 'hierarchical'),
+    asSelectableArrangement(arrangement('flow', 20), 'flow'),
+    asSelectableArrangement(arrangement('organic', 30), 'organic'),
+    asSelectableArrangement(arrangement('keep', 40), 'keep'),
     // The layered drawings are additive: a sibling group after the established arrangements, so
     // the existing four keep their ids, order and contiguity, and the menu separates the two sets.
-    arrangement('hierarchical-new', 50, 'design-arrange-layered'),
-    arrangement('layered-down', 60, 'design-arrange-layered'),
+    asSelectableArrangement(
+      arrangement('hierarchical-new', 50, 'design-arrange-layered'), 'hierarchical-new'),
+    asSelectableArrangement(
+      arrangement('layered-down', 60, 'design-arrange-layered'), 'layered-down'),
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,

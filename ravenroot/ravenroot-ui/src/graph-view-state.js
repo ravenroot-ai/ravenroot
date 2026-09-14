@@ -111,8 +111,10 @@ export function documentPresentationState(document_) {
     ? document_.renderMode : (hasRecordLayoutMode ? undefined : graphProperties[GRAPH_RENDER_MODE_PROPERTY]);
   const persistedLayoutMode = hasRecordLayoutMode
     ? document_.layoutMode : graphProperties[GRAPH_LAYOUT_MODE_PROPERTY];
-  const persistedDesignArrangement = Object.hasOwn(document_ || {}, 'designArrangement')
-    ? document_.designArrangement : graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY];
+  let persistedDesignArrangement = graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY];
+  if (Object.hasOwn(document_ || {}, 'designArrangement')) {
+    persistedDesignArrangement = document_.designArrangement;
+  }
   const designArrangement = normalizeDesignArrangement(persistedDesignArrangement, persistedLayoutMode);
   const explicitDesign = persistedRenderMode === DESIGN_RENDER_MODE
     && Object.hasOwn(document_, 'layoutMode') && DESIGN_LAYOUT_MODES.has(document_.layoutMode)

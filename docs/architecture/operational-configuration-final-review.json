@@ -11503,7 +11503,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "194e20a28e733e1cc593707876a0166050eb1bca14986c8df9ac82e44fcc3a9d",
+          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],
@@ -11577,7 +11577,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "194e20a28e733e1cc593707876a0166050eb1bca14986c8df9ac82e44fcc3a9d",
+          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],
@@ -11648,7 +11648,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "194e20a28e733e1cc593707876a0166050eb1bca14986c8df9ac82e44fcc3a9d",
+          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],

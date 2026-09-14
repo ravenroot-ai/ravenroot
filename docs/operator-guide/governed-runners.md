@@ -170,3 +170,19 @@ worker and SQLite-backed graph continuation between jobs. It refuses a non-enfor
 before dispatch. The supplied base image is never removed; successful execution cleans its own
 workspace containers and snapshots. A failed execution may retain its exact named job resources
 for diagnosis; do not prune unrelated Docker state.
+
+Full-tier GitHub CI also invokes `scripts/fixtures/runner_quota_acceptance.py` on its ephemeral
+Ubuntu x86_64 host. The fixture requires preinstalled XFS tools and passwordless sudo; it never
+installs packages or changes the default Docker daemon. It creates a bounded 4 GiB regular file,
+formats only that file as XFS with project quotas, and starts a separate classic-overlay2 daemon
+with isolated data/state/socket/PID paths, no bridge and no firewall management. It builds the
+example from an immutable official Python image manifest, runs the production quota probe and
+the exact writable nine-job test, and rejects missing, skipped or failed test evidence. Teardown
+stops only its identified daemon, unmounts its filesystem and removes its own temporary directory.
+Unsupported tooling, kernel, filesystem or quota behavior fails the job; it does not fall back to
+an unbounded writable substrate. This fixture refuses local and self-hosted environments.
+Only a successful host-backed job is writable acceptance evidence; a passing fixture unit test
+or Docker's acceptance of a flag is not evidence of enforcement.
+The supported substrate follows Docker's documented
+[XFS project-quota requirement](https://docs.docker.com/reference/cli/dockerd/#overlay2-options)
+and [isolated-daemon contract](https://docs.docker.com/reference/cli/dockerd/#run-multiple-daemons).

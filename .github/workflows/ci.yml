@@ -755,6 +755,11 @@ jobs:
       - name: Run the complete backend unit and integration suite
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress clean verify
+      - name: Verify the isolated writable runner acceptance fixture
+        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance
+      - name: Run writable nine-job acceptance on ephemeral XFS project quotas
+        timeout-minutes: 20
+        run: python3 scripts/fixtures/runner_quota_acceptance.py
       - name: Verify the published extension pack from a clean staged consumer
         run: ./scripts/verify-extension-pack-consumer.sh
 

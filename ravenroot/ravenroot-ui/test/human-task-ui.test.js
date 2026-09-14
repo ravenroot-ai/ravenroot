@@ -106,6 +106,23 @@ describe('Human Task inspector and decision dialog', () => {
     expect(closed).not.toHaveBeenCalled();
   });
 
+  it('notifies a user close only after the native close event has restored focus', async () => {
+    const doc = dialogDocument();
+    const dialog = doc.getElementById('d');
+    const closed = vi.fn();
+    dialog.close = vi.fn(() => {
+      dialog.removeAttribute('open');
+      queueMicrotask(() => dialog.dispatchEvent(new doc.defaultView.Event('close')));
+    });
+    const controller = createHumanTaskDecisionDialog({ dialog, onClose: closed });
+    controller.open(task, capability);
+
+    doc.querySelector('[data-human-task-close]').click();
+    expect(closed).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
   it('suspends immediately when authentication changes during an uncertain decision', async () => {
     const doc = dialogDocument();
     const closed = vi.fn();

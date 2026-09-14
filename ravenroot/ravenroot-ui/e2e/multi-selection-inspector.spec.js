@@ -78,6 +78,12 @@ async function selectWithPointer(page, ids = ['start', 'dosomething']) {
   await page.mouse.click(points[1].x, points[1].y);
   await page.keyboard.up('Control');
   await expect.poll(() => selectionCount(page)).toBe(String(ids.length));
+  // Cytoscape can finish click-selection bookkeeping at the end of its multi-click debounce.
+  // Cross into the keyboard path only after that pointer contract is quiescent, so the test does
+  // not race the guarded selection reassertion that makes a real repeated click deterministic.
+  await page.evaluate(() => new Promise(resolve =>
+    setTimeout(resolve, window.cy.multiClickDebounceTime() + 1)));
+  await expect.poll(() => selectionCount(page)).toBe(String(ids.length));
 }
 
 async function expectSelectionInspector(page, mode, count = 2) {

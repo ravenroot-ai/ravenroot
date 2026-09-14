@@ -131,6 +131,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   let capability = null;
   let submitting = false;
   let generation = 0;
+  let notifyAfterNativeClose = false;
 
   const taskKey = value => value && `${value.taskId}\u0000${value.generation}`;
   function advance() { generation += 1; }
@@ -173,9 +174,13 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     comment.value = '';
     clearReview();
     say();
-    if (dialog.open && typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
-    onClose();
+    if (dialog.open && typeof dialog.close === 'function') {
+      notifyAfterNativeClose = true;
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+      onClose();
+    }
   }
 
   function suspend() {
@@ -187,6 +192,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     comment.value = '';
     clearReview();
     say();
+    notifyAfterNativeClose = false;
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
     else dialog.removeAttribute('open');
   }
@@ -221,6 +227,11 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   });
   dialog.querySelector('[data-human-task-close]').addEventListener('click', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+  dialog.addEventListener('close', () => {
+    if (!notifyAfterNativeClose) return;
+    notifyAfterNativeClose = false;
+    onClose();
+  });
   dialog.addEventListener('keydown', event => event.stopPropagation());
   comment.addEventListener('input', () => {
     say();

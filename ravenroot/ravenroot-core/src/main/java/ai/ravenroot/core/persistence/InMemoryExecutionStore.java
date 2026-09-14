@@ -1958,7 +1958,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             .permittedActions(task.request());
                     if (actions.isEmpty()) return Optional.empty();
                     return Optional.of(attentionItem(new AuthorizedHumanTask(
-                            task, entry.origin.deploymentId(), actions)));
+                            task, entry.origin.deploymentId(), actions), true));
                 }
                 return Optional.empty();
             }
@@ -1976,6 +1976,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row) {
+        return attentionItem(row, false);
+    }
+
+    private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row,
+                                                         boolean includeReview) {
         DurableHumanTask task = row.task();
         HumanTaskRegistration request = task.request();
         return new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
@@ -1985,7 +1990,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 request.confirmationPresentation(), request.confirmationLimits().maxPromptUtf8Bytes(),
                 request.confirmationLimits().maxActionLabelUtf8Bytes(),
                 request.confirmationLimits().maxCommentUtf8Bytes(),
-                row.actions());
+                row.actions(), includeReview && request.reviewPresentation().present()
+                        ? Optional.of(request.reviewPresentation()) : Optional.empty());
     }
 
 

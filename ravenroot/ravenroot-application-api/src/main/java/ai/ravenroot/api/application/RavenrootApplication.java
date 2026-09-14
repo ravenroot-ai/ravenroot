@@ -475,6 +475,18 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Abruptly releases only runtime resources owned by one process instance, without recording
+     * cancellation. Durable recovery may therefore reclaim its unfinished invocations.
+     *
+     * @param tenantId authenticated tenant boundary
+     * @param processInstanceId exact durable process identity
+     * @return number of locally active traversal runtimes released
+     */
+    default int stopProcessInvocations(String tenantId, UUID processInstanceId) {
+        return 0;
+    }
+
+    /**
  * Asks the traversal identified by {@code traversalId} to hold before its next node (ADR 0023).
  * The node in flight finishes and publishes its completion; nothing after it is
  * dispatched until {@link #resumeTraversal} is called.

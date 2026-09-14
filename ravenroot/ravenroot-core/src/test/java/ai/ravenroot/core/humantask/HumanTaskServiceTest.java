@@ -8,6 +8,8 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
+import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadKind;
@@ -15,6 +17,7 @@ import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionTransition;
@@ -22,6 +25,7 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
@@ -43,6 +47,7 @@ import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
+import ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry;
 import ai.ravenroot.core.recovery.ExecutionRecoveryService;
 import ai.ravenroot.core.recovery.RecoveryOutcome;
 import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
@@ -66,6 +71,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -86,6 +92,190 @@ class HumanTaskServiceTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void administrativeInventoryIsPayloadFreeAndForcedAbandonmentIsAtomicWithoutReentry() throws Exception {
+        try (var store = sqlite("admin-human-tasks", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                task = service.suspend(fixture.message(), definition()).task();
+            }
+            var query = new HumanTaskService.AdminQuery(Optional.of(task.request().taskId()), Set.of(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Set.of(), Optional.empty(), Optional.empty(), Optional.empty(), 10);
+            var page = service.adminInventory(TENANT, query);
+            assertEquals(1, page.items().size());
+            assertEquals(HumanTaskService.AdminClassification.ACTIONABLE,
+                    page.items().getFirst().classification());
+            assertEquals(HandlerStatus.WAITING.name(), page.items().getFirst().handlerStatus());
+            assertFalse(page.toString().contains("approved"), "administrative projection must omit payloads");
+
+            var dryRun = service.adminPurge(requester(), query,
+                    HumanTaskService.AdminPurgeMode.FORCE_ABANDON, true, "admin-command");
+            assertTrue(dryRun.dryRun());
+            assertEquals("PLANNED", dryRun.items().getFirst().outcome());
+            assertEquals(HumanTaskStatus.WAITING, store.loadHumanTask(TENANT, task.request().taskId())
+                    .toCompletableFuture().join().orElseThrow().status());
+
+            var applied = service.adminPurge(requester(), query,
+                    HumanTaskService.AdminPurgeMode.FORCE_ABANDON, false, "admin-command");
+            assertEquals("ABANDONED", applied.items().getFirst().outcome());
+            assertEquals(HumanTaskStatus.CANCELLED, store.loadHumanTask(TENANT, task.request().taskId())
+                    .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(HandlerStatus.CANCELLED, store.loadHandler(fixture.key, task.request().taskId())
+                    .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(ProcessInstanceStatus.FAILED,
+                    store.load(fixture.key).toCompletableFuture().join().state().status());
+            assertTrue(store.claimPendingWork(TENANT, "admin-reentry", 10, Duration.ofSeconds(30))
+                    .toCompletableFuture().join().stream()
+                    .noneMatch(PendingWork.HandlerTrigger.class::isInstance));
+            assertEquals("ALREADY_TERMINAL", service.adminPurge(requester(), query,
+                    HumanTaskService.AdminPurgeMode.FORCE_ABANDON, false, "admin-command")
+                    .items().getFirst().outcome());
+        }
+    }
+
+    @Test
+    void administrativePurgeRefusesAnUnfilteredBlastRadius() throws Exception {
+        try (var store = sqlite("admin-unbounded", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var unbounded = new HumanTaskService.AdminQuery(Optional.empty(), Set.of(), Optional.empty(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Set.of(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), 10);
+            assertThrows(IllegalArgumentException.class, () -> service.adminPurge(requester(), unbounded,
+                    HumanTaskService.AdminPurgeMode.CANCEL, true, "admin-command"));
+        }
+    }
+
+    @Test
+    void administrativePagingDoesNotSkipCandidatesInsideAStorePage() throws Exception {
+        try (var store = sqlite("admin-paging", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture first = running(store);
+            Fixture second = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            for (Fixture fixture : List.of(first, second)) {
+                try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker-" + fixture.traversalId,
+                        Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                    service.suspend(fixture.message(), definition());
+                }
+            }
+            var firstQuery = new HumanTaskService.AdminQuery(Optional.empty(), Set.of(HumanTaskStatus.WAITING),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Set.of(), Optional.empty(), Optional.empty(), Optional.empty(), 1);
+            var firstPage = service.adminInventory(TENANT, firstQuery);
+            assertEquals(1, firstPage.items().size());
+            assertTrue(firstPage.nextCursor().isPresent());
+            var secondQuery = new HumanTaskService.AdminQuery(Optional.empty(), Set.of(HumanTaskStatus.WAITING),
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Set.of(), Optional.empty(), Optional.empty(), firstPage.nextCursor(), 1);
+            var secondPage = service.adminInventory(TENANT, secondQuery);
+            assertEquals(1, secondPage.items().size());
+            assertFalse(firstPage.items().getFirst().taskId().equals(secondPage.items().getFirst().taskId()));
+        }
+    }
+
+    @Test
+    void deploymentCancellationTerminallyClosesOnlyItsTasksWithoutReentry() throws Exception {
+        try (var store = sqlite("deployment-cancel", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture cancelledFixture = running(store, "deployment-a");
+            Fixture siblingFixture = running(store, "deployment-b");
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            HumanTaskResult cancelledTask;
+            HumanTaskResult siblingTask;
+            try (var firstRecorder = ExecutionRecorder.open(store, cancelledFixture.key,
+                         "cancelled-worker", Duration.ofSeconds(30), 1);
+                 var secondRecorder = ExecutionRecorder.open(store, siblingFixture.key,
+                         "sibling-worker", Duration.ofSeconds(30), 1);
+                 var firstBinding = service.bindLive(cancelledFixture.key, firstRecorder);
+                 var secondBinding = service.bindLive(siblingFixture.key, secondRecorder)) {
+                cancelledTask = service.suspend(cancelledFixture.message(), definition());
+                siblingTask = service.suspend(siblingFixture.message(), definition());
+            }
+
+            assertEquals(1, service.cancelDeploymentTasks(TENANT,
+                    DeploymentId.of("deployment-a"), "cancel-command"));
+            assertEquals(HumanTaskStatus.CANCELLED,
+                    store.loadHumanTask(TENANT, cancelledTask.task().request().taskId())
+                            .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(HandlerStatus.CANCELLED,
+                    store.loadHandler(cancelledFixture.key, cancelledTask.task().request().taskId())
+                            .toCompletableFuture().join().orElseThrow().status());
+            var cancelledProcess = store.load(cancelledFixture.key).toCompletableFuture().join().state();
+            assertEquals(ProcessInstanceStatus.FAILED, cancelledProcess.status());
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    cancelledProcess.terminationReason());
+            assertEquals(TraversalStatus.FAILED,
+                    cancelledProcess.traversals().get(cancelledFixture.traversalId).status());
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    cancelledProcess.traversals().get(cancelledFixture.traversalId).terminationReason());
+            assertEquals(HumanTaskStatus.WAITING,
+                    store.loadHumanTask(TENANT, siblingTask.task().request().taskId())
+                            .toCompletableFuture().join().orElseThrow().status());
+            assertEquals(0, store.claimPendingWork(TENANT, "reentry", 20,
+                            Duration.ofSeconds(30)).toCompletableFuture().join().stream()
+                    .filter(PendingWork.HandlerTrigger.class::isInstance).count(),
+                    "deployment cancellation must never create a graph re-entry trigger");
+            assertEquals(0, service.cancelDeploymentTasks(TENANT,
+                    DeploymentId.of("deployment-a"), "cancel-command"),
+                    "recovery replay must be idempotent");
+        }
+    }
+
+    @Test
+    void concurrentProcessesRetainAndIndependentlySettleTasksAcrossRestart() throws Exception {
+        Path database = directory.resolve("concurrent-processes.db");
+        UUID firstTaskId;
+        UUID secondTaskId;
+        try (var store = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture first = running(store);
+            Fixture second = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            try (var firstRecorder = ExecutionRecorder.open(store, first.key, "first-worker",
+                         Duration.ofSeconds(30), 1);
+                 var secondRecorder = ExecutionRecorder.open(store, second.key, "second-worker",
+                         Duration.ofSeconds(30), 1);
+                 var firstBinding = service.bindLive(first.key, firstRecorder);
+                 var secondBinding = service.bindLive(second.key, secondRecorder)) {
+                var firstSuspension = CompletableFuture.supplyAsync(
+                        () -> service.suspend(first.message(), definition()));
+                var secondSuspension = CompletableFuture.supplyAsync(
+                        () -> service.suspend(second.message(), definition()));
+                HumanTaskResult firstResult = firstSuspension.join();
+                HumanTaskResult secondResult = secondSuspension.join();
+                assertEquals(HumanTaskResult.Code.CREATED, firstResult.code());
+                assertEquals(HumanTaskResult.Code.CREATED, secondResult.code());
+                firstTaskId = firstResult.task().request().taskId();
+                secondTaskId = secondResult.task().request().taskId();
+            }
+        }
+
+        try (var reopened = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(reopened, Clock.fixed(NOW, ZoneOffset.UTC));
+            assertEquals(Set.of(firstTaskId, secondTaskId), service.inbox(requester(),
+                            HumanTaskQuery.outstanding(10)).items().stream()
+                    .map(task -> task.request().taskId()).collect(java.util.stream.Collectors.toSet()),
+                    "restart must retain every independently addressable pending task");
+
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), firstTaskId, 1, response()).code());
+            assertEquals(HumanTaskStatus.WAITING,
+                    reopened.loadHumanTask(TENANT, secondTaskId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "settling one process must not affect its sibling at the same node");
+            assertEquals(1, service.inbox(requester(), HumanTaskQuery.outstanding(10)).items().size());
+
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), secondTaskId, 1, response()).code());
+            assertTrue(service.inbox(requester(), HumanTaskQuery.outstanding(10)).items().isEmpty());
+            assertEquals(2, reopened.claimPendingWork(TENANT, "reentry-worker", 10,
+                            Duration.ofSeconds(30)).toCompletableFuture().join().stream()
+                    .filter(PendingWork.HandlerTrigger.class::isInstance).count(),
+                    "each accepted decision must retain its own re-entry trigger");
+        }
+    }
 
     @Test
     void suspensionAndResolutionAreAtomicGenerationFencedAndPayloadSafe() throws Exception {
@@ -129,6 +319,43 @@ class HumanTaskServiceTest {
             assertFalse(journal.stream().anyMatch(row -> new String(row.envelope().payload().bytes(),
                     StandardCharsets.UTF_8).contains("approved")),
                     "response values must never enter durable audit event payloads");
+        }
+    }
+
+    @Test
+    void deterministicRetryKeepsTheFirstAdmittedReviewBytes() throws Exception {
+        try (var store = sqlite("review-retry", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var presentation = new HumanTaskConfirmationPresentation(1, "Review the mail.",
+                    HumanTaskCommentRequirement.OPTIONAL,
+                    List.of(HumanTaskConfirmationAction.RESOLVE), "Confirm", "", "");
+            var definition = new HumanTaskDefinition(
+                    new HumanTaskMetadata("Review mail", "Confirm the exact body."),
+                    new HumanTaskResponseSchema(HumanTaskService.CONFIRMATION_CONTENT_TYPE,
+                            HumanTaskService.CONFIRMATION_SCHEMA,
+                            HumanTaskService.CONFIRMATION_SCHEMA_VERSION, PayloadKind.SCALAR, 4096),
+                    HandlerAuthorization.ofRoles(Role.APPROVER.name()),
+                    Optional.empty(), Duration.ofHours(1),
+                    new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                    HumanTaskPolicy.DEFAULTS.executionLimits(4096), presentation,
+                    new HumanTaskReviewDefinition(1, "payload.secret", 64));
+            NodeMessage original = fixture.message();
+            NodeMessage changed = new NodeMessage(original.security(), original.processInstanceId(),
+                    original.traversalId(), original.invocationId(), original.attemptId(),
+                    original.parentInvocationIds(), original.nodeId(), Map.of("secret", "x".repeat(100)),
+                    original.attributes(), original.command());
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                assertEquals(HumanTaskResult.Code.CREATED, service.suspend(original, definition).code());
+                HumanTaskResult retry = service.suspend(changed, definition);
+                assertEquals(HumanTaskResult.Code.ALREADY_APPLIED, retry.code());
+                assertEquals("not copied", retry.task().request().reviewPresentation().text());
+                assertFalse(store.readJournal(TENANT, 0, 100).toCompletableFuture().join().stream()
+                        .anyMatch(row -> new String(row.envelope().payload().bytes(), StandardCharsets.UTF_8)
+                                .contains("not copied")),
+                        "review content must not be copied into audit journal payloads");
+            }
         }
     }
 
@@ -187,6 +414,105 @@ class HumanTaskServiceTest {
             assertEquals(HumanTaskResult.Code.CANCELLED,
                     service.cancel(requester(), suspended.task().request().taskId(), 1).code(),
                     "the original requester may cancel without holding responder roles");
+        }
+    }
+
+    @Test
+    void lifecycleGateRetainsASettledTaskUntilReentryIsAdmitted() throws Exception {
+        try (var store = sqlite("reentry-gate", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            HumanTaskResult suspended;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                suspended = service.suspend(fixture.message(), definition());
+            }
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), suspended.task().request().taskId(), 1, response()).code());
+            PendingWork.HandlerTrigger trigger = assertInstanceOf(PendingWork.HandlerTrigger.class,
+                    store.claimPendingWork(TENANT, "reentry-worker", 10, Duration.ofSeconds(30))
+                            .toCompletableFuture().join().getFirst());
+            var executorConsulted = new java.util.concurrent.atomic.AtomicBoolean();
+            HumanTaskContinuationExecutor executor = new HumanTaskContinuationExecutor() {
+                @Override public boolean supports(ai.ravenroot.api.persistence.DurableHumanTask task) {
+                    executorConsulted.set(true);
+                    return true;
+                }
+
+                @Override public java.util.concurrent.CompletionStage<Void> execute(
+                        ai.ravenroot.api.persistence.DurableHumanTask task,
+                        ai.ravenroot.api.persistence.DurableHandler handler,
+                        PendingWork.HandlerTrigger claim) {
+                    return CompletableFuture.completedFuture(null);
+                }
+            };
+            var closed = new HumanTaskHandlerDispatcher(store, service, executor, task -> false);
+            assertFalse(closed.canDispatch(trigger));
+            assertFalse(executorConsulted.get(),
+                    "a lifecycle hold must be checked before graph reconstruction or dispatch");
+
+            var open = new HumanTaskHandlerDispatcher(store, service, executor, task -> true);
+            assertTrue(open.canDispatch(trigger));
+            assertTrue(executorConsulted.get());
+        }
+    }
+
+    @Test
+    void deploymentGateHoldsPauseButLetsDrainFinishAcceptedHumanTaskWork() throws Exception {
+        var deploymentId = ai.ravenroot.api.deployment.DeploymentId.of("orders");
+        var deployments = new InMemoryDeploymentRegistry(Clock.fixed(NOW, ZoneOffset.UTC),
+                tenant -> deploymentId);
+        var created = deployments.create(
+                new ai.ravenroot.api.deployment.registry.GraphVersion.Content(
+                        1, new byte[]{1}, "test", NOW),
+                new ai.ravenroot.api.deployment.registry.DeploymentRegistry.CreateCommand(
+                        TENANT, "create", "a".repeat(64))).toCompletableFuture().join();
+        try (var store = sqlite("deployment-reentry-gate", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store, deploymentId.value());
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                task = service.suspend(fixture.message(), definition()).task();
+            }
+            var gate = new DeploymentHumanTaskReentryGate(store, deployments);
+
+            var paused = deployments.command(
+                    new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Desired(
+                            ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.PAUSED,
+                            null, null, 0), deploymentCommand(created, "pause"))
+                    .toCompletableFuture().join();
+            assertFalse(gate.admits(task), "Pause retains a settled response without re-entering");
+
+            var drained = deployments.command(new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Desired(
+                            ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.DRAINED,
+                            null, null, 0), deploymentCommand(paused, "drain"))
+                    .toCompletableFuture().join();
+            assertTrue(gate.admits(task), "Drain must allow already accepted Human Task work to finish");
+
+            deployments.command(drained.desired(), new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Command(
+                    drained.tenantId(), drained.deploymentId(), "cancel", "c".repeat(64),
+                    RevisionExpectation.exactly(drained.revision()),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.any(),
+                    ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.CANCEL))
+                    .toCompletableFuture().join();
+            assertFalse(gate.admits(task),
+                    "a Human Task captured before graph Cancel must never re-enter its old traversal");
+        }
+    }
+
+    @Test
+    void deploymentGatePreservesLegacyUnenrolledSourceSessionReentry() throws Exception {
+        var deployments = new InMemoryDeploymentRegistry(Clock.fixed(NOW, ZoneOffset.UTC));
+        try (var store = sqlite("unenrolled-reentry-gate", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store, "editor-session");
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            ai.ravenroot.api.persistence.DurableHumanTask task;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                task = service.suspend(fixture.message(), definition()).task();
+            }
+            assertTrue(new DeploymentHumanTaskReentryGate(store, deployments).admits(task));
         }
     }
 
@@ -751,6 +1077,10 @@ class HumanTaskServiceTest {
     }
 
     private static Fixture running(ExecutionStore store) {
+        return running(store, null);
+    }
+
+    private static Fixture running(ExecutionStore store, String deploymentId) {
         ExecutionKey key = new ExecutionKey(TENANT, UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         UUID invocationId = UUID.randomUUID();
@@ -760,10 +1090,12 @@ class HumanTaskServiceTest {
                 NodeInvocationStatus.RUNNING, List.of(attempt));
         Traversal traversal = new Traversal(traversalId, "review", TraversalStatus.RUNNING,
                 Map.of(invocationId, invocation));
-        store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+        var creation = ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
                         ProcessInstanceStatus.RUNNING, Map.of(traversalId, traversal)),
-                        new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join();
+                        new GraphVersionPin("graph-v1")));
+        if (deploymentId != null) creation.recordOrigin(ExecutionOrigin.of(deploymentId, null, null));
+        store.apply(creation.build()).toCompletableFuture().join();
         NodeMessage message = new NodeMessage(SecurityContext.of(requester()), key.processInstanceId(),
                 traversalId, invocationId, attemptId, Set.of(), "review", Map.of("secret", "not copied"),
                 Map.of(), ai.ravenroot.api.execution.NodeCommand.PROCESS);
@@ -790,6 +1122,14 @@ class HumanTaskServiceTest {
     }
 
     private record Fixture(ExecutionKey key, UUID traversalId, NodeMessage message) { }
+
+    private static ai.ravenroot.api.deployment.registry.DeploymentRegistry.Command deploymentCommand(
+            ai.ravenroot.api.deployment.registry.DeploymentRegistry.Record record, String key) {
+        return new ai.ravenroot.api.deployment.registry.DeploymentRegistry.Command(
+                record.tenantId(), record.deploymentId(), key, "b".repeat(64),
+                RevisionExpectation.exactly(record.revision()),
+                ai.ravenroot.api.deployment.registry.GenerationExpectation.any());
+    }
 
     private record HistoricalTask(ExecutionKey key, UUID traversalId, UUID invocationId,
                                   UUID attemptId, UUID taskId, String correlationKey,

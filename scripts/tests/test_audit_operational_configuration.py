@@ -1093,7 +1093,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        self.assertEqual(1227, len(program["candidateIds"]))
+        self.assertEqual(1230, len(program["candidateIds"]))
         self.assertEqual(164, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
@@ -1924,12 +1924,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(53, len(details))
+            self.assertEqual(61, len(details))
             self.assertEqual(
-                {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54},
+                {"methods": 68, "path": 61, "summary": 371, "successStatuses": 62},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(515, len(entries))
+            self.assertEqual(562, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4227,7 +4227,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 348 |",
+                "| Retained published contract descriptions | 371 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4235,7 +4235,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 347 |",
+                "| Retained published contract descriptions | 370 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

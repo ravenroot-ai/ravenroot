@@ -167,6 +167,10 @@ spec:
               value: ""
             - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
               value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES
+              value: ""
             - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
               value: ""
             - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS

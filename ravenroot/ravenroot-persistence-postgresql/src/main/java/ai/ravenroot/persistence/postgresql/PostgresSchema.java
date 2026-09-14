@@ -970,6 +970,40 @@ final class PostgresSchema {
                 )
                 """)),
                 new SchemaMigration(3, "execution manifest operational policy v2", List.of(
-                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")));
+                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")),
+                new SchemaMigration(4, "immutable human-task review presentation", List.of(
+                        "ALTER TABLE human_task ADD COLUMN review_version INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN review_content_type TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_text TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_digest TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_max_utf8_bytes INTEGER NOT NULL DEFAULT 1")),
+                new SchemaMigration(5, "deployment lifecycle command evidence", List.of(
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command TEXT",
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_epoch_second BIGINT",
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_nano INTEGER",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command TEXT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_epoch_second BIGINT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_nano INTEGER")),
+                new SchemaMigration(6, "tenant-scoped session memory", List.of(
+                        "CREATE TABLE session_memory (tenant_id TEXT NOT NULL, session_id TEXT NOT NULL, "
+                                + "scope TEXT NOT NULL, process_instance_id TEXT NOT NULL, node_id TEXT NOT NULL, "
+                                + "revision BIGINT NOT NULL, value BYTEA NOT NULL, content_type TEXT NOT NULL, "
+                                + "created_at_epoch_second BIGINT NOT NULL, created_at_nano INTEGER NOT NULL, "
+                                + "updated_at_epoch_second BIGINT NOT NULL, updated_at_nano INTEGER NOT NULL, "
+                                + "expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, "
+                                + "PRIMARY KEY (tenant_id, session_id, scope, process_instance_id, node_id))",
+                        "CREATE INDEX session_memory_expiry ON session_memory "
+                                + "(tenant_id, expires_at_epoch_second, expires_at_nano)",
+                        "CREATE TABLE session_memory_command (tenant_id TEXT NOT NULL, command_key TEXT NOT NULL, "
+                                + "digest TEXT NOT NULL, session_id TEXT NOT NULL, scope TEXT NOT NULL, "
+                                + "process_instance_id TEXT NOT NULL, node_id TEXT NOT NULL, revision BIGINT NOT NULL, "
+                                + "value BYTEA NOT NULL, content_type TEXT NOT NULL, "
+                                + "created_at_epoch_second BIGINT NOT NULL, created_at_nano INTEGER NOT NULL, "
+                                + "updated_at_epoch_second BIGINT NOT NULL, updated_at_nano INTEGER NOT NULL, "
+                                + "expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, "
+                                + "PRIMARY KEY (tenant_id, command_key))")),
+                new SchemaMigration(7, "deployment lifecycle command reason", List.of(
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_reason TEXT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_reason TEXT")));
     }
 }

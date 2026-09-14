@@ -126,7 +126,7 @@ class DefaultAuthorizationServiceTest {
             case ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
             case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE -> Role.APPROVER;
             case RUNTIME_OBSERVE, AGENT_AUTHORITY_CONTROL, AUDIT_ADMIN -> Role.PLATFORM_ADMIN;
-            case AUDIT_READ, AUDIT_EXPORT -> Role.TENANT_ADMIN;
+            case AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN -> Role.TENANT_ADMIN;
             // EXECUTION_CONTROL moved out of this reserved arm the same commit it became
             // available -- see enforcesTheCompleteRoleAndScopeMatrix, which now exercises it through
             // the positive branch above (allowed with role+scope, denied with wrong role, denied with

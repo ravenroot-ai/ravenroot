@@ -157,6 +157,7 @@ listings. `--help` and `help` print usage.
 | `traversals PROCESS-INSTANCE-ID` | List durable traversals for one process instance. This is not an execution/traversal ID. |
 | `cancel TRAVERSAL-ID` | Request cancellation and print the recorded outcome and note. |
 | `drain` | Stop new admission and begin controlled drain. |
+| `process PROCESS-INSTANCE-ID pause\|resume\|cancel\|drain\|stop EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Remote-only durable process control across every traversal in the instance. Use the inventory `revision` as the expected generation; the result reports the typed outcome, current generation, state, and retained reason. |
 | `deployments list` | List process-local deployment registrations. |
 | `deployments register ID FILE` | Reserve an ID and validate its graph; does not start it. |
 | `deployments inspect ID` | Read one registration. |

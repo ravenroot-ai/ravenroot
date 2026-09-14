@@ -303,6 +303,33 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/pause",
+                    "Durably closes admission for one tenant-scoped deployment generation while "
+                            + "retaining accepted work for Resume. Requires Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation headers and a bounded X-Ravenroot-Reason.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/resume",
+                    "Durably reopens a paused deployment under a new fenced generation. Requires "
+                            + "Idempotency-Key and X-Ravenroot-Expected-Generation headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/cancel",
+                    "Commits a generation barrier that cooperatively ends work captured before it "
+                            + "without stopping the deployment domain. Requires Idempotency-Key, "
+                            + "X-Ravenroot-Expected-Generation, and X-Ravenroot-Reason headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/drain",
+                    "Durably closes admission and lets accepted work reach its ordinary terminal "
+                            + "state within the configured drain bound. Requires Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
             // Sub-routes under /v1/executions use registersContext=false:
             // the JDK HttpServer matches contexts by longest prefix, so "/v1/executions" already
             // receives both "/v1/executions/{id}" and "/v1/executions/{id}/cancel". Registering a
@@ -573,6 +600,18 @@ public final class RouteTable {
                             + "resume: none of them is the traversal running again.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/processes",
+                    "Authenticated dispatch context for process-instance lifecycle commands.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code()),
+                    NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/processes/{processInstanceId}/{command}",
+                    "Applies Pause, Resume, Cancel, Drain, or recoverable Stop to one durable process and all "
+                            + "contained traversals. Idempotency-Key and X-Ravenroot-Expected-Generation are "
+                            + "mandatory; outcomes distinguish replay, stale generation, partial settlement, "
+                            + "terminal state, and absence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.CONFLICT.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"),
                     "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
                     "Approves, denies, or cancels one exact durable tool call. The authenticated "
@@ -591,7 +630,8 @@ public final class RouteTable {
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/human-tasks/attention",
                     "Lists authorized actionable embedded Human Tasks for an exact durable graph "
-                            + "context, or recovers one actionable task by its exact task and generation locator.",
+                            + "context without review content, or recovers one actionable task by its exact "
+                            + "task and generation locator with its immutable plain-text review presentation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
@@ -610,6 +650,18 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks",
+                    "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. "
+                            + "Filters cover task and execution identity, lifecycle, age, and actionable, terminal, "
+                            + "orphaned, or non-resumable classification.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/purge",
+                    "Dry-runs or applies a bounded, idempotent administrative reconciliation. CANCEL uses normal "
+                            + "task re-entry semantics; FORCE_ABANDON atomically closes inconsistent work without "
+                            + "re-entry. An unfiltered operation is refused.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/agent-authority",
                     "Dispatch context for the authenticated durable agent-authority trip/reset controls. "

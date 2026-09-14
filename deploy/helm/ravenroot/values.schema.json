@@ -357,6 +357,7 @@
         "responseMaxDepth", "responseMaxCollectionSize", "responseMaxValueCount",
         "responseMaxTextLength", "responseMaxKeyLength", "writeAttempts",
         "maxConfirmationPromptBytes", "maxConfirmationActionLabelBytes",
+        "defaultReviewTextBytes", "maxReviewTextBytes",
         "maxDecisionCommentBytes", "attentionPollMillis",
         "attentionPollBackoffMaxMillis", "defaultAttentionPageSize",
         "maxAttentionPageSize"
@@ -384,6 +385,8 @@
         "writeAttempts": { "$ref": "#/definitions/positive32" },
         "maxConfirmationPromptBytes": { "$ref": "#/definitions/positive65536" },
         "maxConfirmationActionLabelBytes": { "$ref": "#/definitions/positive256" },
+        "defaultReviewTextBytes": { "$ref": "#/definitions/positive1048576" },
+        "maxReviewTextBytes": { "$ref": "#/definitions/positive1048576" },
         "maxDecisionCommentBytes": { "$ref": "#/definitions/positive16384" },
         "attentionPollMillis": { "$ref": "#/definitions/pollMillis" },
         "attentionPollBackoffMaxMillis": { "$ref": "#/definitions/pollMillis" },
@@ -542,6 +545,7 @@
       ]
     },
     "positive65536": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 65536 }, { "$ref": "#/definitions/humanTaskBlank" }] },
+    "positive1048576": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1048576 }, { "$ref": "#/definitions/humanTaskBlank" }] },
     "positive16384": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 16384 }, { "$ref": "#/definitions/humanTaskBlank" }] },
     "positive100": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 100 }, { "$ref": "#/definitions/humanTaskBlank" }] },
     "pollMillis": { "oneOf": [{ "type": "integer", "minimum": 250, "maximum": 300000 }, { "$ref": "#/definitions/humanTaskBlank" }] },

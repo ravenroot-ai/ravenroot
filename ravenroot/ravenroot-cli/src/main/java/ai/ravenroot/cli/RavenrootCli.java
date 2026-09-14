@@ -65,6 +65,7 @@ public final class RavenrootCli {
                 case "traversals" -> traversals(args);
                 case "cancel" -> cancelExecution(args);
                 case "drain" -> drainServer();
+                case "process" -> processControl(args);
                 // One verb, seven subcommands, mirroring 'credentials' below: a listing, a
                 // register, and five id-scoped lifecycle actions. Every printed line carries scope=
                 // LOCAL_PROCESS -- the same word and the same guarantee the HTTP wire states -- so an
@@ -403,6 +404,27 @@ public final class RavenrootCli {
         return 0;
     }
 
+    private int processControl(String[] args) throws IOException {
+        if (args.length < 5 || args.length > 6) {
+            return invalid("Usage: ravenroot process <process-instance-id> <pause|resume|cancel|drain|stop> "
+                    + "<expected-generation> <idempotency-key> [reason]");
+        }
+        long generation;
+        try {
+            generation = Long.parseLong(args[3]);
+        } catch (NumberFormatException invalid) {
+            return invalid("expected-generation must be a positive integer");
+        }
+        var result = backend.processControl(args[1], args[2], generation, args[4],
+                args.length == 6 ? args[5] : "");
+        output.println("outcome=" + result.outcome());
+        output.println("process-instance-id=" + result.processInstanceId());
+        output.println("generation=" + result.generation());
+        output.println("state=" + result.state());
+        output.println("reason=" + sanitizeForConsole(result.reason()));
+        return 0;
+    }
+
     /**
      * The process-local deployment lifecycle: {@code list} takes no id, {@code register} takes
      * a fresh id and a graph document, and the five remaining verbs are id-scoped reads and commands.
@@ -528,7 +550,9 @@ public final class RavenrootCli {
         output.println("Usage: ravenroot [--server <url> --token-file <path>] "
                 + "<status|runtime|node-types|inspect <graph.graphml>|run <graph.graphml> [payload]"
                 + "|result <execution-id>|live|inventory|traversals <process-instance-id>"
-                + "|cancel <traversal-id>|drain|credentials|deployments>");
+                + "|cancel <traversal-id>|drain|process|credentials|deployments>");
+        output.println("       ravenroot process <process-instance-id> <pause|resume|cancel|drain|stop> "
+                + "<expected-generation> <idempotency-key> [reason]   (requires --server)");
         // Issue 154: 'inventory' is the durable, tenant-scoped process inventory -- what this
         // deployment's own persisted record says exists, surviving a restart -- as opposed to
         // 'live', which is unchanged and remains the process-local runtime view. 'traversals' takes

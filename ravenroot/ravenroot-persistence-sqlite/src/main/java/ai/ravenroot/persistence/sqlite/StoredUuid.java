@@ -52,6 +52,10 @@ final class StoredUuid {
         return decode(stored, table, column, key, true);
     }
 
+    static UUID optional(String stored, String table, String column, String tenantId) {
+        return decode(stored, table, column, diagnosticKey(tenantId), true);
+    }
+
     static UUID requiredMatching(ResultSet rows, String table, String column, ExecutionKey key,
                                  UUID expected) throws SQLException {
         return requiredMatching(rows.getString(column), table, column, key, expected);

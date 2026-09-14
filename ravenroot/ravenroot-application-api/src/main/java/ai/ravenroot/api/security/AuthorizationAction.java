@@ -58,6 +58,9 @@ public enum AuthorizationAction {
      */
     EXECUTION_CONTROL("ravenroot.execution.control", true),
 
+    /** Inspect and reconcile durable Human Tasks through the guarded administrative surface. */
+    HUMAN_TASK_ADMIN("ravenroot.human-task.admin", true),
+
     /** Trip or reset the store-global first-party agent authority epoch. */
     AGENT_AUTHORITY_CONTROL("ravenroot.agent.authority.control", true),
 

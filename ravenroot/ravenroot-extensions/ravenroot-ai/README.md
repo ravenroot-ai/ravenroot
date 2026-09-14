@@ -57,6 +57,7 @@ Set `RAVENROOT_LLM_PROFILE_<PROFILE_UTF8_HEX>` to strict canonical Base64 of JSO
   "credentialBindingId": "",
   "credentialReference": "",
   "timeoutMs": 60000,
+  "maxRequestBytes": 8388608,
   "maxResponseBytes": 8388608,
   "maxConcurrency": 4,
   "systemPreamble": ""
@@ -64,9 +65,9 @@ Set `RAVENROOT_LLM_PROFILE_<PROFILE_UTF8_HEX>` to strict canonical Base64 of JSO
 ```
 
 Only `endpoint` and `model` are required. The other defaults are empty credential binding, 60,000 ms,
-8 MiB, four concurrent calls per tenant/profile, and an empty preamble. Timeout is 1–600,000 ms,
-response bytes 1–8 MiB, concurrency 1–256, model at most 256 characters, and system preamble at most
-8,192 characters. A credential binding requires HTTPS. The package also requires an operator service
+8 MiB request and response bounds, four concurrent calls per tenant/profile, and an empty preamble.
+Their upper bounds come from the `RAVENROOT_AI_*` startup policy below; model identifiers retain the
+provider wire-format limit of 256 characters. A credential binding requires HTTPS. The package also requires an operator service
 grant for `outbound-http`; `agent` additionally requires `tool-authorization` and `agent-resources`.
 
 For each MCP server named by an `agent`, set
@@ -78,17 +79,21 @@ For each MCP server named by an `agent`, set
   "credentialBindingId": "mcp",
   "credentialReference": "mcp-token",
   "timeoutMs": 30000,
+  "maxRequestBytes": 1048576,
   "maxResponseBytes": 1048576,
   "maxConcurrency": 4,
+  "maxDiscoveredTools": 1024,
   "allowedTools": ["search", "fetch_document"]
 }
 ```
 
 `endpoint` and the nonempty `allowedTools` list are required. Credential binding ID and reference
 default to empty and must be supplied together; a credential requires HTTPS. Timeout defaults to
-30,000 ms and is limited to 1–600,000 ms. Response bytes default to 1 MiB and are limited to 1–4 MiB.
-Concurrency defaults to four and is limited to 1–256 per tenant/profile. A profile permits at most
-64 distinct tools; each tool name is at most 128 characters, and the exposed
+30,000 ms. Request and response bytes default to 1 MiB. Concurrency defaults to four per
+tenant/profile. A profile permits 64 distinct tools and reads at most 1,024 advertised tools by
+default; both limits, and the timeout, byte, and concurrency ceilings, come from the
+`RAVENROOT_AI_*` startup policy. Each tool name retains the provider wire-format limit of 128
+characters, and the exposed
 `<profile>__<tool>` name must match the provider-safe 1–64 character identifier. Unknown JSON fields,
 noncanonical Base64, an invalid endpoint, an empty tool list, or an out-of-range value makes the
 profile absent and the node fails `MCP_PROFILE_UNKNOWN`.
@@ -121,10 +126,13 @@ call.
 
 `agent` has adapter-reference `provider`; required `instructions` and `objective`; optional `model`,
 `mcpServers`, `maxTurns` (default 8, maximum 64), `maxTotalTokens`, whole-run `timeoutMs`, per-turn
-`maxTokens`, `temperature`, `topP`, and `seed`; plus eight ordered optional skill triples named
-`skills.N.name`, `skills.N.description`, and `skills.N.instructions`. Skill names, descriptions, and
-bodies are limited to 64, 512, and 16,384 characters. At most eight MCP server profile names are
-accepted. The final answer becomes the payload on `continue`; tool requests are independently
+`maxTokens`, `temperature`, `topP`, and `seed`; plus an optional, dynamically sized ordered collection
+of atomic skill triples named `skills.N.name`, `skills.N.description`, and
+`skills.N.instructions`. Indices are canonical positive integers contiguous from one; a partial item,
+gap, or duplicate name is refused. There is no fixed item count. Compatibility defaults bound each
+name, description, and body to 64, 512, and 16,384 characters and the collection to 2 MiB of UTF-8.
+The default MCP-server count remains eight. All of those bounds are operator-configurable.
+The final answer becomes the payload on `continue`; tool requests are independently
 authorized immediately before effect and tool errors return to the model as bounded tool results.
 
 ```xml
@@ -146,6 +154,59 @@ bundle allowlist. Test mode bypasses model egress. `llm-prompt` exposes the stab
 and agent-resource refusal families. Neither node has an idempotency or automatic retry field; each
 model or tool dispatch consumes its applicable budget and may have external effects according to the
 authorized tool contract.
+
+## AI operational policy
+
+The AI bundle reads the following positive 32-bit integer settings once when its node package is
+composed. Missing and blank values select the compatibility defaults; malformed, zero, negative, or
+overflowing values refuse startup with the exact variable name. The default turn count may not exceed
+the turn ceiling, and the permitted MCP-tool count may not exceed the discovery ceiling.
+
+| Environment variable | Default | Governs |
+|---|---:|---|
+| `RAVENROOT_AI_DEFAULT_MAX_TURNS` | 8 | Agent turns when a node omits `maxTurns` |
+| `RAVENROOT_AI_MAX_TURNS` | 64 | Deployment ceiling for a node's agent turns |
+| `RAVENROOT_AI_MAX_MCP_SERVERS` | 8 | MCP profile names on one agent node |
+| `RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES` | 2,097,152 | Combined UTF-8 skill metadata and bodies |
+| `RAVENROOT_AI_MAX_SKILL_NAME_CHARS` | 64 | One skill name |
+| `RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS` | 512 | One skill description |
+| `RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS` | 16,384 | One skill body |
+| `RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER` | 64 | Operator-permitted tools in one MCP profile |
+| `RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | 1,024 | MCP profile's omitted discovery bound |
+| `RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | 1,024 | Advertised tools read from one MCP server |
+| `RAVENROOT_AI_MAX_LLM_PROFILE_BYTES` | 8,192 | Decoded LLM profile document |
+| `RAVENROOT_AI_MAX_MCP_PROFILE_BYTES` | 8,192 | Decoded MCP profile document |
+| `RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS` | 60,000 | Omitted LLM profile timeout |
+| `RAVENROOT_AI_MAX_LLM_TIMEOUT_MS` | 600,000 | LLM profile timeout |
+| `RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS` | 30,000 | Omitted MCP profile timeout |
+| `RAVENROOT_AI_MAX_MCP_TIMEOUT_MS` | 600,000 | MCP profile timeout |
+| `RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES` | 8,388,608 | Omitted model request bound |
+| `RAVENROOT_AI_MAX_LLM_REQUEST_BYTES` | 8,388,608 | Encoded model request body |
+| `RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES` | 8,388,608 | Omitted model response bound |
+| `RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES` | 8,388,608 | Encoded model response body |
+| `RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES` | 1,048,576 | Omitted MCP request bound |
+| `RAVENROOT_AI_MAX_MCP_REQUEST_BYTES` | 4,194,304 | Encoded MCP request body |
+| `RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES` | 1,048,576 | Omitted MCP response bound |
+| `RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES` | 4,194,304 | Encoded MCP response body |
+| `RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY` | 4 | Omitted LLM profile concurrency |
+| `RAVENROOT_AI_MAX_LLM_CONCURRENCY` | 256 | Per-tenant/profile LLM concurrency ceiling |
+| `RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY` | 4 | Omitted MCP profile concurrency |
+| `RAVENROOT_AI_MAX_MCP_CONCURRENCY` | 256 | Per-tenant/profile MCP concurrency ceiling |
+| `RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS` | 8,192 | Operator system preamble |
+
+Helm values live under `ai.*`; Compose and the plain Kubernetes manifest expose the same environment
+names. A Helm value change changes the Deployment pod template and therefore rolls the pods. Because
+the policy is an immutable startup snapshot, mixed-version or differently sized pools should use
+separate Deployments/releases with explicit values; changing a running container's environment does
+not mutate already composed node behavior. Leaving every value blank preserves deployments that were
+sized for the former eight-skill/eight-server defaults, while raising the relevant ceilings admits
+larger skill and MCP collections without changing graph syntax.
+
+MCP server references intentionally remain the flat, ordered `mcpServers` name list. Each referenced
+profile is already one atomic operator-owned document containing endpoint, credential binding,
+allowed-tool collection, and resource ceilings. Turning those fields into graph-owned repeated
+properties would move credentials and callable authority across the trust boundary; only the
+author-owned skill collection uses the dynamic additional-property group.
 
 ## Two properties worth knowing before reading the code
 

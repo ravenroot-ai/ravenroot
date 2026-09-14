@@ -32,7 +32,7 @@ import java.util.function.LongSupplier;
  *
  * <h2>Why the servers are opened one after another</h2>
  * <p>Concurrently would be faster and is deliberately not done. Discovery is three exchanges per
- * server against a bound of {@link AgentNodeBehavior#MAX_MCP_SERVERS} servers, so the saving is
+ * server against a bound of {@link AgentOperationalConfiguration#DEFAULT_MAX_MCP_SERVERS} servers, so the saving is
  * small; what it would cost is determinism, and specifically the determinism of the collision check
  * below, whose whole purpose is that the outcome must not depend on which answer arrived first.</p>
  */

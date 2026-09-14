@@ -48,8 +48,8 @@ import java.util.Set;
  */
 public record McpProfile(String name, URI endpoint,
                          Optional<OutboundCredentialBinding> credentialBinding,
-                         int timeoutMs, int maxResponseBytes, int maxConcurrency,
-                         Set<String> allowedTools) {
+                         int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
+                         int maxDiscoveredTools, Set<String> allowedTools) {
 
     /**
      * What separates a profile name from a tool name in the name the model is given.
@@ -60,13 +60,6 @@ public record McpProfile(String name, URI endpoint,
      * the session and the remote name, so resolution never has to guess where the boundary was.</p>
      */
     public static final String SEPARATOR = "__";
-
-    /** Longest response this bundle will ever read from an MCP server, whatever a profile asks for. */
-    public static final int HARD_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-    /** Longest deadline this bundle will ever ask the managed channel for. */
-    public static final int HARD_MAX_TIMEOUT_MS = 600_000;
-    /** Most tools one profile may permit. */
-    public static final int MAX_ALLOWED_TOOLS = 64;
 
     /**
      * What an exposed name must look like.
@@ -99,18 +92,24 @@ public record McpProfile(String name, URI endpoint,
         if (credentialBinding.isPresent() && !scheme.equals("https")) {
             throw new IllegalArgumentException("credentialBinding");
         }
-        if (timeoutMs < 1 || timeoutMs > HARD_MAX_TIMEOUT_MS) {
+        if (timeoutMs < 1) {
             throw new IllegalArgumentException("timeoutMs");
         }
-        if (maxResponseBytes < 1 || maxResponseBytes > HARD_MAX_RESPONSE_BYTES) {
+        if (maxRequestBytes < 1) {
+            throw new IllegalArgumentException("maxRequestBytes");
+        }
+        if (maxResponseBytes < 1) {
             throw new IllegalArgumentException("maxResponseBytes");
         }
-        if (maxConcurrency < 1 || maxConcurrency > 256) {
+        if (maxConcurrency < 1) {
             throw new IllegalArgumentException("maxConcurrency");
+        }
+        if (maxDiscoveredTools < 1 || allowedTools.size() > maxDiscoveredTools) {
+            throw new IllegalArgumentException("maxDiscoveredTools");
         }
         // An empty allow-list is refused rather than read as "everything". The whole point of the
         // list is that omitting it must never be the permissive reading.
-        if (allowedTools.isEmpty() || allowedTools.size() > MAX_ALLOWED_TOOLS) {
+        if (allowedTools.isEmpty()) {
             throw new IllegalArgumentException("allowedTools");
         }
         var copy = new LinkedHashSet<String>(allowedTools.size());
@@ -125,6 +124,16 @@ public record McpProfile(String name, URI endpoint,
             copy.add(tool);
         }
         allowedTools = Set.copyOf(copy);
+    }
+
+    /** Compatibility constructor preserving the profile shape before request-byte policy. */
+    public McpProfile(String name, URI endpoint,
+                      Optional<OutboundCredentialBinding> credentialBinding,
+                      int timeoutMs, int maxResponseBytes, int maxConcurrency,
+                      Set<String> allowedTools) {
+        this(name, endpoint, credentialBinding, timeoutMs, maxResponseBytes, maxResponseBytes,
+                maxConcurrency, AgentOperationalConfiguration.DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER,
+                allowedTools);
     }
 
     /**

@@ -133,6 +133,23 @@ public final class NodeTypeDescriptorValidator {
                         "is declared more than once; a condition referencing it would be ambiguous");
             }
         }
+        Set<String> groupNames = new java.util.HashSet<>();
+        for (NodePropertyGroupDescriptor group : descriptor.additionalProperties()) {
+            if (!groupNames.add(group.name())) {
+                throw reject(descriptor, group.name(), "is declared as an additional-property group more than once");
+            }
+            if (byName.keySet().stream().anyMatch(name -> name.equals(group.name())
+                    || name.startsWith(group.name() + "."))) {
+                throw reject(descriptor, group.name(),
+                        "overlaps a statically declared property; one key cannot have two schema authorities");
+            }
+            if (descriptor.additionalProperties().stream().anyMatch(other -> other != group
+                    && (other.name().startsWith(group.name() + ".")
+                    || group.name().startsWith(other.name() + ".")))) {
+                throw reject(descriptor, group.name(),
+                        "overlaps another additional-property group prefix");
+            }
+        }
         for (NodePropertyDescriptor property : descriptor.properties()) {
             check(descriptor, byName, property, property.visibleWhen(), "visibleWhen");
             check(descriptor, byName, property, property.requiredWhen(), "requiredWhen");

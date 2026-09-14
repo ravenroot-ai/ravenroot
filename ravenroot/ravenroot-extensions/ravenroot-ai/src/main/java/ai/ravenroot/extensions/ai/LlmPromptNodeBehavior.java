@@ -263,12 +263,15 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
             provenance.add(ModelInputProvenance.Kind.INBOUND_ATTRIBUTES,
                     "invocation:" + message.invocationId(), message.attributes());
             byte[] body = OpenAiCompatibleChat.writeRequest(settings.model(), prompt, settings.tuning());
+            if (body.length > settings.profile().maxRequestBytes()) {
+                throw new IllegalArgumentException("model request exceeds the configured request-byte ceiling");
+            }
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                     settings.profile().endpoint(), "POST",
                     Map.of("content-type", List.of("application/json")), body,
                     Duration.ofMillis(settings.timeoutMs()),
                     settings.profile().credentialBinding().orElse(null), null,
-                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                    ExternalIoLimits.compressedHttp(settings.profile().maxRequestBytes(),
                             settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
                             settings.profile().maxResponseBytes(), 100,
                             Duration.ofMillis(settings.timeoutMs()), Set.of("application/json")),

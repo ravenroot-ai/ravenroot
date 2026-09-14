@@ -266,7 +266,7 @@ class AgentNodeBehaviorTest {
         failureOf(behavior.create(configuration(Map.of(
                 "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
 
-        assertEquals(AgentNodeBehavior.DEFAULT_MAX_TURNS, http.calls());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_TURNS, http.calls());
     }
 
     @Test
@@ -280,7 +280,7 @@ class AgentNodeBehaviorTest {
                 "provider", "local", "instructions", "be terse", "objective", "say hi",
                 "maxTurns", "100000")), http));
 
-        assertEquals(AgentNodeBehavior.MAX_TURNS_CEILING, http.calls());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_TURNS_CEILING, http.calls());
     }
 
     @Test
@@ -575,7 +575,7 @@ class AgentNodeBehaviorTest {
     @DisplayName("a skill over the ceiling refuses when the node is built, not when a message arrives")
     void anOversizeSkillRefusesAtConstruction() {
         Map<String, Object> properties = AgentSkillTest.withSkills(1);
-        properties.put("skills.1.instructions", "x".repeat(AgentSkill.MAX_INSTRUCTIONS_CHARS + 1));
+        properties.put("skills.1.instructions", "x".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_INSTRUCTIONS_CHARS + 1));
         var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
 
         // create() and not handle(): NodeBehavior#create reserves a throw for a node the behavior can
@@ -667,7 +667,7 @@ class AgentNodeBehaviorTest {
         // cut at index MAX_NAME_CHARS lands exactly on a pair boundary -- 32 whole pairs of two UTF-16
         // units -- and no lone surrogate is ever produced, so the test would pass whether the hazard
         // were handled or not. Shifting by one puts a HIGH surrogate at the last kept index.
-        String astral = "n" + "\uD83D\uDE80".repeat(AgentSkill.MAX_NAME_CHARS);
+        String astral = "n" + "\uD83D\uDE80".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_NAME_CHARS);
         var http = new AiTestSupport.ScriptedHttp()
                 .then(AiTestSupport.asksFor("call-1", LoadSkillTool.NAME,
                         "{\"name\":\"" + astral + "\"}"))

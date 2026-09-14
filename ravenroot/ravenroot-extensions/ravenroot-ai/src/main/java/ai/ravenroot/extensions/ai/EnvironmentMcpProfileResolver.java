@@ -49,22 +49,27 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
     /** Prefix of the one variable family this class reads. The suffix is {@code hex(profileName)}. */
     public static final String VARIABLE_PREFIX = "RAVENROOT_MCP_SERVER_";
 
-    private static final int MAX_PROFILE_BYTES = 8 * 1024;
-    private static final PayloadLimits LIMITS =
-            new PayloadLimits(MAX_PROFILE_BYTES, 8, 128, 512, 2048, 64);
     private static final Set<String> FIELDS = Set.of("endpoint", "credentialBindingId",
-            "credentialReference", "timeoutMs", "maxResponseBytes", "maxConcurrency", "allowedTools");
+            "credentialReference", "timeoutMs", "maxRequestBytes", "maxResponseBytes", "maxConcurrency",
+            "maxDiscoveredTools", "allowedTools");
     /** Same ASCII mask every other profile resolver applies before deriving a variable name. */
     private static final String NAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
 
     private final Map<String, String> environment;
+    private final AgentOperationalConfiguration policy;
 
     public EnvironmentMcpProfileResolver() {
-        this(System.getenv());
+        this(System.getenv(), AgentOperationalConfiguration.fromEnvironment(System.getenv()));
     }
 
     EnvironmentMcpProfileResolver(Map<String, String> environment) {
+        this(environment, AgentOperationalConfiguration.defaults());
+    }
+
+    EnvironmentMcpProfileResolver(Map<String, String> environment,
+                                  AgentOperationalConfiguration policy) {
         this.environment = Map.copyOf(environment);
+        this.policy = java.util.Objects.requireNonNull(policy, "policy");
     }
 
     /** The exact variable an operator must set to declare {@code profileName}. */
@@ -79,7 +84,8 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
         }
         try {
             String encoded = environment.get(environmentVariableName(profileName));
-            if (encoded == null || encoded.isBlank() || encoded.length() > MAX_PROFILE_BYTES * 2) {
+            if (encoded == null || encoded.isBlank()
+                    || encoded.length() > (long) policy.maxMcpProfileBytes() * 2) {
                 return Optional.empty();
             }
             byte[] json = Base64.getDecoder().decode(encoded);
@@ -89,7 +95,9 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
             if (!Base64.getEncoder().encodeToString(json).equals(encoded)) {
                 return Optional.empty();
             }
-            Object read = PayloadJson.read(json, LIMITS).toJava();
+            Object read = PayloadJson.read(json, new PayloadLimits(policy.maxMcpProfileBytes(), 8,
+                    Math.max(128, policy.maxDiscoveredMcpToolsPerServer()), 512,
+                    policy.maxMcpProfileBytes(), 64)).toJava();
             if (!(read instanceof Map<?, ?> raw)) {
                 return Optional.empty();
             }
@@ -105,13 +113,27 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
             Optional<OutboundCredentialBinding> credential = bindingId.isEmpty() && reference.isEmpty()
                     ? Optional.empty()
                     : Optional.of(new OutboundCredentialBinding(bindingId, reference));
+            int timeoutMs = integer(root.get("timeoutMs"), policy.defaultMcpTimeoutMs());
+            int maxRequestBytes = integer(root.get("maxRequestBytes"),
+                    policy.defaultMcpRequestBytes());
+            int maxResponseBytes = integer(root.get("maxResponseBytes"),
+                    policy.defaultMcpResponseBytes());
+            int maxConcurrency = integer(root.get("maxConcurrency"), policy.defaultMcpConcurrency());
+            int maxDiscoveredTools = integer(root.get("maxDiscoveredTools"),
+                    policy.defaultMaxDiscoveredMcpToolsPerServer());
+            Set<String> allowedTools = tools(root.get("allowedTools"));
+            atMost("timeoutMs", timeoutMs, policy.maxMcpTimeoutMs());
+            atMost("maxRequestBytes", maxRequestBytes, policy.maxMcpRequestBytes());
+            atMost("maxResponseBytes", maxResponseBytes, policy.maxMcpResponseBytes());
+            atMost("maxConcurrency", maxConcurrency, policy.maxMcpConcurrency());
+            atMost("maxDiscoveredTools", maxDiscoveredTools,
+                    policy.maxDiscoveredMcpToolsPerServer());
+            atMost("allowedTools", allowedTools.size(), policy.maxMcpToolsPerServer());
             return Optional.of(new McpProfile(profileName,
                     new URI(text(root.get("endpoint"), null)),
                     credential,
-                    integer(root.get("timeoutMs"), 30_000),
-                    integer(root.get("maxResponseBytes"), 1024 * 1024),
-                    integer(root.get("maxConcurrency"), 4),
-                    tools(root.get("allowedTools"))));
+                    timeoutMs, maxRequestBytes, maxResponseBytes, maxConcurrency,
+                    maxDiscoveredTools, allowedTools));
         } catch (RuntimeException | java.net.URISyntaxException invalid) {
             return Optional.empty();
         }
@@ -146,7 +168,7 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
             }
             return defaultValue;
         }
-        if (!(value instanceof String text) || text.length() > 2048) {
+        if (!(value instanceof String text)) {
             throw new IllegalArgumentException("text");
         }
         return text.strip();
@@ -160,5 +182,9 @@ public final class EnvironmentMcpProfileResolver implements McpProfileResolver {
             throw new IllegalArgumentException("integer");
         }
         return number.intValue();
+    }
+
+    private static void atMost(String field, int value, int ceiling) {
+        if (value > ceiling) throw new IllegalArgumentException(field);
     }
 }

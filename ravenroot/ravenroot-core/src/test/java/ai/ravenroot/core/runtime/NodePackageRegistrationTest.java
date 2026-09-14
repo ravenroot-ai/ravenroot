@@ -1,6 +1,7 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyGroupDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.catalog.NodeCatalogSource;
@@ -66,6 +67,44 @@ class NodePackageRegistrationTest {
                 () -> schema.validate(graphWith(Map.of("greeting", "hello", "shout", "yes"))),
                 "a graph writing a non-boolean into a declared boolean must be refused");
         assertEquals("shout", wrongType.propertyName());
+    }
+
+    @Test
+    void aDynamicGroupIsAtomicTypedAndContiguous() {
+        var schema = new BehaviorPropertySchema(
+                NodePackages.register(new BehaviorRegistry(), new GreetingPackage()));
+
+        assertDoesNotThrow(() -> schema.validate(graphWith(Map.of(
+                "greeting", "hello",
+                "items.1.name", "one", "items.1.enabled", true,
+                "items.2.name", "two", "items.2.enabled", false))));
+
+        var partial = assertThrows(BehaviorPropertySchema.BehaviorPropertyException.class,
+                () -> schema.validate(graphWith(Map.of(
+                        "greeting", "hello", "items.1.name", "one"))));
+        assertEquals("items.1", partial.propertyName());
+
+        var gap = assertThrows(BehaviorPropertySchema.BehaviorPropertyException.class,
+                () -> schema.validate(graphWith(Map.of(
+                        "greeting", "hello", "items.2.name", "two", "items.2.enabled", true))));
+        assertEquals("items.2", gap.propertyName());
+
+        var malformed = assertThrows(BehaviorPropertySchema.BehaviorPropertyException.class,
+                () -> schema.validate(graphWith(Map.of(
+                        "greeting", "hello", "items.01.name", "one"))));
+        assertEquals("items.01.name", malformed.propertyName());
+    }
+
+    @Test
+    void dynamicGroupValuesReachTheRegisteredBehavior() {
+        var registry = NodePackages.register(new BehaviorRegistry(), new GreetingPackage());
+        var handler = registry.create(new GraphNode("probe", NodeKind.BEHAVIOR, BEHAVIOR,
+                Map.of("greeting", "hello", "items.1.name", "one", "items.1.enabled", true,
+                        "items.2.name", "two", "items.2.enabled", false))).orElseThrow();
+
+        NodeResult result = handler.handle(messageFor("probe", "world")).toCompletableFuture().join();
+
+        assertEquals("hello, world [one,two]", result.payload());
     }
 
     /**
@@ -234,15 +273,25 @@ class NodePackageRegistrationTest {
                             "Text placed before the payload."),
                     NodePropertyDescriptor.optional("shout", "Shout", NodePropertyType.BOOLEAN,
                             "Upper-cases the result.", "false")),
-                    Set.of("deterministic"));
+                    Set.of("deterministic")).withAdditionalProperties(
+                    new NodePropertyGroupDescriptor("items", "Items", "Repeated items.", List.of(
+                            NodePropertyDescriptor.required("name", "Name", NodePropertyType.STRING,
+                                    "Item name."),
+                            NodePropertyDescriptor.required("enabled", "Enabled", NodePropertyType.BOOLEAN,
+                                    "Whether the item is enabled."))));
         }
 
         @Override
         public NodeAction create(NodeConfiguration configuration) {
             String greeting = configuration.requiredProperty("greeting");
             boolean shout = Boolean.parseBoolean(configuration.property("shout", "false"));
+            String items = java.util.stream.IntStream.iterate(1, index -> configuration.properties()
+                            .containsKey("items." + index + ".name"), index -> index + 1)
+                    .mapToObj(index -> configuration.property("items." + index + ".name", ""))
+                    .collect(java.util.stream.Collectors.joining(","));
             return message -> {
                 String text = greeting + ", " + message.payload();
+                if (!items.isEmpty()) text += " [" + items + "]";
                 return CompletableFuture.completedFuture(
                         NodeResult.continueWith(shout ? text.toUpperCase(java.util.Locale.ROOT) : text));
             };

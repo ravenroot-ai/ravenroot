@@ -107,7 +107,7 @@ final class McpSession {
                     // The SAME object all the way through, deliberately: it is carrying the session
                     // handle and the id counter, and a second object would start both from scratch.
                     session.announced = McpProtocol.readTools(
-                            exchange.value(), exchange.maximumOutputBytes());
+                            exchange.value(), exchange.maximumOutputBytes(), profile.maxDiscoveredTools());
                     session.announcedMaximumOutputBytes = exchange.maximumOutputBytes();
                     return session;
                 });
@@ -163,10 +163,13 @@ final class McpSession {
         }
         OutboundCall<OutboundHttpResponse> call;
         try {
+            if (body.length > profile.maxRequestBytes()) {
+                throw new McpRefusal(McpRefusal.Reason.SERVER_REQUEST_REFUSED);
+            }
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                     profile.endpoint(), "POST", headers(), body, Duration.ofMillis(remaining),
                     profile.credentialBinding().orElse(null), null,
-                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                    ExternalIoLimits.compressedHttp(profile.maxRequestBytes(),
                             profile.maxResponseBytes(), profile.maxResponseBytes(),
                             profile.maxResponseBytes(), 100, Duration.ofMillis(remaining),
                             expectsResult ? Set.of("application/json", "text/event-stream") : Set.of()),
@@ -195,7 +198,8 @@ final class McpSession {
             int outputLimit = Math.toIntExact(Math.min(profile.maxResponseBytes(),
                     response.effectiveMaximumOutputBytes()));
             return new ExchangeResult(McpProtocol.readResult(response.body(),
-                    header(response.headers(), "content-type"), outputLimit), outputLimit);
+                    header(response.headers(), "content-type"), outputLimit,
+                    profile.maxDiscoveredTools()), outputLimit);
         });
     }
 

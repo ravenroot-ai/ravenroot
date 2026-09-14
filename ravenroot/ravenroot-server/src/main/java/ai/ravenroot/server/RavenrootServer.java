@@ -2303,6 +2303,9 @@ public final class RavenrootServer implements AutoCloseable {
         source = source == null ? ai.ravenroot.api.catalog.NodeCatalogSource.bundle("") : source;
         String properties = type.properties().stream().map(RavenrootServer::nodePropertyJson)
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        String additionalProperties = type.additionalProperties().stream()
+                .map(RavenrootServer::nodePropertyGroupJson)
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
         String capabilities = type.capabilities().stream().sorted().map(value -> "\"" + escape(value) + "\"")
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
         String allowedNatures = type.allowedNatureIdentifiers().stream()
@@ -2355,7 +2358,18 @@ public final class RavenrootServer implements AutoCloseable {
                 + escape(NodeRuntimeMaxConcurrencyProperty.NAME) + "\""
                 + ",\"defaultMaxConcurrency\":" + type.runtimeConcurrency().defaultValue()
                 + ",\"maxConcurrencyCeiling\":" + type.runtimeConcurrency().ceiling()
-                + ",\"properties\":" + properties + "}";
+                + ",\"properties\":" + properties
+                + ",\"additionalProperties\":" + additionalProperties + "}";
+    }
+
+    private static String nodePropertyGroupJson(
+            ai.ravenroot.api.catalog.NodePropertyGroupDescriptor group) {
+        String fields = group.fields().stream().map(RavenrootServer::nodePropertyJson)
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return "{\"name\":\"" + escape(group.name()) + "\""
+                + ",\"displayName\":\"" + escape(group.displayName()) + "\""
+                + ",\"description\":\"" + escape(group.description()) + "\""
+                + ",\"indexStart\":1,\"contiguous\":true,\"fields\":" + fields + "}";
     }
 
     /**

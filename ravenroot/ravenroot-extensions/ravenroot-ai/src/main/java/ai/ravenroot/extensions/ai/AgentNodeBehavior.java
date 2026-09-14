@@ -105,11 +105,6 @@ public final class AgentNodeBehavior implements NodeBehavior {
      * under-specified, and the failure an author wants in that case is a fast, named one rather than
      * a long, expensive one that arrives at the same place.</p>
      */
-    static final int DEFAULT_MAX_TURNS = 8;
-
-    /** Turns this node will run however large a number an author writes. */
-    static final int MAX_TURNS_CEILING = 64;
-
     /**
      * What a model is told when a tool broke its own contract — threw, failed its stage, or answered
      * with nothing.
@@ -125,7 +120,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
      *
      * <p>Deliberately not a number. Token usage per turn depends on the model, the instructions and
      * how much a tool returns, so any default this bundle picked would terminate some legitimate runs
-     * and none of the runaway ones. The bound that always applies is {@link #DEFAULT_MAX_TURNS}, and
+     * and none of the runaway ones. The configured finite turn bound always applies, and
      * it is the one that does not need to guess.</p>
      */
     static final long UNBOUNDED_TOKENS = 0L;
@@ -139,13 +134,12 @@ public final class AgentNodeBehavior implements NodeBehavior {
      * should be split across nodes, which the managed-team shape of
      * {@code docs/product/agent-node-and-managed-teams.md} is exactly for.</p>
      */
-    static final int MAX_MCP_SERVERS = 8;
-
     /** The mask a server name must match before it is used to derive an environment variable. */
     private static final String MCP_NAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
 
     private final LlmProfileResolver profiles;
     private final McpProfileResolver mcpProfiles;
+    private final AgentOperationalConfiguration operationalConfiguration;
     /** Per (tenant, profile) admission, shared by every node of this type. */
     private final Admission profileAdmission = new Admission();
     /**
@@ -160,16 +154,28 @@ public final class AgentNodeBehavior implements NodeBehavior {
     private final Admission mcpAdmission = new Admission();
 
     public AgentNodeBehavior() {
-        this(new EnvironmentLlmProfileResolver(), new EnvironmentMcpProfileResolver());
+        this(AgentOperationalConfiguration.fromEnvironment(System.getenv()));
+    }
+
+    private AgentNodeBehavior(AgentOperationalConfiguration configuration) {
+        this(new EnvironmentLlmProfileResolver(System.getenv(), configuration),
+                new EnvironmentMcpProfileResolver(System.getenv(), configuration), configuration);
     }
 
     AgentNodeBehavior(LlmProfileResolver profiles) {
-        this(profiles, name -> Optional.empty());
+        this(profiles, name -> Optional.empty(), AgentOperationalConfiguration.defaults());
     }
 
     AgentNodeBehavior(LlmProfileResolver profiles, McpProfileResolver mcpProfiles) {
+        this(profiles, mcpProfiles, AgentOperationalConfiguration.defaults());
+    }
+
+    AgentNodeBehavior(LlmProfileResolver profiles, McpProfileResolver mcpProfiles,
+                      AgentOperationalConfiguration operationalConfiguration) {
         this.profiles = Objects.requireNonNull(profiles, "profiles");
         this.mcpProfiles = Objects.requireNonNull(mcpProfiles, "mcpProfiles");
+        this.operationalConfiguration = Objects.requireNonNull(operationalConfiguration,
+                "operationalConfiguration");
     }
 
     @Override
@@ -185,7 +191,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 "Runs a bounded agent loop against an operator-configured OpenAI-compatible model: "
                         + "the model plans, calls the tools this node exposes, reads their results, "
                         + "and continues with its final answer.",
-                "agent", true, properties(List.of(
+                "agent", true, List.of(
                 // An adapter binding, not a plain required property, for the reason spelled out on
                 // LlmPromptNodeBehavior: leaving it blank makes this an unconfigured node rather than
                 // a defective graph (CORE-07), and the emptiness test must stay adapterIdOf(...).
@@ -209,11 +215,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 NodePropertyDescriptor.optional("mcpServers", "MCP servers", NodePropertyType.STRING,
                         "Comma-separated names of MCP servers this deployment declared in its "
                                 + "environment (RAVENROOT_MCP_SERVER_<hex(name)>). Their tools are "
-                                + "offered to the model as <server>__<tool>. At most "
-                                + MAX_MCP_SERVERS + ".", ""),
+                                + "offered to the model as <server>__<tool>. The executing runtime "
+                                + "applies its configured admission ceiling.", ""),
                 NodePropertyDescriptor.optional("maxTurns", "Max turns", NodePropertyType.INTEGER,
                         "Model turns this run may take before it is refused. Defaults to "
-                                + DEFAULT_MAX_TURNS + ", never exceeds " + MAX_TURNS_CEILING + ".", ""),
+                                + "the executing runtime default and may not exceed its configured ceiling.", ""),
                 NodePropertyDescriptor.optional("maxTotalTokens", "Max tokens", NodePropertyType.INTEGER,
                         "Cumulative reported tokens across the whole run before it is refused. "
                                 + "The operator's finite ceiling still applies when absent.", ""),
@@ -229,31 +235,14 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         "Nucleus sampling parameter forwarded verbatim.", ""),
                 NodePropertyDescriptor.optional("seed", "Seed", NodePropertyType.INTEGER,
                         "Sampling seed, when the endpoint honours it.", "")),
-                // Declared here and built there, so this bundle spells "skills.<n>.name" exactly
-                // once: the descriptor the editor renders, the reader that parses the values and the
-                // listing the model sees all go through AgentSkill and cannot drift apart.
-                AgentSkill.propertyDescriptors()),
                 // "ai" and "agentic" are both members of SyntheticProvenance.GENERATIVE_CAPABILITIES.
                 // They are not decoration: they are the entire reason this node's output is marked,
                 // and the other three only describe what it does.
                 Set.of("ai", "agentic", "external-provider", "network", "credential-reference"))
                 .withOutcomes(NodeOutcomeDescriptor.literal("continue",
                         "The agent finished and its answer becomes the outgoing payload. The only "
-                                + "outcome this node produces: anything else fails the node."));
-    }
-
-    /**
-     * The node's own properties followed by the skill slots, as one list.
-     *
-     * <p>Concatenated rather than interleaved so the order the editor renders stays the order an
-     * author works in: what the node is and how it is bounded first, then what it knows how to do.</p>
-     */
-    private static List<NodePropertyDescriptor> properties(List<NodePropertyDescriptor> own,
-                                                           List<NodePropertyDescriptor> skills) {
-        var all = new ArrayList<NodePropertyDescriptor>(own.size() + skills.size());
-        all.addAll(own);
-        all.addAll(skills);
-        return List.copyOf(all);
+                                + "outcome this node produces: anything else fails the node."))
+                .withAdditionalProperties(AgentSkill.propertyGroup());
     }
 
     @Override
@@ -279,7 +268,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // A node with no skill properties passes here trivially and reaches the provider read
         // unchanged; only a node carrying a skill that can never work is stopped, which is what
         // NodeBehavior#create reserves a throw for.
-        List<AgentSkill> skills = AgentSkill.declaredOn(configuration);
+        List<AgentSkill> skills = AgentSkill.declaredOn(configuration, operationalConfiguration);
         // Read FIRST among the adapter properties, or a node with neither a provider nor instructions
         // would fail on the instructions and the CORE-07 reversal would only appear to work.
         String profileName = NodePropertyDescriptor.adapterIdOf(configuration.properties().get("provider"));
@@ -298,10 +287,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // graph runs cannot arm a node that already refused -- and one REMOVED from the environment
         // cannot silently narrow an agent that is mid-run.
         List<String> declared = mcpNames(configuration);
-        if (declared.size() > MAX_MCP_SERVERS) {
-            // Checked, and not merely documented. The descriptor tells a graph author "at most eight"
-            // and the guide repeats it; a bound that only three sentences believe in is not a bound,
-            // and the ninth server would be opened by an author who had been told it would not be.
+        if (declared.size() > operationalConfiguration.maxMcpServers()) {
+            // Checked, and not merely documented. A configured bound that only the deployment
+            // documentation believes in is not a bound, and silently truncating the list would run
+            // without tools the author explicitly declared.
             return refuse(AgentException.Code.MCP_TOO_MANY_SERVERS, "");
         }
         var servers = new ArrayList<McpProfile>();
@@ -317,7 +306,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
             }
             servers.add(server.get());
         }
-        Settings settings = Settings.compile(configuration, resolved.get(), skills, List.copyOf(servers));
+        Settings settings = Settings.compile(configuration, resolved.get(), skills, List.copyOf(servers),
+                operationalConfiguration);
         return new NodeAction() {
             @Override public CompletionStage<NodeResult> handle(NodeMessage message) {
                 return invoke(message, services, settings, NEVER_CANCELLED);
@@ -333,12 +323,12 @@ public final class AgentNodeBehavior implements NodeBehavior {
     @Override
     public Optional<ToolCallContinuationAction> createToolCallContinuation(
             NodeConfiguration configuration, NodePackageServices services) {
-        List<AgentSkill> skills = AgentSkill.declaredOn(configuration);
+        List<AgentSkill> skills = AgentSkill.declaredOn(configuration, operationalConfiguration);
         String profileName = NodePropertyDescriptor.adapterIdOf(configuration.properties().get("provider"));
         LlmProfile profile = profiles.resolve(profileName).orElseThrow(
                 () -> new IllegalStateException("agent continuation provider is unavailable"));
         List<String> declared = mcpNames(configuration);
-        if (declared.size() > MAX_MCP_SERVERS) {
+        if (declared.size() > operationalConfiguration.maxMcpServers()) {
             throw new IllegalStateException("agent continuation MCP inventory is invalid");
         }
         var servers = new ArrayList<McpProfile>();
@@ -346,7 +336,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
             servers.add(mcpProfiles.resolve(serverName).orElseThrow(
                     () -> new IllegalStateException("agent continuation MCP profile is unavailable")));
         }
-        Settings settings = Settings.compile(configuration, profile, skills, List.copyOf(servers));
+        Settings settings = Settings.compile(configuration, profile, skills, List.copyOf(servers),
+                operationalConfiguration);
         return Optional.of(new ToolCallContinuationAction() {
             @Override public void validate(ToolCallContinuationInput input) {
                 validateContinuation(input);
@@ -366,7 +357,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
      * unambiguous meaning, and it would otherwise become an exposed-name collision -- a refusal whose
      * message would send the operator looking for two servers when there is one.</p>
      *
-     * <p>More than {@link #MAX_MCP_SERVERS} is refused by {@link #create}, and is <b>not</b> silently
+     * <p>More than the executing runtime's configured MCP-server ceiling is refused by
+     * {@link #create}, and is <b>not</b> silently
      * truncated. Truncation would mean an agent quietly running without tools its author declared,
      * which is the shape of failure that is discovered in production. This method only collects; the
      * count is checked where the refusal can be a named failure.</p>
@@ -408,7 +400,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
          *     declare refuses the node with its own code rather than at the first turn
          */
         static Settings compile(NodeConfiguration configuration, LlmProfile profile,
-                                List<AgentSkill> skills, List<McpProfile> mcpServers) {
+                                List<AgentSkill> skills, List<McpProfile> mcpServers,
+                                AgentOperationalConfiguration policy) {
             String instructions = configuration.requiredProperty("instructions");
             String objective = configuration.requiredProperty("objective");
             String model = configuration.property("model", "").strip();
@@ -416,7 +409,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             // call. That is the deliberate reading: a loop of n turns under a per-turn ceiling has no
             // ceiling at all, and the operator's number has to stay a number they can reason about.
             int requestedDeadline = positiveInt(configuration, "timeoutMs").orElse(profile.timeoutMs());
-            int maxTurns = positiveInt(configuration, "maxTurns").orElse(DEFAULT_MAX_TURNS);
+            int maxTurns = positiveInt(configuration, "maxTurns").orElse(policy.defaultMaxTurns());
             long maxTotalTokens = positiveLong(configuration, "maxTotalTokens").orElse(UNBOUNDED_TOKENS);
             var tuning = new OpenAiCompatibleChat.Tuning(
                     positiveLong(configuration, "maxTokens"),
@@ -426,7 +419,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             return new Settings(profile, instructions, objective,
                     model.isEmpty() ? profile.model() : model,
                     Math.max(1, Math.min(profile.timeoutMs(), requestedDeadline)),
-                    Math.max(1, Math.min(MAX_TURNS_CEILING, maxTurns)),
+                    Math.max(1, Math.min(policy.maxTurns(), maxTurns)),
                     maxTotalTokens, tuning, skills, mcpServers);
         }
 
@@ -875,7 +868,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             this.services = services;
             this.settings = settings;
             this.resources = resources;
-            this.loadSkill = new LoadSkillTool(settings.skills());
+            this.loadSkill = new LoadSkillTool(settings.skills(), operationalConfiguration.maxSkillNameChars());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
                     + Duration.ofMillis(settings.deadlineMs()).toNanos();
@@ -917,7 +910,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             this.services = services;
             this.settings = settings;
             this.resources = resources;
-            this.loadSkill = new LoadSkillTool(settings.skills());
+            this.loadSkill = new LoadSkillTool(settings.skills(), operationalConfiguration.maxSkillNameChars());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
                     + Duration.ofMillis(Math.min(settings.deadlineMs(), checkpoint.remainingMillis())).toNanos();
@@ -1135,12 +1128,16 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             try {
+                if (body.length > settings.profile().maxRequestBytes()) {
+                    throw new IllegalArgumentException(
+                            "model request exceeds the configured request-byte ceiling");
+                }
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
                         Duration.ofMillis(effectiveTimeout),
                         settings.profile().credentialBinding().orElse(null), null,
-                        ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                        ExternalIoLimits.compressedHttp(settings.profile().maxRequestBytes(),
                                 settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
                                 settings.profile().maxResponseBytes(), 100,
                                 Duration.ofMillis(effectiveTimeout), Set.of("application/json")),

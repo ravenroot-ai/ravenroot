@@ -41,7 +41,8 @@ public record NodeTypeDescriptor(
         Set<NodeRuntimeNature> allowedNatures,
         Set<String> commands,
         List<NodeOutcomeDescriptor> outcomes,
-        NodeRuntimeConcurrency runtimeConcurrency) {
+        NodeRuntimeConcurrency runtimeConcurrency,
+        List<NodePropertyGroupDescriptor> additionalProperties) {
 
 /**
  * Normalizes optional display metadata and rejects outcome/nature combinations that a graph could
@@ -70,6 +71,7 @@ public record NodeTypeDescriptor(
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         outcomes = outcomes == null ? List.of() : List.copyOf(outcomes);
         runtimeConcurrency = runtimeConcurrency == null ? NodeRuntimeConcurrency.DEFAULT : runtimeConcurrency;
+        additionalProperties = additionalProperties == null ? List.of() : List.copyOf(additionalProperties);
         // A property-derived outcome that names a property this descriptor does not declare cannot be
         // resolved by anyone: the editor has no field to read and no default to fall back to, so the
         // outcome would silently vanish from the suggestions instead of being wrong loudly. Catching it
@@ -161,7 +163,8 @@ public record NodeTypeDescriptor(
  */
     public NodeTypeDescriptor withNature(NodeRuntimeNature newDefault, Set<NodeRuntimeNature> newAllowed) {
         return new NodeTypeDescriptor(behavior, displayName, category, description, visualType, agentic,
-                properties, capabilities, newDefault, newAllowed, commands, outcomes, runtimeConcurrency);
+                properties, capabilities, newDefault, newAllowed, commands, outcomes, runtimeConcurrency,
+                additionalProperties);
     }
 
     /**
@@ -179,7 +182,7 @@ public record NodeTypeDescriptor(
     public NodeTypeDescriptor withOutcomes(NodeOutcomeDescriptor... declared) {
         return new NodeTypeDescriptor(behavior, displayName, category, description, visualType, agentic,
                 properties, capabilities, defaultNature, allowedNatures, commands, List.of(declared),
-                runtimeConcurrency);
+                runtimeConcurrency, additionalProperties);
     }
 
     /**
@@ -189,7 +192,15 @@ public record NodeTypeDescriptor(
  */
     public NodeTypeDescriptor withRuntimeConcurrency(NodeRuntimeConcurrency constraint) {
         return new NodeTypeDescriptor(behavior, displayName, category, description, visualType, agentic,
-                properties, capabilities, defaultNature, allowedNatures, commands, outcomes, constraint);
+                properties, capabilities, defaultNature, allowedNatures, commands, outcomes, constraint,
+                additionalProperties);
+    }
+
+    /** Returns a copy with trusted dynamic additional-property collections. */
+    public NodeTypeDescriptor withAdditionalProperties(NodePropertyGroupDescriptor... groups) {
+        return new NodeTypeDescriptor(behavior, displayName, category, description, visualType, agentic,
+                properties, capabilities, defaultNature, allowedNatures, commands, outcomes,
+                runtimeConcurrency, List.of(groups));
     }
 
     /**
@@ -278,7 +289,7 @@ public record NodeTypeDescriptor(
                               String visualType, boolean agentic, List<NodePropertyDescriptor> properties,
                               Set<String> capabilities) {
         this(behavior, displayName, category, description, visualType, agentic, properties, capabilities,
-                null, Set.of(), Set.of(), List.of(), NodeRuntimeConcurrency.DEFAULT);
+                null, Set.of(), Set.of(), List.of(), NodeRuntimeConcurrency.DEFAULT, List.of());
     }
 
     /**
@@ -301,7 +312,7 @@ public record NodeTypeDescriptor(
                               Set<String> capabilities, NodeRuntimeNature defaultNature,
                               Set<NodeRuntimeNature> allowedNatures) {
         this(behavior, displayName, category, description, visualType, agentic, properties, capabilities,
-                defaultNature, allowedNatures, Set.of(), List.of(), NodeRuntimeConcurrency.DEFAULT);
+                defaultNature, allowedNatures, Set.of(), List.of(), NodeRuntimeConcurrency.DEFAULT, List.of());
     }
 
     /**
@@ -333,7 +344,7 @@ public record NodeTypeDescriptor(
                               Set<String> capabilities, NodeRuntimeNature defaultNature,
                               Set<NodeRuntimeNature> allowedNatures, Set<String> commands) {
         this(behavior, displayName, category, description, visualType, agentic, properties, capabilities,
-                defaultNature, allowedNatures, commands, List.of(), NodeRuntimeConcurrency.DEFAULT);
+                defaultNature, allowedNatures, commands, List.of(), NodeRuntimeConcurrency.DEFAULT, List.of());
     }
 
     /**
@@ -357,7 +368,17 @@ public record NodeTypeDescriptor(
                               Set<NodeRuntimeNature> allowedNatures, Set<String> commands,
                               List<NodeOutcomeDescriptor> outcomes) {
         this(behavior, displayName, category, description, visualType, agentic, properties, capabilities,
-                defaultNature, allowedNatures, commands, outcomes, NodeRuntimeConcurrency.DEFAULT);
+                defaultNature, allowedNatures, commands, outcomes, NodeRuntimeConcurrency.DEFAULT, List.of());
+    }
+
+    /** Compatibility constructor preserving the thirteen-argument canonical descriptor. */
+    public NodeTypeDescriptor(String behavior, String displayName, String category, String description,
+                              String visualType, boolean agentic, List<NodePropertyDescriptor> properties,
+                              Set<String> capabilities, NodeRuntimeNature defaultNature,
+                              Set<NodeRuntimeNature> allowedNatures, Set<String> commands,
+                              List<NodeOutcomeDescriptor> outcomes, NodeRuntimeConcurrency runtimeConcurrency) {
+        this(behavior, displayName, category, description, visualType, agentic, properties, capabilities,
+                defaultNature, allowedNatures, commands, outcomes, runtimeConcurrency, List.of());
     }
 
     /**

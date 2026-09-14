@@ -103,7 +103,7 @@ public final class AgentException extends RuntimeException {
          */
         MCP_TOOL_NAME_COLLISION,
         /**
-         * The node declares more MCP servers than {@code AgentNodeBehavior.MAX_MCP_SERVERS}.
+         * The node declares more MCP servers than {@code AgentOperationalConfiguration.DEFAULT_MAX_MCP_SERVERS}.
          *
          * <p>A refusal and not a truncation. Truncating would give the author an agent missing tools
          * they declared, working well enough to reach production before anyone noticed which ones

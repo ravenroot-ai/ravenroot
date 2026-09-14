@@ -334,9 +334,17 @@ public final class ExecutionRecorder implements AutoCloseable {
 
     /** Applies one runner lifecycle change and its audit event through the current process fence. */
     public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event) {
+        applyRunner(operation, event, java.util.List.of());
+    }
+
+    /** Commits an operator continuation disposition with its graph transitions and audit atomically. */
+    public synchronized void applyRunner(ai.ravenroot.api.runner.RunnerJobOperation operation, EventEnvelope event,
+                                          java.util.List<ExecutionTransition> transitions) {
         requireFence();
-        revision = await(store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease).runner(operation).publish(event).build())).revision();
+        var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease).runner(operation).publish(event);
+        transitions.forEach(batch::apply);
+        revision = await(store.apply(batch.build())).revision();
     }
 
     /** Confirms the core signal against immutable durable acceptance before unwinding engine workers. */

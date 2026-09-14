@@ -467,7 +467,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         runnerWorkspace = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(
                                 key, runnerWorkspace, operation, folded, now);
                     }
-                    if (runnerWorkspace != null) ai.ravenroot.api.runner.RunnerCodec.workspace(runnerWorkspace);
+                    if (runnerWorkspace != null) {
+                        runnerWorkspace = runnerWorkspace.observeProcess(folded, now);
+                        ai.ravenroot.api.runner.RunnerCodec.workspace(runnerWorkspace);
+                    }
                 } catch (IllegalArgumentException | IllegalStateException invalid) {
                     throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
                 }

@@ -14,6 +14,22 @@ import {
   validateSourceSessionStatus,
 } from '../src/runtime-client.js';
 
+it('requires an explicit revision and authenticates continuation resolution', async () => {
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ revision: 8, resolution: 'RESUME' }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'token' });
+  expect(() => client.resolveRunnerContinuation('process', 'job', 0, 'RESUME')).toThrow();
+  expect(() => client.resolveRunnerContinuation('process', 'job', 7, 'RETRY')).toThrow();
+  expect(fetchImpl).not.toHaveBeenCalled();
+  await client.resolveRunnerContinuation('process', 'job', 7, 'RESUME');
+  const [url, request] = fetchImpl.mock.calls[0];
+  expect(url).toBe('https://runtime.example/v1/runner-plane/workspaces/process/jobs/job/resolve-continuation');
+  expect(request.method).toBe('POST');
+  expect(request.headers.Authorization).toBe('Bearer token');
+  expect(request.headers['Content-Type']).toBe('application/json');
+  expect(JSON.parse(request.body)).toEqual({ expectedRevision: 7, resolution: 'RESUME' });
+});
+
 function versionedRingEvent(overrides = {}) {
   return {
     schemaVersion: 1, source: 'RING', id: '1', eventType: 'EXECUTION_STARTED',

@@ -68,6 +68,47 @@ class RunnerBoundaryTest {
         }
     }
 
+    @Test void mixedLogKindsShareOneDurableQuotaIncludingUnreferencedUploads(@TempDir Path directory) throws Exception {
+        var job = job();
+        var artifacts = new RunnerArtifactStore(directory.toRealPath());
+        artifacts.put(job, RunnerArtifact.Kind.LOG, new ByteArrayInputStream(new byte[5]));
+        artifacts.put(job, RunnerArtifact.Kind.STDOUT, new ByteArrayInputStream(new byte[5]));
+        var restarted = new RunnerArtifactStore(directory.toRealPath());
+        restarted.put(job, RunnerArtifact.Kind.STDERR, new ByteArrayInputStream(new byte[6]));
+        for (var kind : List.of(RunnerArtifact.Kind.LOG, RunnerArtifact.Kind.STDOUT, RunnerArtifact.Kind.STDERR)) {
+            assertThrows(IllegalArgumentException.class, () -> restarted.put(job, kind, new ByteArrayInputStream(new byte[1])));
+        }
+        assertThrows(IllegalArgumentException.class, () -> restarted.put(job, null, new ByteArrayInputStream(new byte[0])));
+        var other = Arrays.stream(RunnerArtifact.Kind.values()).filter(kind -> !List.of(
+                RunnerArtifact.Kind.LOG, RunnerArtifact.Kind.STDOUT, RunnerArtifact.Kind.STDERR).contains(kind)).findFirst().orElseThrow();
+        restarted.put(job, other, new ByteArrayInputStream(new byte[16]));
+        assertThrows(IllegalArgumentException.class, () -> restarted.put(job, other, new ByteArrayInputStream(new byte[1])));
+    }
+
+    @Test void concurrentStoreInstancesCannotOversubscribeLogBudget(@TempDir Path directory) throws Exception {
+        var job = job();
+        var first = new RunnerArtifactStore(directory.toRealPath());
+        var second = new RunnerArtifactStore(directory.toRealPath());
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var workers = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var calls = List.of(first, second).stream().map(store -> workers.submit(() -> {
+                start.await();
+                try { store.put(job, RunnerArtifact.Kind.STDOUT, new ByteArrayInputStream(new byte[10])); return true; }
+                catch (IllegalArgumentException exhausted) { return false; }
+            })).toList();
+            start.countDown();
+            assertNotEquals(calls.get(0).get(), calls.get(1).get());
+        }
+        // A crash-left upload counts even though no accepted report references it.
+        Path jobDirectory;
+        try (var files = Files.walk(directory)) {
+            jobDirectory = files.filter(path -> path.getFileName().toString().equals("artifact.lock")).findFirst().orElseThrow().getParent();
+        }
+        Files.write(jobDirectory.resolve("upload-crashed.pending"), new byte[6]);
+        assertThrows(IllegalArgumentException.class, () -> new RunnerArtifactStore(directory.toRealPath())
+                .put(job, RunnerArtifact.Kind.STDERR, new ByteArrayInputStream(new byte[1])));
+    }
+
     @Test void workloadsCannotApproveAndIssuerIsPartOfRunnerIdentity(@TempDir Path directory) throws Exception {
         try (var store = new InMemoryExecutionStore(CLOCK)) {
             var service = new RunnerJobService(store, CLOCK, List.of(), List.of(), Map.of("tenant", policy()));

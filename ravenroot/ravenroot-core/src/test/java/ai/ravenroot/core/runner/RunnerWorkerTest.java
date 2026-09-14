@@ -62,14 +62,26 @@ class RunnerWorkerTest {
             public void close() { }
         };
         try (var worker = new RunnerWorker(new RemoteRunnerClient(URI.create("http://127.0.0.1:" + server.getAddress().getPort()), () -> "test-workload"), driver)) {
+            var gauges = new ArrayList<Integer>();
+            var failures = new AtomicInteger();
+            worker.telemetry().install(new RunnerTelemetry() {
+                public void increment(Counter counter) { assertEquals(Counter.WORKER_FAILURE, counter); failures.incrementAndGet(); }
+                public void activeJobs(int count) { gauges.add(count); }
+            });
             worker.tick(); assertEquals(4, worker.activeJobs()); assertEquals(4, futures.size());
+            assertEquals(4, gauges.getLast());
             assertEquals(4, futures.keySet().stream().map(id -> assignments.get(id).workspaceId()).distinct().count());
             worker.tick(); assertEquals(4, claims.get(), "full capacity does not claim another execution");
             var first = futures.entrySet().iterator().next();
             first.getValue().complete(new RunnerResult("answered", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), first.getKey()));
             assertEquals(3, worker.activeJobs());
+            assertEquals(3, gauges.getLast());
             worker.tick(); assertEquals(4, worker.activeJobs()); assertEquals(5, futures.size()); assertEquals(5, claims.get());
             assertEquals(0, worker.protocolFailures());
+            futures.values().stream().filter(value -> !value.isDone()).findFirst().orElseThrow()
+                    .completeExceptionally(new IllegalStateException("worker transport failed"));
+            assertEquals(1, failures.get());
+            assertEquals(3, gauges.getLast());
         } finally { server.stop(0); }
     }
 }

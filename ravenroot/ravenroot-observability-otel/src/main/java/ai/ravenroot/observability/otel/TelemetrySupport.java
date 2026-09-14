@@ -52,10 +52,19 @@ public final class TelemetrySupport {
     public static Optional<AutoCloseable> install(
             TelemetryConfiguration configuration, ExecutionMonitor monitor,
             ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay agentBudgets) {
+        return install(configuration, monitor, agentBudgets, null);
+    }
+
+    /** Installs bounded runner metrics through the same exporter and lifecycle as execution telemetry. */
+    public static Optional<AutoCloseable> install(
+            TelemetryConfiguration configuration, ExecutionMonitor monitor,
+            ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay agentBudgets,
+            ai.ravenroot.core.runner.RunnerTelemetry.Relay runners) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(monitor, "monitor");
         if (!configuration.enabled()) {
             if (agentBudgets != null) agentBudgets.clear();
+            if (runners != null) runners.clear();
             return Optional.empty();
         }
 
@@ -78,9 +87,11 @@ public final class TelemetrySupport {
         TelemetryBridge bridge = new TelemetryBridge(sdk);
         AutoCloseable unsubscribe = monitor.subscribe(bridge);
         if (agentBudgets != null) agentBudgets.install(bridge);
+        if (runners != null) runners.install(bridge);
 
         return Optional.of(() -> {
             if (agentBudgets != null) agentBudgets.clear();
+            if (runners != null) runners.clear();
             unsubscribe.close();
             bridge.close();
             tracerProvider.shutdown();

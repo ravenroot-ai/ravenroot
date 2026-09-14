@@ -14,6 +14,10 @@ public final class RunnerWorker implements AutoCloseable {
     private final ConcurrentMap<UUID, Slot> active = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicLong failures = new AtomicLong();
+    private final RunnerTelemetry.Relay telemetry = new RunnerTelemetry.Relay();
+    public RunnerTelemetry.Relay telemetry() { return telemetry; }
+    private void failure() { failures.incrementAndGet(); telemetry.increment(RunnerTelemetry.Counter.WORKER_FAILURE); }
+    private synchronized void observeActive() { telemetry.activeJobs(active.size()); }
     private String cursor;
     public RunnerWorker(RemoteRunnerClient client, RunnerDriver driver) { this.client = client; this.driver = driver; }
     public void start() throws Exception {
@@ -43,6 +47,7 @@ public final class RunnerWorker implements AutoCloseable {
                 else if (state != RunnerJob.State.RECONCILING && state != RunnerJob.State.CANCELLING) continue;
                 var slot = new Slot(assignment);
                 active.put(id, slot);
+                observeActive();
                 // A separate heartbeat task keeps admission and cleanup from starving each live job.
                 slot.heartbeat = polling.scheduleWithFixedDelay(() -> renew(id, slot), 10, 10, TimeUnit.SECONDS);
                 boolean execute = state == RunnerJob.State.QUEUED;
@@ -55,18 +60,18 @@ public final class RunnerWorker implements AutoCloseable {
                     future.whenComplete((result, failure) -> {
                         try {
                             synchronized (slot) {
-                                if (failure != null) { failures.incrementAndGet(); return; }
+                                if (failure != null) { failure(); return; }
                                 client.complete(slot.assignment, result);
                             }
-                        } catch (Exception lostAcknowledgement) { failures.incrementAndGet(); }
-                        finally { slot.heartbeat.cancel(false); active.remove(id, slot); }
+                        } catch (Exception lostAcknowledgement) { failure(); }
+                        finally { slot.heartbeat.cancel(false); active.remove(id, slot); observeActive(); }
                     });
                 } catch (RuntimeException refused) {
-                    slot.heartbeat.cancel(false); active.remove(id, slot); throw refused;
+                    slot.heartbeat.cancel(false); active.remove(id, slot); observeActive(); throw refused;
                 }
             }
         } catch (Exception unavailable) {
-            failures.incrementAndGet();
+            failure();
         }
     }
     private void renew(UUID id, Slot slot) {
@@ -76,7 +81,7 @@ public final class RunnerWorker implements AutoCloseable {
                 slot.assignment = client.heartbeat(slot.assignment);
                 if (slot.assignment.job().stopReason() != RunnerJob.StopReason.NONE) driver.cancel(slot.assignment);
             } catch (Exception unavailable) {
-                failures.incrementAndGet();
+                failure();
                 driver.cancel(slot.assignment);
             }
         }
@@ -87,9 +92,9 @@ public final class RunnerWorker implements AutoCloseable {
         closed.set(true); polling.shutdownNow();
         var stops = new ArrayList<CompletableFuture<Void>>();
         for (var slot : active.values()) try { stops.add(driver.cancel(slot.assignment).toCompletableFuture()); }
-        catch (RuntimeException refused) { failures.incrementAndGet(); }
+        catch (RuntimeException refused) { failure(); }
         try { CompletableFuture.allOf(stops.toArray(CompletableFuture[]::new)).get(20, TimeUnit.SECONDS); }
-        catch (Exception unconfirmed) { failures.incrementAndGet(); }
+        catch (Exception unconfirmed) { failure(); }
         driver.close();
     }
     private static final class Slot {

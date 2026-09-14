@@ -68,8 +68,22 @@ export function createRunnerWindow({ dialog }) {
             deadline: job.deadline, leaseUntil: job.leaseUntil, authority: job.authority, outcome: job.outcome }, null, 2)));
         if (job.state === 'UNKNOWN') section.append(element('p',
           'Effect unknown. The workspace remains owned. Reconciliation is report-only; this action does not retry the agent.'));
-        if (job.continuationUncertain) section.append(element('p',
-          'Successor delivery is uncertain. Automatic runner replay and new workspace admissions are blocked; inspect the audit and use operator graph recovery.'));
+        if (job.continuationUncertain) {
+          section.append(element('p', 'Successor delivery is uncertain. Inspect graph state and audit before resolving revision '
+            + workspace.revision + '. Resume requires zero recorded successors; acknowledge requires the complete successor set; abandon fails the unfinished traversal. No action replays runner effects.'));
+          const confirmation = element('input'); confirmation.type = 'checkbox';
+          const confirmationLabel = element('label', 'I reviewed graph state and understand the selected disposition.');
+          confirmationLabel.prepend(confirmation); section.append(confirmationLabel);
+          for (const [resolution, label] of [['RESUME', 'Resume undispatched successors'],
+            ['ACKNOWLEDGE', 'Acknowledge complete successors'], ['ABANDON', 'Abandon unfinished traversal']]) {
+            const action = button(label, () => request(async current => {
+              if (!confirmation.checked) throw new Error('Confirm graph-state review before resolving.');
+              await current.resolveRunnerContinuation(id, job.runnerJobId, workspace.revision, resolution);
+              return () => { void inspect(); };
+            }));
+            action.disabled = !Number.isSafeInteger(workspace.revision); section.append(action);
+          }
+        }
         if (!TERMINAL.has(job.state)) for (const operation of ['cancel', 'reconcile']) {
           section.append(button(operation === 'cancel' ? 'Request cancellation' : 'Reconcile liveness', () => request(async current => {
             await current.runnerOperation(id, job.runnerJobId, operation);

@@ -37,13 +37,13 @@ public final class RunnerRecoveryLoop implements AutoCloseable {
                     var actor = new SecurityContext("runner-recovery-" + UUID.randomUUID(), tenant, "runner-recovery",
                             PrincipalType.WORKLOAD, "ravenroot-control-plane");
                     for (var entry : new ArrayList<>(workspace.jobs().values()).reversed()) {
-                        var job = entry.job(); swept.increment();
-                        if (entry.continuationUncertain()) { unknown.increment(); continue; }
+                        var job = entry.job(); swept.increment(); jobs.telemetry().increment(RunnerTelemetry.Counter.RECOVERY_OBSERVED);
+                        if (entry.continuationUncertain()) { observeUnknown(); continue; }
                         if (!job.state().terminal() && job.reconcileLiveness(clock.instant()) != job) {
                             job = jobs.mutate(actor, process.key(), new RunnerJobOperation.Reconcile(job.identity().runnerJobId()))
                                     .jobs().get(job.identity().runnerJobId()).job();
                         }
-                        if (job.state() == RunnerJob.State.UNKNOWN) unknown.increment();
+                        if (job.state() == RunnerJob.State.UNKNOWN) observeUnknown();
                         var invocation = aggregate.traversals().get(job.identity().traversalId()).invocations()
                                 .get(job.identity().invocationId());
                         boolean parked = invocation.attempts().stream().anyMatch(attempt ->
@@ -52,12 +52,14 @@ public final class RunnerRecoveryLoop implements AutoCloseable {
                                     || attempt.status() == ai.ravenroot.api.application.NodeAttemptStatus.RUNNING
                                     || attempt.status() == ai.ravenroot.api.application.NodeAttemptStatus.COMPLETED));
                         if (job.state().terminal() && parked) continuations.resume(process.key(), job.identity().runnerJobId())
-                                .whenComplete((ignored, failure) -> { if (failure != null) conflicts.increment(); });
+                                .whenComplete((ignored, failure) -> { if (failure != null) observeConflict(); });
                     }
                 }
-            } catch (RuntimeException conflict) { conflicts.increment(); }
+            } catch (RuntimeException conflict) { observeConflict(); }
         }
     }
+    private void observeUnknown() { unknown.increment(); jobs.telemetry().increment(RunnerTelemetry.Counter.UNKNOWN_OBSERVED); }
+    private void observeConflict() { conflicts.increment(); jobs.telemetry().increment(RunnerTelemetry.Counter.RECOVERY_CONFLICT); }
     public Map<String, Long> metrics() {
         return Map.of("runnerJobsObserved", swept.sum(), "runnerRecoveryConflicts", conflicts.sum(), "runnerUnknownObserved", unknown.sum());
     }

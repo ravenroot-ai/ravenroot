@@ -68,6 +68,28 @@ public final class AuthorizedRunnerControl {
         return load(actor, processId);
     }
 
+    /** A revision-consistent snapshot for explicit operator continuation resolution. */
+    public WorkspaceView view(RequestContext actor, UUID processId) {
+        authorize(actor, AuthorizationAction.RUNNER_READ, processId.toString());
+        var key = new ExecutionKey(actor.tenantId(), processId);
+        long revision = jobs.store().load(key).toCompletableFuture().join().revision();
+        var workspace = load(actor, processId);
+        if (jobs.store().load(key).toCompletableFuture().join().revision() != revision) {
+            throw new IllegalStateException("runner workspace changed while reading");
+        }
+        return new WorkspaceView(workspace, revision);
+    }
+    public record WorkspaceView(RunnerWorkspaceState workspace, long revision) { }
+
+    public long resolve(RequestContext actor, UUID processId, UUID jobId, long expectedRevision,
+                        RunnerJobOperation.ContinuationResolution resolution, PinnedRunnerContinuationExecutor continuations) {
+        authorize(actor, AuthorizationAction.RUNNER_CONTROL, processId.toString());
+        if (actor.principalType() != PrincipalType.USER) throw new AuthorizationDeniedException("operator identity required");
+        requireJob(load(actor, processId), jobId);
+        return continuations.resolve(SecurityContext.of(actor), new ExecutionKey(actor.tenantId(), processId),
+                jobId, expectedRevision, resolution);
+    }
+
     public MapPage assignments(RequestContext actor, String cursor) {
         requireRunner(actor, actor.subject());
         var query = ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(16).after(cursor);
@@ -79,7 +101,7 @@ public final class AuthorizedRunnerControl {
             if (process.status().terminal() && workspace.jobs().values().stream().allMatch(entry -> entry.job().state().terminal())) {
                 var retention = workspace.jobs().values().stream().map(entry -> entry.job().definition().workspaceRetention())
                         .max(java.time.Duration::compareTo).orElseThrow();
-                if (!clock.instant().isBefore(process.updatedAt().plus(retention))) {
+                if (workspace.processTerminalAt() != null && !clock.instant().isBefore(workspace.processTerminalAt().plus(retention))) {
                     items.add(java.util.Map.of("cleanup", true, "processInstanceId", process.key().processInstanceId().toString()));
                 }
                 continue;
@@ -141,7 +163,8 @@ public final class AuthorizedRunnerControl {
         }
         var retention = workspace.jobs().values().stream().map(entry -> entry.job().definition().workspaceRetention())
                 .max(java.time.Duration::compareTo).orElseThrow();
-        var notBefore = process.updatedAt().plus(retention);
+        if (workspace.processTerminalAt() == null) throw new IllegalStateException("workspace terminal timestamp requires durable reconciliation");
+        var notBefore = workspace.processTerminalAt().plus(retention);
         if (clock.instant().isBefore(notBefore)) throw new IllegalStateException("workspace retention has not elapsed");
         for (var entry : workspace.jobs().values()) artifacts.removeRetained(entry.job());
         return new RunnerWorkspaceRelease(1, workspace.execution(), workspace.workspaceId(), workspace.runnerId(),
@@ -157,7 +180,8 @@ public final class AuthorizedRunnerControl {
 
     public RunnerAssignment operate(RequestContext actor, UUID processId, RunnerJobOperation operation) throws IOException {
         var workspace = load(actor, processId); var job = requireJob(workspace, operation.jobId());
-        if (operation instanceof RunnerJobOperation.Submit || operation instanceof RunnerJobOperation.ContinuationUncertain) {
+        if (operation instanceof RunnerJobOperation.Submit || operation instanceof RunnerJobOperation.ContinuationUncertain
+                || operation instanceof RunnerJobOperation.ResolveContinuation) {
             throw new AuthorizationDeniedException("runner cannot change graph admission or delivery state");
         }
         if (operation instanceof RunnerJobOperation.Cancel || operation instanceof RunnerJobOperation.Reconcile) {
@@ -198,20 +222,22 @@ public final class AuthorizedRunnerControl {
         var workspace = workspace(actor, processId); var job = requireJob(workspace, jobId);
         if (job.result() == null) throw new IllegalStateException("runner artifact is not sealed");
         var artifact = job.result().artifacts().stream().filter(value -> value.artifactId().equals(artifactId))
-                .findFirst().orElseThrow(() -> new IllegalArgumentException("runner artifact not found"));
-        if (!clock.instant().isBefore(job.updatedAt().plus(job.definition().workspaceRetention()))) {
-            throw new IllegalArgumentException("runner artifact retention expired");
+                .findFirst().orElseThrow(() -> new java.util.NoSuchElementException("runner artifact not found"));
+        var process = jobs.store().load(workspace.execution()).toCompletableFuture().join();
+        if (process.state().status().terminal() && workspace.processTerminalAt() != null
+                && !clock.instant().isBefore(workspace.processTerminalAt().plus(job.definition().workspaceRetention()))) {
+            throw new java.util.NoSuchElementException("runner artifact retention expired");
         }
         return artifacts.open(job, artifact);
     }
 
     private RunnerWorkspaceState load(RequestContext actor, UUID processId) {
         return jobs.store().loadRunnerWorkspace(new ExecutionKey(actor.tenantId(), processId)).toCompletableFuture()
-                .join().orElseThrow(() -> new IllegalArgumentException("runner workspace not found"));
+                .join().orElseThrow(() -> new java.util.NoSuchElementException("runner workspace not found"));
     }
     private static RunnerJob requireJob(RunnerWorkspaceState workspace, UUID id) {
         var entry = workspace.jobs().get(id);
-        if (entry == null) throw new IllegalArgumentException("runner job not found");
+        if (entry == null) throw new java.util.NoSuchElementException("runner job not found");
         return entry.job();
     }
     private void requireRunner(RequestContext actor, String runnerId) {

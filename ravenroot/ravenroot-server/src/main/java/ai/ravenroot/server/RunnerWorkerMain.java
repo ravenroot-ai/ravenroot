@@ -38,7 +38,10 @@ public final class RunnerWorkerMain {
         });
         try (var driver = new LocalContainerRunner(registration, Path.of(RunnerJson.text(config, "docker")),
                 Path.of(RunnerJson.text(config, "stateDirectory")), images, Clock.systemUTC(), client::upload);
-             var worker = new RunnerWorker(client, driver)) {
+             var worker = new RunnerWorker(client, driver);
+             var telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
+                     ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()),
+                     new ai.ravenroot.core.runtime.ExecutionMonitor(), null, worker.telemetry()).orElse(() -> { })) {
             if (registration.capabilities().capabilities().contains(ai.ravenroot.api.runner.RunnerPolicy.Capability.WORKSPACE_WRITE)) {
                 for (String image : images.values()) driver.verifyWorkspaceQuota(image);
             }

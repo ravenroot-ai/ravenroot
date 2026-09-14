@@ -21,6 +21,8 @@ import java.util.UUID;
  * into runner containers. Shared control-plane replicas require the same locking-capable volume.
  */
 public final class RunnerArtifactStore {
+    private static final java.util.List<java.util.concurrent.locks.ReentrantLock> DIRECTORY_LOCKS =
+            java.util.stream.IntStream.range(0, 64).mapToObj(ignored -> new java.util.concurrent.locks.ReentrantLock()).toList();
     private final Path root;
     public RunnerArtifactStore(Path root) throws IOException {
         this.root = root.toAbsolutePath().normalize();
@@ -29,22 +31,34 @@ public final class RunnerArtifactStore {
     }
 
     public RunnerArtifact put(RunnerJob job, RunnerArtifact.Kind kind, InputStream source) throws IOException {
+        if (kind == null) throw new IllegalArgumentException("runner artifact kind is required");
         Path directory = directory(job);
         Files.createDirectories(directory);
         requireSafe(directory);
+        var localLock = localLock(directory); localLock.lock();
         try (var channel = FileChannel.open(directory.resolve("artifact.lock"), StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS); var lock = channel.lock()) {
-            long stored = 0; int count = 0;
+            long stored = 0, storedLogs = 0; int count = 0;
             try (var files = Files.newDirectoryStream(directory)) {
                 for (Path file : files) {
                     if (file.getFileName().toString().equals("artifact.lock")) continue;
-                    requireSafe(file); stored = Math.addExact(stored, Files.size(file)); count++;
+                    requireSafe(file); long size = Files.size(file);
+                    stored = Math.addExact(stored, size); count++;
+                    // The directory is authoritative, including uploads never referenced by a report.
+                    // Unknown/crash-left files are conservatively charged against both quotas.
+                    String[] parts = file.getFileName().toString().split("\\.");
+                    boolean retainedLog = true;
+                    if (parts.length == 4 && parts[3].equals("blob")) {
+                        try { retainedLog = logKind(RunnerArtifact.Kind.valueOf(parts[1])); }
+                        catch (IllegalArgumentException unknown) { /* retain the conservative charge */ }
+                    }
+                    if (retainedLog) storedLogs = Math.addExact(storedLogs, size);
                 }
             }
             if (count >= 128) throw new IllegalArgumentException("runner artifact count quota exceeded");
-            boolean log = kind == RunnerArtifact.Kind.LOG || kind == RunnerArtifact.Kind.STDOUT || kind == RunnerArtifact.Kind.STDERR;
+            boolean log = logKind(kind);
             long limit = job.authority().limits().artifactBytes() - stored;
-            if (log) limit = Math.min(limit, job.authority().limits().logBytes());
+            if (log) limit = Math.min(limit, job.authority().limits().logBytes() - storedLogs);
             if (limit < 0) throw new IllegalArgumentException("runner artifact byte quota exceeded");
             Path temporary = Files.createTempFile(directory, "upload-", ".pending");
             try {
@@ -61,7 +75,7 @@ public final class RunnerArtifactStore {
                 Files.move(temporary, path(job, artifact), StandardCopyOption.ATOMIC_MOVE);
                 return artifact;
             } finally { Files.deleteIfExists(temporary); }
-        }
+        } finally { localLock.unlock(); }
     }
 
     /** Revalidates retained evidence, including its digest, before it can authorize a terminal report. */
@@ -100,6 +114,7 @@ public final class RunnerArtifactStore {
         Path directory = directory(job);
         if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) return;
         requireSafe(directory);
+        var localLock = localLock(directory); localLock.lock();
         try (var channel = FileChannel.open(directory.resolve("artifact.lock"), StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS); var lock = channel.lock();
              var files = Files.newDirectoryStream(directory)) {
@@ -108,11 +123,17 @@ public final class RunnerArtifactStore {
                 String name = file.getFileName().toString();
                 if (name.endsWith(".blob") || name.endsWith(".pending")) Files.delete(file);
             }
-        }
+        } finally { localLock.unlock(); }
         // Keep the zero-byte lock as a stable cross-process synchronization inode.
     }
     private Path path(RunnerJob job, RunnerArtifact artifact) {
         return directory(job).resolve(artifact.artifactId() + "." + artifact.kind() + "." + artifact.sha256() + ".blob");
+    }
+    private static boolean logKind(RunnerArtifact.Kind kind) {
+        return kind == RunnerArtifact.Kind.LOG || kind == RunnerArtifact.Kind.STDOUT || kind == RunnerArtifact.Kind.STDERR;
+    }
+    private static java.util.concurrent.locks.ReentrantLock localLock(Path directory) {
+        return DIRECTORY_LOCKS.get(Math.floorMod(directory.hashCode(), DIRECTORY_LOCKS.size()));
     }
     private void requireSafe(Path path) throws IOException {
         if (!path.startsWith(root) || !path.equals(path.toRealPath())

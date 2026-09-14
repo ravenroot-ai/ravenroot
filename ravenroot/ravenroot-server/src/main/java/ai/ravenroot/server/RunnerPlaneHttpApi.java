@@ -22,10 +22,17 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
     @Override public void handle(HttpExchange exchange, HttpRequestContext context) throws IOException {
         try { route(exchange, context); }
         catch (AuthorizationDeniedException denied) { error(exchange, context, 403, "RUNNER_ACCESS_DENIED"); }
+        catch (NoSuchElementException absent) { error(exchange, context, 404, "RUNNER_RESOURCE_NOT_FOUND"); }
         catch (IllegalArgumentException invalid) { error(exchange, context, 400, "INVALID_RUNNER_REQUEST"); }
         catch (IllegalStateException conflict) { error(exchange, context, 409, "RUNNER_STATE_CONFLICT"); }
         catch (java.util.concurrent.CompletionException failed) {
-            error(exchange, context, 409, "RUNNER_STORE_CONFLICT");
+            if (failed.getCause() instanceof ai.ravenroot.api.persistence.ExecutionStoreException storeFailure
+                    && storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                error(exchange, context, 404, "RUNNER_RESOURCE_NOT_FOUND");
+            } else if (failed.getCause() instanceof ai.ravenroot.api.persistence.ExecutionStoreException storeFailure
+                    && storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.InvalidRequest) {
+                error(exchange, context, 400, "INVALID_RUNNER_REQUEST");
+            } else error(exchange, context, 409, "RUNNER_STORE_CONFLICT");
         }
     }
 
@@ -50,7 +57,7 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
         if (path.startsWith("/catalog/") && method.equals("GET")) {
             String key = path.substring("/catalog/".length());
             var resource = control.resources(actor).stream().filter(value -> value.key().equals(key))
-                    .findFirst().orElseThrow(() -> new IllegalArgumentException("runner resource not found"));
+                    .findFirst().orElseThrow(() -> new NoSuchElementException("runner resource not found"));
             json(exchange, 200, RunnerJson.resource(resource)); return;
         }
         if (path.equals("/catalog") && method.equals("PUT")) {
@@ -83,12 +90,12 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
                     "notBefore", release.notBefore().toString())); return;
         }
         if (pieces.length == 3 && method.equals("GET")) {
-            var workspace = control.workspace(actor, process);
+            var view = control.view(actor, process); var workspace = view.workspace();
             json(exchange, 200, Map.of("workspaceId", workspace.workspaceId().toString(), "runnerId", workspace.runnerId(),
-                    "processInstanceId", process.toString(), "jobs", workspace.jobs().values().stream()
+                    "processInstanceId", process.toString(), "revision", view.revision(), "jobs", workspace.jobs().values().stream()
                             .map(RunnerJson::entry).toList())); return;
         }
-        if (pieces.length < 5 || !pieces[3].equals("jobs")) throw new IllegalArgumentException("invalid runner route");
+        if (pieces.length < 5 || !pieces[3].equals("jobs")) throw new NoSuchElementException("unknown runner route");
         UUID jobId = UUID.fromString(pieces[4]);
         if (pieces.length == 5 && method.equals("GET")) {
             binary(exchange, 200, "application/vnd.ravenroot.runner-assignment.v1", RunnerCodec.assignment(control.assignment(actor, process, jobId))); return;
@@ -107,21 +114,35 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
                 try (var output = exchange.getResponseBody()) { input.transferTo(output); }
             } return;
         }
-        if (pieces.length != 6 || !method.equals("POST")) throw new IllegalArgumentException("invalid runner operation route");
+        if (pieces.length != 6 || !method.equals("POST")) throw new NoSuchElementException("unknown runner operation route");
         String operation = pieces[5];
+        if (operation.equals("resolve-continuation")) {
+            requireContentType(exchange, "application/json");
+            var value = RunnerJson.read(body(exchange, 4096));
+            if (!value.keySet().equals(Set.of("expectedRevision", "resolution"))) throw new IllegalArgumentException("invalid continuation resolution");
+            var resolution = RunnerJobOperation.ContinuationResolution.valueOf(RunnerJson.text(value, "resolution"));
+            long revision = control.resolve(actor, process, jobId, RunnerJson.number(value, "expectedRevision"), resolution, continuations);
+            if (resolution == RunnerJobOperation.ContinuationResolution.RESUME) continuations.resume(
+                    new ai.ravenroot.api.persistence.ExecutionKey(actor.tenantId(), process), jobId);
+            json(exchange, 200, Map.of("revision", revision, "resolution", resolution.name())); return;
+        }
         if (operation.equals("artifacts")) {
-            long fence = Long.parseLong(exchange.getRequestHeaders().getFirst("X-Runner-Fence"));
-            var kind = RunnerArtifact.Kind.valueOf(exchange.getRequestHeaders().getFirst("X-Runner-Artifact-Kind"));
+            requireContentType(exchange, "application/octet-stream");
+            long fence = Long.parseLong(requiredHeader(exchange, "X-Runner-Fence"));
+            var kind = RunnerArtifact.Kind.valueOf(requiredHeader(exchange, "X-Runner-Artifact-Kind"));
             json(exchange, 201, RunnerJson.artifact(control.upload(actor, process, jobId, fence, kind, exchange.getRequestBody()))); return;
         }
         RunnerJobOperation mutation;
         if (operation.equals("complete")) {
-            long fence = Long.parseLong(exchange.getRequestHeaders().getFirst("X-Runner-Fence"));
+            requireContentType(exchange, "application/vnd.ravenroot.runner-result.v1");
+            long fence = Long.parseLong(requiredHeader(exchange, "X-Runner-Fence"));
             mutation = new RunnerJobOperation.Complete(jobId, actor.subject(), fence,
                     RunnerCodec.result(body(exchange, RunnerJson.LIMITS.maxEncodedBytes())));
         } else if (operation.equals("cancel")) mutation = new RunnerJobOperation.Cancel(jobId);
         else if (operation.equals("reconcile")) mutation = new RunnerJobOperation.Reconcile(jobId);
         else {
+            if (!Set.of("claim", "heartbeat", "reconcile-report").contains(operation)) throw new NoSuchElementException("unknown runner operation");
+            requireContentType(exchange, "application/json");
             var value = RunnerJson.read(body(exchange, 4096));
             Duration ttl = Duration.ofSeconds(RunnerJson.number(value, "ttlSeconds"));
             mutation = switch (operation) {
@@ -138,6 +159,19 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
             json(exchange, 200, RunnerJson.job(assignment.job())); return;
         }
         binary(exchange, 200, "application/vnd.ravenroot.runner-assignment.v1", RunnerCodec.assignment(assignment));
+    }
+
+    private static String requiredHeader(HttpExchange exchange, String name) {
+        var values = exchange.getRequestHeaders().get(name);
+        if (values == null || values.size() != 1 || values.getFirst().isBlank()) {
+            throw new IllegalArgumentException("required runner header is missing or ambiguous");
+        }
+        return values.getFirst();
+    }
+    private static void requireContentType(HttpExchange exchange, String type) {
+        if (!requiredHeader(exchange, "Content-Type").split(";", 2)[0].trim().equalsIgnoreCase(type)) {
+            throw new IllegalArgumentException("unsupported runner content type");
+        }
     }
 
     private static byte[] body(HttpExchange exchange, int limit) throws IOException {

@@ -311,6 +311,93 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void runnerContinuationResolutionIsRevisionProtectedAndSurvivesRestart() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        for (int children = 0; children <= 2; children++) {
+            var submit = runnerSubmission(newKey()); var key = submit.identity().execution(); var id = submit.identity();
+            await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                    .apply(new ExecutionTransition.ProcessCreated(runnerInitial(submit), new GraphVersionPin("runner-graph-v1")))
+                    .runner(submit).build()));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Cancel(submit.jobId()));
+            var graphBatch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(id.traversalId(), TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationTransitioned(id.traversalId(), id.invocationId(), NodeInvocationStatus.RUNNING))
+                    .apply(new ExecutionTransition.AttemptTransitioned(id.traversalId(), id.invocationId(), id.attemptId(), NodeAttemptStatus.RUNNING))
+                    .apply(new ExecutionTransition.AttemptTransitioned(id.traversalId(), id.invocationId(), id.attemptId(), NodeAttemptStatus.COMPLETED))
+                    .apply(new ExecutionTransition.InvocationTransitioned(id.traversalId(), id.invocationId(), NodeInvocationStatus.COMPLETED));
+            for (int child = 0; child < children; child++) graphBatch.apply(new ExecutionTransition.InvocationAdded(id.traversalId(),
+                    new NodeInvocation(UUID.randomUUID(), "child-" + child, Set.of(id.invocationId()), NodeInvocationStatus.RUNNING,
+                            List.of(new NodeAttempt(UUID.randomUUID(), 1, NodeAttemptStatus.RUNNING)))));
+            graphBatch.runner(new ai.ravenroot.api.runner.RunnerJobOperation.ContinuationUncertain(submit.jobId()));
+            long marked = await(store().apply(graphBatch.build())).revision();
+            if (store().supports(StoreCapability.DURABLE)) reopen();
+            var observed = await(store().loadRunnerWorkspace(key)).orElseThrow();
+            assertTrue(observed.jobs().get(submit.jobId()).continuationUncertain());
+            var expected = Map.of("child-0", 1L, "child-1", 1L);
+            var mode = children == 0 ? ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution.RESUME
+                    : children == 2 ? ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution.ACKNOWLEDGE
+                    : ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution.ABANDON;
+            var operation = new ai.ravenroot.api.runner.RunnerJobOperation.ResolveContinuation(submit.jobId(), mode, expected);
+            var next = runnerSubmission(key);
+            var handoff = new ai.ravenroot.api.runner.RunnerJobOperation.Submit(next.identity(), next.definition(), next.command(),
+                    next.deployment(), next.runner(), next.input(), next.deadline(), submit.workspaceId(), next.continuation());
+            var nextTraversal = runnerInitial(handoff).traversals().get(next.identity().traversalId());
+            assertThrows(RuntimeException.class, () -> await(store().apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(marked)).apply(new ExecutionTransition.TraversalAdded(nextTraversal))
+                    .runner(handoff).build())), "uncertainty blocks admission and rolls back the new traversal");
+            assertThrows(RuntimeException.class, () -> await(store().apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(marked - 1)).runner(operation).build())));
+            assertThrows(RuntimeException.class, () -> await(store().apply(ExecutionBatch.to(new ExecutionKey("other", key.processInstanceId()))
+                    .expecting(RevisionExpectation.exactly(marked)).runner(operation).build())));
+            if (children == 1) {
+                assertThrows(RuntimeException.class, () -> runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ResolveContinuation(
+                        submit.jobId(), ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution.RESUME, expected)));
+                assertThrows(RuntimeException.class, () -> runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ResolveContinuation(
+                        submit.jobId(), ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution.ACKNOWLEDGE, expected)));
+                assertThrows(RuntimeException.class, () -> runnerApply(key, operation));
+            }
+            var resolution = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(marked)).runner(operation);
+            if (children == 1) resolution.apply(new ExecutionTransition.TraversalTransitioned(id.traversalId(), TraversalStatus.FAILED));
+            await(store().apply(resolution.build()));
+            if (store().supports(StoreCapability.DURABLE)) reopen();
+            var resolved = await(store().loadRunnerWorkspace(key)).orElseThrow();
+            assertFalse(resolved.jobs().get(submit.jobId()).continuationUncertain());
+            var before = observed.jobs().get(submit.jobId()).job();
+            var after = resolved.jobs().get(submit.jobId()).job();
+            assertEquals(before.identity(), after.identity());
+            assertEquals(before.state(), after.state());
+            assertEquals(before.revision(), after.revision(), "resolution cannot replay or mutate runner effects");
+            assertEquals(before.updatedAt(), after.updatedAt());
+            assertEquals(children + 1, await(store().load(key)).state().traversals().get(id.traversalId()).invocations().size());
+            assertThrows(RuntimeException.class, () -> runnerApply(key, operation));
+            await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                    .apply(new ExecutionTransition.TraversalAdded(nextTraversal)).runner(handoff).build()));
+            assertEquals(submit.workspaceId(), await(store().loadRunnerWorkspace(key)).orElseThrow().workspaceId());
+        }
+    }
+
+    @Test
+    final void runnerRetentionPinsProcessTerminationNotEarlyJobCompletionOrLaterWrites() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var submit = runnerSubmission(newKey()); var key = submit.identity().execution();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(submit), new GraphVersionPin("runner-graph-v1")))
+                .runner(submit).build()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Cancel(submit.jobId()));
+        clock().advance(Duration.ofDays(2));
+        assertNull(await(store().loadRunnerWorkspace(key)).orElseThrow().processTerminalAt());
+        var terminalAt = clock().instant();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(submit.identity().traversalId(), TraversalStatus.FAILED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED)).build()));
+        clock().advance(Duration.ofSeconds(1));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ContinuationUncertain(submit.jobId()));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(terminalAt, await(store().loadRunnerWorkspace(key)).orElseThrow().processTerminalAt());
+    }
+
+    @Test
     final void runnerCatalogIsImmutableRevisionedTenantScopedAndDurable() {
         Assumptions.assumeTrue(store().supports(StoreCapability.RUNNER_JOBS));
         var definition = runnerSubmission(newKey()).definition();

@@ -769,7 +769,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
         apiContext("/v1/human-tasks", this::humanTasks);
-        apiContext("/v1/runner-plane", this::runnerPlane);
+        apiPrefixContext("/v1/runner-plane", this::runnerPlane);
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
@@ -876,6 +876,19 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             protectedRequest(handler).handle(exchange, httpContext);
+        }));
+    }
+
+    /** A protected dispatch mount is not itself an HTTP operation in the published contract. */
+    private void apiPrefixContext(String path, HttpRequestContext.Handler handler) {
+        Set<String> methods = ai.ravenroot.server.spec.RouteTable.ALL.stream()
+                .filter(route -> route.path().startsWith(path + "/"))
+                .flatMap(route -> route.methods().stream()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (methods.isEmpty()) throw new IllegalStateException("API prefix has no published operations");
+        server.createContext(path, publicContext((exchange, context) -> {
+            if (httpSecurity.browserOrigins().handlePreflight(exchange, methods)) return;
+            if (!httpSecurity.browserOrigins().acceptActual(exchange)) return;
+            protectedRequest(handler).handle(exchange, context);
         }));
     }
 

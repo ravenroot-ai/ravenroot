@@ -7,6 +7,25 @@ import static ai.ravenroot.api.runner.RunnerFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerCodecTest {
+    @Test void workspaceVersionTwoReadsLegacyVersionOneWithoutInventingTerminationTime() throws Exception {
+        var job = job();
+        var state = new RunnerWorkspaceState(job.identity().execution(), UUID.randomUUID(), RUNNER,
+                Map.of(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, EMPTY)));
+        byte[] current = RunnerCodec.workspace(state);
+        // Version one has the same bounded fields, without the trailing terminal-time presence byte.
+        byte[] legacy = java.util.Arrays.copyOf(current, current.length - 1);
+        java.nio.ByteBuffer.wrap(legacy).putInt(0x52524a31);
+        int payloadLength = legacy.length - 32;
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(java.util.Arrays.copyOf(legacy, payloadLength));
+        System.arraycopy(digest, 0, legacy, payloadLength, digest.length);
+        var decoded = RunnerCodec.workspace(legacy);
+        assertNull(decoded.processTerminalAt());
+        assertEquals(job.identity(), decoded.jobs().get(job.identity().runnerJobId()).job().identity());
+        var terminal = new RunnerWorkspaceState(state.execution(), state.workspaceId(), state.runnerId(), state.jobs(), NOW);
+        assertEquals(NOW, RunnerCodec.workspace(RunnerCodec.workspace(terminal)).processTerminalAt());
+        assertNull(RunnerCodec.workspace(RunnerCodec.workspace(decoded)).processTerminalAt());
+    }
+
     @Test void snapshotsRoundTripEveryLifecycleWithoutLosingFencesOrPinnedPolicies() {
         var queued = job();
         var claimed = queued.claim(RUNNER, NOW, TTL);

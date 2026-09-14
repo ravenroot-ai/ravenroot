@@ -39,6 +39,8 @@ public final class RunnerJobService {
     private final Map<String, RunnerRegistration> runners;
     private final Map<String, RunnerPolicy> policies;
     private final Map<UUID, Binding> live = new ConcurrentHashMap<>();
+    private final RunnerTelemetry.Relay telemetry = new RunnerTelemetry.Relay();
+    public RunnerTelemetry.Relay telemetry() { return telemetry; }
 
     public RunnerJobService(ExecutionStore store, Clock clock, Collection<AgentDefinition> definitions,
                             Collection<RunnerRegistration> runners, Map<String, RunnerPolicy> policies) {
@@ -163,6 +165,7 @@ public final class RunnerJobService {
                 .map(value -> ai.ravenroot.api.runner.RunnerCodec.registration(value.document().bytes())).toList();
     }
     public ExecutionStore store() { return store; }
+    java.time.Instant now() { return clock.instant(); }
 
     /** Dynamic command declarations come from governed definitions, never a wildcard descriptor. */
     public boolean declaresCommand(String tenant, ai.ravenroot.core.graph.GraphNode node, String command) {
@@ -207,6 +210,7 @@ public final class RunnerJobService {
             case RunnerJobOperation.Complete ignored -> "RUNNER_JOB_TERMINAL_REPORTED";
             case RunnerJobOperation.Submit ignored -> "RUNNER_JOB_SUBMITTED";
             case RunnerJobOperation.ContinuationUncertain ignored -> "RUNNER_JOB_CONTINUATION_UNCERTAIN";
+            case RunnerJobOperation.ResolveContinuation ignored -> "RUNNER_JOB_CONTINUATION_RESOLVED";
         };
     }
     private static String runnerKey(String tenant, String runner) { return tenant.length() + ":" + tenant + runner; }

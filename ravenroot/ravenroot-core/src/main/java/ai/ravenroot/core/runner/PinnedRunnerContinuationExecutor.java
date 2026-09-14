@@ -72,6 +72,69 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
         } catch (RuntimeException refused) { pending.remove(key); return CompletableFuture.failedFuture(refused); }
     }
 
+    /** Resolves only graph delivery uncertainty under an exact operator-observed revision. */
+    public long resolve(ai.ravenroot.api.security.SecurityContext actor, ExecutionKey key, UUID jobId,
+                        long expectedRevision, ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution disposition) {
+        if (!actor.tenantId().equals(key.tenantId()) || actor.principalType() != ai.ravenroot.api.security.PrincipalType.USER
+                || expectedRevision < 1) throw new IllegalArgumentException("operator revision and tenant are required");
+        var store = jobs.store();
+        try (var recorder = ExecutionRecorder.open(store, key, "runner-resolution-" + UUID.randomUUID(),
+                Duration.ofSeconds(30), expectedRevision)) {
+            var stored = store.load(key).toCompletableFuture().join();
+            if (stored.revision() != expectedRevision) throw new IllegalStateException("runner resolution revision is stale");
+            var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
+            var entry = workspace.jobs().get(jobId);
+            if (entry == null || !entry.continuationUncertain() || !entry.job().state().terminal()) {
+                throw new IllegalStateException("runner continuation is not awaiting resolution");
+            }
+            var job = entry.job(); var id = job.identity();
+            var traversal = stored.state().traversals().get(id.traversalId());
+            var invocation = traversal.invocations().get(id.invocationId());
+            var graph = definitions.load(new GraphDefinitionKey(key.tenantId(),
+                    new GraphContentId(stored.graphVersionPin().reference()))).toCompletableFuture().join();
+            var policy = manifests == null ? null : manifests.graphPolicyForParsing(key,
+                    ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+            var pinnedLimits = policy == null ? limits : ai.ravenroot.core.manifest.ExecutionManifestResolver.graphExecutionLimits(policy);
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(graph.canonical().bytes()), pinnedLimits.graphMl())) {
+                var expected = expectedSuccessors(manager, invocation.nodeId(), job);
+                var observed = traversal.invocations().values().stream()
+                        .filter(value -> value.parentInvocationIds().contains(id.invocationId()))
+                        .collect(java.util.stream.Collectors.groupingBy(ai.ravenroot.api.application.NodeInvocation::nodeId,
+                                java.util.stream.Collectors.counting()));
+                var transitions = new java.util.ArrayList<ai.ravenroot.api.persistence.ExecutionTransition>();
+                if (disposition == ai.ravenroot.api.runner.RunnerJobOperation.ContinuationResolution.ABANDON
+                        && !traversal.status().terminal()) {
+                    transitions.add(new ai.ravenroot.api.persistence.ExecutionTransition.TraversalTransitioned(id.traversalId(),
+                            ai.ravenroot.api.application.TraversalStatus.FAILED));
+                    if (!stored.state().status().terminal() && stored.state().traversals().values().stream()
+                            .allMatch(value -> value.traversalId().equals(id.traversalId()) || value.status().terminal())) {
+                        transitions.add(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                                ai.ravenroot.api.application.ProcessInstanceStatus.FAILED));
+                    }
+                }
+                var event = ai.ravenroot.api.persistence.EventEnvelope.of(UUID.randomUUID(), key.tenantId(),
+                        "RUNNER_JOB_CONTINUATION_RESOLVED", key.processInstanceId(), id.traversalId(), id.invocationId(), id.attemptId(),
+                        terminalEventId(job), actor.requestId(), stored.graphVersionPin().reference(), jobs.now(),
+                        ai.ravenroot.api.persistence.OpaquePayload.of(RunnerJson.write(java.util.Map.of(
+                                "runnerJobId", jobId.toString(), "actor", actor.qualifiedIdentity(), "fence", job.fence(),
+                                "expectedRevision", expectedRevision, "resolution", disposition.name(),
+                                "observedSuccessors", observed, "expectedSuccessors", expected)),
+                                "application/vnd.ravenroot.runner-event.v1+json"));
+                recorder.applyRunner(new ai.ravenroot.api.runner.RunnerJobOperation.ResolveContinuation(jobId, disposition, expected),
+                        event, transitions);
+                return recorder.revision();
+            }
+        }
+    }
+
+    private static java.util.Map<String, Long> expectedSuccessors(GraphManager manager, String nodeId, RunnerJob job) {
+        String outcome = job.state() == RunnerJob.State.COMPLETED ? job.result().outcome() : "blocked";
+        var edges = manager.definition().nextEdges(nodeId, outcome);
+        if (edges.isEmpty() && !outcome.equals("continue")) edges = manager.definition().nextEdges(nodeId, "continue");
+        return edges.stream().collect(java.util.stream.Collectors.groupingBy(ai.ravenroot.core.graph.GraphEdge::target,
+                java.util.stream.Collectors.counting()));
+    }
+
     private void resumeOwned(ExecutionKey key, UUID jobId) {
         var store = jobs.store();
         var stored = store.load(key).toCompletableFuture().join();
@@ -106,12 +169,10 @@ public final class PinnedRunnerContinuationExecutor implements AutoCloseable {
             try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(graph.canonical().bytes()), pinnedLimits.graphMl())) {
                 var children = current.invocations().values().stream()
                         .filter(value -> value.parentInvocationIds().contains(invocation.invocationId()))
-                        .map(ai.ravenroot.api.application.NodeInvocation::nodeId).collect(java.util.stream.Collectors.toSet());
+                        .collect(java.util.stream.Collectors.groupingBy(ai.ravenroot.api.application.NodeInvocation::nodeId,
+                                java.util.stream.Collectors.counting()));
                 if (!children.isEmpty()) {
-                    String outcome = job.state() == RunnerJob.State.COMPLETED ? job.result().outcome() : "blocked";
-                    var edges = manager.definition().nextEdges(invocation.nodeId(), outcome);
-                    if (edges.isEmpty() && !outcome.equals("continue")) edges = manager.definition().nextEdges(invocation.nodeId(), "continue");
-                    var expected = edges.stream().map(ai.ravenroot.core.graph.GraphEdge::target).collect(java.util.stream.Collectors.toSet());
+                    var expected = expectedSuccessors(manager, invocation.nodeId(), job);
                     if (children.equals(expected)) return;
                     var id = job.identity();
                     var event = ai.ravenroot.api.persistence.EventEnvelope.of(UUID.randomUUID(), key.tenantId(),

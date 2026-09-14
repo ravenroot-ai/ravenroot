@@ -27,7 +27,10 @@ class WorkspaceAgentRuntimeTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC);
     private static final SecurityContext SECURITY = new SecurityContext("request", "tenant", "operator", PrincipalType.USER, "test");
 
-    @Test void partialSuccessorFanOutIsDurablyParkedAndNeverReplayed(@TempDir Path directory) throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = RunnerJobOperation.ContinuationResolution.class, names = {"ACKNOWLEDGE", "ABANDON"})
+    void partialSuccessorFanOutIsDurablyParkedAndNeverReplayed(RunnerJobOperation.ContinuationResolution disposition,
+                                                            @TempDir Path directory) throws Exception {
         String xml = """
                 <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
                   <key id="k" for="node" attr.name="kind" attr.type="string"/>
@@ -93,6 +96,30 @@ class WorkspaceAgentRuntimeTest {
                 assertEquals(spawned, engine.spawnCount());
                 assertTrue(store.readJournal("tenant", 0, 64).toCompletableFuture().join().stream()
                         .anyMatch(record -> record.envelope().eventType().equals("RUNNER_JOB_CONTINUATION_UNCERTAIN")));
+                assertThrows(RuntimeException.class, () -> executor.resolve(SECURITY, key, identity.runnerJobId(), marked,
+                        RunnerJobOperation.ContinuationResolution.RESUME));
+                assertThrows(RuntimeException.class, () -> executor.resolve(SECURITY, key, identity.runnerJobId(), marked,
+                        RunnerJobOperation.ContinuationResolution.ACKNOWLEDGE));
+                if (disposition == RunnerJobOperation.ContinuationResolution.ACKNOWLEDGE) {
+                    // Operator graph reconciliation records the missing dispatch; resolution observes it,
+                    // never recreates either effect or invents an invocation identity.
+                    store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(marked))
+                            .apply(new ExecutionTransition.InvocationAdded(traversal, new NodeInvocation(UUID.randomUUID(), "b",
+                                    Set.of(identity.invocationId()), NodeInvocationStatus.RUNNING,
+                                    List.of(new NodeAttempt(UUID.randomUUID(), 1, NodeAttemptStatus.RUNNING)))))
+                            .build()).toCompletableFuture().join();
+                }
+                long expected = store.load(key).toCompletableFuture().join().revision();
+                long resolved = executor.resolve(SECURITY, key, identity.runnerJobId(), expected, disposition);
+                assertTrue(resolved > expected);
+                assertFalse(store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().get(identity.runnerJobId()).continuationUncertain());
+                assertThrows(RuntimeException.class, () -> executor.resolve(SECURITY, key, identity.runnerJobId(), expected, disposition));
+                assertThrows(RuntimeException.class, () -> executor.resolve(SECURITY, key, identity.runnerJobId(), resolved, disposition));
+                assertEquals(spawned, engine.spawnCount());
+                var resolutionEvents = store.readJournal("tenant", 0, 64).toCompletableFuture().join().stream()
+                        .filter(record -> record.envelope().eventType().equals("RUNNER_JOB_CONTINUATION_RESOLVED")).toList();
+                assertEquals(1, resolutionEvents.size());
+                assertTrue(new String(resolutionEvents.getFirst().envelope().payload().bytes()).contains(SECURITY.qualifiedIdentity()));
             }
         }
     }
@@ -188,6 +215,13 @@ class WorkspaceAgentRuntimeTest {
                 service.mutate(security, key, new RunnerJobOperation.Complete(job.identity().runnerJobId(), "workspace-runner", 1, report));
                 try (var executor = new ai.ravenroot.core.runner.PinnedRunnerContinuationExecutor(service, graphStore, engine,
                         BehaviorRegistry.standard().withRunnerJobs(service), new ExecutionMonitor(), GraphExecutionLimits.DEFAULTS, null)) {
+                    if (index == 0) {
+                        service.mutate(security, key, new RunnerJobOperation.ContinuationUncertain(job.identity().runnerJobId()));
+                        long expected = store.load(key).toCompletableFuture().join().revision();
+                        executor.resolve(security, key, job.identity().runnerJobId(), expected, RunnerJobOperation.ContinuationResolution.RESUME);
+                        assertThrows(RuntimeException.class, () -> executor.resolve(security, key, job.identity().runnerJobId(),
+                                expected, RunnerJobOperation.ContinuationResolution.RESUME));
+                    }
                     executor.resume(key, job.identity().runnerJobId()).toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
                     long revision = store.load(key).toCompletableFuture().join().revision();
                     executor.resume(key, job.identity().runnerJobId()).toCompletableFuture().join();

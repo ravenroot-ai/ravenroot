@@ -4316,14 +4316,16 @@ public final class PostgresExecutionStore implements ExecutionStore {
 
     private void writeRunnerWorkspace(Connection connection, ExecutionKey key, ExecutionBatch batch,
                                       ProcessInstance folded, Instant now) throws SQLException {
-        if (batch.runnerOperations().isEmpty()) return;
+        if (batch.runnerOperations().isEmpty() && !folded.status().terminal()) return;
         var state = readRunnerWorkspace(connection, key);
+        if (state == null && batch.runnerOperations().isEmpty()) return;
+        if (batch.runnerOperations().isEmpty() && state.processTerminalAt() != null) return;
         byte[] bytes;
         try {
             for (var operation : batch.runnerOperations()) {
                 state = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(key, state, operation, folded, now);
             }
-            bytes = ai.ravenroot.api.runner.RunnerCodec.workspace(state);
+            bytes = ai.ravenroot.api.runner.RunnerCodec.workspace(state.observeProcess(folded, now));
         } catch (IllegalArgumentException | IllegalStateException invalid) {
             throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
         }

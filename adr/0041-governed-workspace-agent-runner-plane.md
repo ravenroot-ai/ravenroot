@@ -40,6 +40,13 @@ report-only fence. A report cannot change the graph pin or the original attempt.
 terminal report is an idempotent read, not a second journal effect. Downstream uncertainty belongs
 to graph recovery and is not a reason to rerun the workspace agent.
 
+Graph-delivery uncertainty has an explicit operator resolution transaction. RESUME requires zero
+recorded successors; ACKNOWLEDGE requires the exact pinned-graph successor target multiset and a
+completed source invocation; ABANDON atomically fails an unfinished traversal while preserving its
+recorded effects. The same-tenant user supplies the observed process revision. A process fence and
+revision CAS commit graph transitions, barrier clearance and the actor's audit event together.
+Neither stale/repeated resolution nor partial fan-out permits speculative runner or branch replay.
+
 ## Reference enforcement boundary
 
 The reference driver runs an operator-installed image by digest, without a host workspace mount,
@@ -61,12 +68,20 @@ Artifact references identify a job, opaque artifact ID, kind, digest and size, n
 caller URL. The control-plane artifact volume is separate from every runner filesystem.
 Every retrieval verifies tenant authorization and digest. Budgets cover streaming admission,
 retained bytes and object counts. Results are bounded structured payloads; large logs remain artifacts.
+LOG, STDOUT and STDERR share a cumulative directory-locked budget, including unreferenced/pending
+uploads. A JVM stripe plus the process-shared file lock serializes concurrent writers and cleanup.
 
 Cleanup requires a terminal process, terminal jobs, elapsed configured retention and an authenticated
 release proof. UNKNOWN ownership is not cleaned into a reusable workspace. Operators must keep
 terminal execution inventory long enough for runner cleanup and preserve the database, artifact
 volume and runner snapshot state together. If a runner stays offline beyond retained authority,
 cleanup requires explicit operator reconciliation; absence alone is not a release proof.
+Workspace storage version 2 pins the first process-terminal store-clock timestamp atomically with
+the graph transition. Retrieval and cleanup anchor retention to that timestamp; later writes cannot
+extend it. Version-one envelopes remain readable and are conservatively retained until an explicit
+reconciliation creates a store-clock anchor. Runner protocol version 1 is unchanged.
+The existing OpenTelemetry exporter receives fixed-enum observation counters and an unlabelled
+0–4 worker-active gauge. These describe local observations, not global or distinct durable job counts.
 
 ## Consequences
 

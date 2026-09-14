@@ -825,6 +825,14 @@ export class RavenrootRuntimeClient {
       + '/jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodeURIComponent(artifactId),
     { method: 'GET', headers: { Accept: 'application/json' } });
   }
+  resolveRunnerContinuation(processId, jobId, expectedRevision, resolution) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+        || !['RESUME', 'ACKNOWLEDGE', 'ABANDON'].includes(resolution)) throw new Error('Explicit runner continuation revision and resolution required');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/resolve-continuation',
+    { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision, resolution }) });
+  }
 
   async #json(path, options) {
     if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');

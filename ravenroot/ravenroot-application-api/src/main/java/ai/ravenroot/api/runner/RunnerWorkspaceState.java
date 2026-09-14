@@ -18,9 +18,30 @@ import java.util.UUID;
  * @param workspaceId stable opaque workspace identity
  * @param runnerId immutable designated runner placement
  * @param jobs bounded insertion-ordered history keyed by runner job identity
+ * @param processTerminalAt store-clock timestamp pinned atomically at process termination; null before termination
  */
 public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, String runnerId,
-                                   Map<UUID, Entry> jobs) {
+                                   Map<UUID, Entry> jobs, Instant processTerminalAt) {
+    /** Compatibility constructor for workspaces whose process has not terminated.
+     * @param execution owning process
+     * @param workspaceId immutable workspace identity
+     * @param runnerId immutable runner placement
+     * @param jobs accepted jobs
+     */
+    public RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, String runnerId, Map<UUID, Entry> jobs) {
+        this(execution, workspaceId, runnerId, jobs, null);
+    }
+
+    /** Pins retention once in the same transaction as the terminal graph transition.
+     * @param graph authoritative post-fold process
+     * @param now authoritative store clock
+     * @return workspace with a stable terminal timestamp
+     */
+    public RunnerWorkspaceState observeProcess(ProcessInstance graph, Instant now) {
+        if (!execution.processInstanceId().equals(graph.processInstanceId())) throw new IllegalArgumentException("runner process scope mismatch");
+        return graph.status().terminal() && processTerminalAt == null
+                ? new RunnerWorkspaceState(execution, workspaceId, runnerId, jobs, now) : this;
+    }
     /** Maximum retained job count per process workspace. */
     public static final int MAX_JOBS = 256;
 
@@ -115,6 +136,34 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
             if (!job.state().terminal()) throw new IllegalStateException("only a terminal runner result can have uncertain graph delivery");
             return entry.continuationUncertain() ? current : current.replace(operation.jobId(), new Entry(job, entry.continuation(), true));
         }
+        if (operation instanceof RunnerJobOperation.ResolveContinuation resolution) {
+            if (!job.state().terminal() || !entry.continuationUncertain()) {
+                throw new IllegalStateException("runner continuation is not awaiting resolution");
+            }
+            var traversal = graph.traversals().get(job.identity().traversalId());
+            var observed = traversal.invocations().values().stream()
+                    .filter(value -> value.parentInvocationIds().contains(job.identity().invocationId()))
+                    .collect(java.util.stream.Collectors.groupingBy(ai.ravenroot.api.application.NodeInvocation::nodeId,
+                            java.util.stream.Collectors.counting()));
+            switch (resolution.resolution()) {
+                case RESUME -> {
+                    if (!observed.isEmpty() || traversal.status().terminal()) {
+                        throw new IllegalStateException("resume requires an open traversal with zero recorded successors");
+                    }
+                }
+                case ACKNOWLEDGE -> {
+                    var invocation = traversal.invocations().get(job.identity().invocationId());
+                    if (!observed.equals(resolution.expectedSuccessors())
+                            || invocation.status() != ai.ravenroot.api.application.NodeInvocationStatus.COMPLETED) {
+                        throw new IllegalStateException("acknowledgement requires the complete recorded successor multiset");
+                    }
+                }
+                case ABANDON -> {
+                    if (!traversal.status().terminal()) throw new IllegalStateException("abandoned continuation requires a terminal traversal");
+                }
+            }
+            return current.replace(operation.jobId(), new Entry(job, entry.continuation(), false));
+        }
         RunnerJob next = switch (operation) {
             case RunnerJobOperation.Claim value -> job.claim(value.runnerId(), now, value.ttl());
             case RunnerJobOperation.Heartbeat value -> job.heartbeat(value.runnerId(), value.fence(), now, value.ttl());
@@ -124,6 +173,7 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
             case RunnerJobOperation.Complete value -> job.complete(value.runnerId(), value.fence(), value.result(), now);
             case RunnerJobOperation.Submit ignored -> throw new IllegalStateException("admission already handled");
             case RunnerJobOperation.ContinuationUncertain ignored -> throw new IllegalStateException("uncertainty already handled");
+            case RunnerJobOperation.ResolveContinuation ignored -> throw new IllegalStateException("resolution already handled");
         };
         return next == job ? current : current.replace(operation.jobId(), new Entry(next, entry.continuation(), entry.continuationUncertain()));
     }
@@ -131,6 +181,6 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
     private RunnerWorkspaceState replace(UUID id, Entry entry) {
         var next = new LinkedHashMap<>(jobs);
         next.put(id, entry);
-        return new RunnerWorkspaceState(execution, workspaceId, runnerId, next);
+        return new RunnerWorkspaceState(execution, workspaceId, runnerId, next, processTerminalAt);
     }
 }

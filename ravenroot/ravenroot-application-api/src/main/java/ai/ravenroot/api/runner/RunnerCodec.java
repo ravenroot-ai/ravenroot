@@ -27,28 +27,32 @@ public final class RunnerCodec {
     /** Maximum encoded document size, including its corruption-detection digest. */
     public static final int MAX_BYTES = 16_777_216;
     private static final int MAGIC = 0x52524a31;
+    private static final int WORKSPACE_V2 = 0x52524a32;
     private RunnerCodec() { }
 
     /**
-     * Encodes a bounded trusted process workspace using protocol version one.
+     * Encodes trusted workspace storage version two; runner wire messages remain version one.
      * @param value validated immutable value
      * @return independent encoded bytes with an integrity digest
      */
     public static byte[] workspace(RunnerWorkspaceState value) {
-        return encode(out -> {
+        return encode(WORKSPACE_V2, out -> {
             key(out, value.execution()); uuid(out, value.workspaceId()); string(out, value.runnerId());
             out.writeInt(value.jobs().size());
             for (var entry : value.jobs().values()) { job(out, entry.job()); payload(out, entry.continuation()); out.writeBoolean(entry.continuationUncertain()); }
+            out.writeBoolean(value.processTerminalAt() != null);
+            if (value.processTerminalAt() != null) instant(out, value.processTerminalAt());
         });
     }
 
     /**
      * Decodes a trusted process workspace, rejecting corruption, trailing bytes and invalid bounds.
-     * @param bytes complete version-one document
+     * @param bytes complete workspace storage version-one or version-two document
      * @return validated immutable value
      */
     public static RunnerWorkspaceState workspace(byte[] bytes) {
-        return decode(bytes, in -> {
+        boolean versionTwo = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V2;
+        return decode(bytes, versionTwo ? WORKSPACE_V2 : MAGIC, in -> {
             ExecutionKey execution = key(in); UUID workspace = uuid(in); String runner = string(in);
             var jobs = new LinkedHashMap<UUID, RunnerWorkspaceState.Entry>();
             int size = count(in, RunnerWorkspaceState.MAX_JOBS);
@@ -58,7 +62,8 @@ public final class RunnerCodec {
                     throw new IllegalArgumentException("duplicate stored runner job");
                 }
             }
-            return new RunnerWorkspaceState(execution, workspace, runner, jobs);
+            Instant terminalAt = versionTwo && in.readBoolean() ? instant(in) : null;
+            return new RunnerWorkspaceState(execution, workspace, runner, jobs, terminalAt);
         });
     }
 
@@ -280,6 +285,9 @@ public final class RunnerCodec {
         return size;
     }
     private static byte[] encode(Writer writer) {
+        return encode(MAGIC, writer);
+    }
+    private static byte[] encode(int magic, Writer writer) {
         try {
             var bytes = new ByteArrayOutputStream() {
                 @Override public synchronized void write(int value) {
@@ -292,19 +300,22 @@ public final class RunnerCodec {
                 }
             };
             var out = new DataOutputStream(bytes);
-            out.writeInt(MAGIC); writer.write(out); out.flush();
+            out.writeInt(magic); writer.write(out); out.flush();
             if (bytes.size() > MAX_BYTES - 32) throw new IllegalArgumentException("runner state quota exceeded");
             byte[] body = bytes.toByteArray(); out.write(digest(body)); return bytes.toByteArray();
         } catch (IOException impossible) { throw new IllegalStateException(impossible); }
     }
     private static <T> T decode(byte[] bytes, Reader<T> reader) {
+        return decode(bytes, MAGIC, reader);
+    }
+    private static <T> T decode(byte[] bytes, int magic, Reader<T> reader) {
         if (bytes == null || bytes.length < 36 || bytes.length > MAX_BYTES) throw new IllegalArgumentException("invalid runner state size");
         byte[] body = java.util.Arrays.copyOf(bytes, bytes.length - 32);
         if (!MessageDigest.isEqual(digest(body), java.util.Arrays.copyOfRange(bytes, body.length, bytes.length))) {
             throw new IllegalArgumentException("runner state digest mismatch");
         }
         try (var in = new DataInputStream(new ByteArrayInputStream(body))) {
-            if (in.readInt() != MAGIC) throw new IllegalArgumentException("unsupported runner state version");
+            if (in.readInt() != magic) throw new IllegalArgumentException("unsupported runner state version");
             T value = reader.read(in);
             if (in.available() != 0) throw new IllegalArgumentException("trailing runner state");
             return value;

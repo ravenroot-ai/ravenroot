@@ -535,7 +535,7 @@ public final class RavenrootServerMain {
         try {
             telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
                     ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor,
-                    agentBudgetTelemetry);
+                    agentBudgetTelemetry, runnerJobs == null ? null : runnerJobs.telemetry());
         } catch (RuntimeException | Error telemetryFailure) {
             startupHandle.close();
             userCredentials.close();

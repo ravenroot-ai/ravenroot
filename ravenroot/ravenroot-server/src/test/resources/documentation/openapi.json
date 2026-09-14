@@ -1049,282 +1049,60 @@
         }
       }
     },
-    "/v1/runner-plane": {
-      "get": {
-        "summary": "Opt-in governed runner protocol v1. Disabled deployments return 501. Tenant identity is authenticated, never a request field.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      },
-      "post": {
-        "summary": "Opt-in governed runner protocol v1. Disabled deployments return 501. Tenant identity is authenticated, never a request field.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      },
-      "put": {
-        "summary": "Opt-in governed runner protocol v1. Disabled deployments return 501. Tenant identity is authenticated, never a request field.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
-    },
     "/v1/runner-plane/assignments": {
-      "get": {
-        "summary": "Cursor-paged work for the authenticated runner subject and issuer; no graph checkpoint is exposed.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"query","name":"cursor","required":false,"schema":{"type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"properties":{"items":{"items":{"type":"object"},"maxItems":4096,"type":"array"},"nextCursor":{"nullable":true,"type":"string"},"observedAt":{"type":"string"},"pageMetrics":{"additionalProperties":{"format":"int64","type":"integer"},"type":"object"}},"required":["items","nextCursor"],"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Cursor-paged work for the authenticated runner subject and issuer; no graph checkpoint is exposed.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/audit": {
-      "get": {
-        "summary": "Bounded tenant journal page after afterOffset, projected to runner events with recorded revision, actor and fence. nextOffset advances across non-runner records too.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"query","name":"afterOffset","required":false,"schema":{"default":0,"format":"int64","minimum":0,"type":"integer"}}],"responses":{"200":{"content":{"application/json":{"schema":{"properties":{"items":{"items":{"type":"object"},"maxItems":64,"type":"array"},"nextOffset":{"format":"int64","minimum":0,"type":"integer"}},"required":["items","nextOffset"],"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Bounded tenant journal page after afterOffset, projected to runner events with recorded revision, actor and fence. nextOffset advances across non-runner records too.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/catalog": {
-      "get": {
-        "summary": "Bounded immutable definition/runner catalog and revisioned operator approval. PUT requires runner.admin, a user principal and expectedRevision.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      },
-      "put": {
-        "summary": "Bounded immutable definition/runner catalog and revisioned operator approval. PUT requires runner.admin, a user principal and expectedRevision.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Bounded immutable definition/runner catalog and revisioned operator approval. PUT requires runner.admin, a user principal and expectedRevision.","x-assistant-posture":"NEVER"},
+      "put": {"requestBody":{"content":{"application/json":{"schema":{"description":"Bounded protocol-v1 definition/registration. Catalog PUT requires expectedRevision and explicit approved.","type":"object"}}},"required":true},"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Bounded immutable definition/runner catalog and revisioned operator approval. PUT requires runner.admin, a user principal and expectedRevision.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/catalog/{key}": {
-      "get": {
-        "summary": "Read one tenant-governed version, including its editable bounded JSON definition.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "key", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"path","name":"key","required":true,"schema":{"type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Read one tenant-governed version, including its editable bounded JSON definition.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/health": {
-      "get": {
-        "summary": "Tenant-scoped cursor page of durable active-job health and pageMetrics gauges. Idle runner health is unknown, never inferred from registration.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"query","name":"cursor","required":false,"schema":{"type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"properties":{"items":{"items":{"type":"object"},"maxItems":4096,"type":"array"},"nextCursor":{"nullable":true,"type":"string"},"observedAt":{"type":"string"},"pageMetrics":{"additionalProperties":{"format":"int64","type":"integer"},"type":"object"}},"required":["items","nextCursor","pageMetrics","observedAt"],"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Tenant-scoped cursor page of durable active-job health and pageMetrics gauges. Idle runner health is unknown, never inferred from registration.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/register": {
-      "post": {
-        "summary": "Authenticated designated workload advertisement. Registration creates a draft and never grants approval.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "post": {"requestBody":{"content":{"application/json":{"schema":{"description":"Bounded protocol-v1 definition/registration. Catalog PUT requires expectedRevision and explicit approved.","type":"object"}}},"required":true},"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Authenticated designated workload advertisement. Registration creates a draft and never grants approval.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/workspaces/{processId}": {
-      "get": {
-        "summary": "Inspect the tenant-exact process workspace, durable job chain, authority and retained artifact references.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "processId", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Inspect the tenant-exact process workspace, durable job chain, authority and retained artifact references.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}": {
-      "get": {
-        "summary": "Designated runner only: bounded binary RunnerCodec protocol-v1 assignment, without graph continuations.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "processId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"responses":{"200":{"content":{"application/vnd.ravenroot.runner-assignment.v1":{"schema":{"format":"binary","type":"string"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Designated runner only: bounded binary RunnerCodec protocol-v1 assignment, without graph continuations.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/artifacts": {
-      "post": {
-        "summary": "Bounded streaming upload under a live X-Runner-Fence and X-Artifact-Kind. Returns durable digest metadata, never a host path.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "processId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "201": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"header","name":"X-Runner-Fence","required":true,"schema":{"format":"int64","minimum":1,"type":"integer"}},{"in":"header","name":"X-Runner-Artifact-Kind","required":true,"schema":{"enum":["LOG","STDOUT","STDERR","PATCH","MANIFEST","TEST_REPORT"],"type":"string"}}],"requestBody":{"content":{"application/octet-stream":{"schema":{"format":"binary","type":"string"}}},"required":true},"responses":{"201":{"content":{"application/json":{"schema":{"properties":{"artifactId":{"format":"uuid","type":"string"},"kind":{"type":"string"},"sha256":{"pattern":"^[0-9a-f]{64}$","type":"string"},"sizeBytes":{"format":"int64","minimum":0,"type":"integer"}},"required":["artifactId","kind","sha256","sizeBytes"],"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Bounded streaming upload under a live X-Runner-Fence and X-Runner-Artifact-Kind. Returns durable digest metadata, never a host path.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/artifacts/{artifactId}": {
-      "get": {
-        "summary": "Authorized, digest-verified retained artifact. Accept application/json for a bounded 64-KiB text preview; otherwise attachment bytes.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "processId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "artifactId", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "get": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"artifactId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"header","name":"Accept","required":false,"schema":{"enum":["application/json","application/octet-stream"],"type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"properties":{"content":{"maxLength":65536,"type":"string"},"truncated":{"type":"boolean"}},"required":["content","truncated"],"type":"object"}},"application/octet-stream":{"schema":{"format":"binary","type":"string"}}},"description":"Accepted","headers":{"Content-Disposition":{"description":"Binary responses are attachments","schema":{"enum":["attachment"],"type":"string"}},"X-Content-Type-Options":{"description":"Binary responses disable content sniffing","schema":{"enum":["nosniff"],"type":"string"}}}},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Authorized, digest-verified retained artifact. Accept application/json for a bounded 64-KiB text preview; otherwise attachment bytes.","x-assistant-posture":"NEVER"}
     },
-    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/{operation}": {
-      "post": {
-        "summary": "claim, heartbeat and reconcile-report accept ttlSeconds (maximum 300); heartbeat also requires fence. complete accepts a binary v1 RunnerResult and X-Runner-Fence. cancel/reconcile require an operator. Stale fences and conflicts return 409; unknown work is never retried.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "processId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "operation", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/cancel": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Tenant operator requests cancellation, never inferring that effects have stopped.","x-assistant-posture":"NEVER"}
+    },
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/claim": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"properties":{"ttlSeconds":{"maximum":300,"minimum":1,"type":"integer"}},"required":["ttlSeconds"],"type":"object"}}},"required":true},"responses":{"200":{"content":{"application/vnd.ravenroot.runner-assignment.v1":{"schema":{"format":"binary","type":"string"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Designated runner execution claim; bounded ttlSeconds. Stale or conflicting claims return 409.","x-assistant-posture":"NEVER"}
+    },
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/complete": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"header","name":"X-Runner-Fence","required":true,"schema":{"format":"int64","minimum":1,"type":"integer"}}],"requestBody":{"content":{"application/vnd.ravenroot.runner-result.v1":{"schema":{"format":"binary","type":"string"}}},"required":true},"responses":{"200":{"content":{"application/vnd.ravenroot.runner-assignment.v1":{"schema":{"format":"binary","type":"string"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Designated runner binary v1 quiescence report under X-Runner-Fence; accepted duplicate reports are idempotent.","x-assistant-posture":"NEVER"}
+    },
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/heartbeat": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"properties":{"fence":{"format":"int64","minimum":1,"type":"integer"},"ttlSeconds":{"maximum":300,"minimum":1,"type":"integer"}},"required":["ttlSeconds","fence"],"type":"object"}}},"required":true},"responses":{"200":{"content":{"application/vnd.ravenroot.runner-assignment.v1":{"schema":{"format":"binary","type":"string"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Designated runner heartbeat with live fence and bounded ttlSeconds; never revives expired work.","x-assistant-posture":"NEVER"}
+    },
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/reconcile": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Tenant operator reconciles lease/deadline liveness without retrying runner effects.","x-assistant-posture":"NEVER"}
+    },
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/reconcile-report": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"properties":{"ttlSeconds":{"maximum":300,"minimum":1,"type":"integer"}},"required":["ttlSeconds"],"type":"object"}}},"required":true},"responses":{"200":{"content":{"application/vnd.ravenroot.runner-assignment.v1":{"schema":{"format":"binary","type":"string"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Designated runner report-only reconciliation lease; unknown work is never re-executed.","x-assistant-posture":"NEVER"}
+    },
+    "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/resolve-continuation": {
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}},{"in":"path","name":"jobId","required":true,"schema":{"format":"uuid","type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"properties":{"expectedRevision":{"format":"int64","minimum":1,"type":"integer"},"resolution":{"enum":["RESUME","ACKNOWLEDGE","ABANDON"],"type":"string"}},"required":["expectedRevision","resolution"],"type":"object"}}},"required":true},"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Tenant operator resolves uncertain graph delivery with expectedRevision and RESUME, ACKNOWLEDGE or ABANDON; no runner effect is replayed.","x-assistant-posture":"NEVER"}
     },
     "/v1/runner-plane/workspaces/{processId}/release": {
-      "post": {
-        "summary": "Designated runner only: obtain a scoped cleanup proof after terminal quiescence and retention; delete retained control-plane artifacts.",
-        "x-assistant-posture": "NEVER",
-        "security": [{"bearerAuth": []}],
-        "parameters": [
-          {"name": "processId", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {"description": "success"},
-          "401": {"description": "AUTHENTICATION_REQUIRED"},
-          "403": {"description": "ACCESS_DENIED"},
-          "405": {"description": "METHOD_NOT_ALLOWED"},
-          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
-          "414": {"description": "QUERY_TOO_LARGE"},
-          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
-        }
-      }
+      "post": {"parameters":[{"in":"path","name":"processId","required":true,"schema":{"format":"uuid","type":"string"}}],"responses":{"200":{"content":{"application/json":{"schema":{"type":"object"}}},"description":"Accepted"},"400":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"INVALID_RUNNER_REQUEST"},"401":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"Authentication required"},"403":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_ACCESS_DENIED"},"404":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_RESOURCE_NOT_FOUND"},"409":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_STATE_CONFLICT or RUNNER_STORE_CONFLICT"},"501":{"content":{"application/json":{"schema":{"properties":{"error":{"type":"string"},"requestId":{"type":"string"}},"required":["error"],"type":"object"}}},"description":"RUNNER_PLANE_UNAVAILABLE"}},"security":[{"bearerAuth":[]}],"summary":"Designated runner only: obtain a scoped cleanup proof after terminal quiescence and retention; delete retained control-plane artifacts.","x-assistant-posture":"NEVER"}
     },
     "/v1/runtime": {
       "get": {

@@ -87,4 +87,31 @@ public sealed interface RunnerJobOperation {
      * @param jobId terminal job whose graph continuation was partially dispatched
      */
     record ContinuationUncertain(UUID jobId) implements RunnerJobOperation { }
+
+    /** Explicit operator disposition; none of these modes grants runner execution authority. */
+    enum ContinuationResolution {
+        /** Deliver the accepted result only when no successor invocation was recorded. */
+        RESUME,
+        /** Acknowledge the complete successor multiset observed in the pinned graph. */
+        ACKNOWLEDGE,
+        /** Fail the unfinished traversal, preserving already observed effects and never dispatching missing work. */
+        ABANDON
+    }
+
+    /** Trusted graph-derived resolution, committed with the operator audit and graph transitions.
+     * @param jobId terminal runner job
+     * @param resolution explicit operator disposition
+     * @param expectedSuccessors exact target multiplicities derived from the immutable graph pin
+     */
+    record ResolveContinuation(UUID jobId, ContinuationResolution resolution,
+                               java.util.Map<String, Long> expectedSuccessors) implements RunnerJobOperation {
+        /** Freezes the bounded graph-derived target multiset. */
+        public ResolveContinuation {
+            Objects.requireNonNull(jobId); Objects.requireNonNull(resolution);
+            expectedSuccessors = java.util.Map.copyOf(expectedSuccessors);
+            if (expectedSuccessors.size() > 1024 || expectedSuccessors.values().stream().anyMatch(count -> count < 1)) {
+                throw new IllegalArgumentException("invalid runner successor multiset");
+            }
+        }
+    }
 }

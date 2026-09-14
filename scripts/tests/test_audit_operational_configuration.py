@@ -5837,6 +5837,19 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertEqual([], audit.reconciliation_plan_errors(
                 root, source_document, (candidate,), plan)[0])
 
+            empty_semantic_reviews = copy.deepcopy(plan)
+            empty_semantic_reviews["semanticReviews"] = []
+            self.assertEqual([], audit.reconciliation_plan_errors(
+                root, source_document, (candidate,), empty_semantic_reviews)[0])
+            malformed_semantic_review = copy.deepcopy(plan)
+            malformed_semantic_review["semanticReviews"] = [{
+                "candidateId": "oc-new", "approved": False,
+                "rationale": "Not approved.", "beforeMetadata": {}, "afterMetadata": {},
+            }]
+            self.assertTrue(any("source-anchored row approval" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), malformed_semantic_review)[0]))
+
             with mock.patch.object(audit, "current_route_table_authority", return_value={}):
                 remapped, remap_errors = audit.apply_reconciliation(
                     root, source_document, (candidate,), plan)

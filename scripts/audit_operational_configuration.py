@@ -2947,7 +2947,8 @@ def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
 
 def final_review_authority_errors(
         root: Path, document: dict[str, object],
-        expected_metadata: dict[str, dict[str, object]]) -> list[str]:
+        expected_metadata: dict[str, dict[str, object]],
+        semantic_override_ids: set[str] | None = None) -> list[str]:
     """Apply the exact, source-anchored final-review partition without weakening row review.
 
     Earlier issues recorded one semantic history object per changed row.  The final review covers
@@ -2956,6 +2957,7 @@ def final_review_authority_errors(
     the group link and resulting metadata.  New candidates can never inherit a group by filename,
     symbol, or a classifier heuristic.
     """
+    semantic_override_ids = semantic_override_ids or set()
     reference = document.get("finalReviewAuthority")
     if reference is None:
         claimed = any(isinstance(entry, dict)
@@ -3092,6 +3094,8 @@ def final_review_authority_errors(
                     root, source_entry, classification))
             active_id = active_identifier(candidate_id)
             if active_id not in expected_metadata:
+                continue
+            if active_id in semantic_override_ids:
                 continue
             expected_metadata[active_id] = {
                 **metadata,
@@ -3593,7 +3597,8 @@ def reconciliation_plan_errors(root: Path, document: dict[str, object],
         "id", "issue", "sourceRevision", "targetRevision", "sourceInventoryPath",
         "sourceInventoryDigest", "targetCandidateDigest", "mappings", "retirements", "additions",
     }
-    if set(plan) != required or not isinstance(plan.get("issue"), str) \
+    supported_fields = (required, required | {"semanticReviews"})
+    if set(plan) not in supported_fields or not isinstance(plan.get("issue"), str) \
             or re.fullmatch(r"#[1-9][0-9]*", str(plan["issue"])) is None \
             or not isinstance(plan.get("id"), str) or not str(plan["id"]).strip():
         return ["reconciliation plan has an unsupported or incomplete shape"], {}
@@ -3734,6 +3739,29 @@ def reconciliation_plan_errors(root: Path, document: dict[str, object],
     if len(unchanged) + len(mapping_from) + len(retired_ids) != len(source_ids) \
             or len(unchanged) + len(mapping_to) + len(addition_ids) != len(current_ids):
         errors.append("reconciliation partition counts are inconsistent")
+
+    semantic_reviews = plan.get("semanticReviews", [])
+    reviewed_ids: set[str] = set()
+    if not isinstance(semantic_reviews, list):
+        errors.append("reconciliation semanticReviews must be an array")
+    else:
+        for review in semantic_reviews:
+            identifier = review.get("candidateId") if isinstance(review, dict) else None
+            if not isinstance(review, dict) or set(review) != {
+                    "candidateId", "approved", "rationale", "beforeMetadata", "afterMetadata"} \
+                    or review.get("approved") is not True \
+                    or not isinstance(identifier, str) or identifier in reviewed_ids \
+                    or identifier not in unchanged \
+                    or not isinstance(review.get("rationale"), str) \
+                    or not str(review["rationale"]).strip() \
+                    or not isinstance(review.get("beforeMetadata"), dict) \
+                    or not isinstance(review.get("afterMetadata"), dict) \
+                    or review.get("beforeMetadata") != candidate_semantic_payload(
+                        source_entries.get(str(identifier), {})):
+                errors.append(
+                    f"semantic review {identifier!r} requires a unique, source-anchored row approval")
+                continue
+            reviewed_ids.add(identifier)
     return errors, source_entries
 
 
@@ -3861,7 +3889,11 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history
-    refreshed.setdefault("semanticReviewHistory", [])
+    semantic_review_history = list(refreshed.get("semanticReviewHistory", []))
+    semantic_review_history.extend({
+        **review, "sourceRevision": plan["sourceRevision"],
+    } for review in plan.get("semanticReviews", []))
+    refreshed["semanticReviewHistory"] = semantic_review_history
     refreshed["migrationHistory"] = expected_reconciled_migration_history(
         document, plan, source_entries)
     refreshed["retiredEntries"] = expected_reconciled_retired_entries(
@@ -3982,7 +4014,11 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         identifier = str(addition["id"])
         expected_metadata[identifier] = dict(addition["metadata"])
     for identifier in set(source_entries) & set(active):
-        expected_metadata[identifier] = candidate_semantic_payload(source_entries[identifier])
+        payload_holder: dict[str, object] = {
+            "entries": [candidate_semantic_payload(source_entries[identifier])],
+        }
+        remap_declared_candidate_references(payload_holder, reference_replacements)
+        expected_metadata[identifier] = payload_holder["entries"][0]
 
     review_history = document.get("semanticReviewHistory", [])
     if not isinstance(review_history, list):
@@ -3994,6 +4030,7 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         errors.append(
             "semanticReviewHistory is not an append-only chain from the committed source inventory")
         source_reviews = []
+    applied_review_ids: set[str] = set()
     for review in review_history[len(source_reviews):]:
         required = {"candidateId", "approved", "rationale", "sourceRevision",
                     "beforeMetadata", "afterMetadata"}
@@ -4018,7 +4055,9 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
             errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
             continue
         expected_metadata[identifier] = dict(review["afterMetadata"])
-    errors.extend(final_review_authority_errors(root, document, expected_metadata))
+        applied_review_ids.add(identifier)
+    errors.extend(final_review_authority_errors(
+        root, document, expected_metadata, applied_review_ids))
     for identifier, expected in expected_metadata.items():
         target = active.get(identifier)
         if target is None or candidate_semantic_payload(target) != expected:

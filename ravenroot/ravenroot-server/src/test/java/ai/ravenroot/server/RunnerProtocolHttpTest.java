@@ -20,6 +20,18 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerProtocolHttpTest {
+    @Test void disabledPlaneReturnsStructuredUnavailableForConcreteRoutes(@TempDir Path directory) throws Exception {
+        try (var engine = new PekkoExecutionEngine("runner-disabled");
+             var server = new RavenrootServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()),
+                     new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), directory, new DisabledLoopbackAuthenticator())) {
+            server.start(); var http = HttpClient.newHttpClient();
+            var response = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/runner-plane/health"))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(501, response.statusCode());
+            assertEquals("RUNNER_PLANE_UNAVAILABLE", RunnerJson.read(response.body().getBytes()).get("error"));
+        }
+    }
+
     @Test void designatedRemoteClientUsesAuthenticatedFencedArtifactProtocol(@TempDir Path directory) throws Exception {
         var time = new java.util.concurrent.atomic.AtomicReference<>(Instant.now());
         var clock = new Clock() {

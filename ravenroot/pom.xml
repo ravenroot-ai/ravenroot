@@ -173,9 +173,10 @@
         <jetty.version>12.1.12</jetty.version>
         <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
         <!--
-            The PostgreSQL driver ravenroot-persistence-postgresql ships at runtime, and the version
-            ravenroot-server tests the shared store against. 42.7.11 and later fix two high
-            advisories (GHSA-j92g-9f8w-j867, GHSA-98qh-xjc8-98pq); do not move it below 42.7.12.
+            The PostgreSQL driver ravenroot-persistence-postgresql ships at runtime; ravenroot-server
+            depends on the adapter at compile scope, so the distribution bundles it. 42.7.12 is the
+            first release that fixes both high advisories: GHSA-98qh-xjc8-98pq (fixed in 42.7.11)
+            and GHSA-j92g-9f8w-j867 (fixed in 42.7.12). Do not move it below 42.7.12.
 
             The 42.7.12 driver is a multi-release jar. That is harmless here: the runtime
             loads it from the application classpath, where the JVM resolves multi-release jars

@@ -368,7 +368,9 @@ class NodePackageRegistrationTest {
         @Override public String version() { return "1"; }
         @Override public String sdkContract() { return NodeSdk.CONTRACT; }
         @Override public Optional<String> operationalPolicyDigest() { return Optional.of(policyDigest); }
-        @Override public List<NodeBehavior> behaviors() { return List.of(); }
+        @Override public List<NodeBehavior> behaviors() {
+            return List.of(new GreetingBehavior("policy-behavior"));
+        }
     }
 
     private record LooseVersionPackage(String declaredVersion, String contract, String packageId)

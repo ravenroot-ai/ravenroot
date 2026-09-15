@@ -30,7 +30,7 @@ async function replaceGraph(page, name = 'inspector-layout.graphml') {
 
 async function arrange(page, label) {
   await page.locator('#menu-layout').click();
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await page.getByRole('menuitemradio', { name: label, exact: true }).click();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', {
     timeout: 15_000,
   });

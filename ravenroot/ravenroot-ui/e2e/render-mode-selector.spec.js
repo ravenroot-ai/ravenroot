@@ -104,7 +104,10 @@ test('exposes exactly Design and Monitoring in one exclusive toolbar and menu gr
   await expect(page.locator('#btn-design')).toHaveAttribute('aria-checked', 'true');
 
   await page.locator('[data-menu="layout"]').click();
-  const modes = page.locator('#application-menu [role="menuitemradio"][data-command-id^="layout."]');
+  const modes = page.locator([
+    '#application-menu [role="menuitemradio"][data-command-id="layout.design"]',
+    '#application-menu [role="menuitemradio"][data-command-id="layout.monitoring"]',
+  ].join(', '));
   await expect(modes).toHaveCount(2);
   await expect(modes).toHaveText([/Design/, /Monitoring/]);
   await expect(page.locator('#application-menu [data-command-id^="style."]')).toHaveCount(0);

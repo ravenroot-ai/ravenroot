@@ -26,12 +26,20 @@ import {
 describe('editable GraphML documents', () => {
   it('replaces the editor-owned presentation properties on save and round-trips them', () => {
     const graph = parseGraphML(serializeGraphML(createWorkflowDocument()));
-    setGraphPresentation(graph, { renderMode: 'monitoring', layoutMode: 'elastic' });
+    setGraphPresentation(graph, {
+      renderMode: 'monitoring', layoutMode: 'elastic', designArrangement: 'flow',
+    });
 
     expect(parseGraphML(serializeGraphML(graph)).graphProperties).toMatchObject({
       'ravenroot.renderMode': 'monitoring',
       'ravenroot.layoutMode': 'elastic',
+      'ravenroot.designArrangement': 'flow',
     });
+
+    setGraphPresentation(graph, { designArrangement: 'organic' });
+    const updated = parseGraphML(serializeGraphML(graph));
+    expect(updated.graphProperties['ravenroot.designArrangement']).toBe('organic');
+    expect(serializeGraphML(graph).match(/ravenroot\.designArrangement/g)).toHaveLength(1);
   });
 
   // A drawing made from scratch has no join unless its author selects one. That is true only

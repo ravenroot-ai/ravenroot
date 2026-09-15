@@ -8771,13 +8771,73 @@ function additionalPropertyGroupItemHtml(definition, item) {
     ${(definition.fields || []).map(field => {
       const entry = item.fields[field.name];
       return `<label class="editor-field">${escapeHtml(field.displayName || field.name)}
-        <input data-additional-field="${escapeAttribute(field.name)}"
-          data-additional-type="${escapeAttribute(String(field.type || 'STRING').toLowerCase())}"
-          value="${escapeAttribute(entry?.value ?? field.defaultValue ?? '')}"
-          ${field.required ? 'required' : ''}></label>`;
+        ${additionalPropertyGroupFieldControlHtml(field, entry)}</label>`;
     }).join('')}
     <button type="button" class="property-remove" data-remove-additional-group>Remove group</button>
   </fieldset>`;
+}
+
+function additionalPropertyGroupFieldControlHtml(field, entry) {
+  const type = String(field.type || 'STRING');
+  const value = String(entry?.value ?? field.defaultValue ?? '');
+  const fieldName = escapeAttribute(field.name);
+  const data = ` data-additional-field="${fieldName}" data-additional-type="${escapeAttribute(
+    type.toLowerCase())}"`;
+  const required = field.required ? ' required' : '';
+  const numericBounds = `${field.minimumValue != null && field.minimumValue !== ''
+    ? ` min="${escapeAttribute(field.minimumValue)}"` : ''}`
+    + `${field.maximumValue != null && field.maximumValue !== ''
+      ? ` max="${escapeAttribute(field.maximumValue)}"` : ''}`;
+  const encodedBounds = `${field.maximumUtf8Bytes > 0
+    ? ` data-maximum-utf8-bytes="${field.maximumUtf8Bytes}"` : ''}`
+    + `${field.maximumItems > 0 ? ` data-maximum-items="${field.maximumItems}"` : ''}`
+    + `${field.maximumItemUtf8Bytes > 0
+      ? ` data-maximum-item-utf8-bytes="${field.maximumItemUtf8Bytes}"` : ''}`;
+  if (field.allowedValues?.length) {
+    const declared = field.allowedValues.some(option => String(option) === value);
+    const undeclared = value === ''
+      ? '<option value="" selected>Not declared</option>' : '';
+    const mismatched = value !== '' && !declared
+      ? `<option value="${escapeAttribute(value)}" selected>Current value not among the declared alternatives: ${escapeHtml(value)}</option>` : '';
+    return `<select${data}${required}>${undeclared}${mismatched}${field.allowedValues.map(option =>
+      `<option value="${escapeAttribute(option)}" ${String(option) === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
+  }
+  if (type === 'SECRET_REFERENCE') {
+    return `<select${data}${required}>${secretReferenceOptionsHtml(value)}</select>`;
+  }
+  if (type === 'TEXT' || type === 'CEL_EXPRESSION') {
+    return `<textarea${data}${encodedBounds}${required}>${escapeHtml(value)}</textarea>`;
+  }
+  if (type === 'BOOLEAN') {
+    const recognized = value === '' || value === 'true' || value === 'false';
+    const undeclared = value === '' ? '<option value="" selected>Not declared</option>' : '';
+    const mismatched = recognized ? ''
+      : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
+    return `<select${data}${required}>${undeclared}${mismatched}`
+      + `<option value="false" ${value === 'false' ? 'selected' : ''}>false</option>`
+      + `<option value="true" ${value === 'true' ? 'selected' : ''}>true</option></select>`;
+  }
+  const inputType = type === 'INTEGER' || type === 'DECIMAL' ? 'number' : 'text';
+  const step = type === 'DECIMAL' ? ' step="any"' : '';
+  return `<input${data} type="${inputType}"${step}${numericBounds}${encodedBounds}`
+    + ` value="${escapeAttribute(value)}"${required}>`;
+}
+
+function removeAdditionalPropertyGroupItem(control) {
+  const item = control?.closest('.additional-property-group-item');
+  if (!item) return false;
+  item.remove();
+  return true;
+}
+
+function appendAdditionalPropertyGroupItem(section, definition) {
+  const items = section?.querySelector('[data-additional-group-items]');
+  if (!items || !definition) return false;
+  const group = { definition, items: Array.from(
+    section.querySelectorAll('.additional-property-group-item')) };
+  items.insertAdjacentHTML('beforeend',
+    additionalPropertyGroupItemHtml(definition, nextAdditionalPropertyGroupItem(group)));
+  return true;
 }
 
 function readAdditionalPropertyGroupEditor(form, descriptor) {
@@ -14642,7 +14702,7 @@ document.addEventListener('click', event => {
   }
   const removeAdditionalGroup = event.target.closest('[data-remove-additional-group]');
   if (removeAdditionalGroup) {
-    removeAdditionalGroup.closest('.additional-property-group-item')?.remove();
+    removeAdditionalPropertyGroupItem(removeAdditionalGroup);
     return;
   }
   const addAdditionalGroup = event.target.closest('[data-add-additional-group]');
@@ -14651,12 +14711,7 @@ document.addEventListener('click', event => {
     const descriptor = catalogDescriptor(section.closest('form')?.elements.behavior?.value);
     const definition = (descriptor?.additionalProperties || [])
       .find(group => group.name === section.dataset.additionalGroup);
-    if (definition) {
-      const group = { definition, items: Array.from(
-        section.querySelectorAll('.additional-property-group-item')) };
-      section.querySelector('[data-additional-group-items]')?.insertAdjacentHTML('beforeend',
-        additionalPropertyGroupItemHtml(definition, nextAdditionalPropertyGroupItem(group)));
-    }
+    appendAdditionalPropertyGroupItem(section, definition);
     return;
   }
   const addProperty = event.target.closest('[data-add-property]');

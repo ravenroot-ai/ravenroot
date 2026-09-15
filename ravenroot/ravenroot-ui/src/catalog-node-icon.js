@@ -27,13 +27,18 @@ export function resolveDescriptorNodeType(descriptor) {
 }
 
 // The default Design renderer writes a per-node inline shape after Cytoscape applies its semantic
-// stylesheet. Preserve the two non-colour identities there as well: a Human Task is round and a
-// Trace is rectangular, while ordinary catalog nodes retain the established rounded card.
+// stylesheet. Human Task and Trace follow the same established rounded-card result as every other
+// type in this renderer; this helper does not alter the separate semantic stylesheet rules.
 export function nodeTypeCardShape(nodeType) {
-  if (nodeType === 'human-task') return 'ellipse';
-  if (nodeType === 'trace') return 'rectangle';
   return 'roundrectangle';
 }
+
+// These semantic types share the ordinary node card. Their plain glyphs, not a bespoke silhouette,
+// provide the non-colour cue consistently in the catalog and every Design renderer.
+export const COMMON_NODE_GLYPHS = Object.freeze({
+  trace: '▤',
+  'human-task': '👤',
+});
 
 // The catalog palette's preview icon for a descriptor, kept in lockstep with what the canvas will
 // actually draw once the node exists. `agent` is the one node type with its own bespoke artwork

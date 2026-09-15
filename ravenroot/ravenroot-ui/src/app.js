@@ -2,7 +2,11 @@ import cytoscape from 'cytoscape';
 import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
 import { createVisualGroup, editVisualGroups } from './graph-editing.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
-import { normalizedCanvasState, visualGroupPresentation } from './graph-view-state.js';
+import {
+  DESIGN_ARRANGEMENTS,
+  normalizedCanvasState,
+  visualGroupPresentation,
+} from './graph-view-state.js';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
@@ -58,7 +62,12 @@ import {
   validateWorkflow,
 } from './graph-document.js';
 import { catalogEmptyState } from './catalog-empty-state.js';
-import { catalogNodeIcon, nodeTypeCardShape, resolveDescriptorNodeType } from './catalog-node-icon.js';
+import {
+  catalogNodeIcon,
+  COMMON_NODE_GLYPHS,
+  nodeTypeCardShape,
+  resolveDescriptorNodeType,
+} from './catalog-node-icon.js';
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
@@ -379,7 +388,8 @@ const NODE_ICONS = {
   terminal: '⊙ ',
   consumer: '⩓ ', handler:  '↩ ',
   agent:    '⬡ ', flow:     '⚙ ',
-  actor:    '◉ ', system:   '▪ ', trace: '▤ ', 'human-task': '♙ '
+  actor:    '◉ ', system:   '▪ ', trace: `${COMMON_NODE_GLYPHS.trace} `,
+  'human-task': `${COMMON_NODE_GLYPHS['human-task']} `
 };
 
 /**
@@ -568,11 +578,11 @@ function createStylesheet(palette = rendererPalette) {
     'border-color': node.system, 'border-width': 1.5,
   }},
   { selector: 'node[nodeType="trace"]', style: {
-    shape: 'rectangle', 'background-color': surface.trace,
+    shape: 'roundrectangle', 'background-color': surface.trace,
     'border-color': node.trace, 'border-width': 2,
   }},
   { selector: 'node[nodeType="human-task"]', style: {
-    shape: 'ellipse', 'background-color': surface['human-task'],
+    shape: 'roundrectangle', 'background-color': surface['human-task'],
     'border-color': node['human-task'], 'border-width': 2.5,
   }},
   { selector: 'node[humanTaskPending > 0]', style: {
@@ -933,6 +943,7 @@ let graphData   = null;
 let activeDocumentIncarnation = null;
 let renderMode  = DEFAULT_RENDER_MODE;
 let layoutMode  = 'cyto';
+let designArrangement = null;
 let visualStyle = DEFAULT_VISUAL_STYLE;
 let layoutBusy = false;
 let filterActive = null;   // { elType, type } or null
@@ -2361,9 +2372,10 @@ function captureActiveDocument() {
   document_.displayName = graphDisplayName;
   document_.renderMode = renderMode;
   document_.layoutMode = layoutMode;
+  document_.designArrangement = designArrangement;
   document_.visualStyle = visualStyle;
   if (document_.graph?.format === 'graphml') {
-    setGraphPresentation(document_.graph, { renderMode, layoutMode });
+    setGraphPresentation(document_.graph, { renderMode, layoutMode, designArrangement });
   }
   document_.layoutBusy = layoutBusy;
   document_.filterActive = filterActive;
@@ -2453,6 +2465,7 @@ function applyActiveDocument() {
     && document_.visualStyle === presentation.visualStyle);
   renderMode = presentation.renderMode;
   layoutMode = presentation.layoutMode;
+  designArrangement = presentation.designArrangement;
   visualStyle = presentation.visualStyle;
   if (document_) Object.assign(document_, presentation);
   layoutBusy = document_?.layoutBusy ?? false;
@@ -3275,7 +3288,8 @@ function forkActiveDocument() {
     mode: fork.mode,
     provenance: fork.provenance,
     presentation: { ...visualGroupPresentation(fork), renderMode: fork.renderMode,
-      layoutMode: fork.layoutMode, visualStyle: fork.visualStyle, fontSize: fork.fontSize },
+      layoutMode: fork.layoutMode, designArrangement: fork.designArrangement,
+      visualStyle: fork.visualStyle, fontSize: fork.fontSize },
   });
   addActivityMessage('editor', `Forked immutable ${source.mode} snapshot as an editable draft`, 'completed');
   scheduleWorkspacePersistence();
@@ -3322,6 +3336,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   Object.assign(target, incomingPresentation);
   renderMode = incomingPresentation.renderMode;
   layoutMode = incomingPresentation.layoutMode;
+  designArrangement = incomingPresentation.designArrangement;
   visualStyle = incomingPresentation.visualStyle;
   filterActive = null;
   traceActive = false;
@@ -4158,7 +4173,7 @@ const N8N_ICONS_CHAR = {
   consumer: '⧒', handler:  '↩',
   agent:    '🧠', flow:     '⚙',
   actor:    '◎', system:   '▤',
-  trace:    '⇢', 'human-task': '♙',
+  trace:    COMMON_NODE_GLYPHS.trace, 'human-task': COMMON_NODE_GLYPHS['human-task'],
 };
 let N8N_BG = rendererPalette.nodeSurfaceByType;
 let N8N_BORDER = rendererPalette.nodeType;
@@ -5112,16 +5127,6 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
-const DESIGN_ARRANGEMENTS = Object.freeze({
-  hierarchical: Object.freeze({ layout: 'hierarchical' }),
-  flow: Object.freeze({ layout: 'dagre' }),
-  organic: Object.freeze({ layout: 'cose' }),
-  keep: Object.freeze({ preservePositions: true }),
-  // Additive layered drawings (ADR 0036). The four entries above are untouched by design.
-  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
-  'layered-down': Object.freeze({ layout: 'layered-down' }),
-});
-
 function renderModeLabel(mode) {
   const semanticMode = normalizeRenderMode(mode);
   return commandRegistry.get(`layout.${semanticMode}`)?.label || 'Graph';
@@ -5482,12 +5487,14 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   }
   renderMode = semanticMode;
   owner.renderMode = semanticMode;
-  // Product choices project onto existing internal engines. Design owns a deterministic full
-  // relayout plus the established Cyto routing; Monitoring owns the continuous D3 lifecycle.
+  // Product choices project onto existing internal engines. Design restores its exact selected
+  // arrangement; Monitoring owns the continuous D3 lifecycle.
   const style = 'cyto';
-  const layout = semanticMode === 'design' ? 'cyto' : 'elastic';
+  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
   target.batch(() => applyVisualStyle(style, target, owner));
-  setLayout(layout);
+  setLayout(semanticMode === 'design' ? (arrangement?.layout || 'cyto') : 'elastic',
+    semanticMode === 'design' && designArrangement === 'keep'
+      ? { preservePositions: true, keepPositions: true } : {});
   scheduleWorkspacePersistence();
 }
 
@@ -5498,6 +5505,8 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
   }
+  designArrangement = name;
+  owner.designArrangement = name;
   setLayout(name === 'keep' ? owner.layoutMode || layoutMode || 'preset' : arrangement.layout, {
     preservePositions: arrangement.preservePositions,
     keepPositions: name === 'keep',
@@ -5505,6 +5514,7 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
     fitAfterLayout: !arrangement.preservePositions,
     commandLabel: commandRegistry.get(`layout.arrange.${name}`)?.label || 'Arrange graph',
   });
+  scheduleWorkspacePersistence();
   return true;
 }
 
@@ -14282,6 +14292,7 @@ function commandContext() {
       && canDuplicateNode(graphData, selectedNodes.first().id(), layoutMode)),
     hasJoinSemanticsMarker: Boolean(graphData && hasDeclaredJoinSemantics(graphData)),
     layoutMode,
+    designArrangement,
     visualStyle,
     renderMode,
     workspaceLayoutMode: workspaceLayout.mode,

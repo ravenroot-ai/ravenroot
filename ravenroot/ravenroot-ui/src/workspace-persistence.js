@@ -1,4 +1,4 @@
-import { visualGroupPresentation } from './graph-view-state.js';
+import { normalizeDesignArrangement, visualGroupPresentation } from './graph-view-state.js';
 
 export const WORKSPACE_DATABASE_NAME = 'ravenroot-workspaces';
 export const WORKSPACE_DATABASE_VERSION = 1;
@@ -69,6 +69,10 @@ export function persistedDocument(document_) {
         ? 'monitoring' : 'design',
       layoutMode: typeof (document_.layoutMode ?? document_.presentation?.layoutMode) === 'string'
         ? (document_.layoutMode ?? document_.presentation.layoutMode) : 'cyto',
+      designArrangement: normalizeDesignArrangement(
+        document_.designArrangement ?? document_.presentation?.designArrangement,
+        document_.layoutMode ?? document_.presentation?.layoutMode,
+      ),
       visualStyle: typeof (document_.visualStyle ?? document_.presentation?.visualStyle) === 'string'
         ? (document_.visualStyle ?? document_.presentation.visualStyle) : 'cyto',
       fontSize: Number.isFinite(document_.fontSize ?? document_.presentation?.fontSize)

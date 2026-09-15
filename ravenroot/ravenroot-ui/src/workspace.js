@@ -92,6 +92,7 @@ export function createDocumentRecord({
     // activation can repaint without rerunning a layout and old records can be normalized safely.
     renderMode: DEFAULT_RENDER_MODE,
     layoutMode: 'cyto',
+    designArrangement: null,
     visualStyle: DEFAULT_VISUAL_STYLE,
     filterActive: null,
     traceActive: false,
@@ -214,6 +215,7 @@ export function forkDocumentRecord(source, { documentId = createDocumentIncarnat
   fork.canvasState = source.canvasState ? structuredClone(source.canvasState) : null;
   fork.renderMode = source.renderMode;
   fork.layoutMode = source.layoutMode;
+  fork.designArrangement = source.designArrangement;
   fork.visualStyle = source.visualStyle;
   fork.fontSize = source.fontSize;
   return fork;

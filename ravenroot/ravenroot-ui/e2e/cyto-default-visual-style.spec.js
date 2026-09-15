@@ -18,6 +18,7 @@ const activeView = page => page.evaluate(() => {
     renderMode: owner.renderMode,
     style: owner.visualStyle,
     layout: owner.layoutMode,
+    designArrangement: owner.designArrangement,
     renderer: owner.renderer?.kind ?? null,
     positions: Object.fromEntries(owner.cy.nodes().map(node => [node.id(), node.position()])),
     modelPositions: Object.fromEntries(owner.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }])),
@@ -169,7 +170,8 @@ test('GraphML coordinates remain exact until explicit Design performs its comple
     timeout: 10_000,
   });
   await expect.poll(() => activeView(page)).toMatchObject({
-    renderMode: 'design', style: 'cyto', layout: 'cyto', renderer: 'cytoscape',
+    renderMode: 'design', style: 'cyto', layout: 'cyto', designArrangement: null,
+    renderer: 'cytoscape',
   });
   const before = await activeView(page);
 
@@ -220,7 +222,7 @@ test('save and reopen retain Monitoring and a non-default Design arrangement', a
   await page.locator('#btn-design').click();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
   await page.locator('#menu-layout').click();
-  await page.getByRole('menuitem', { name: 'Arrange — Flow', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'Arrange — Flow', exact: true }).click();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
   await expect.poll(() => activeView(page)).toMatchObject({ renderMode: 'design', layout: 'dagre' });
   expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.graphProperties))

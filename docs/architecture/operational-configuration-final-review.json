@@ -1344,7 +1344,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0",
+          "digest": "aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d",
           "assertion": "Empty values deliberately select application defaults for declared carriers."
         }
       ],
@@ -1447,12 +1447,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "b936c4a130113d5e10f80a6b93358d028f0d2ae8cdb9c3cb22c379959c54b7b1",
+          "digest": "558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7",
           "assertion": "Compose carries supported environment key identities."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0",
+          "digest": "aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d",
           "assertion": "Kubernetes carries supported environment key identities."
         }
       ],
@@ -1704,12 +1704,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "compose.yaml",
-          "digest": "b936c4a130113d5e10f80a6b93358d028f0d2ae8cdb9c3cb22c379959c54b7b1",
+          "digest": "558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7",
           "assertion": "Compose declares explicit local runtime defaults and external carriers."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
-          "digest": "052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0",
+          "digest": "aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d",
           "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes."
         }
       ],
@@ -4521,7 +4521,7 @@
         },
         {
           "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentException.java",
-          "digest": "be2ae21bcd9c3e1bda73d53274bd40ffd2d6ea019dc7ff7890d9379c25b07b10",
+          "digest": "783c4a109d50ecbb072cc862c8323bbedd77f9b8d8c02048745f75177bd8a2b6",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5658,7 +5658,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "6568835454eee2c1ac4c7618c319968fbb78944f136dee0a21743dc2e9f4a80d",
+          "digest": "dd26e0f5937d3f00dbfcacd946ad99ad8b3165995f7881deae305be8ae40f97d",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "6568835454eee2c1ac4c7618c319968fbb78944f136dee0a21743dc2e9f4a80d",
+          "digest": "dd26e0f5937d3f00dbfcacd946ad99ad8b3165995f7881deae305be8ae40f97d",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -5761,7 +5761,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "6568835454eee2c1ac4c7618c319968fbb78944f136dee0a21743dc2e9f4a80d",
+          "digest": "dd26e0f5937d3f00dbfcacd946ad99ad8b3165995f7881deae305be8ae40f97d",
           "assertion": "Server composition consumes exact process environment keys."
         },
         {
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "6568835454eee2c1ac4c7618c319968fbb78944f136dee0a21743dc2e9f4a80d",
+          "digest": "dd26e0f5937d3f00dbfcacd946ad99ad8b3165995f7881deae305be8ae40f97d",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "6568835454eee2c1ac4c7618c319968fbb78944f136dee0a21743dc2e9f4a80d",
+          "digest": "dd26e0f5937d3f00dbfcacd946ad99ad8b3165995f7881deae305be8ae40f97d",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -8378,7 +8378,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "92e757dacb2fceba8d9499ccf79863ec0d15d5fe60ae587c603be2295eb2e545",
+          "digest": "d3a72c798179521b92c444690c295d52b5c9a19a810a4b433ea682043fb216ce",
           "assertion": "Reference publisher enumerates environment vocabulary."
         },
         {
@@ -8533,7 +8533,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "06cfe9a567ea2f3b6a30a28eeff432d6e170056e5e7b0e5d1a8658dc28caa2f3",
+          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -8829,7 +8829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "06cfe9a567ea2f3b6a30a28eeff432d6e170056e5e7b0e5d1a8658dc28caa2f3",
+          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
           "assertion": "UI resolves catalog entries through stable lookup tokens."
         }
       ],
@@ -8987,7 +8987,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "06cfe9a567ea2f3b6a30a28eeff432d6e170056e5e7b0e5d1a8658dc28caa2f3",
+          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -10766,7 +10766,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "06cfe9a567ea2f3b6a30a28eeff432d6e170056e5e7b0e5d1a8658dc28caa2f3",
+          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11429,7 +11429,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "06cfe9a567ea2f3b6a30a28eeff432d6e170056e5e7b0e5d1a8658dc28caa2f3",
+          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         },
         {
@@ -11503,7 +11503,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "4f25915e8f8c296a3707bf1c6db5b60777d05f0e45965959f8483417e408c6e9",
+          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],
@@ -11577,7 +11577,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "4f25915e8f8c296a3707bf1c6db5b60777d05f0e45965959f8483417e408c6e9",
+          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],
@@ -11648,7 +11648,7 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "4f25915e8f8c296a3707bf1c6db5b60777d05f0e45965959f8483417e408c6e9",
+          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
           "assertion": "The environment reference publishes each exact binding name."
         }
       ],

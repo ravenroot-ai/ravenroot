@@ -41,6 +41,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end }}
 
+{{/* AI limits share the graph scalar rendering contract but retain a distinct audit identity. */}}
+{{- define "ravenroot.aiLimitValue" -}}
+{{- if kindIs "string" . -}}
+{{ . | quote }}
+{{- else -}}
+{{ int64 . | quote }}
+{{- end -}}
+{{- end }}
+
 {{- define "ravenroot.image" -}}
 {{- if .Values.image.digest -}}
 {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}

@@ -75,6 +75,37 @@ Detailed contract: [Bundle profile](bundles/).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
+| `RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_PROFILE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_PROFILE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_SERVERS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_NAME_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CONSUMER_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_PROFILE_` | See the linked contract for exact type, default, and applicability. |

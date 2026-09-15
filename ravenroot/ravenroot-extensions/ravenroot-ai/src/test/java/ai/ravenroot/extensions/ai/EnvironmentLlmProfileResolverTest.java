@@ -31,7 +31,8 @@ class EnvironmentLlmProfileResolverTest {
         assertEquals("qwen38", profile.model());
         assertEquals(Optional.empty(), profile.credentialBinding());
         assertEquals(60_000, profile.timeoutMs());
-        assertEquals(LlmProfile.HARD_MAX_RESPONSE_BYTES, profile.maxResponseBytes());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_LLM_BYTES, profile.maxRequestBytes());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_LLM_BYTES, profile.maxResponseBytes());
         assertEquals(4, profile.maxConcurrency());
     }
 
@@ -90,6 +91,39 @@ class EnvironmentLlmProfileResolverTest {
         assertEquals(Optional.empty(), resolve("local", """
                 {"endpoint":"http://127.0.0.1:8000/v1/chat/completions","model":"m",
                  "maxResponseBytes":1073741824}"""));
+    }
+
+    @Test
+    @DisplayName("an operator override admits a profile above the compatibility ceiling")
+    void anOperatorCanRaiseACeiling() {
+        var environment = Map.of(
+                EnvironmentLlmProfileResolver.environmentVariableName("local"),
+                AiTestSupport.encodedProfile("""
+                        {"endpoint":"http://127.0.0.1:8000/v1/chat/completions","model":"m",
+                         "maxRequestBytes":16777216,"maxResponseBytes":16777216} """));
+        AgentOperationalConfiguration policy = AgentOperationalConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_AI_MAX_LLM_REQUEST_BYTES", "16777216",
+                "RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES", "16777216"));
+
+        LlmProfile profile = new EnvironmentLlmProfileResolver(environment, policy)
+                .resolve("local").orElseThrow();
+        assertEquals(16_777_216, profile.maxRequestBytes());
+        assertEquals(16_777_216, profile.maxResponseBytes());
+    }
+
+    @Test
+    @DisplayName("the configured preamble ceiling replaces the former hidden 2048-character parser cap")
+    void aConfiguredLongPreambleIsAccepted() {
+        String preamble = "p".repeat(4096);
+        var environment = Map.of(
+                EnvironmentLlmProfileResolver.environmentVariableName("local"),
+                AiTestSupport.encodedProfile("""
+                        {"endpoint":"http://127.0.0.1:8000/v1/chat/completions","model":"m",
+                         "systemPreamble":"%s"} """.formatted(preamble)));
+
+        LlmProfile profile = new EnvironmentLlmProfileResolver(environment,
+                AgentOperationalConfiguration.defaults()).resolve("local").orElseThrow();
+        assertEquals(preamble, profile.systemPreamble());
     }
 
     private static Optional<LlmProfile> resolve(String name, String json) {

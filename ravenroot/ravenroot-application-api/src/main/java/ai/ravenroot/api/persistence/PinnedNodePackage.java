@@ -62,6 +62,30 @@ public record PinnedNodePackage(String packageId, String identityDigest)
     }
 
     /**
+     * Pins a package together with an optional process-wide operational-policy generation.
+     *
+     * <p>An empty digest delegates to the historical three-argument identity exactly. A present
+     * digest is validated as SHA-256 and domain-separated inside the package identity.</p>
+     *
+     * @param packageId stable identifier of the node package
+     * @param version package build version, possibly {@code null}
+     * @param sdkContract declared SDK contract, possibly {@code null}
+     * @param operationalPolicyDigest canonical non-secret SHA-256 policy digest, when applicable
+     * @return pinned package identity including the policy generation when present
+     */
+    public static PinnedNodePackage of(String packageId, String version, String sdkContract,
+                                       java.util.Optional<String> operationalPolicyDigest) {
+        if (operationalPolicyDigest == null || operationalPolicyDigest.isEmpty()) {
+            return of(packageId, version, sdkContract);
+        }
+        String policy = ManifestTokens.requireSha256Hex(
+                operationalPolicyDigest.orElseThrow(), "operationalPolicyDigest");
+        return new PinnedNodePackage(packageId, ExecutionManifestDigest.component(IDENTITY_DOMAIN,
+                List.of(version == null ? "" : version, sdkContract == null ? "" : sdkContract,
+                        "operational-policy-sha256", policy)));
+    }
+
+    /**
      * Orders packages by id, then by identity digest.
      *
      * <p>A manifest sorts its packages with this order before it is digested, so two runtimes that

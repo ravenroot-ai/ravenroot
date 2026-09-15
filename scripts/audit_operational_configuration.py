@@ -423,7 +423,7 @@ HELM_FIXED_LIST_CONTRACTS = {
     "persistence.accessModes.0": "ReadWriteOnce",
 }
 HELM_JAVA_CARRIER_PREFIXES = (
-    "executionRuntime.", "graph.", "humanTask.", "assistant.", "rateLimit.",
+    "executionRuntime.", "graph.", "ai.", "humanTask.", "assistant.", "rateLimit.",
 )
 GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
 GRAPH_EXECUTION_LIMITS_PATH = Path(
@@ -2947,7 +2947,8 @@ def candidate_semantic_payload(entry: dict[str, object]) -> dict[str, object]:
 
 def final_review_authority_errors(
         root: Path, document: dict[str, object],
-        expected_metadata: dict[str, dict[str, object]]) -> list[str]:
+        expected_metadata: dict[str, dict[str, object]],
+        semantic_override_ids: set[str] | None = None) -> list[str]:
     """Apply the exact, source-anchored final-review partition without weakening row review.
 
     Earlier issues recorded one semantic history object per changed row.  The final review covers
@@ -2956,6 +2957,7 @@ def final_review_authority_errors(
     the group link and resulting metadata.  New candidates can never inherit a group by filename,
     symbol, or a classifier heuristic.
     """
+    semantic_override_ids = semantic_override_ids or set()
     reference = document.get("finalReviewAuthority")
     if reference is None:
         claimed = any(isinstance(entry, dict)
@@ -3093,6 +3095,8 @@ def final_review_authority_errors(
             active_id = active_identifier(candidate_id)
             if active_id not in expected_metadata:
                 continue
+            if active_id in semantic_override_ids:
+                continue
             expected_metadata[active_id] = {
                 **metadata,
                 "finalReviewAuthority": FINAL_REVIEW_AUTHORITY_ID,
@@ -3117,10 +3121,10 @@ def final_review_authority_errors(
         and str(entry["retirementRationale"]).strip()
     }
     for identifier in assigned:
-        if identifier in retired_entries and identifier not in active_entries \
-                and identifier not in replacements:
-            continue
         active_id = active_identifier(identifier)
+        if (identifier in retired_entries or active_id in retired_entries) \
+                and active_id not in active_entries:
+            continue
         active = active_entries.get(active_id)
         if active is None or candidate_semantic_payload(active) != expected_metadata.get(active_id):
             errors.append(f"final review candidate {identifier} lost its marker or approved classification")
@@ -3346,6 +3350,12 @@ def allowed_migrated_reference(path: tuple[str, ...]) -> bool:
             and path[2] in {"contracts", "bindingCarriers", "semanticPartitions"} and path[3].isdigit() \
             and path[4] in {"candidateIds", "defaultCandidateIds"}:
         return path[5].isdigit()
+    if len(path) == 4 and path[0] == "aiOperationalAuthorities" and path[2] == "candidateIds":
+        return path[3].isdigit()
+    if len(path) == 6 and path[0] == "aiOperationalAuthorities" \
+            and path[2] in {"settings", "semanticPartitions"} and path[3].isdigit() \
+            and path[4] == "candidateIds":
+        return path[5].isdigit()
     if len(path) == 5 and path[0] == "remediationDomains" \
             and path[1] == "domains" and path[2].isdigit() \
             and path[3] == "candidateIds":
@@ -3560,6 +3570,17 @@ def remap_declared_candidate_references(document: dict[str, object],
                         if field == "contracts":
                             remap_list(row, "defaultCandidateIds")
 
+    ai_authorities = document.get("aiOperationalAuthorities")
+    if isinstance(ai_authorities, dict):
+        for authority in ai_authorities.values():
+            if not isinstance(authority, dict):
+                continue
+            remap_list(authority, "candidateIds")
+            for field in ("settings", "semanticPartitions"):
+                for row in authority.get(field, []):
+                    if isinstance(row, dict):
+                        remap_list(row, "candidateIds")
+
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
     if isinstance(domain_rows, list):
@@ -3576,7 +3597,8 @@ def reconciliation_plan_errors(root: Path, document: dict[str, object],
         "id", "issue", "sourceRevision", "targetRevision", "sourceInventoryPath",
         "sourceInventoryDigest", "targetCandidateDigest", "mappings", "retirements", "additions",
     }
-    if set(plan) != required or not isinstance(plan.get("issue"), str) \
+    supported_fields = (required, required | {"semanticReviews"})
+    if set(plan) not in supported_fields or not isinstance(plan.get("issue"), str) \
             or re.fullmatch(r"#[1-9][0-9]*", str(plan["issue"])) is None \
             or not isinstance(plan.get("id"), str) or not str(plan["id"]).strip():
         return ["reconciliation plan has an unsupported or incomplete shape"], {}
@@ -3717,6 +3739,29 @@ def reconciliation_plan_errors(root: Path, document: dict[str, object],
     if len(unchanged) + len(mapping_from) + len(retired_ids) != len(source_ids) \
             or len(unchanged) + len(mapping_to) + len(addition_ids) != len(current_ids):
         errors.append("reconciliation partition counts are inconsistent")
+
+    semantic_reviews = plan.get("semanticReviews", [])
+    reviewed_ids: set[str] = set()
+    if not isinstance(semantic_reviews, list):
+        errors.append("reconciliation semanticReviews must be an array")
+    else:
+        for review in semantic_reviews:
+            identifier = review.get("candidateId") if isinstance(review, dict) else None
+            if not isinstance(review, dict) or set(review) != {
+                    "candidateId", "approved", "rationale", "beforeMetadata", "afterMetadata"} \
+                    or review.get("approved") is not True \
+                    or not isinstance(identifier, str) or identifier in reviewed_ids \
+                    or identifier not in unchanged \
+                    or not isinstance(review.get("rationale"), str) \
+                    or not str(review["rationale"]).strip() \
+                    or not isinstance(review.get("beforeMetadata"), dict) \
+                    or not isinstance(review.get("afterMetadata"), dict) \
+                    or review.get("beforeMetadata") != candidate_semantic_payload(
+                        source_entries.get(str(identifier), {})):
+                errors.append(
+                    f"semantic review {identifier!r} requires a unique, source-anchored row approval")
+                continue
+            reviewed_ids.add(identifier)
     return errors, source_entries
 
 
@@ -3820,10 +3865,35 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
         refreshed["interactionWebSocketAuthorities"] = {
             INTERACTION_WEBSOCKET_AUTHORITY_ID: interaction_authority,
         }
+    if ai_operational_source_present(root):
+        ai_operational_authority = ai_operational_authority_from_source(root, current)
+        if ai_operational_authority is None:
+            return None, ["cannot derive the closed AI operational configuration authority"]
+        refreshed["aiOperationalAuthorities"] = {
+            AI_OPERATIONAL_AUTHORITY_ID: ai_operational_authority,
+        }
+        by_id = {str(entry["id"]): entry for entry in merged}
+        for partition in ai_operational_authority["semanticPartitions"]:
+            for identifier in partition["candidateIds"]:
+                by_id[identifier].update(
+                    status=partition["status"], classification=partition["classification"],
+                    rationale=partition["rationale"], coverage=partition["coverage"],
+                    aiOperationalAuthority=AI_OPERATIONAL_AUTHORITY_ID)
+    final_review_reference = refreshed.get("finalReviewAuthority")
+    if isinstance(final_review_reference, dict) \
+            and final_review_reference.get("id") == FINAL_REVIEW_AUTHORITY_ID \
+            and final_review_reference.get("path") == FINAL_REVIEW.relative_to(ROOT).as_posix():
+        final_review_reference["digest"] = hashlib.sha256(
+            (root / FINAL_REVIEW.relative_to(ROOT)).read_bytes(),
+        ).hexdigest()
     history = list(refreshed.get("reconciliationHistory", []))
     history.append(plan)
     refreshed["reconciliationHistory"] = history
-    refreshed.setdefault("semanticReviewHistory", [])
+    semantic_review_history = list(refreshed.get("semanticReviewHistory", []))
+    semantic_review_history.extend({
+        **review, "sourceRevision": plan["sourceRevision"],
+    } for review in plan.get("semanticReviews", []))
+    refreshed["semanticReviewHistory"] = semantic_review_history
     refreshed["migrationHistory"] = expected_reconciled_migration_history(
         document, plan, source_entries)
     refreshed["retiredEntries"] = expected_reconciled_retired_entries(
@@ -3944,7 +4014,11 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         identifier = str(addition["id"])
         expected_metadata[identifier] = dict(addition["metadata"])
     for identifier in set(source_entries) & set(active):
-        expected_metadata[identifier] = candidate_semantic_payload(source_entries[identifier])
+        payload_holder: dict[str, object] = {
+            "entries": [candidate_semantic_payload(source_entries[identifier])],
+        }
+        remap_declared_candidate_references(payload_holder, reference_replacements)
+        expected_metadata[identifier] = payload_holder["entries"][0]
 
     review_history = document.get("semanticReviewHistory", [])
     if not isinstance(review_history, list):
@@ -3956,6 +4030,28 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
         errors.append(
             "semanticReviewHistory is not an append-only chain from the committed source inventory")
         source_reviews = []
+    applied_review_ids: set[str] = set()
+    committed_review_sources: dict[str, dict[str, object] | None] = {}
+    for review in source_reviews:
+        identifier = review.get("candidateId") if isinstance(review, dict) else None
+        revision = review.get("sourceRevision") if isinstance(review, dict) else None
+        if not isinstance(identifier, str) or not isinstance(revision, str) \
+                or not isinstance(review.get("beforeMetadata"), dict) \
+                or not isinstance(review.get("afterMetadata"), dict) \
+                or review.get("approved") is not True:
+            continue
+        if revision not in committed_review_sources:
+            committed_review_sources[revision] = committed_json(
+                root, revision, str(plan["sourceInventoryPath"]))[0]
+        committed = committed_review_sources[revision]
+        committed_entry = next((item for item in committed.get("entries", [])
+                                if isinstance(item, dict) and item.get("id") == identifier), None) \
+            if isinstance(committed, dict) else None
+        source_entry = source_entries.get(identifier)
+        if committed_entry is not None and source_entry is not None \
+                and candidate_semantic_payload(committed_entry) == review["beforeMetadata"] \
+                and candidate_semantic_payload(source_entry) == review["afterMetadata"]:
+            applied_review_ids.add(identifier)
     for review in review_history[len(source_reviews):]:
         required = {"candidateId", "approved", "rationale", "sourceRevision",
                     "beforeMetadata", "afterMetadata"}
@@ -3980,7 +4076,9 @@ def reconciliation_history_errors(root: Path, document: dict[str, object],
             errors.append(f"semantic review {identifier} is not anchored to its committed prior metadata")
             continue
         expected_metadata[identifier] = dict(review["afterMetadata"])
-    errors.extend(final_review_authority_errors(root, document, expected_metadata))
+        applied_review_ids.add(identifier)
+    errors.extend(final_review_authority_errors(
+        root, document, expected_metadata, applied_review_ids))
     for identifier, expected in expected_metadata.items():
         target = active.get(identifier)
         if target is None or candidate_semantic_payload(target) != expected:
@@ -7670,7 +7768,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'ensureProgramGraphReady',
   'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
   1),
- ('compose.yaml', 'file', '', '', 'b936c4a130113d5e10f80a6b93358d028f0d2ae8cdb9c3cb22c379959c54b7b1', 1),
+ ('compose.yaml', 'file', '', '', '558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7', 1),
  ('deploy/dev/sandbox-supervisor.sh',
   'file',
   '',
@@ -7681,25 +7779,25 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '6938df16a0ab0a4da200cd68a7f2cd82dcff4a999e4b39bcb9a84cbc85a53fb8',
+  '866c8c950817cd8ac82990907b33cca86c1c4eb79ff5bb8ddc92618d7bb6b22a',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  '7b8be871faf8f426a3b6aa38eae2b221de7cd1e82cdd59236164940467115c2d',
+  'd851be43f0e17d0a8cb857ccdd6a19de716c77b5ccda7e44e89dcaa25840030f',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  '7f3405e65122795507a682176349ce40eabdefd759e4ef9193b4a25abbfe2e50',
+  'a36bd353f0e241f4f0796739ce8ab49aaf5cb8a40eb75eb355f2ab4eff74a27a',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
   '',
   '',
-  '052ed5cb5fd8b7c2f4416ddf92172b73d3ed7ae0863e3947222d551de5448cf0',
+  'aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d',
   1),
  ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
   'file',
@@ -11739,6 +11837,254 @@ def program_github_deployment_candidate(root: Path, candidate: Candidate) -> boo
         return False
 
 
+AI_OPERATIONAL_AUTHORITY_ID = "ai-operational-configuration-v1"
+AI_OPERATIONAL_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/"
+    "AgentOperationalConfiguration.java"
+)
+AI_OPERATIONAL_TEST_PATH = Path(
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/test/java/ai/ravenroot/extensions/ai/"
+    "AgentOperationalConfigurationTest.java"
+)
+AI_OPERATIONAL_SETTINGS = (
+    ("ai.default-max-turns", "defaultMaxTurns", "RAVENROOT_AI_DEFAULT_MAX_TURNS", "8"),
+    ("ai.max-turns", "maxTurns", "RAVENROOT_AI_MAX_TURNS", "64"),
+    ("ai.max-mcp-servers", "maxMcpServers", "RAVENROOT_AI_MAX_MCP_SERVERS", "8"),
+    ("ai.max-skill-payload-bytes", "maxSkillPayloadBytes", "RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES", "2097152"),
+    ("ai.max-skill-name-chars", "maxSkillNameChars", "RAVENROOT_AI_MAX_SKILL_NAME_CHARS", "64"),
+    ("ai.max-skill-description-chars", "maxSkillDescriptionChars", "RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS", "512"),
+    ("ai.max-skill-instructions-chars", "maxSkillInstructionsChars", "RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS", "16384"),
+    ("ai.max-mcp-tools-per-server", "maxMcpToolsPerServer", "RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER", "64"),
+    ("ai.default-max-discovered-mcp-tools-per-server", "defaultMaxDiscoveredMcpToolsPerServer", "RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "1024"),
+    ("ai.max-discovered-mcp-tools-per-server", "maxDiscoveredMcpToolsPerServer", "RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "1024"),
+    ("ai.max-llm-profile-bytes", "maxLlmProfileBytes", "RAVENROOT_AI_MAX_LLM_PROFILE_BYTES", "8192"),
+    ("ai.max-mcp-profile-bytes", "maxMcpProfileBytes", "RAVENROOT_AI_MAX_MCP_PROFILE_BYTES", "8192"),
+    ("ai.default-llm-timeout-ms", "defaultLlmTimeoutMs", "RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS", "60000"),
+    ("ai.max-llm-timeout-ms", "maxLlmTimeoutMs", "RAVENROOT_AI_MAX_LLM_TIMEOUT_MS", "600000"),
+    ("ai.default-mcp-timeout-ms", "defaultMcpTimeoutMs", "RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS", "30000"),
+    ("ai.max-mcp-timeout-ms", "maxMcpTimeoutMs", "RAVENROOT_AI_MAX_MCP_TIMEOUT_MS", "600000"),
+    ("ai.default-llm-request-bytes", "defaultLlmRequestBytes", "RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES", "8388608"),
+    ("ai.max-llm-request-bytes", "maxLlmRequestBytes", "RAVENROOT_AI_MAX_LLM_REQUEST_BYTES", "8388608"),
+    ("ai.default-llm-response-bytes", "defaultLlmResponseBytes", "RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES", "8388608"),
+    ("ai.max-llm-response-bytes", "maxLlmResponseBytes", "RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES", "8388608"),
+    ("ai.default-mcp-request-bytes", "defaultMcpRequestBytes", "RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES", "1048576"),
+    ("ai.max-mcp-request-bytes", "maxMcpRequestBytes", "RAVENROOT_AI_MAX_MCP_REQUEST_BYTES", "4194304"),
+    ("ai.default-mcp-response-bytes", "defaultMcpResponseBytes", "RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES", "1048576"),
+    ("ai.max-mcp-response-bytes", "maxMcpResponseBytes", "RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES", "4194304"),
+    ("ai.default-llm-concurrency", "defaultLlmConcurrency", "RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY", "4"),
+    ("ai.max-llm-concurrency", "maxLlmConcurrency", "RAVENROOT_AI_MAX_LLM_CONCURRENCY", "256"),
+    ("ai.default-mcp-concurrency", "defaultMcpConcurrency", "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", "4"),
+    ("ai.max-mcp-concurrency", "maxMcpConcurrency", "RAVENROOT_AI_MAX_MCP_CONCURRENCY", "256"),
+    ("ai.max-system-preamble-chars", "maxSystemPreambleChars", "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "8192"),
+    ("ai.max-http-decompression-ratio", "maxHttpDecompressionRatio", "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", "100"),
+    ("ai.max-model-input-provenance-entries", "maxModelInputProvenanceEntries", "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES", "4096"),
+)
+AI_OPERATIONAL_RETAINED_PARTITIONS = (
+    {"semanticPartition": "ai.model-output-projection-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes.",
+     "coverage": "AgentNodeBehaviorTest and LlmPromptNodeBehaviorTest exercise bounded model output projection and refusal.",
+     "candidateIds": ["oc-3aba38cfe203f9b3f49e", "oc-63a0108d73246ff05f46", "oc-87688d017e988172d961", "oc-b8cdf3dc00eb521149ee", "oc-a15232f6cf9188a6c271", "oc-479da44f4ca2e22dc41d", "oc-d61dcb75ce909feb893f", "oc-91a0b04901ac3e122a2d"]},
+    {"semanticPartition": "ai.model-response-json-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "OpenAI response grammar structural limits are fixed parser-safety invariants layered beneath the operator-configurable encoded response-byte limit; the minimum-one and half-body expressions are derived nonzero/value-size carriers, not independent workload defaults.",
+     "coverage": "AgentTurnTest and OpenAiCompatibleChatTest cover malformed, nested and oversized response refusal.",
+     "candidateIds": ["oc-b304ca383e681889cdad", "oc-ab050180737152e3db47", "oc-c8ad30ca50463b65dd7f", "oc-7395b4fd33ea8ab599a0", "oc-c8d3d8cc2848e890ccc0", "oc-0a9124d45147744e7625", "oc-9fe47da66b933edbe09f", "oc-52ff52588d6bda679008", "oc-fbdfcb025ba7a055e25d", "oc-75c5b834e1a5f9bf0826", "oc-ac6e4b728284c147ab9f", "oc-7b234fec362ee9c931d9", "oc-87bb69df4d6402ae6374", "oc-b3c01d47adf91bf50fd6"]},
+    {"semanticPartition": "ai.profile-json-schema-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "LLM and MCP environment profiles have closed shallow schemas. Their fixed nesting, field-count and key-size parser limits are stricter testable format invariants; decoded document bytes and dynamic MCP tool count remain independently operator-configurable.",
+     "coverage": "EnvironmentLlmProfileResolverTest and EnvironmentMcpProfileResolverTest cover exact schema, unknown fields and oversized profiles.",
+     "candidateIds": ["oc-c99966cbf3c2a9ae6a22", "oc-d08aeb4e34a2c7ee4fa5", "oc-8430bd8f6c7d9c77e0da", "oc-e1103ccb2aaca6c00feb", "oc-c3665467a01a705e73f0", "oc-d4a043e085968e89c956", "oc-5b6e7490edee77907819", "oc-97ae5ff1d3c12b1f1ccc"]},
+    {"semanticPartition": "ai.load-skill-argument-schema-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "load_skill accepts one name field. Its document allowance is derived from the configured maximum skill-name bytes with a fixed JSON framing floor; depth, collection/value and key limits describe that closed one-field wire schema.",
+     "coverage": "LoadSkillToolTest covers valid selection, unreadable arguments and configured long names.",
+     "candidateIds": ["oc-9e28fd1ab4498d75a555", "oc-2717e87fd768be6443dc", "oc-fc83f6a6057502f39e98", "oc-fb8c4f21457f70b6028c", "oc-da0cfb97aee8e2473bab", "oc-9f84f4e7ebb208cefd84", "oc-2a38f927656ddb0e54d6"]},
+    {"semanticPartition": "ai.mcp-tool-argument-json-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "Model-authored MCP arguments use a fixed correction/refusal envelope before authorization. These depth, fan-out, string and key ceilings limit parser amplification and are not server catalogue counts or deployment defaults.",
+     "coverage": "McpProtocolTest covers empty, malformed, scalar and bounded argument objects.",
+     "candidateIds": ["oc-98fcad8f7ba993e57442", "oc-a8290e051e14f2801eeb", "oc-c4a3ffef5b376e8aff9c", "oc-289a37588d57c8680dfc", "oc-ff6a0e8b4d7b90d908f2", "oc-88acd206eaf81c9229ca", "oc-23910800a6c0cd367f40", "oc-aa9aa7d0faefd822435c"]},
+    {"semanticPartition": "ai.mcp-projection-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "The model-facing MCP catalogue projection is re-measured under the managed response-byte ceiling; fixed depth/fan-out/key limits prevent local prefix/schema projection from amplifying a wire response already admitted by bytes.",
+     "coverage": "McpProtocolTest and McpToolsetTest cover projection expansion and refusal.",
+     "candidateIds": ["oc-f4386b9a20c123cbb041", "oc-19472f5234b8c555d7c5", "oc-d7724afa46ae936e695c", "oc-743afef29b48af69c2c0"]},
+    {"semanticPartition": "ai.mcp-response-json-envelope",
+     "classification": "security-ceiling-or-default", "status": "retained",
+     "rationale": "MCP response collection capacity is derived from the operator-configurable discovered-tool maximum while fixed depth, value multiplier, key length and nonzero byte carriers bound JSON-RPC parser amplification.",
+     "coverage": "McpProtocolTest and McpSessionTest cover dynamic catalogues, malformed responses and configured response bounds.",
+     "candidateIds": ["oc-b40c4e7d6024ba83d129", "oc-2a2b015ed390039a879a", "oc-91c0b087437402d8bb97", "oc-0c82731c3b4ee9aa0d32", "oc-0033f52fb149e7fd5db1"]},
+)
+AI_OPERATIONAL_RETAINED_PATHS = {
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentTurn.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentLlmProfileResolver.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentMcpProfileResolver.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LoadSkillTool.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpProtocol.java",
+    "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/OpenAiCompatibleChat.java",
+}
+
+
+def ai_operational_retained_cohort(discovered: dict[str, Candidate]) -> set[str]:
+    """Discover the reviewed parser-envelope family without trusting inventory classifications."""
+    return {candidate.id for candidate in discovered.values()
+            if candidate.path in AI_OPERATIONAL_RETAINED_PATHS
+            and ((candidate.kind == "inline-operational-call"
+                  and candidate.role == "new-PayloadLimits"
+                  and candidate.expression[:1].isdigit())
+                 or (candidate.path.endswith("/LoadSkillTool.java")
+                     and candidate.role in {"documentBytes", "argumentLimits"}
+                     and candidate.expression != "256"))}
+AI_OPERATIONAL_PROOF_PATHS = (
+    AI_OPERATIONAL_CONFIGURATION_PATH,
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentSkill.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentLlmProfileResolver.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/EnvironmentMcpProfileResolver.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpProtocol.java"),
+    Path("ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpSession.java"),
+    Path("compose.yaml"),
+    Path("deploy/helm/ravenroot/templates/_helpers.tpl"),
+    Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+    Path("deploy/helm/ravenroot/values.schema.json"),
+    Path("deploy/helm/ravenroot/values.yaml"),
+    Path("deploy/kubernetes/ravenroot.yaml"),
+)
+AI_OPERATIONAL_TEST_METHODS = (
+    "missingAndBlankSettingsUseDefaults",
+    "validValuesOverrideEveryDefault",
+    "invalidValuesAreActionable",
+    "crossFieldRelationshipsAreValidated",
+    "compatibilityDigestPinsTheCompletePolicy",
+)
+
+
+def ai_operational_source_present(root: Path) -> bool:
+    """Keep the authority mandatory while any typed AI owner or consumer remains."""
+    return any((root / path).exists() for path in (
+        *AI_OPERATIONAL_PROOF_PATHS[:8],
+        AI_OPERATIONAL_TEST_PATH,
+    ))
+
+
+def ai_operational_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the complete AI startup-policy family from typed code and deployment carriers."""
+    try:
+        sources = {path: (root / path).read_text(encoding="utf-8")
+                   for path in AI_OPERATIONAL_PROOF_PATHS}
+        test_source = (root / AI_OPERATIONAL_TEST_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    source = sources[AI_OPERATIONAL_CONFIGURATION_PATH]
+    components = java_record_components(source, "AgentOperationalConfiguration")
+    if components != tuple(field for _setting, field, _environment, _default in AI_OPERATIONAL_SETTINGS):
+        return None
+    factory_span = java_method_span(source, "AgentOperationalConfiguration", "fromEnvironment")
+    defaults_span = java_method_span(source, "AgentOperationalConfiguration", "defaults")
+    constructor_span = java_compact_constructor_span(source, "AgentOperationalConfiguration")
+    if factory_span is None or defaults_span is None or constructor_span is None:
+        return None
+    factory = normalized(source[slice(*factory_span)])
+    constructor = normalized(source[slice(*constructor_span)])
+    settings: list[dict[str, object]] = []
+    candidate_ids: set[str] = set()
+    for setting, field, environment, default in AI_OPERATIONAL_SETTINGS:
+        if factory.count(normalized(f'value(environment, "{environment}", d.{field})')) != 1 \
+                or constructor.count(normalized(f'positive("{environment}", {field})')) != 1:
+            return None
+        ids = sorted(candidate.id for candidate in discovered.values()
+                     if candidate.kind == "environment-binding"
+                     and candidate.expression == environment)
+        if not ids or any(identifier in candidate_ids for identifier in ids):
+            return None
+        candidate_ids.update(ids)
+        settings.append({"setting": setting, "field": field, "environment": environment,
+                         "default": default, "candidateIds": ids})
+    test_digests = {method: java_method_digest(
+        test_source, "AgentOperationalConfigurationTest", method)
+        for method in AI_OPERATIONAL_TEST_METHODS}
+    if any(digest is None for digest in test_digests.values()):
+        return None
+    helper_digests = {method: java_method_digest(source, "AgentOperationalConfiguration", method)
+                      for method in ("value", "positive", "supportedPayload", "notAbove")}
+    if any(digest is None for digest in helper_digests.values()):
+        return None
+    retained = [copy.deepcopy(partition) for partition in AI_OPERATIONAL_RETAINED_PARTITIONS]
+    retained_ids = [identifier for partition in retained for identifier in partition["candidateIds"]]
+    if len(retained_ids) != 54 or len(set(retained_ids)) != 54 \
+            or set(retained_ids) != ai_operational_retained_cohort(discovered):
+        return None
+    candidate_ids.update(retained_ids)
+    return {
+        "kind": "java-ai-operational-configuration-v1",
+        "settings": settings,
+        "semanticPartitions": retained,
+        "candidateIds": sorted(candidate_ids),
+        "sourceDigests": [{"path": path.as_posix(), "digest": _source_digest(text)}
+                          for path, text in sources.items()],
+        "factoryBodyDigest": java_method_digest(
+            source, "AgentOperationalConfiguration", "fromEnvironment"),
+        "defaultsBodyDigest": java_method_digest(
+            source, "AgentOperationalConfiguration", "defaults"),
+        "compactConstructorDigest": java_span_digest(source, constructor_span),
+        "helperBodyDigests": helper_digests,
+        "testPath": AI_OPERATIONAL_TEST_PATH.as_posix(),
+        "testMethodDigests": test_digests,
+    }
+
+
+def ai_operational_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    marked = {identifier for identifier, entry in entries.items()
+              if entry.get("aiOperationalAuthority") is not None}
+    if not ai_operational_source_present(root):
+        errors = ([] if authorities in (None, {})
+                  else ["AI operational authority exists without its typed source family"])
+        if marked:
+            errors.append("AI operational authority markers exist without their typed source family")
+        return errors
+    expected = ai_operational_authority_from_source(root, discovered)
+    if expected is None:
+        return ["AI operational configuration source family is incomplete or unsupported"]
+    if authorities != {AI_OPERATIONAL_AUTHORITY_ID: expected}:
+        return ["AI operational configuration requires its exact source-derived authority"]
+    expected_ids = set(str(identifier) for identifier in expected["candidateIds"])
+    errors: list[str] = []
+    if marked != expected_ids:
+        errors.append("AI operational authority candidate partition is missing, duplicated, or foreign")
+    owner = f"{AI_OPERATIONAL_CONFIGURATION_PATH.as_posix()}#AgentOperationalConfiguration"
+    for contract in expected["settings"]:
+        setting = str(contract["setting"])
+        ids = set(str(identifier) for identifier in contract["candidateIds"])
+        for identifier in ids:
+            entry = entries.get(identifier, {})
+            if entry.get("aiOperationalAuthority") != AI_OPERATIONAL_AUTHORITY_ID \
+                    or entry.get("setting") != setting \
+                    or entry.get("owner") != owner \
+                    or entry.get("field") != contract["field"] \
+                    or entry.get("bindings") != [contract["environment"]] \
+                    or entry.get("default") != contract["default"] \
+                    or entry.get("status") != "already-centralized" \
+                    or entry.get("classification") != "operator-configurable":
+                errors.append(f"{identifier}: AI operational authority metadata has drifted")
+    for partition in expected["semanticPartitions"]:
+        for identifier in partition["candidateIds"]:
+            entry = entries.get(identifier, {})
+            if entry.get("aiOperationalAuthority") != AI_OPERATIONAL_AUTHORITY_ID \
+                    or entry.get("status") != partition["status"] \
+                    or entry.get("classification") != partition["classification"] \
+                    or entry.get("rationale") != partition["rationale"] \
+                    or entry.get("coverage") != partition["coverage"]:
+                errors.append(f"{identifier}: AI retained semantic partition metadata has drifted")
+    return errors
+
+
 def program_github_policy_cohort_candidate_ids(root: Path, discovered: dict[str, Candidate]) -> set[str]:
     reviewed = {identifier for contract in PROGRAM_GITHUB_CONTRACTS + PROGRAM_GITHUB_BINDING_CARRIERS
                 for identifier in contract["candidateIds"]}
@@ -12178,7 +12524,7 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
- 'scripts/publish_environment_reference.py': '92e757dacb2fceba8d9499ccf79863ec0d15d5fe60ae587c603be2295eb2e545',
+ 'scripts/publish_environment_reference.py': 'd3a72c798179521b92c444690c295d52b5c9a19a810a4b433ea682043fb216ce',
  'scripts/tests/test_publish_environment_reference.py': '135e497abc1202d12264bba621dfb75d29854df4f59e90b5a1a994108b46bb49',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
@@ -15418,6 +15764,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             entry.get("helmAuthority"),
             entry.get("persistenceAuthority"),
             entry.get("externalIoPolicyAuthority"),
+            entry.get("aiOperationalAuthority"),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -15495,6 +15842,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(interaction_websocket_authority_errors(
         root, document.get("interactionWebSocketAuthorities"), entries, discovered,
     ))
+    errors.extend(ai_operational_authority_errors(
+        root, document.get("aiOperationalAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -15525,6 +15875,8 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("jwkPolicyAuthority") == JWK_POLICY_AUTHORITY_ID:
             continue
         if representative.get("interactionWebSocketAuthority") == INTERACTION_WEBSOCKET_AUTHORITY_ID:
+            continue
+        if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
             continue
         if representative.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID \
                 and representative.get("finalReviewGroup") == "embed-enabled-operator-setting":

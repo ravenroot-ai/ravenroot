@@ -48,6 +48,7 @@ final class McpSession {
     private final McpProfile profile;
     private final NodePackageServices services;
     private final NodeMessage message;
+    private final int maximumDecompressionRatio;
     /** What is left of the whole run, asked freshly on every exchange rather than captured. */
     private final LongSupplier remainingRunMillis;
     private final AtomicLong nextId = new AtomicLong(1);
@@ -78,11 +79,12 @@ final class McpSession {
     private volatile String sessionId = "";
 
     private McpSession(McpProfile profile, NodePackageServices services, NodeMessage message,
-                       LongSupplier remainingRunMillis) {
+                       LongSupplier remainingRunMillis, int maximumDecompressionRatio) {
         this.profile = profile;
         this.services = services;
         this.message = message;
         this.remainingRunMillis = remainingRunMillis;
+        this.maximumDecompressionRatio = maximumDecompressionRatio;
     }
 
     /**
@@ -97,8 +99,10 @@ final class McpSession {
      *     {@link McpRefusal}
      */
     static CompletionStage<McpSession> open(McpProfile profile, NodePackageServices services,
-                                            NodeMessage message, LongSupplier remainingRunMillis) {
-        var session = new McpSession(profile, services, message, remainingRunMillis);
+                                            NodeMessage message, LongSupplier remainingRunMillis,
+                                            int maximumDecompressionRatio) {
+        var session = new McpSession(profile, services, message, remainingRunMillis,
+                maximumDecompressionRatio);
         return session.exchange(McpProtocol.initialize(session.nextId.getAndIncrement()), true)
                 .thenCompose(ignored -> session.exchange(McpProtocol.initialized(), false))
                 .thenCompose(ignored -> session.exchange(
@@ -107,7 +111,7 @@ final class McpSession {
                     // The SAME object all the way through, deliberately: it is carrying the session
                     // handle and the id counter, and a second object would start both from scratch.
                     session.announced = McpProtocol.readTools(
-                            exchange.value(), exchange.maximumOutputBytes());
+                            exchange.value(), exchange.maximumOutputBytes(), profile.maxDiscoveredTools());
                     session.announcedMaximumOutputBytes = exchange.maximumOutputBytes();
                     return session;
                 });
@@ -163,12 +167,16 @@ final class McpSession {
         }
         OutboundCall<OutboundHttpResponse> call;
         try {
+            if (body.length > profile.maxRequestBytes()) {
+                throw new McpRefusal(McpRefusal.Reason.SERVER_REQUEST_REFUSED);
+            }
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                     profile.endpoint(), "POST", headers(), body, Duration.ofMillis(remaining),
                     profile.credentialBinding().orElse(null), null,
-                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                    ExternalIoLimits.compressedHttp(profile.maxRequestBytes(),
                             profile.maxResponseBytes(), profile.maxResponseBytes(),
-                            profile.maxResponseBytes(), 100, Duration.ofMillis(remaining),
+                            profile.maxResponseBytes(), maximumDecompressionRatio,
+                            Duration.ofMillis(remaining),
                             expectsResult ? Set.of("application/json", "text/event-stream") : Set.of()),
                     ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {
@@ -195,7 +203,8 @@ final class McpSession {
             int outputLimit = Math.toIntExact(Math.min(profile.maxResponseBytes(),
                     response.effectiveMaximumOutputBytes()));
             return new ExchangeResult(McpProtocol.readResult(response.body(),
-                    header(response.headers(), "content-type"), outputLimit), outputLimit);
+                    header(response.headers(), "content-type"), outputLimit,
+                    profile.maxDiscoveredTools()), outputLimit);
         });
     }
 

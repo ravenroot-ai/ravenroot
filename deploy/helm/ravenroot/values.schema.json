@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["replicaCount", "image", "service", "auth", "engine", "executionRuntime", "graph", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
+  "required": ["replicaCount", "image", "service", "auth", "engine", "executionRuntime", "graph", "ai", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "programTimeoutMs": {
@@ -206,6 +206,7 @@
         }
       }
     },
+    "ai": { "$ref": "#/definitions/aiConfiguration" },
     "assistant": {
       "type": "object",
       "additionalProperties": false,
@@ -572,6 +573,45 @@
         { "type": "integer", "minimum": 1, "maximum": 32 },
         { "$ref": "#/definitions/humanTaskBlank" }
       ]
+    },
+    "aiPositive": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }] },
+    "aiConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultMaxTurns", "maxTurns", "maxMcpServers", "maxSkillPayloadBytes", "maxSkillNameChars", "maxSkillDescriptionChars", "maxSkillInstructionsChars", "maxMcpToolsPerServer", "defaultMaxDiscoveredMcpToolsPerServer", "maxDiscoveredMcpToolsPerServer", "maxLlmProfileBytes", "maxMcpProfileBytes", "defaultLlmTimeoutMs", "maxLlmTimeoutMs", "defaultMcpTimeoutMs", "maxMcpTimeoutMs", "defaultLlmRequestBytes", "maxLlmRequestBytes", "defaultLlmResponseBytes", "maxLlmResponseBytes", "defaultMcpRequestBytes", "maxMcpRequestBytes", "defaultMcpResponseBytes", "maxMcpResponseBytes", "defaultLlmConcurrency", "maxLlmConcurrency", "defaultMcpConcurrency", "maxMcpConcurrency", "maxSystemPreambleChars", "maxHttpDecompressionRatio", "maxModelInputProvenanceEntries"],
+      "properties": {
+        "defaultMaxTurns": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MAX_TURNS", "$ref": "#/definitions/aiPositive" },
+        "maxTurns": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_TURNS", "$ref": "#/definitions/aiPositive" },
+        "maxMcpServers": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_SERVERS", "$ref": "#/definitions/aiPositive" },
+        "maxSkillPayloadBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES", "$ref": "#/definitions/aiPositive" },
+        "maxSkillNameChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SKILL_NAME_CHARS", "$ref": "#/definitions/aiPositive" },
+        "maxSkillDescriptionChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS", "$ref": "#/definitions/aiPositive" },
+        "maxSkillInstructionsChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS", "$ref": "#/definitions/aiPositive" },
+        "maxMcpToolsPerServer": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER", "$ref": "#/definitions/aiPositive" },
+        "defaultMaxDiscoveredMcpToolsPerServer": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "$ref": "#/definitions/aiPositive" },
+        "maxDiscoveredMcpToolsPerServer": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "$ref": "#/definitions/aiPositive" },
+        "maxLlmProfileBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_LLM_PROFILE_BYTES", "$ref": "#/definitions/aiPositive" },
+        "maxMcpProfileBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_PROFILE_BYTES", "$ref": "#/definitions/aiPositive" },
+        "defaultLlmTimeoutMs": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS", "$ref": "#/definitions/aiPositive" },
+        "maxLlmTimeoutMs": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_LLM_TIMEOUT_MS", "$ref": "#/definitions/aiPositive" },
+        "defaultMcpTimeoutMs": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS", "$ref": "#/definitions/aiPositive" },
+        "maxMcpTimeoutMs": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_TIMEOUT_MS", "$ref": "#/definitions/aiPositive" },
+        "defaultLlmRequestBytes": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES", "$ref": "#/definitions/aiPositive" },
+        "maxLlmRequestBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_LLM_REQUEST_BYTES", "$ref": "#/definitions/aiPositive" },
+        "defaultLlmResponseBytes": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES", "$ref": "#/definitions/aiPositive" },
+        "maxLlmResponseBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES", "$ref": "#/definitions/aiPositive" },
+        "defaultMcpRequestBytes": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES", "$ref": "#/definitions/aiPositive" },
+        "maxMcpRequestBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_REQUEST_BYTES", "$ref": "#/definitions/aiPositive" },
+        "defaultMcpResponseBytes": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES", "$ref": "#/definitions/aiPositive" },
+        "maxMcpResponseBytes": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES", "$ref": "#/definitions/aiPositive" },
+        "defaultLlmConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
+        "maxLlmConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_LLM_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
+        "defaultMcpConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
+        "maxMcpConcurrency": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MCP_CONCURRENCY", "$ref": "#/definitions/aiPositive" },
+        "maxSystemPreambleChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "$ref": "#/definitions/aiPositive" },
+        "maxHttpDecompressionRatio": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", "$ref": "#/definitions/aiPositive" },
+        "maxModelInputProvenanceEntries": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES", "$ref": "#/definitions/aiPositive" }
+      }
     }
   }
 }

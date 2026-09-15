@@ -108,6 +108,68 @@ spec:
               value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxCumulativePayloadBytes }}
             - name: RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT
               value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxRecoveryDeliveriesPerAttempt }}
+            - name: RAVENROOT_AI_DEFAULT_MAX_TURNS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultMaxTurns }}
+            - name: RAVENROOT_AI_MAX_TURNS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxTurns }}
+            - name: RAVENROOT_AI_MAX_MCP_SERVERS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpServers }}
+            - name: RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxSkillPayloadBytes }}
+            - name: RAVENROOT_AI_MAX_SKILL_NAME_CHARS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxSkillNameChars }}
+            - name: RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxSkillDescriptionChars }}
+            - name: RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxSkillInstructionsChars }}
+            - name: RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpToolsPerServer }}
+            - name: RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultMaxDiscoveredMcpToolsPerServer }}
+            - name: RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxDiscoveredMcpToolsPerServer }}
+            - name: RAVENROOT_AI_MAX_LLM_PROFILE_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxLlmProfileBytes }}
+            - name: RAVENROOT_AI_MAX_MCP_PROFILE_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpProfileBytes }}
+            - name: RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultLlmTimeoutMs }}
+            - name: RAVENROOT_AI_MAX_LLM_TIMEOUT_MS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxLlmTimeoutMs }}
+            - name: RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultMcpTimeoutMs }}
+            - name: RAVENROOT_AI_MAX_MCP_TIMEOUT_MS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpTimeoutMs }}
+            - name: RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultLlmRequestBytes }}
+            - name: RAVENROOT_AI_MAX_LLM_REQUEST_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxLlmRequestBytes }}
+            - name: RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultLlmResponseBytes }}
+            - name: RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxLlmResponseBytes }}
+            - name: RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultMcpRequestBytes }}
+            - name: RAVENROOT_AI_MAX_MCP_REQUEST_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpRequestBytes }}
+            - name: RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultMcpResponseBytes }}
+            - name: RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpResponseBytes }}
+            - name: RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultLlmConcurrency }}
+            - name: RAVENROOT_AI_MAX_LLM_CONCURRENCY
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxLlmConcurrency }}
+            - name: RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.defaultMcpConcurrency }}
+            - name: RAVENROOT_AI_MAX_MCP_CONCURRENCY
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxMcpConcurrency }}
+            - name: RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxSystemPreambleChars }}
+            - name: RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxHttpDecompressionRatio }}
+            - name: RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES
+              value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxModelInputProvenanceEntries }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultResponseBytes }}
             - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES

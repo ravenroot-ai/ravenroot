@@ -4031,7 +4031,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
+                mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -5836,6 +5837,19 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertEqual([], audit.reconciliation_plan_errors(
                 root, source_document, (candidate,), plan)[0])
 
+            empty_semantic_reviews = copy.deepcopy(plan)
+            empty_semantic_reviews["semanticReviews"] = []
+            self.assertEqual([], audit.reconciliation_plan_errors(
+                root, source_document, (candidate,), empty_semantic_reviews)[0])
+            malformed_semantic_review = copy.deepcopy(plan)
+            malformed_semantic_review["semanticReviews"] = [{
+                "candidateId": "oc-new", "approved": False,
+                "rationale": "Not approved.", "beforeMetadata": {}, "afterMetadata": {},
+            }]
+            self.assertTrue(any("source-anchored row approval" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), malformed_semantic_review)[0]))
+
             with mock.patch.object(audit, "current_route_table_authority", return_value={}):
                 remapped, remap_errors = audit.apply_reconciliation(
                     root, source_document, (candidate,), plan)
@@ -6012,7 +6026,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))
@@ -6142,6 +6157,68 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:
             audit.main(["--accept-retired-pending"])
         self.assertEqual(2, failure.exception.code)
+
+
+class AiOperationalPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.candidates = audit.discover(ROOT)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.inventory = audit.load_inventory()
+        cls.entries = {entry["id"]: entry for entry in cls.inventory["entries"]}
+
+    def test_source_derived_authority_covers_every_typed_setting_and_binding(self) -> None:
+        authority = audit.ai_operational_authority_from_source(ROOT, self.discovered)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        self.assertEqual(31, len(authority["settings"]))
+        environments = {environment for _setting, _field, environment, _default
+                        in audit.AI_OPERATIONAL_SETTINGS}
+        self.assertEqual(
+            environments,
+            {contract["environment"] for contract in authority["settings"]},
+        )
+        self.assertEqual(
+            {candidate.id for candidate in self.candidates
+             if candidate.kind == "environment-binding"
+             and candidate.expression in environments},
+            {identifier for contract in authority["settings"]
+             for identifier in contract["candidateIds"]},
+        )
+        self.assertEqual(7, len(authority["semanticPartitions"]))
+        retained = {identifier for partition in authority["semanticPartitions"]
+                    for identifier in partition["candidateIds"]}
+        self.assertEqual(54, len(retained))
+        self.assertEqual(retained, audit.ai_operational_retained_cohort(self.discovered))
+        self.assertEqual(
+            [],
+            audit.ai_operational_authority_errors(
+                ROOT, self.inventory["aiOperationalAuthorities"],
+                self.entries, self.discovered),
+        )
+
+    def test_missing_binding_marker_cannot_escape_the_closed_partition(self) -> None:
+        entries = copy.deepcopy(self.entries)
+        identifier = self.inventory["aiOperationalAuthorities"][
+            audit.AI_OPERATIONAL_AUTHORITY_ID]["candidateIds"][0]
+        entries[identifier].pop("aiOperationalAuthority")
+        errors = audit.ai_operational_authority_errors(
+            ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered)
+        self.assertTrue(any("partition" in error for error in errors), errors)
+
+    def test_retained_ai_partition_relabel_or_new_payload_limit_fails_closed(self) -> None:
+        retained_id = self.inventory["aiOperationalAuthorities"][
+            audit.AI_OPERATIONAL_AUTHORITY_ID]["semanticPartitions"][0]["candidateIds"][0]
+        entries = copy.deepcopy(self.entries)
+        entries[retained_id]["classification"] = "protocol-or-format-invariant"
+        self.assertTrue(audit.ai_operational_authority_errors(
+            ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered))
+
+        from dataclasses import replace
+        source = self.discovered[retained_id]
+        injected = replace(source, id="oc-injected-ai-envelope", expression="999")
+        changed = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.ai_operational_authority_from_source(ROOT, changed))
 
 
 class ProgramGithubPolicyAuditTest(unittest.TestCase):

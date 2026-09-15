@@ -16,6 +16,12 @@ import {
 } from './layered-layout.js';
 import * as d3 from 'd3';
 import {
+  additionalPropertyGroupsValid,
+  nextAdditionalPropertyGroupItem,
+  serializeAdditionalPropertyGroups,
+  splitAdditionalPropertyGroups,
+} from './additional-property-groups.js';
+import {
   detectAndParse,
   GFY_MAX_WARN,
   GFY_SAMPLE,
@@ -6027,6 +6033,8 @@ function readNodeEditorPatch(form, model) {
   const values = new FormData(form);
   const id = String(values.get('id') || '').trim();
   const custom = readPropertyEditor(form);
+  const additionalGroups = readAdditionalPropertyGroupEditor(
+    form, catalogDescriptor(String(values.get('behavior') || '').trim()));
   const catalog = readCatalogPropertyEditor(form);
   const nature = readNatureEditor(form);
   // The bypass flag is read HERE and not at the submit site, and that placement is the
@@ -6066,11 +6074,11 @@ function readNodeEditorPatch(form, model) {
     // under a default type, which is the kind of divergence that only surfaces on a GraphML round
     // trip, so the two lists are kept in the same order to make an omission visible by eye.
     properties: {
-      ...custom.properties, ...catalog.properties, ...nature.properties,
+      ...custom.properties, ...additionalGroups.properties, ...catalog.properties, ...nature.properties,
       ...bypass.properties, ...runtimeConcurrency.properties, ...join.properties,
     },
     propertyTypes: {
-      ...custom.propertyTypes, ...catalog.propertyTypes, ...nature.propertyTypes,
+      ...custom.propertyTypes, ...additionalGroups.propertyTypes, ...catalog.propertyTypes, ...nature.propertyTypes,
       ...bypass.propertyTypes, ...runtimeConcurrency.propertyTypes, ...join.propertyTypes,
     },
   };
@@ -6488,8 +6496,11 @@ function renderNodeForm(model, creating) {
     DEFAULT_MAX_CONCURRENCY_PROPERTY, descriptor?.maxConcurrencyProperty,
     bypassPropertyName(descriptor, nodeTypeCatalog),
   ].filter(Boolean));
+  const additionalGroups = splitAdditionalPropertyGroups(
+    descriptor, model.properties || {}, model.propertyTypes || {});
   const extras = additionalProperties(model, 'node')
-    .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name));
+    .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name)
+      && !additionalGroups.claimed.has(property.name));
   const visualTypes = NODE_TYPES.map(type =>
     `<option value="${type.type}" ${type.type === model.nodeType ? 'selected' : ''}>${escapeHtml(type.label)}</option>`)
     .join('');
@@ -6520,6 +6531,7 @@ function renderNodeForm(model, creating) {
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
         catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
+      <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
         ${creating ? '' : '<button class="btn danger" type="button" id="delete-node">Delete</button>'}
@@ -6552,6 +6564,8 @@ function renderNodeForm(model, creating) {
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
       programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
+    document.getElementById('additional-property-groups').innerHTML = additionalPropertyGroupsHtml(
+      splitAdditionalPropertyGroups(selected, model.properties || {}, model.propertyTypes || {}).groups);
     bindProgramWorkspace(form, model);
   });
   // `NodeBypassValidator` refuses the key on every non-BEHAVIOR node, `false` included, so
@@ -8748,6 +8762,110 @@ function propertyEditorHtml(id, properties) {
   return `<div class="editor-section-title"><span>Additional properties</span>
       <button class="property-add" type="button" data-add-property="${escapeAttribute(id)}">＋ Add property</button></div>
     <div id="${id}" class="property-editor">${properties.map(propertyRowHtml).join('')}</div>`;
+}
+
+function additionalPropertyGroupsHtml(groups) {
+  return groups.map(group => `<section class="additional-property-group"
+      data-additional-group="${escapeAttribute(group.definition.name)}">
+    <div class="editor-section-title"><span>${escapeHtml(group.definition.displayName || group.definition.name)}</span>
+      <button class="property-add" type="button" data-add-additional-group>＋ Add</button></div>
+    ${group.definition.description ? `<p>${escapeHtml(group.definition.description)}</p>` : ''}
+    <div data-additional-group-items>${group.items.map(item => additionalPropertyGroupItemHtml(
+      group.definition, item)).join('')}</div>
+  </section>`).join('');
+}
+
+function additionalPropertyGroupItemHtml(definition, item) {
+  return `<fieldset class="additional-property-group-item"><legend>${escapeHtml(
+    definition.displayName || definition.name)}</legend>
+    ${(definition.fields || []).map(field => {
+      const entry = item.fields[field.name];
+      return `<label class="editor-field">${escapeHtml(field.displayName || field.name)}
+        ${additionalPropertyGroupFieldControlHtml(field, entry)}</label>`;
+    }).join('')}
+    <button type="button" class="property-remove" data-remove-additional-group>Remove group</button>
+  </fieldset>`;
+}
+
+function additionalPropertyGroupFieldControlHtml(field, entry) {
+  const type = String(field.type || 'STRING');
+  const value = String(entry?.value ?? field.defaultValue ?? '');
+  const fieldName = escapeAttribute(field.name);
+  const data = ` data-additional-field="${fieldName}" data-additional-type="${escapeAttribute(
+    type.toLowerCase())}"`;
+  const required = field.required ? ' required' : '';
+  const numericBounds = `${field.minimumValue != null && field.minimumValue !== ''
+    ? ` min="${escapeAttribute(field.minimumValue)}"` : ''}`
+    + `${field.maximumValue != null && field.maximumValue !== ''
+      ? ` max="${escapeAttribute(field.maximumValue)}"` : ''}`;
+  const encodedBounds = `${field.maximumUtf8Bytes > 0
+    ? ` data-maximum-utf8-bytes="${field.maximumUtf8Bytes}"` : ''}`
+    + `${field.maximumItems > 0 ? ` data-maximum-items="${field.maximumItems}"` : ''}`
+    + `${field.maximumItemUtf8Bytes > 0
+      ? ` data-maximum-item-utf8-bytes="${field.maximumItemUtf8Bytes}"` : ''}`;
+  if (field.allowedValues?.length) {
+    const declared = field.allowedValues.some(option => String(option) === value);
+    const undeclared = value === ''
+      ? '<option value="" selected>Not declared</option>' : '';
+    const mismatched = value !== '' && !declared
+      ? `<option value="${escapeAttribute(value)}" selected>Current value not among the declared alternatives: ${escapeHtml(value)}</option>` : '';
+    return `<select${data}${required}>${undeclared}${mismatched}${field.allowedValues.map(option =>
+      `<option value="${escapeAttribute(option)}" ${String(option) === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
+  }
+  if (type === 'SECRET_REFERENCE') {
+    return `<select${data}${required}>${secretReferenceOptionsHtml(value)}</select>`;
+  }
+  if (type === 'TEXT' || type === 'CEL_EXPRESSION') {
+    return `<textarea${data}${encodedBounds}${required}>${escapeHtml(value)}</textarea>`;
+  }
+  if (type === 'BOOLEAN') {
+    const recognized = value === '' || value === 'true' || value === 'false';
+    const undeclared = value === '' ? '<option value="" selected>Not declared</option>' : '';
+    const mismatched = recognized ? ''
+      : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
+    return `<select${data}${required}>${undeclared}${mismatched}`
+      + `<option value="false" ${value === 'false' ? 'selected' : ''}>false</option>`
+      + `<option value="true" ${value === 'true' ? 'selected' : ''}>true</option></select>`;
+  }
+  const inputType = type === 'INTEGER' || type === 'DECIMAL' ? 'number' : 'text';
+  const step = type === 'DECIMAL' ? ' step="any"' : '';
+  return `<input${data} type="${inputType}"${step}${numericBounds}${encodedBounds}`
+    + ` value="${escapeAttribute(value)}"${required}>`;
+}
+
+function removeAdditionalPropertyGroupItem(control) {
+  const item = control?.closest('.additional-property-group-item');
+  if (!item) return false;
+  item.remove();
+  return true;
+}
+
+function appendAdditionalPropertyGroupItem(section, definition) {
+  const items = section?.querySelector('[data-additional-group-items]');
+  if (!items || !definition) return false;
+  const group = { definition, items: Array.from(
+    section.querySelectorAll('.additional-property-group-item')) };
+  items.insertAdjacentHTML('beforeend',
+    additionalPropertyGroupItemHtml(definition, nextAdditionalPropertyGroupItem(group)));
+  return true;
+}
+
+function readAdditionalPropertyGroupEditor(form, descriptor) {
+  const definitions = new Map((descriptor?.additionalProperties || [])
+    .map(group => [group.name, group]));
+  const groups = Array.from(form.querySelectorAll('[data-additional-group]')).map(section => ({
+    definition: definitions.get(section.dataset.additionalGroup)
+      || { name: section.dataset.additionalGroup, fields: [] },
+    items: Array.from(section.querySelectorAll('.additional-property-group-item')).map(item => ({
+      fields: Object.fromEntries(Array.from(item.querySelectorAll('[data-additional-field]'))
+        .map(input => [input.dataset.additionalField,
+          { value: input.value, type: input.dataset.additionalType }])),
+    })),
+  }));
+  if (!additionalPropertyGroupsValid(groups)) {
+    throw new TypeError('additional property group is incomplete');
+  }
+  return serializeAdditionalPropertyGroups(groups);
 }
 
 function propertyRowHtml(property = { name: '', type: 'string', value: '' }) {
@@ -14591,6 +14709,20 @@ document.addEventListener('click', event => {
       inspectorDraft.dirty = inspectInspectorDraft(inspectorDraft).changed;
       scheduleInspectorDraftCommit(inspectorDraft, true);
     }
+    return;
+  }
+  const removeAdditionalGroup = event.target.closest('[data-remove-additional-group]');
+  if (removeAdditionalGroup) {
+    removeAdditionalPropertyGroupItem(removeAdditionalGroup);
+    return;
+  }
+  const addAdditionalGroup = event.target.closest('[data-add-additional-group]');
+  if (addAdditionalGroup) {
+    const section = addAdditionalGroup.closest('[data-additional-group]');
+    const descriptor = catalogDescriptor(section.closest('form')?.elements.behavior?.value);
+    const definition = (descriptor?.additionalProperties || [])
+      .find(group => group.name === section.dataset.additionalGroup);
+    appendAdditionalPropertyGroupItem(section, definition);
     return;
   }
   const addProperty = event.target.closest('[data-add-property]');

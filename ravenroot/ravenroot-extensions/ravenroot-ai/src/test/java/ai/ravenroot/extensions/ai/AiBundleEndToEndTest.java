@@ -314,7 +314,7 @@ class AiBundleEndToEndTest {
                 "provider", PROFILE, "instructions", "be terse", "objective", "say hi",
                 "skills.1.name", "runbook",
                 "skills.1.description", "the operational runbook",
-                "skills.1.instructions", "x".repeat(AgentSkill.MAX_INSTRUCTIONS_CHARS + 1)));
+                "skills.1.instructions", "x".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_INSTRUCTIONS_CHARS + 1)));
 
         // BehaviorRegistry#create is the call the runtime makes when it composes a graph, so this
         // exercises the same path a submission takes rather than a direct call to the behavior.

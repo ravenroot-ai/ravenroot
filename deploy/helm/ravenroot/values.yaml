@@ -63,6 +63,40 @@ graph:
     maxCumulativePayloadBytes: ""
     maxRecoveryDeliveriesPerAttempt: ""
 
+# AI bundle defaults and admission ceilings. Blank values select the immutable Java defaults.
+ai:
+  defaultMaxTurns: ""
+  maxTurns: ""
+  maxMcpServers: ""
+  maxSkillPayloadBytes: ""
+  maxSkillNameChars: ""
+  maxSkillDescriptionChars: ""
+  maxSkillInstructionsChars: ""
+  maxMcpToolsPerServer: ""
+  defaultMaxDiscoveredMcpToolsPerServer: ""
+  maxDiscoveredMcpToolsPerServer: ""
+  maxLlmProfileBytes: ""
+  maxMcpProfileBytes: ""
+  defaultLlmTimeoutMs: ""
+  maxLlmTimeoutMs: ""
+  defaultMcpTimeoutMs: ""
+  maxMcpTimeoutMs: ""
+  defaultLlmRequestBytes: ""
+  maxLlmRequestBytes: ""
+  defaultLlmResponseBytes: ""
+  maxLlmResponseBytes: ""
+  defaultMcpRequestBytes: ""
+  maxMcpRequestBytes: ""
+  defaultMcpResponseBytes: ""
+  maxMcpResponseBytes: ""
+  defaultLlmConcurrency: ""
+  maxLlmConcurrency: ""
+  defaultMcpConcurrency: ""
+  maxMcpConcurrency: ""
+  maxSystemPreambleChars: ""
+  maxHttpDecompressionRatio: ""
+  maxModelInputProvenanceEntries: ""
+
 # Human Task operational policy. These values become environment variables in the pod and are read
 # once at startup. The chart intentionally carries no numeric defaults: an empty or whitespace-only
 # string makes the server resolve the documented Java-owned default, while an overlay may set a

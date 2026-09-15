@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
@@ -550,6 +551,17 @@ public abstract class ExecutionManifestStoreContract {
         assertFalse(report.describe().contains("1.4.2") || report.describe().contains("1.4.3"),
                 "and not the versions themselves: the package declares those, this contract imposes "
                         + "no shape on them, and they are recorded as a digest rather than as text");
+
+        String policyA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        String policyB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        ExecutionManifestCompatibility policyReport = ExecutionManifestCompatibility.compare(
+                manifest(key, "a", "STANDARD", List.of(PinnedNodePackage.of(
+                        "alpha.nodes", "1.4.2", "node-sdk-1", Optional.of(policyA)))),
+                manifest(key, "a", "STANDARD", List.of(PinnedNodePackage.of(
+                        "alpha.nodes", "1.4.2", "node-sdk-1", Optional.of(policyB)))));
+        assertEquals(ExecutionManifestDifference.Dimension.NODE_PACKAGE_CHANGED,
+                policyReport.differences().getFirst().dimension(),
+                "a different operational-policy generation is a deterministic resume fence");
     }
 
     // ============================================================ fixtures

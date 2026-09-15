@@ -1,6 +1,7 @@
 package ai.ravenroot.api.node;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * A deployable unit of third-party node types, and the thing whose compatibility is checked
@@ -61,6 +62,19 @@ public interface NodePackage {
      * @return compile-time SDK contract used for compatibility admission
      */
     String sdkContract();
+
+    /**
+     * Identifies process-wide, non-secret operational policy that changes execution semantics.
+     *
+     * <p>The default preserves the historical package identity. A package whose behavior is shaped
+     * by deployment policy may return a canonical digest so an execution accepted under one policy
+     * cannot silently resume on an otherwise identical runtime using another.</p>
+     *
+     * @return a canonical policy digest, or empty when this package has no runtime policy dimension
+     */
+    default Optional<String> operationalPolicyDigest() {
+        return Optional.empty();
+    }
 
     /**
      * The node types this package contributes.

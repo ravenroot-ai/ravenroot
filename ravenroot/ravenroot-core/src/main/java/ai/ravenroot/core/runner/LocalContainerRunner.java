@@ -484,6 +484,7 @@ public final class LocalContainerRunner implements RunnerDriver {
             var access = assignment.lifecycleCommand() == null && (persistent(assignment) || assignment.job().command().readOnly())
                     ? gate.readLock() : gate.writeLock();
             access.lock();
+            boolean dispatchStarted = false;
             try {
                 if (assignment.workspace().profile().workspaceScope() == WorkspaceProfile.Scope.EPHEMERAL && assignment.lifecycleCommand() == null) {
                     Path controller = state.resolve(assignment.workspace().workspaceId().toString()); requireSafe(controller);
@@ -493,11 +494,17 @@ public final class LocalContainerRunner implements RunnerDriver {
                 Files.createDirectories(directory); requireSafe(directory);
                 {
                     requireOwner(directory, assignment, true);
+                    // Recovery and release share this stable inode. Initialize it before any
+                    // dispatch receipt/effect; worker.lock fences other supervisors, while the
+                    // local gate permits concurrent readers without overlapping JVM file locks.
+                    try (var lockFile = FileChannel.open(directory.resolve("workspace.lock"), StandardOpenOption.CREATE,
+                            StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) { lockFile.force(true); }
                     if (stoppedOnDisk(assignment) || stoppedWorkspaces.contains(stopKey(assignment))) throw new IllegalStateException("Workspace has stopped");
                     Path marker = directory.resolve(assignment.job().identity().runnerJobId() + ".started");
                     try (var started = FileChannel.open(marker, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                         started.write(java.nio.ByteBuffer.wrap(RunnerCodec.assignment(assignment))); started.force(true);
                     }
+                    dispatchStarted = true;
                     String base = runtimeImages.get(assignment.workspace().profile().runtimeProfile());
                     Path pin = directory.resolve("base.image");
                     if (Files.exists(pin, LinkOption.NOFOLLOW_LINKS)) {
@@ -550,7 +557,9 @@ public final class LocalContainerRunner implements RunnerDriver {
                     return result;
                 }
             } catch (Exception failure) {
-                try { stop(assignment); } catch (Exception unconfirmed) { failure.addSuppressed(unconfirmed); }
+                // A refused replay has no new effect to stop. Killing here would destroy the
+                // retained runtime belonging to the original completed dispatch or its successor.
+                if (dispatchStarted) try { stop(assignment); } catch (Exception unconfirmed) { failure.addSuppressed(unconfirmed); }
                 throw new CompletionException("Workspace effect requires fenced reconciliation; never redispatch", failure);
             } finally { access.unlock(); }
         }, executor).whenComplete((ignored, failure) -> executionSlots.release());

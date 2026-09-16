@@ -149,6 +149,58 @@ def verify_report(path: Path) -> None:
         raise RuntimeError("the hermetic model-protocol explicit Workspace acceptance did not execute successfully exactly once")
 
 
+def mounted_paths() -> set[Path]:
+    """Read this mount namespace, including Docker's surviving bind-mounted netns."""
+    return {Path(re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), line.split()[4]))
+            for line in Path("/proc/self/mountinfo").read_text().splitlines()}
+
+
+def cleanup(parent: Path, directory: Path, daemon: subprocess.Popen | None, command) -> None:
+    """Stop the exact private daemon, then unmount its children before deleting owned files.
+
+    A failed ownership/quiescence/unmount check retains the directory for diagnosis. Neither
+    lazy unmount nor recursive deletion across a remaining mount is an acceptable fallback.
+    """
+    if (directory.parent != parent or not directory.name.startswith("ravenroot-runner-quota-")
+            or directory.resolve(strict=True) != directory):
+        raise RuntimeError("refusing cleanup outside the exact fixture directory")
+    if daemon is not None:
+        pid_file = directory / "daemon.pid"
+        if pid_file.exists():
+            pid = int(pid_file.read_text().strip())
+            if pid <= 1:
+                raise RuntimeError("refusing invalid private daemon identity")
+            process = Path(f"/proc/{pid}/cmdline")
+            try:
+                arguments = process.read_bytes().split(b"\0")
+            except FileNotFoundError:
+                arguments = None  # Already exited; no signal is necessary.
+            if arguments is not None:
+                required = ("--data-root=" + str(directory / "xfs/docker"),
+                            "--exec-root=" + str(directory / "exec"),
+                            "--pidfile=" + str(pid_file), "--host=unix://" + str(directory / "docker.sock"))
+                if not all(value.encode() in arguments for value in required):
+                    raise RuntimeError("refusing cleanup of a daemon outside this fixture")
+                command(["sudo", "-n", "kill", "-TERM", str(pid)])
+                daemon.wait(timeout=30)
+                if process.exists():
+                    raise RuntimeError("private daemon shutdown is unconfirmed; retaining fixture")
+        elif daemon.poll() is None:
+            raise RuntimeError("private daemon identity is unavailable; retaining fixture")
+        daemon.wait(timeout=30)
+    owned = {path for path in mounted_paths() if path == directory or directory in path.parents}
+    roots = (directory / "exec", directory / "xfs")
+    if any(not any(path == root or root in path.parents for root in roots) for path in owned):
+        raise RuntimeError("unexpected mount in fixture; refusing deletion")
+    # dockerd can leave exec/netns/default mounted even after a graceful exit. Containers'
+    # overlay mounts, if any, must likewise be detached before the backing XFS loop mount.
+    for path in sorted(owned, key=lambda value: (len(value.parts), str(value)), reverse=True):
+        command(["sudo", "-n", "umount", "--", str(path)])
+    if any(path == directory or directory in path.parents for path in mounted_paths()):
+        raise RuntimeError("fixture mounts remain; refusing deletion")
+    command(["sudo", "-n", "rm", "-rf", "--one-file-system", "--", str(directory)])
+
+
 def run() -> None:
     parent = prerequisites(dict(os.environ))
     subprocess.run(["sudo", "-n", "true"], check=True, timeout=10)
@@ -156,7 +208,6 @@ def run() -> None:
     image_file = directory / "quota.img"
     mountpoint = directory / "xfs"
     daemon = None
-    mounted = False
     environment = dict(os.environ)
     # Do not permit an ambient Docker context/TLS configuration to redirect the fixture or test.
     for key in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"):
@@ -174,7 +225,6 @@ def run() -> None:
         (directory / "daemon.json").write_text("{}\n", encoding="utf-8")
         command(["mkfs.xfs", "-f", "-n", "ftype=1", str(image_file)])
         command(["sudo", "-n", "mount", "-o", "loop,pquota", str(image_file), str(mountpoint)])
-        mounted = True
         filesystem = json.loads(command(["findmnt", "--json", "--mountpoint", str(mountpoint), "-o", "FSTYPE,OPTIONS"]))["filesystems"][0]
         if filesystem["fstype"] != "xfs" or not {"prjquota", "pquota"}.intersection(filesystem["options"].split(",")):
             raise RuntimeError("the fixture filesystem does not enforce XFS project quotas")
@@ -220,24 +270,17 @@ def run() -> None:
         verify_report(report)
         print("RUNNER_HERMETIC_MODEL_PROTOCOL_EXPLICIT_WORKSPACE_ACCEPTANCE=passed", flush=True)
     finally:
-        # Never address the host's default daemon or perform a global Docker prune.
-        if daemon is not None and daemon.poll() is None:
-            pid_file = directory / "daemon.pid"
-            if not pid_file.is_file():
-                daemon.terminate()
-                daemon.wait(timeout=30)
-            else:
-                pid = int(pid_file.read_text().strip())
-                arguments = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-                if ("--data-root=" + str(mountpoint / "docker")).encode() not in arguments:
-                    raise RuntimeError("refusing cleanup of a daemon outside this fixture")
-                command(["sudo", "-n", "kill", "-TERM", str(pid)])
-                daemon.wait(timeout=30)
-        if mounted:
-            command(["sudo", "-n", "umount", str(mountpoint)])
-        if directory.parent != parent or not directory.name.startswith("ravenroot-runner-quota-"):
-            raise RuntimeError("refusing cleanup outside the exact fixture directory")
-        command(["sudo", "-n", "rm", "-rf", "--", str(directory)])
+        primary = sys.exc_info()[1]
+        try:
+            cleanup(parent, directory, daemon, command)
+        except Exception as failure:
+            # Keep Maven/native enforcement failures primary. A green body with failed
+            # cleanup still fails the gate; no error is silently swallowed.
+            print("RUNNER_QUOTA_CLEANUP_FAILURE=" + json.dumps({"directory": str(directory),
+                  "error": str(failure), "primary": type(primary).__name__ if primary else None}),
+                  file=sys.stderr, flush=True)
+            if primary is None:
+                raise
 
 
 if __name__ == "__main__":

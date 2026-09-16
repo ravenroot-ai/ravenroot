@@ -92,6 +92,11 @@ terminal reports do not duplicate audit or graph effects. Partial successor fan-
 CONTINUATION_UNCERTAIN. Revision-protected RESUME requires zero successors; ACKNOWLEDGE requires
 the exact pinned successor multiset; ABANDON preserves recorded effects. None reruns an Agent job.
 
+The local driver initializes its stable no-follow Workspace lock before writing any dispatch
+receipt. A restarted supervisor can reconcile that receipt without executing the job again.
+Refusing duplicate dispatch does not grant stop authority over the original retained runtime:
+only a newly started dispatch failure or an explicit stop request enters effect cleanup.
+
 PAUSE parks delivery. Process STOP also requests stops for every Workspace. CANCEL atomically
 terminates the process with sticky job/resource stops, audit and retention anchor. A resource abort
 does not stop other resources. Workers check cancellation before model turns and each tool call;

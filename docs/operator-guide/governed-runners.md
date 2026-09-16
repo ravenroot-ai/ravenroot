@@ -345,8 +345,12 @@ job reports: the unchanged production gateway and bounded Agent runtime execute 
 tests, results and remediation inside native containers. The endpoint has no Workspace/daemon access.
 This is protocol/lifecycle evidence, not trained-model inference. The test also starts the same Agent
 for independent processes, compares later-traversal session/container identities, and checks
-uncommitted filesystem sentinels and isolation. Teardown
-stops only its identified daemon, unmounts its filesystem and removes its own temporary directory.
+uncommitted filesystem sentinels and isolation. Teardown verifies and stops only its identified
+daemon, unmounts surviving namespace and overlay mounts deepest-first before the backing XFS
+filesystem, then removes its own temporary directory. Unconfirmed shutdown, unexpected mounts or
+failed unmounts retain the fixture instead of forcing deletion. A cleanup failure is reported
+separately without replacing the original acceptance exception; failed cleanup also fails an
+otherwise successful run. No host-wide prune, lazy unmount or default-daemon operation is used.
 Unsupported tooling, kernel, filesystem or quota behavior fails the job; it does not fall back to
 an unbounded writable substrate. This fixture refuses local and self-hosted environments.
 Only a successful host-backed job is writable acceptance evidence; a passing fixture unit test

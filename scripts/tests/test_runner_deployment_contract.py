@@ -1,5 +1,6 @@
 """Render deployment topology; this is not proof of runtime quota or model enforcement."""
 import json
+import configparser
 import os
 from pathlib import Path
 import re
@@ -12,6 +13,31 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RunnerDeploymentContract(unittest.TestCase):
+    def test_systemd_templates_supervise_independent_instances_and_stop_their_process_groups(self):
+        units = {}
+        for name, main in (("ravenroot-runner@.service", "RunnerWorkerMain"),
+                           ("ravenroot-runner-coordinator@.service", "RunnerCoordinatorMain")):
+            unit = configparser.ConfigParser(interpolation=None)
+            unit.read(ROOT / "deploy/systemd" / name)
+            units[name] = unit
+            self.assertEqual("simple", unit["Service"]["Type"])
+            self.assertEqual("on-failure", unit["Service"]["Restart"])
+            self.assertEqual("control-group", unit["Service"]["KillMode"])
+            self.assertEqual("true", unit["Service"]["NoNewPrivileges"])
+            self.assertEqual("strict", unit["Service"]["ProtectSystem"])
+            self.assertIn("ai.ravenroot.server." + main, unit["Service"]["ExecStart"])
+            self.assertIn("%i.environment", unit["Service"]["EnvironmentFile"])
+            self.assertEqual("multi-user.target", unit["Install"]["WantedBy"])
+            self.assertNotIn("ravenroot.service", unit["Unit"].get("Requires", ""))
+        worker = units["ravenroot-runner@.service"]
+        self.assertEqual("docker.service", worker["Unit"]["Requires"])
+        self.assertEqual("RAVENROOT_RUNNER_INSTANCE=%i", worker["Service"]["Environment"])
+        self.assertIn("/etc/ravenroot/workers/%i.json", worker["Service"]["ExecStart"])
+        self.assertEqual("ravenroot-runner-%i", worker["Service"]["StateDirectory"])
+        coordinator = units["ravenroot-runner-coordinator@.service"]
+        self.assertNotIn("docker.service", coordinator["Unit"].get("Requires", ""))
+        self.assertNotIn("SupplementaryGroups", coordinator["Service"])
+
     @unittest.skipUnless(shutil.which("helm"), "Helm is required")
     def test_coordinators_and_two_worker_pools_scale_independently_without_replicating_graph_authority(self):
         pools = [{"name": name, "replicas": replicas, "image": "registry.example.test/worker@sha256:" + "a" * 64,

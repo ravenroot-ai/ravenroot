@@ -188,6 +188,8 @@ def check_workflows() -> None:
         "SOURCE_DATE_EPOCH",
         "image_digest",
         "push-to-registry: true",
+        "image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8",
+        'test "$version" = v0.32.2',
     ):
         if required not in publication:
             raise ValueError(f"release workflow contract is missing: {required}")
@@ -222,6 +224,7 @@ def check_workflows() -> None:
         '"--preserve-digests"',
         '"https://spdx.dev/Document"',
         '"https://slsa.dev/provenance/v1"',
+        '"https://in-toto.io/Statement/v1"',
     ):
         if required not in oci_registry:
             raise ValueError(f"OCI reconciliation contract is missing: {required}")
@@ -248,6 +251,17 @@ def check_oci_metadata() -> None:
     release_workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     if "buildkit-syft-scanner:stable-1@sha256:" not in release_workflow:
         raise ValueError("OCI SBOM generator is not pinned by digest")
+    buildkit = (
+        "image=moby/buildkit@"
+        "sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
+    )
+    if release_workflow.count(buildkit) != 1:
+        raise ValueError("release BuildKit daemon is not pinned once by the reviewed digest")
+    ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    if ci_workflow.count(buildkit) != 1:
+        raise ValueError("CI does not exercise the release BuildKit daemon digest exactly once")
+    if "python3 scripts/verify_oci_release_builder.py" not in ci_workflow:
+        raise ValueError("CI does not exercise the real release-builder attestation contract")
 
 
 def main() -> int:

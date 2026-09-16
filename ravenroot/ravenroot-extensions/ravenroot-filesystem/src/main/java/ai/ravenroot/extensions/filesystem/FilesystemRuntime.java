@@ -64,13 +64,15 @@ final class FilesystemRuntime {
         }
         CancellableDeadline deadline = deadlineScheduler.schedule(() -> {
                     if (state.timeout()) {
-                        worker.interrupt();
                         answer.completeExceptionally(FilesystemNodeException.of(
                                 FilesystemNodeException.Reason.TIMEOUT));
-                    } else if (state.moving()) {
                         worker.interrupt();
+                    } else if (state.moving()) {
+                        // Interruption can let the owned move finish immediately. Publish the
+                        // ambiguous outcome first so that resumed work cannot report success.
                         answer.completeExceptionally(FilesystemNodeException.of(
                                 FilesystemNodeException.Reason.AMBIGUOUS_FINAL_MOVE));
+                        worker.interrupt();
                     }
                 }, timeout);
         answer.whenComplete((ignoredResult, ignoredFailure) -> deadline.cancel());

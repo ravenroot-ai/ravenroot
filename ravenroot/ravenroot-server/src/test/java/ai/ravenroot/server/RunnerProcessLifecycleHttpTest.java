@@ -38,7 +38,11 @@ class RunnerProcessLifecycleHttpTest {
         var definition = new AgentDefinition(new AgentDefinition.Reference("tenant", "specialist", 1), "Read only",
                 "reference", "reference", Map.of("plan", new AgentCommand("plan", true, policy, AgentCommand.STANDARD_OUTCOMES)),
                 Set.of(), Set.of(), policy, Duration.ofHours(1), "object");
-        var registration = new RunnerRegistration(1, "tenant", "designated", "local-container-v1", Set.of(), policy);
+        var registration = new RunnerRegistration(1, "tenant", "designated", "local-container-v1", Set.of("development"), policy);
+        var profile = new WorkspaceProfile(new AgentDefinition.Reference("tenant", "development", 1),
+                WorkspaceProfile.Scope.PROCESS_INSTANCE, WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE,
+                "development", "reference", policy, new WorkspaceProfile.Capacity(1, 7, 8, 8_000_000, 64, 1024,
+                WorkspaceProfile.Admission.QUEUE), Duration.ofHours(1), WorkspaceProfile.CompletionPolicy.ABORT, Set.of("specialist"));
         var base = ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults();
         var config = new ai.ravenroot.persistence.sqlite.SqliteStoreConfig(base.synchronousMode(), base.busyTimeout(),
                 base.maxLeaseTtl(), base.maxPayloadBytes(), base.maxClockSkew(), Duration.ofSeconds(1),
@@ -46,7 +50,7 @@ class RunnerProcessLifecycleHttpTest {
         try (var store = new SqliteExecutionStore(directory.resolve("http.db"), clock, config);
              var graphs = new InMemoryGraphDefinitionStore(clock);
              var engine = new PekkoExecutionEngine("runner-lifecycle-http")) {
-            var jobs = new RunnerJobService(store, clock, List.of(definition), List.of(registration), Map.of("tenant", policy));
+            var jobs = new RunnerJobService(store, clock, List.of(definition), List.of(registration), Map.of("tenant", policy), List.of(profile));
             var behaviors = BehaviorRegistry.standard().withRunnerJobs(jobs);
             var monitor = new ExecutionMonitor();
             var application = new DefaultRavenrootApplication(engine, monitor);
@@ -55,14 +59,18 @@ class RunnerProcessLifecycleHttpTest {
                       <key id="k" for="node" attr.name="kind" attr.type="string"/>
                       <key id="b" for="node" attr.name="behavior" attr.type="string"/>
                       <key id="d" for="node" attr.name="agentDefinition" attr.type="string"/>
-                      <key id="r" for="node" attr.name="runner" attr.type="string"/>
+                      <key id="r" for="node" attr.name="workspaceRef" attr.type="string"/>
+                      <key id="p" for="node" attr.name="workspaceProfile" attr.type="string"/>
+                      <key id="o" for="edge" attr.name="outcome" attr.type="string"/>
                       <key id="c" for="edge" attr.name="command" attr.type="string"/>
                       <graph edgedefault="directed">
                         <node id="start"><data key="k">START</data></node>
                         <node id="error"><data key="k">ERROR</data></node>
                         <node id="end"><data key="k">END</data></node>
-                        <node id="agent"><data key="k">BEHAVIOR</data><data key="b">workspace-agent</data><data key="d">specialist</data><data key="r">designated</data></node>
-                        <edge source="start" target="agent"><data key="c">plan</data></edge><edge source="agent" target="end"/>
+                        <node id="repository"><data key="k">BEHAVIOR</data><data key="b">workspace</data><data key="p">development</data></node>
+                        <node id="agent"><data key="k">BEHAVIOR</data><data key="b">agent</data><data key="d">specialist</data><data key="r">repository</data></node>
+                        <edge source="start" target="repository"><data key="c">open</data></edge>
+                        <edge source="repository" target="agent"><data key="o">ready</data><data key="c">plan</data></edge><edge source="agent" target="end"/>
                       </graph>
                     </graphml>
                     """.getBytes());
@@ -80,7 +88,6 @@ class RunnerProcessLifecycleHttpTest {
                         key.processInstanceId(), traversalId, Map.of(), canonical.contentId().value(), null, null, recorder)
                         .toCompletableFuture().join()).getCause());
             }
-            var id = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().iterator().next().job().identity();
             var lifecycle = new ProcessLifecycleService(store, application, null, clock);
             var control = new AuthorizedRunnerControl(jobs, new DefaultAuthorizationService(ignored -> { }), "trusted",
                     new RunnerArtifactStore(directory.toRealPath().resolve("artifacts")), clock);
@@ -104,6 +111,18 @@ class RunnerProcessLifecycleHttpTest {
                 server.start();
                 URI endpoint = URI.create("http://127.0.0.1:" + server.port());
                 var client = new RemoteRunnerClient(endpoint, () -> "runner");
+                client.availability(7, 0, Set.of("reference"), Duration.ofSeconds(120));
+                client.assignments(null); // atomically place the queued opening on this live worker
+                var opening = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().iterator().next().job();
+                assertEquals("designated", opening.runner().runnerId());
+                var openAssignment = client.claim(key.processInstanceId(), opening.identity().runnerJobId(), false);
+                client.complete(openAssignment, new RunnerResult("ready", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID(),
+                        new RunnerResult.WorkspaceObservation(openAssignment.workspaceId(), "conformance-runtime", null)));
+                long openingDeadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+                while (store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().size() < 2 && System.nanoTime() < openingDeadline)
+                    Thread.sleep(10);
+                var id = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().stream()
+                        .map(RunnerWorkspaceState.Entry::job).filter(job -> job.command().name().equals("plan")).findFirst().orElseThrow().identity();
                 long queued = revision(store, key);
                 assertEquals(404, lifecycle(endpoint, key, "pause", queued, "foreign", "other").statusCode());
                 assertEquals(queued, revision(store, key));
@@ -120,7 +139,8 @@ class RunnerProcessLifecycleHttpTest {
                         journal.getLast().journalOffset()).toCompletableFuture().join();
                 clock.now = clock.now.plusSeconds(2);
                 assertEquals(journal.size(), store.compactJournal("tenant").toCompletableFuture().join());
-                var report = new RunnerResult("answered", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID());
+                var report = new RunnerResult("answered", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID(),
+                        new RunnerResult.WorkspaceObservation(claimed.workspaceId(), "conformance-runtime", null));
                 client.complete(claimed, report); client.complete(claimed, report);
                 continuations.resume(key, id.runnerJobId()).toCompletableFuture().join();
                 var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();

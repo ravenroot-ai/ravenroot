@@ -7,23 +7,43 @@ import static ai.ravenroot.api.runner.RunnerFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerCodecTest {
-    @Test void workspaceVersionTwoReadsLegacyVersionOneWithoutInventingTerminationTime() throws Exception {
+    @Test void workspaceVersionThreeReadsBothLegacyVersionsWithoutInventingTerminationTime() throws Exception {
         var job = job();
         var state = new RunnerWorkspaceState(job.identity().execution(), UUID.randomUUID(), RUNNER,
                 Map.of(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, EMPTY)));
         byte[] current = RunnerCodec.workspace(state);
-        // Version one has the same bounded fields, without the trailing terminal-time presence byte.
-        byte[] legacy = java.util.Arrays.copyOf(current, current.length - 1);
-        java.nio.ByteBuffer.wrap(legacy).putInt(0x52524a31);
+        // Old definitions ended at outputSchema. Remove the new four budget scalars and empty
+        // skill-body map from this exact embedded definition before constructing the old envelope.
+        byte[] encodedDefinition = RunnerCodec.definition(job.definition());
+        byte[] body = java.util.Arrays.copyOfRange(encodedDefinition, 4, encodedDefinition.length - 32);
+        int embedded = -1;
+        for (int offset = 4; offset <= current.length - body.length; offset++) {
+            if (java.util.Arrays.equals(body, java.util.Arrays.copyOfRange(current, offset, offset + body.length))) {
+                embedded = offset; break;
+            }
+        }
+        assertTrue(embedded >= 4);
+        var legacyBody = new java.io.ByteArrayOutputStream();
+        legacyBody.write(current, 0, embedded + body.length - 24);
+        legacyBody.write(current, embedded + body.length, current.length - embedded - body.length);
+        current = legacyBody.toByteArray();
+        // This single legacy entry has null workspace-node/command fields (two bytes),
+        // no termination time (one byte), and an empty resource map (four bytes).
+        // All seven bytes are contiguous immediately before the integrity digest.
+        for (int version : new int[]{1, 2}) {
+        byte[] legacy = java.util.Arrays.copyOf(current, current.length - (version == 1 ? 7 : 6));
+        java.nio.ByteBuffer.wrap(legacy).putInt(version == 1 ? 0x52524a31 : 0x52524a32);
         int payloadLength = legacy.length - 32;
         byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(java.util.Arrays.copyOf(legacy, payloadLength));
         System.arraycopy(digest, 0, legacy, payloadLength, digest.length);
         var decoded = RunnerCodec.workspace(legacy);
+        assertEquals(AgentDefinition.Budgets.LEGACY, decoded.jobs().get(job.identity().runnerJobId()).job().definition().budgets());
         assertNull(decoded.processTerminalAt());
         assertEquals(job.identity(), decoded.jobs().get(job.identity().runnerJobId()).job().identity());
         var terminal = new RunnerWorkspaceState(state.execution(), state.workspaceId(), state.runnerId(), state.jobs(), NOW);
         assertEquals(NOW, RunnerCodec.workspace(RunnerCodec.workspace(terminal)).processTerminalAt());
         assertNull(RunnerCodec.workspace(RunnerCodec.workspace(decoded)).processTerminalAt());
+        }
     }
 
     @Test void snapshotsRoundTripEveryLifecycleWithoutLosingFencesOrPinnedPolicies() {
@@ -58,5 +78,28 @@ class RunnerCodecTest {
             assertThrows(IllegalArgumentException.class, () -> RunnerCodec.definition(corrupt));
         }
         assertThrows(IllegalArgumentException.class, () -> RunnerCodec.workspace(new byte[0]));
+    }
+    @Test void definitionBudgetsSkillsAndLongOperatorRetentionRoundTripWithoutLegacyCeilings() {
+        var original = definition();
+        var limits = original.policy().limits();
+        var extended = new RunnerPolicy.Limits(java.time.Duration.ofDays(30), limits.memoryBytes(), limits.processes(),
+                limits.workspaceBytes(), limits.artifactBytes(), limits.logBytes(), limits.payloadBytes());
+        var policy = new RunnerPolicy(original.policy().capabilities(), original.policy().tools(), original.policy().egress(),
+                original.policy().secrets(), original.policy().mounts(), extended);
+        var definition = new AgentDefinition(original.reference(), original.instructions(), original.runtimeProfile(), original.modelProfile(),
+                original.commands(), java.util.Set.of("review-rubric"), original.runnerRequirements(), policy, java.time.Duration.ofDays(730),
+                original.outputSchema(), new AgentDefinition.Budgets(37, 91, 120000, 8192), Map.of("review-rubric", "Verify all invariants."));
+        assertEquals(definition, RunnerCodec.definition(RunnerCodec.definition(definition)));
+        var oldEncoded = RunnerCodec.definition(original);
+        byte[] legacy = java.util.Arrays.copyOf(oldEncoded, oldEncoded.length - 24);
+        java.nio.ByteBuffer.wrap(legacy).putInt(0x52524a31);
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(java.util.Arrays.copyOf(legacy, legacy.length - 32));
+            System.arraycopy(digest, 0, legacy, legacy.length - 32, 32);
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        assertEquals(original, RunnerCodec.definition(legacy));
+        assertThrows(IllegalArgumentException.class, () -> new AgentDefinition.Budgets(0, 1, 1, 1));
+        assertThrows(IllegalArgumentException.class, () -> new RunnerPolicy.Limits(java.time.Duration.ofSeconds(Long.MAX_VALUE),
+                1, 1, 1, 1, 1, 1));
     }
 }

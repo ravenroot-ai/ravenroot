@@ -464,6 +464,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             for contract in authority["contracts"] for identifier in contract["candidateIds"]
         }
         mutations = (
+            (audit.HELM_VALUES_PATH, "coordinatorReplicas: 2", "coordinatorReplicas: 4"),
+            (audit.HELM_VALUES_PATH, "coordinatorPort: 8080", "coordinatorPort: 8188"),
+            (audit.HELM_TEMPLATE_PATHS[4], "replicas: {{ .Values.runnerPlane.coordinatorReplicas }}", "replicas: 4"),
+            (audit.HELM_TEMPLATE_PATHS[4], "replicas: {{ .replicas }}", "replicas: 4"),
+            ("scripts/tests/test_runner_deployment_contract.py", '"coordinatorReplicas": 3', '"coordinatorReplicas": 1'),
             (audit.HELM_VALUES_PATH, "programTimeoutMs: 15000", "programTimeoutMs: 15001"),
             (audit.HELM_VALUES_PATH, "runAsNonRoot: true", "runAsNonRoot: false"),
             (audit.HELM_VALUES_PATH, "allowPrivilegeEscalation: false", "allowPrivilegeEscalation: true"),
@@ -1920,16 +1925,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_588_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_660_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(79, len(details))
+            self.assertEqual(85, len(details))
             self.assertEqual(
-                {"methods": 87, "path": 79, "summary": 389, "successStatuses": 80},
+                {"methods": 94, "path": 85, "summary": 395, "successStatuses": 86},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(635, len(entries))
+            self.assertEqual(660, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -1945,7 +1950,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
-        self.assertEqual(18, len(runner_routes))
+        self.assertEqual(24, len(runner_routes))
         put_routes = {
             item["path"] for item in runner_routes
             if any(candidates[identifier].expression == '"PUT"'
@@ -4275,7 +4280,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 389 |",
+                "| Retained published contract descriptions | 395 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4283,7 +4288,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 388 |",
+                "| Retained published contract descriptions | 394 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -5971,6 +5976,25 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             }]
             self.assertEqual([], audit.reconciliation_history_errors(
                 root, reviewed, (candidate,)))
+
+            review_plan = {
+                "id": "approved-semantic-replacement", "issue": "#423",
+                "sourceRevision": review_revision, "targetRevision": review_revision,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": audit.hashlib.sha256(inventory.read_bytes()).hexdigest(),
+                "targetCandidateDigest": audit.candidate_set_digest({candidate.id: candidate}),
+                "mappings": [], "retirements": [], "additions": [],
+                "semanticReviews": [{key: value for key, value in reviewed["semanticReviewHistory"][0].items()
+                                     if key != "sourceRevision"}],
+            }
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                applied, errors = audit.apply_reconciliation(root, refreshed, (candidate,), review_plan)
+            self.assertEqual([], errors)
+            self.assertEqual(after_metadata, audit.candidate_semantic_payload(applied["entries"][0]))
+            self.assertEqual([], audit.reconciliation_history_errors(root, applied, (candidate,)))
+            refused_review = copy.deepcopy(review_plan)
+            refused_review["semanticReviews"][0]["approved"] = False
+            self.assertTrue(audit.reconciliation_plan_errors(root, refreshed, (candidate,), refused_review)[0])
 
     def test_unresolved_operator_authority_stays_deferred_and_exact(self) -> None:
         candidate = audit.Candidate(

@@ -50,7 +50,8 @@ their architecture status and wording are ready for publication.
 | 2026-09-06 | 0039 | Accepted | [Unreachable executions are reconciled, not waited out](0039-unreachable-executions-are-reconciled.md) |
 | 2026-09-06 | 0040 | Accepted contract | [Shared persistence adapters share the ports and the conformance suite, not a JDBC core](0040-shared-persistence-adapters-share-ports-not-a-jdbc-core.md) |
 
-| 2026-09-14 | 0041 | Proposed implementation contract | [Governed workspace-agent runner plane](0041-governed-workspace-agent-runner-plane.md) |
+| 2026-09-14 | 0041 | Superseded by 0042 | [Governed workspace-agent runner plane](0041-governed-workspace-agent-runner-plane.md) |
+| 2026-09-16 | 0042 | Accepted | [Explicit Workspaces and independently scalable runner coordinators](0042-explicit-workspaces-and-runner-coordinators.md) |
 
 ## Status vocabulary
 

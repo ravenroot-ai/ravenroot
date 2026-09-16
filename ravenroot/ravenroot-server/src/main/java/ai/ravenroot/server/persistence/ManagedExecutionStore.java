@@ -53,7 +53,7 @@ public final class ManagedExecutionStore implements InvocationHandler {
             "leases", "ack", "maxClockSkew", "forgottenBefore", "lookupIdempotency",
             "idempotencyRecordCount", "purgeExpiredIdempotencyRecords", "loadHandler", "findHandler",
             "handlers", "loadToolApproval", "toolApprovals", "loadAgentAuthorityBudget", "loadRunnerWorkspace",
-            "runnerResources", "saveRunnerResource",
+            "runnerResources", "saveRunnerResource", "renewRunnerAvailability", "runnerAvailability",
             "loadAgentAuthorityControl", "transitionAgentAuthorityControl", "maxHumanTaskPageSize",
             "maxHumanTaskAttentionPageSize", "maxHumanTaskAttentionNodeCounts",
             "maxHumanTaskResponsePayloadBytes", "loadHumanTask", "listHumanTasks",

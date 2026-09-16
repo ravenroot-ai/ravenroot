@@ -52,11 +52,13 @@ public record RunnerPolicy(Set<Capability> capabilities, Set<String> tools, Set<
         /** Rejects nonpositive or protocol-unrepresentable limits. */
         public Limits {
             Objects.requireNonNull(wallTime, "wallTime");
-            if (wallTime.isZero() || wallTime.isNegative() || wallTime.compareTo(Duration.ofDays(7)) > 0
+            if (wallTime.isZero() || wallTime.isNegative()
                     || memoryBytes < 1 || processes < 1 || workspaceBytes < 1 || artifactBytes < 1
                     || logBytes < 1 || payloadBytes < 1 || payloadBytes > 1_048_576) {
                 throw new IllegalArgumentException("invalid runner resource limits");
             }
+            try { wallTime.toNanos(); }
+            catch (ArithmeticException overflow) { throw new IllegalArgumentException("wall time exceeds the monotonic clock representation", overflow); }
         }
 
         private Limits intersect(Limits other) {
@@ -106,7 +108,12 @@ public record RunnerPolicy(Set<Capability> capabilities, Set<String> tools, Set<
         return result;
     }
 
-    private RunnerPolicy intersect(RunnerPolicy other) {
+    /**
+     * Intersects all grants and takes the stricter resource ceiling in every dimension.
+     * @param other additional independently approved policy boundary
+     * @return authority no wider than either input
+     */
+    public RunnerPolicy intersect(RunnerPolicy other) {
         Objects.requireNonNull(other, "policy");
         return new RunnerPolicy(intersection(capabilities, other.capabilities), intersection(tools, other.tools),
                 intersection(egress, other.egress), intersection(secrets, other.secrets),

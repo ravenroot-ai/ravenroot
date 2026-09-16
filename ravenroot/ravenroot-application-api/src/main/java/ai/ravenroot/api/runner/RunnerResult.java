@@ -15,9 +15,36 @@ import java.util.UUID;
  * @param payload bounded context
  * @param artifacts durable references
  * @param quiescenceId stable runner acknowledgement of the ownership barrier
+ * @param workspace independently verified physical identities, null only for legacy reports
  */
 public record RunnerResult(String outcome, OpaquePayload payload, List<RunnerArtifact> artifacts,
-                            UUID quiescenceId) {
+                            UUID quiescenceId, WorkspaceObservation workspace) {
+    /**
+     * Reconstructs a legacy report without asserting unobserved runtime identity.
+     * @param outcome accepted graph outcome
+     * @param payload bounded direct result
+     * @param artifacts retained evidence references
+     * @param quiescenceId stable acknowledgement of descendant quiescence
+     */
+    public RunnerResult(String outcome, OpaquePayload payload, List<RunnerArtifact> artifacts, UUID quiescenceId) {
+        this(outcome, payload, artifacts, quiescenceId, null);
+    }
+    /**
+     * Physical identities are evidence separate from the invocation's ownership-barrier acknowledgement.
+     * @param workspaceId filesystem identity assigned by the control plane
+     * @param runtimeId driver-observed container or VM identity, null when none is materialized
+     * @param checkpoint immutable snapshot digest, null before any checkpoint exists
+     */
+    public record WorkspaceObservation(UUID workspaceId, String runtimeId, String checkpoint) {
+        /** Requires a filesystem identity and syntactically bounded runtime/checkpoint evidence. */
+        public WorkspaceObservation {
+            Objects.requireNonNull(workspaceId);
+            if (runtimeId != null && !runtimeId.matches("[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,255}"))
+                throw new IllegalArgumentException("invalid physical runtime identity");
+            if (checkpoint != null && !checkpoint.matches("sha256:[0-9a-f]{64}"))
+                throw new IllegalArgumentException("immutable checkpoint identity required");
+        }
+    }
     /** Enforces protocol-wide bounds; admission applies the stricter effective policy. */
     public RunnerResult {
         outcome = RunnerPolicy.identifier(outcome);

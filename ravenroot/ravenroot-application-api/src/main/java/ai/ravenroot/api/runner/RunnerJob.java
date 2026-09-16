@@ -54,9 +54,6 @@ public final class RunnerJob {
         DEADLINE
     }
 
-    /** Maximum liveness lease; a shorter effective job deadline always wins. */
-    public static final Duration MAX_LEASE = Duration.ofMinutes(5);
-
     private final RunnerJobIdentity identity;
     private final AgentDefinition definition;
     private final AgentCommand command;
@@ -348,9 +345,9 @@ public final class RunnerJob {
         }
     }
 
-    private static void checkTtl(Duration ttl) {
+    private void checkTtl(Duration ttl) {
         Objects.requireNonNull(ttl, "ttl");
-        if (ttl.isNegative() || ttl.isZero() || ttl.compareTo(MAX_LEASE) > 0) {
+        if (ttl.isNegative() || ttl.isZero() || ttl.compareTo(authority.limits().wallTime()) > 0) {
             throw new IllegalArgumentException("invalid runner lease duration");
         }
     }
@@ -373,6 +370,18 @@ public final class RunnerJob {
      * @return complete durable identity
      */
     public RunnerJobIdentity identity() { return identity; }
+    /**
+     * Rebind an undispatched reservation without replaying effects or widening its pinned ceiling.
+     * @param replacement compatible approved worker selected by the scheduler
+     * @param now authoritative store transition time
+     * @return queued job with new placement and authority attenuated by that worker
+     */
+    public RunnerJob place(RunnerRegistration replacement, Instant now) {
+        if (state != State.QUEUED || fence != 0 || stopReason != StopReason.NONE) throw new IllegalStateException("dispatched runner placement is pinned");
+        var accepted = accept(identity, definition, command.name(), authority, replacement, input, now, deadline);
+        return new RunnerJob(identity, definition, command, replacement, accepted.authority, input, deadline, now,
+                Math.addExact(revision, 1), fence, state, stopReason, leaseUntil, result);
+    }
     /**
      * Returns exact immutable resolved definition, including its version.
      * @return exact immutable resolved definition, including its version

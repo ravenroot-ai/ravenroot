@@ -2,8 +2,32 @@
   "protocolVersion": 1,
   "runnerIssuer": "https://identity.example.test",
   "artifactDirectory": "/var/lib/ravenroot/runner-artifacts",
+  "control": {"continuationThreads": 8, "continuationQueue": 64, "recoveryPageSize": 64,
+    "recoveryInterval": "PT2S", "continuationLease": "PT30S", "nodeTimeout": "PT10S"},
   "tenants": {
     "example-tenant": {
+      "workspaceProfiles": [{
+        "name": "development", "version": 1,
+        "workspaceScope": "PROCESS_INSTANCE", "runtimeLifecycle": "PER_WORKSPACE",
+        "runnerPool": "development", "runtimeProfile": "agent", "cpuMillicores": 1000,
+        "policy": {
+          "capabilities": ["WORKSPACE_READ", "WORKSPACE_WRITE", "PROCESS_EXECUTE"],
+          "tools": [], "network": [], "secrets": [], "mounts": [],
+          "limits": {"wallTime": "PT2M", "memoryBytes": 134217728, "processes": 32,
+            "workspaceBytes": 67108864, "artifactBytes": 131072, "logBytes": 8192, "payloadBytes": 16384}
+        },
+        "capacity": {"mutatingUsers": 1, "readOnlyUsers": 7, "materializedWorkspaces": 16,
+          "aggregateStorageBytes": 1073741824, "queuedJobs": 128, "retainedJobs": 4096, "admission": "QUEUE"},
+        "fleetLimits": {
+          "GLOBAL": {"claimedJobs": 32, "queuedJobs": 128, "retainedWorkspaces": 16, "storageBytes": 1073741824},
+          "POOL": {"claimedJobs": 16, "queuedJobs": 128, "retainedWorkspaces": 16, "storageBytes": 1073741824},
+          "WORKER": {"claimedJobs": 8, "queuedJobs": 128, "retainedWorkspaces": 16, "storageBytes": 1073741824},
+          "TENANT": {"claimedJobs": 16, "queuedJobs": 128, "retainedWorkspaces": 16, "storageBytes": 1073741824},
+          "PROFILE": {"claimedJobs": 16, "queuedJobs": 128, "retainedWorkspaces": 16, "storageBytes": 1073741824}
+        },
+        "retention": "PT1H", "completionPolicy": "REQUIRE_CLOSED",
+        "allowedAgents": ["polaris", "betelgeuse", "tester", "antares", "coordinator"]
+      }],
       "policy": {
         "capabilities": [
           "WORKSPACE_READ",
@@ -26,14 +50,16 @@
       },
       "definitions": [
         {
-          "name": "planner",
+          "name": "polaris",
           "version": 1,
-          "instructions": "Act as the planner for this process. Keep results bounded and report uncertainty explicitly.",
-          "runtimeProfile": "reference",
-          "modelProfile": "deterministic-reference",
+          "instructions": "You are Polaris, the bounded planner in the disposable repository exercise. Read README.md, hello.py and test_hello.py using read_file. For plan, describe the baseline-test, remediation, retest and review sequence and finish answered. For read, independently summarize the defect and finish answered. For resume, use the returned answer and finish completed. Do not mutate files. Report a concise result, never invent test execution.",
+          "runtimeProfile": "agent",
+          "modelProfile": "governed-model",
+          "budgets": {"modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048},
+          "skillInstructions": {},
           "skills": [],
           "runnerRequirements": [
-            "reference-v1"
+            "development"
           ],
           "policy": {
             "capabilities": [
@@ -120,14 +146,16 @@
           ]
         },
         {
-          "name": "developer",
+          "name": "betelgeuse",
           "version": 1,
-          "instructions": "Act as the developer for this process. Keep results bounded and report uncertainty explicitly.",
-          "runtimeProfile": "reference",
-          "modelProfile": "deterministic-reference",
+          "instructions": "You are Betelgeuse, the bounded developer in a disposable repository exercise. For implement, inspect the repository and write PLAN.md with the development plan, leaving hello.py unchanged so the next Agent can observe the failing baseline; finish completed. For remediate, read hello.py and test_hello.py, repair addition in hello.py, preserve PLAN.md and the .git directory, then finish fixed. Do not commit changes: review must see uncommitted work. Never claim tests ran unless the test tool reports them. Keep your direct result concise.",
+          "runtimeProfile": "agent",
+          "modelProfile": "governed-model",
+          "budgets": {"modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048},
+          "skillInstructions": {},
           "skills": [],
           "runnerRequirements": [
-            "reference-v1"
+            "development"
           ],
           "policy": {
             "capabilities": [
@@ -239,12 +267,14 @@
         {
           "name": "tester",
           "version": 1,
-          "instructions": "Act as the tester for this process. Keep results bounded and report uncertainty explicitly.",
-          "runtimeProfile": "reference",
-          "modelProfile": "deterministic-reference",
+          "instructions": "You are the bounded test Agent. Always invoke the test tool; never infer success from source. Finish passed only when its exitCode is zero, failed otherwise. Include the actual exit code and concise test evidence in your direct result. Do not repair source files or mutate the .git directory.",
+          "runtimeProfile": "agent",
+          "modelProfile": "governed-model",
+          "budgets": {"modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048},
+          "skillInstructions": {},
           "skills": [],
           "runnerRequirements": [
-            "reference-v1"
+            "development"
           ],
           "policy": {
             "capabilities": [
@@ -313,14 +343,16 @@
           ]
         },
         {
-          "name": "reviewer",
+          "name": "antares",
           "version": 1,
-          "instructions": "Act as the reviewer for this process. Keep results bounded and report uncertainty explicitly.",
-          "runtimeProfile": "reference",
-          "modelProfile": "deterministic-reference",
+          "instructions": "You are Antares, the read-only reviewer. Inspect hello.py, test_hello.py and PLAN.md with read_file. Approve only when addition is correctly implemented and the incoming result reports passing tests. Finish approved or changes-requested with a concise reason. You cannot write files or execute processes.",
+          "runtimeProfile": "agent",
+          "modelProfile": "governed-model",
+          "budgets": {"modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048},
+          "skillInstructions": {},
           "skills": [],
           "runnerRequirements": [
-            "reference-v1"
+            "development"
           ],
           "policy": {
             "capabilities": [
@@ -391,12 +423,14 @@
         {
           "name": "coordinator",
           "version": 1,
-          "instructions": "Act as the coordinator for this process. Keep results bounded and report uncertainty explicitly.",
-          "runtimeProfile": "reference",
-          "modelProfile": "deterministic-reference",
+          "instructions": "You are the bounded handoff Agent. Read PLAN.md and hello.py, summarize the completed change and incoming review evidence without claiming unobserved actions, and finish completed. Leave all filesystem evidence intact for the explicit Workspace close.",
+          "runtimeProfile": "agent",
+          "modelProfile": "governed-model",
+          "budgets": {"modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048},
+          "skillInstructions": {},
           "skills": [],
           "runnerRequirements": [
-            "reference-v1"
+            "development"
           ],
           "policy": {
             "capabilities": [
@@ -471,7 +505,7 @@
           "runnerId": "workspace-runner",
           "trustProfile": "local-container-v1",
           "labels": [
-            "reference-v1"
+            "development"
           ],
           "capabilities": {
             "capabilities": [

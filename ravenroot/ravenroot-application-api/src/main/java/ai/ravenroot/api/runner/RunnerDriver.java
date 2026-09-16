@@ -13,6 +13,11 @@ public interface RunnerDriver extends AutoCloseable {
      */
     RunnerRegistration registration();
     /**
+     * Installed immutable runtime profile names; an empty set cannot receive explicit Workspace work.
+     * @return operator-installed profile identifiers, not image names or graph-provided grants
+     */
+    default java.util.Set<String> runtimeProfiles() { return java.util.Set.of(); }
+    /**
      * Executes once under the accepted live execution fence and seals a quiescent result.
      * @param assignment authenticated claimed job; never an unknown or report-only job
      * @return sealed result, or failure requiring reconciliation without redispatch
@@ -24,6 +29,14 @@ public interface RunnerDriver extends AutoCloseable {
      * @return acknowledgement after stopping, or failure if quiescence is unproven
      */
     CompletionStage<Void> cancel(RunnerAssignment assignment);
+    /**
+     * Stops a resource under its sticky control-plane stop request, including an idle runtime.
+     * @param assignment accepted resource ownership carrying a sticky stop request
+     * @return physical stop acknowledgement, or failure preserving unknown ownership
+     */
+    default CompletionStage<Void> stopWorkspace(RunnerAssignment assignment) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new UnsupportedOperationException("Workspace stop is not supported"));
+    }
     /**
      * Retrieves sealed evidence, or fails unknown. Must not repeat work to manufacture a result.
      * @param assignment authenticated job with current report-only authority

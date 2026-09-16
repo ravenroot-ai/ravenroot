@@ -97,6 +97,15 @@ public final class BehaviorPropertySchema {
                 validateNode(node);
             }
         }
+        for (GraphNode node : graph.nodes()) {
+            if (!ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)) continue;
+            String reference = Objects.toString(node.properties().get("workspaceRef"));
+            var matches = graph.nodes().stream().filter(value -> value.id().equals(reference)).toList();
+            if (matches.size() != 1 || !"workspace".equals(matches.getFirst().behavior())) {
+                throw new BehaviorPropertyException(node.id(), "workspaceRef", "must reference exactly one Workspace declared in this graph");
+            }
+            if (behaviors.runnerJobs() == null) throw new BehaviorPropertyException(node.id(), "workspaceRef", "governed runner plane is unavailable");
+        }
     }
 
     private void validateNode(GraphNode node) {
@@ -110,7 +119,10 @@ public final class BehaviorPropertySchema {
         if (node.kind() != NodeKind.BEHAVIOR) {
             return;
         }
-        Optional<NodeTypeDescriptor> catalogued = behaviors.descriptor(node.behavior());
+        if ("workspace-agent".equals(node.behavior())) {
+            throw new BehaviorPropertyException(node.id(), "behavior", "workspace-agent was removed; declare a Workspace and an Agent with workspaceRef");
+        }
+        Optional<NodeTypeDescriptor> catalogued = behaviors.descriptor(node);
         if (catalogued.isEmpty()) {
             // Unknown behavior. Separate from SEC-09 rules 1 and 2; the pass-through path is
             // unchanged and its fail-closed treatment belongs to rule 3.
@@ -388,7 +400,7 @@ public final class BehaviorPropertySchema {
                     throw typeFailure(node, property, value, "an absolute URI including a scheme");
                 }
             }
-            case SECRET_REFERENCE -> {
+            case SECRET_REFERENCE, WORKSPACE_REFERENCE -> {
                 // A reference names a server-side secret; it is never the secret. Whitespace and
                 // control characters are refused because a reference is an identifier, and a padded
                 // one is a typo the author would far rather meet here — with a node id and a property

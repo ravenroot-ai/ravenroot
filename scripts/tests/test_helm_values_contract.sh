@@ -71,7 +71,12 @@ if set(schema.get("required", [])) != expected_top or set(schema.get("properties
 def verify_leaf_schema(value, node, path):
     if isinstance(value, dict):
         if "$ref" in node:
-            node = schema["definitions"][node["$ref"].rsplit("/", 1)[1]]
+            reference = node["$ref"]
+            if not reference.startswith("#/"):
+                raise SystemExit(f"{path} must use a local closed schema reference")
+            node = schema
+            for component in reference[2:].split("/"):
+                node = node[component.replace("~1", "/").replace("~0", "~")]
         if node.get("type") != "object" or node.get("additionalProperties") is not False:
             raise SystemExit(f"{path} must be a closed schema object")
         if set(node.get("required", [])) != set(value) or set(node.get("properties", [])) != set(value):

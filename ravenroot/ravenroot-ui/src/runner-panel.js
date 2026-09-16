@@ -7,7 +7,7 @@ export function createRunnerWindow({ dialog }) {
   let client = null, generation = 0;
   let auditOffset = 0, healthCursor = null;
   const element = (name, text = '') => { const node = doc.createElement(name); node.textContent = text; return node; };
-  const heading = element('h2', 'Governed agents and runners'); heading.id = 'runner-title';
+  const heading = element('h2', 'Workspaces, named Agents and runners'); heading.id = 'runner-title';
   const status = element('p', 'Connect to a service to inspect governed agents and runners.');
   status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const catalog = element('div');
@@ -56,16 +56,38 @@ export function createRunnerWindow({ dialog }) {
     const id = process.value.trim();
     if (!UUID.test(id)) throw new Error('Enter an exact process instance UUID.');
     const workspace = await owner.runnerWorkspace(id);
-    if (!Array.isArray(workspace?.jobs) || workspace.jobs.length > 256) throw new Error('Unsupported runner workspace');
+    if (!Array.isArray(workspace?.jobs)) throw new Error('Unsupported runner workspace');
     return () => {
-      jobs.replaceChildren(element('h3', 'Workspace ' + workspace.workspaceId + ' · runner ' + workspace.runnerId));
+      jobs.replaceChildren(element('h3', 'Process Workspaces'));
+      for (const resource of workspace.workspaces || []) {
+        const section = element('section');
+        section.append(element('h4', resource.nodeId + ' · ' + resource.state),
+          element('pre', JSON.stringify({ workspaceId: resource.workspaceId, runtimeId: resource.runtimeId,
+            workspaceScope: resource.profile?.workspaceScope, runtimeLifecycle: resource.profile?.runtimeLifecycle,
+            runnerPool: resource.profile?.runnerPool, runnerId: resource.runnerId,
+            ownershipGeneration: resource.ownershipGeneration, checkpoint: resource.checkpoint,
+            capacity: resource.profile?.capacity, fleetLimits: resource.profile?.fleetLimits,
+            cpuMillicores: resource.profile?.cpuMillicores, stopRequested: resource.stopRequested }, null, 2)));
+        if (!resource.stopRequested && !['CLOSED', 'ABORTED', 'FAILED', 'RELEASING', 'RELEASED'].includes(resource.state)) {
+          section.append(button('Stop this Workspace', () => request(async current => {
+            await current.stopRunnerWorkspace(id, resource.nodeId, workspace.revision);
+            return () => { void inspect(); };
+          })));
+        }
+        jobs.append(section);
+      }
       for (const job of workspace.jobs) {
         const section = element('section');
         section.append(element('h4', job.command + ' · ' + job.state + ' · fence ' + job.fence),
-          element('p', job.definition + ' v' + job.definitionVersion + ' · ' + (job.readOnly ? 'Read-only' : 'Governed write authority')),
+          element('p', job.definition + ' v' + job.definitionVersion + ' · ' + (job.readOnly ? 'Read-only' : 'Governed write authority')));
+        if (job.result != null) section.append(element('h5', 'Agent result'), element('pre', JSON.stringify(job.result, null, 2)));
+        const technical = element('details');
+        technical.append(element('summary', 'Technical job identity and authority'),
           element('pre', JSON.stringify({ processInstanceId: id, traversalId: job.traversalId,
             invocationId: job.invocationId, attemptId: job.attemptId, runnerJobId: job.runnerJobId,
-            deadline: job.deadline, leaseUntil: job.leaseUntil, authority: job.authority, outcome: job.outcome }, null, 2)));
+            workspaceRef: job.workspaceRef, deadline: job.deadline, leaseUntil: job.leaseUntil,
+            authority: job.authority, outcome: job.outcome }, null, 2)));
+        section.append(technical);
         if (job.state === 'UNKNOWN') section.append(element('p',
           'Effect unknown. The workspace remains owned. Reconciliation is report-only; this action does not retry the agent.'));
         if (job.continuationUncertain) {
@@ -116,13 +138,17 @@ export function createRunnerWindow({ dialog }) {
     const result = await owner.runnerAudit(auditOffset);
     return () => { auditOffset = result.nextOffset; operations.textContent = JSON.stringify(result, null, 2); };
   });
+  const availability = () => request(async owner => {
+    const result = await owner.runnerAvailability();
+    return () => { operations.textContent = JSON.stringify(result, null, 2); };
+  });
   dialog.replaceChildren(heading, button('Close', () => dialog.close()), status,
-    element('p', 'The bounded Agent node is unchanged. Workspace agents reference approved versions; graph instructions cannot grant authority.'),
+    element('p', 'An Agent without workspaceRef remains unchanged. Named Agents reference explicit Workspaces and approved versions; graph instructions cannot grant authority.'),
     button('Refresh catalogue', refresh), catalog, editorLabel, editor,
     element('p', 'Changing a body requires a new version. Set approved explicitly to approve or retire; an operator scope is required.'),
     button('Save version / approval', save), processLabel, process, button('Inspect workspace', inspect), jobs, evidence,
-    element('p', 'Health and metrics are cursor-paged observations, not global totals. Idle runner health is unknown.'),
-    button('Next health / metrics page', health), button('Next audit page', audit), operations);
+    element('p', 'Health and metrics are cursor-paged observations, not global totals. Worker availability is valid only until its advertised lease expires.'),
+    button('Worker capacity / availability', availability), button('Next health / metrics page', health), button('Next audit page', audit), operations);
   return {
     open() { dialog.showModal(); if (client) void refresh(); },
     close() { dialog.close(); },

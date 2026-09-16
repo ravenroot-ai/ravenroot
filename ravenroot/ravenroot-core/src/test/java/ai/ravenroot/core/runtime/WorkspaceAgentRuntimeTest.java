@@ -23,9 +23,11 @@ import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Restart/routing conformance uses labelled reports; the opt-in native path uses the real model broker. */
 class WorkspaceAgentRuntimeTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-01T00:00:00Z"), ZoneOffset.UTC);
     private static final SecurityContext SECURITY = new SecurityContext("request", "tenant", "operator", PrincipalType.USER, "test");
+    private static final UUID SESSION = UUID.randomUUID();
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(value = RunnerJobOperation.ContinuationResolution.class, names = {"ACKNOWLEDGE", "ABANDON"})
@@ -36,17 +38,20 @@ class WorkspaceAgentRuntimeTest {
                   <key id="k" for="node" attr.name="kind" attr.type="string"/>
                   <key id="b" for="node" attr.name="behavior" attr.type="string"/>
                   <key id="d" for="node" attr.name="agentDefinition" attr.type="string"/>
-                  <key id="r" for="node" attr.name="runner" attr.type="string"/>
+                  <key id="r" for="node" attr.name="workspaceRef" attr.type="string"/>
+                  <key id="p" for="node" attr.name="workspaceProfile" attr.type="string"/>
                   <key id="c" for="edge" attr.name="command" attr.type="string"/>
                   <key id="o" for="edge" attr.name="outcome" attr.type="string"/>
                   <graph edgedefault="directed">
                     <node id="start"><data key="k">START</data></node>
                     <node id="error"><data key="k">ERROR</data></node>
                     <node id="end"><data key="k">END</data></node>
-                    <node id="planner"><data key="k">BEHAVIOR</data><data key="b">workspace-agent</data><data key="d">specialist</data><data key="r">local</data></node>
+                    <node id="repository"><data key="k">BEHAVIOR</data><data key="b">workspace</data><data key="p">development</data></node>
+                    <node id="planner"><data key="k">BEHAVIOR</data><data key="b">agent</data><data key="d">specialist</data><data key="r">repository</data></node>
                     <node id="a"><data key="k">BEHAVIOR</data><data key="b">log</data></node>
                     <node id="b"><data key="k">BEHAVIOR</data><data key="b">log</data></node>
-                    <edge source="start" target="planner"><data key="c">plan</data></edge>
+                    <edge source="start" target="repository"><data key="c">open</data></edge>
+                    <edge source="repository" target="planner"><data key="o">ready</data><data key="c">plan</data></edge>
                     <edge source="planner" target="a"><data key="o">answered</data><data key="c">process</data></edge>
                     <edge source="planner" target="b"><data key="o">answered</data><data key="c">process</data></edge>
                     <edge source="a" target="end"/><edge source="b" target="end"/>
@@ -71,7 +76,13 @@ class WorkspaceAgentRuntimeTest {
                         key.processInstanceId(), traversal, Map.of(), canonical.contentId().value(), null, null, recorder)
                         .toCompletableFuture().join()).getCause());
             }
-            var identity = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().iterator().next().job().identity();
+            var opening = queued(store, key).identity();
+            finish(service, opening, "ready");
+            try (var executor = new ai.ravenroot.core.runner.PinnedRunnerContinuationExecutor(service, graphs, engine, behaviors,
+                    new ExecutionMonitor(), GraphExecutionLimits.DEFAULTS, null)) {
+                executor.resume(key, opening.runnerJobId()).toCompletableFuture().join();
+            }
+            var identity = queued(store, key).identity();
             finish(service, identity, "answered");
             // Crash window: the original result is completed and only the first successor started.
             store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(store.load(key).toCompletableFuture().join().revision()))
@@ -128,14 +139,31 @@ class WorkspaceAgentRuntimeTest {
         runDevelopmentCycle(directory, null);
     }
 
+    @Test void documentedMinimalTeamExecutesItsLiteralNamedAgentOrder(@TempDir Path directory) throws Exception {
+        runDevelopmentCycle(directory, null, WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE, true);
+    }
+
     @Test void writableContainerDevelopmentCycleUsesRealWorkspaceAcrossEveryRestart(@TempDir Path directory) throws Exception {
         String image = System.getProperty("ravenroot.runner.testWritableImage", "");
         org.junit.jupiter.api.Assumptions.assumeTrue(image.matches("sha256:[0-9a-f]{64}"),
                 "set ravenroot.runner.testWritableImage to the built example image on a quota-enforcing daemon");
-        runDevelopmentCycle(directory, image);
+        runDevelopmentCycle(java.nio.file.Files.createDirectory(directory.resolve("minimal")), image,
+                WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE, true);
+        for (var lifecycle : WorkspaceProfile.RuntimeLifecycle.values()) {
+            Path isolated = java.nio.file.Files.createDirectory(directory.resolve(lifecycle.name()));
+            runDevelopmentCycle(isolated, image, lifecycle);
+        }
     }
 
     private void runDevelopmentCycle(Path directory, String containerImage) throws Exception {
+        runDevelopmentCycle(directory, containerImage, WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE);
+    }
+
+    private void runDevelopmentCycle(Path directory, String containerImage, WorkspaceProfile.RuntimeLifecycle lifecycle) throws Exception {
+        runDevelopmentCycle(directory, containerImage, lifecycle, false);
+    }
+
+    private void runDevelopmentCycle(Path directory, String containerImage, WorkspaceProfile.RuntimeLifecycle lifecycle, boolean minimal) throws Exception {
         Path database = directory.resolve("sample.db");
         Path samples = Path.of("../../docs/examples/governed-runner");
         var config = ai.ravenroot.core.runner.RunnerJson.read(java.nio.file.Files.readAllBytes(samples.resolve("control-plane.json")));
@@ -145,11 +173,17 @@ class WorkspaceAgentRuntimeTest {
                 "example-tenant", ai.ravenroot.core.runner.RunnerJson.map(value))).toList();
         var registrations = ((List<?>) tenant.get("runners")).stream().map(value -> ai.ravenroot.core.runner.RunnerJson.registration(
                 "example-tenant", ai.ravenroot.core.runner.RunnerJson.map(value))).toList();
+        var profiles = ((List<?>) tenant.get("workspaceProfiles")).stream().map(value -> ai.ravenroot.core.runner.RunnerJson.workspaceProfile(
+                "example-tenant", ai.ravenroot.core.runner.RunnerJson.map(value)))
+                .map(profile -> new WorkspaceProfile(profile.reference(), profile.workspaceScope(), lifecycle,
+                        profile.runnerPool(), profile.runtimeProfile(), profile.policy(), profile.capacity(), profile.retention(),
+                        profile.completionPolicy(), profile.allowedAgents(), profile.fleetLimits(), profile.cpuMillicores())).toList();
         if (containerImage != null) try (var driver = sampleDriver(directory, registrations.getFirst(), containerImage)) {
             // Refuse the entire fixture before dispatch if the daemon ignores writable storage quotas.
             driver.verifyWorkspaceQuota(containerImage);
         }
-        var canonical = CanonicalGraphMl.of(java.nio.file.Files.readAllBytes(samples.resolve("development-cycle.graphml")));
+        var canonical = CanonicalGraphMl.of(java.nio.file.Files.readAllBytes(samples.resolve(
+                minimal ? "three-agents.graphml" : "development-cycle.graphml")));
         String pin = canonical.contentId().value();
         var key = new ExecutionKey("example-tenant", UUID.randomUUID());
         UUID traversal = UUID.randomUUID();
@@ -159,7 +193,8 @@ class WorkspaceAgentRuntimeTest {
              var engine = new JoinTestEngine();
              var manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(canonical.bytes()))) {
             graphStore.put(key.tenantId(), GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical).toCompletableFuture().join();
-            var service = new RunnerJobService(store, CLOCK, definitions, registrations, Map.of(key.tenantId(), policy));
+            advertise(store, "example-tenant", "workspace-runner", "agent");
+            var service = new RunnerJobService(store, CLOCK, definitions, registrations, Map.of(key.tenantId(), policy), profiles);
             long revision = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent()).apply(
                     new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(), ProcessInstanceStatus.RUNNING,
                             Map.of(traversal, new Traversal(traversal, "start", TraversalStatus.RUNNING, Map.of()))),
@@ -174,36 +209,65 @@ class WorkspaceAgentRuntimeTest {
             }
         }
         UUID workspace = null;
-        var commands = List.of("plan", "read", "resume", "implement", "test", "remediate", "test", "review", "handoff");
-        var outcomes = List.of("answered", "answered", "completed", "completed", "failed", "fixed", "passed", "approved", "completed");
+        var commands = minimal ? List.of("open", "implement", "read", "review", "close")
+                : List.of("open", "plan", "read", "resume", "implement", "test", "remediate", "test", "review", "handoff", "close");
+        var outcomes = minimal ? List.of("ready", "completed", "answered", "changes-requested", "closed")
+                : List.of("ready", "answered", "answered", "completed", "completed", "failed", "fixed", "passed", "approved", "completed", "closed");
+        String runtimeIdentity = null;
+        var invocationRuntimes = new HashSet<String>();
+        var physicalExtraJobs = new HashSet<UUID>();
+        byte[] gitHead = null;
+        byte[] planSentinel = null;
         RunnerJobIdentity caller = null;
         for (int index = 0; index < commands.size(); index++) {
             try (var store = new SqliteExecutionStore(database, CLOCK);
                  var graphStore = new ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore(database, CLOCK, GraphDefinitionReferences.NONE);
                  var engine = new JoinTestEngine()) {
-                var service = new RunnerJobService(store, CLOCK, definitions, registrations, Map.of(key.tenantId(), policy));
+                advertise(store, "example-tenant", "workspace-runner", "agent");
+                var service = new RunnerJobService(store, CLOCK, definitions, registrations, Map.of(key.tenantId(), policy), profiles);
                 var state = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
-                if (workspace == null) workspace = state.workspaceId();
-                assertEquals(workspace, state.workspaceId());
+                var resource = state.workspaces().get("repository");
+                if (workspace == null) workspace = resource.workspaceId();
+                assertEquals(workspace, resource.workspaceId());
                 assertEquals(1, state.jobs().values().stream().filter(entry -> entry.job().retainsWorkspace()).count());
                 var job = state.jobs().values().stream().map(RunnerWorkspaceState.Entry::job).filter(RunnerJob::retainsWorkspace).findFirst().orElseThrow();
                 assertEquals(commands.get(index), job.command().name());
-                if (index == 0) caller = job.identity();
-                if (index == 2) {
+                if (index == 1) caller = job.identity();
+                if (index == 3 && !minimal) {
                     assertEquals(caller.traversalId(), job.identity().traversalId());
                     assertNotEquals(caller.invocationId(), job.identity().invocationId(), "explicit return is a new caller visit, not a technical retry");
                     var invocations = store.load(key).toCompletableFuture().join().state().traversals().get(traversal).invocations();
                     assertEquals(invocations.get(caller.invocationId()).nodeId(), invocations.get(job.identity().invocationId()).nodeId());
                     assertEquals(NodeInvocationStatus.COMPLETED, invocations.get(caller.invocationId()).status(), "caller holds no running worker while the researcher executes");
                 }
-                var claimed = service.mutate(security, key, new RunnerJobOperation.Claim(job.identity().runnerJobId(), "workspace-runner", Duration.ofSeconds(120)))
+                var claimed = service.mutate(security, key, new RunnerJobOperation.Claim(job.identity().runnerJobId(), "workspace-runner", Duration.ofSeconds(120), SESSION))
                         .jobs().get(job.identity().runnerJobId()).job();
-                var report = new RunnerResult(outcomes.get(index), OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID());
+                var report = new RunnerResult(outcomes.get(index), OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID(),
+                        new RunnerResult.WorkspaceObservation(workspace, "conformance-runtime", null));
                 if (containerImage != null) {
-                    var assignment = new RunnerAssignment(1, workspace, claimed);
+                    var assignment = new RunnerAssignment(1, workspace, claimed, resource, state.jobs().get(claimed.identity().runnerJobId()).lifecycleCommand());
                     try (var driver = sampleDriver(directory, registrations.getFirst(), containerImage)) {
                         report = driver.execute(assignment).toCompletableFuture().get(120, java.util.concurrent.TimeUnit.SECONDS);
                         assertEquals(outcomes.get(index), report.outcome());
+                    }
+                    if (lifecycle == WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE) {
+                        if (runtimeIdentity == null) runtimeIdentity = report.workspace().runtimeId();
+                        assertEquals(runtimeIdentity, report.workspace().runtimeId(), "every Agent and loop uses the same runtime");
+                    } else if (assignment.lifecycleCommand() == null) {
+                        assertTrue(invocationRuntimes.add(report.workspace().runtimeId()), "each invocation has a distinct physical container");
+                        assertNotNull(report.workspace().checkpoint(), "the same filesystem is checkpointed before handoff");
+                    }
+                    if (report.workspace().runtimeId() != null) {
+                        byte[] head = nativeWorkspaceFile(directory, report.workspace().runtimeId(), ".git/HEAD", true);
+                        if (gitHead == null) gitHead = head;
+                        assertArrayEquals(gitHead, head, "Git identity remains intact without repository reinitialization");
+                        int sentinelStart = minimal ? 1 : 4;
+                        byte[] plan = nativeWorkspaceFile(directory, report.workspace().runtimeId(), "PLAN.md", index >= sentinelStart);
+                        if (index < sentinelStart) assertNull(plan, "another process's uncommitted plan must not leak into this Workspace");
+                        else {
+                            if (planSentinel == null) { planSentinel = plan; assertTrue(plan.length > 0); }
+                            assertArrayEquals(planSentinel, plan, "uncommitted Agent-written sentinel survives every successor and remediation loop");
+                        }
                     }
                     // Worker restart after effects but before reporting must recover the same result,
                     // not launch a second process or overwrite the workspace snapshot.
@@ -211,11 +275,17 @@ class WorkspaceAgentRuntimeTest {
                         assertEquals(report, restarted.reconcile(assignment).toCompletableFuture().get(30, java.util.concurrent.TimeUnit.SECONDS));
                         assertThrows(Exception.class, () -> restarted.execute(assignment).toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS));
                     }
+                    if (!minimal && index == 4 && lifecycle == WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE) {
+                        physicalExtraJobs.add(nativeLaterTraversalIsolation(directory, containerImage, registrations.getFirst(),
+                                definitions.stream().filter(value -> value.reference().name().equals("polaris")).findFirst().orElseThrow(),
+                                resource.observed("inspect", report.workspace().runtimeId(), report.workspace().checkpoint(), CLOCK.instant()),
+                                key, traversal, planSentinel));
+                    }
                 }
                 service.mutate(security, key, new RunnerJobOperation.Complete(job.identity().runnerJobId(), "workspace-runner", 1, report));
                 try (var executor = new ai.ravenroot.core.runner.PinnedRunnerContinuationExecutor(service, graphStore, engine,
                         BehaviorRegistry.standard().withRunnerJobs(service), new ExecutionMonitor(), GraphExecutionLimits.DEFAULTS, null)) {
-                    if (index == 0) {
+                    if (index == 1) {
                         service.mutate(security, key, new RunnerJobOperation.ContinuationUncertain(job.identity().runnerJobId()));
                         long expected = store.load(key).toCompletableFuture().join().revision();
                         executor.resolve(security, key, job.identity().runnerJobId(), expected, RunnerJobOperation.ContinuationResolution.RESUME);
@@ -227,15 +297,17 @@ class WorkspaceAgentRuntimeTest {
                     executor.resume(key, job.identity().runnerJobId()).toCompletableFuture().join();
                     assertEquals(revision, store.load(key).toCompletableFuture().join().revision(), "duplicate delivery is a no-op");
                 }
-                var lifecycle = store.load(key).toCompletableFuture().join().state();
-                var original = lifecycle.traversals().get(traversal).invocations().get(job.identity().invocationId());
+                var processState = store.load(key).toCompletableFuture().join().state();
+                var original = processState.traversals().get(traversal).invocations().get(job.identity().invocationId());
                 assertEquals(1, original.attempts().size());
                 assertEquals(job.identity().attemptId(), original.attempts().getFirst().attemptId());
-                if (index == commands.size() - 1) assertEquals(ProcessInstanceStatus.COMPLETED, lifecycle.status());
+                if (index == commands.size() - 1) assertEquals(ProcessInstanceStatus.COMPLETED, processState.status());
                 if (containerImage != null && index == commands.size() - 1) {
                     try (var driver = sampleDriver(directory, registrations.getFirst(), containerImage)) {
+                        var receipts = new HashSet<>(store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().keySet());
+                        receipts.addAll(physicalExtraJobs);
                         driver.release(new RunnerWorkspaceRelease(1, key, workspace, "workspace-runner",
-                                store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().keySet(), CLOCK.instant()))
+                                receipts, CLOCK.instant()))
                                 .toCompletableFuture().get(60, java.util.concurrent.TimeUnit.SECONDS);
                     }
                 }
@@ -243,21 +315,104 @@ class WorkspaceAgentRuntimeTest {
         }
     }
 
+    /** Physical driver acceptance complements the persisted traversal/session and fleet contracts. */
+    private UUID nativeLaterTraversalIsolation(Path directory, String image, RunnerRegistration registration,
+            AgentDefinition definition, WorkspaceResource original, ExecutionKey firstProcess,
+            UUID firstTraversal, byte[] sentinel) throws Exception {
+        var otherProcess = new ExecutionKey(firstProcess.tenantId(), UUID.randomUUID());
+        var other = new WorkspaceResource(original.nodeId(), UUID.randomUUID(), original.profile(), registration.runnerId(),
+                WorkspaceResource.State.OPENING, null, null, false, CLOCK.instant());
+        var lifecycleCommands = new LinkedHashMap<String, AgentCommand>();
+        Map.of("open", "ready", "close", "closed").forEach((command, outcome) -> lifecycleCommands.put(command,
+                new AgentCommand(command, false, original.profile().policy(), Set.of(outcome))));
+        var lifecycle = new AgentDefinition(new AgentDefinition.Reference(firstProcess.tenantId(), "workspace-lifecycle", 1),
+                "Native fixture lifecycle", "agent", "none", lifecycleCommands, Set.of(), Set.of(), original.profile().policy(),
+                Duration.ZERO, "workspace-state");
+        var foreignJobs = new HashSet<UUID>();
+        try (var driver = sampleDriver(directory, registration, image)) {
+            var open = nativeAssignment(otherProcess, UUID.randomUUID(), lifecycle, "open", registration, other, "open");
+            foreignJobs.add(open.job().identity().runnerJobId());
+            var opened = driver.execute(open).toCompletableFuture().get(120, java.util.concurrent.TimeUnit.SECONDS);
+            other = other.observed("open", opened.workspace().runtimeId(), opened.workspace().checkpoint(), CLOCK.instant());
+            assertNotEquals(original.runtimeId(), other.runtimeId());
+            assertNull(nativeWorkspaceFile(directory, other.runtimeId(), "PLAN.md", false), "another intent cannot observe uncommitted files");
+            var later = nativeAssignment(firstProcess, UUID.randomUUID(), definition, "read", registration, original, null);
+            var foreign = nativeAssignment(otherProcess, UUID.randomUUID(), definition, "read", registration, other, null);
+            foreignJobs.add(foreign.job().identity().runnerJobId());
+            var earlier = nativeAssignment(firstProcess, firstTraversal, definition, "read", registration, original, null);
+            assertEquals(earlier.agentSessionId(), later.agentSessionId());
+            assertNotEquals(earlier.job().identity().traversalId(), later.job().identity().traversalId());
+            assertNotEquals(later.agentSessionId(), foreign.agentSessionId());
+            var first = driver.execute(later).toCompletableFuture();
+            var second = driver.execute(foreign).toCompletableFuture();
+            var firstResult = first.get(120, java.util.concurrent.TimeUnit.SECONDS);
+            var secondResult = second.get(120, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals("answered", firstResult.outcome()); assertEquals("answered", secondResult.outcome());
+            assertEquals(original.runtimeId(), firstResult.workspace().runtimeId(), "later traversal keeps the still-open container");
+            assertEquals(other.runtimeId(), secondResult.workspace().runtimeId());
+            assertArrayEquals(sentinel, nativeWorkspaceFile(directory, original.runtimeId(), "PLAN.md", true));
+            assertNull(nativeWorkspaceFile(directory, other.runtimeId(), "PLAN.md", false));
+            var close = nativeAssignment(otherProcess, UUID.randomUUID(), lifecycle, "close", registration, other, "close");
+            foreignJobs.add(close.job().identity().runnerJobId());
+            assertEquals("closed", driver.execute(close).toCompletableFuture().get(120, java.util.concurrent.TimeUnit.SECONDS).outcome());
+            driver.release(new RunnerWorkspaceRelease(1, otherProcess, other.workspaceId(), registration.runnerId(),
+                    foreignJobs, CLOCK.instant())).toCompletableFuture().get(60, java.util.concurrent.TimeUnit.SECONDS);
+            return later.job().identity().runnerJobId();
+        }
+    }
+
+    private static RunnerAssignment nativeAssignment(ExecutionKey key, UUID traversal, AgentDefinition definition,
+            String command, RunnerRegistration worker, WorkspaceResource resource, String lifecycle) {
+        var id = new RunnerJobIdentity(key, traversal, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        var accepted = RunnerJob.accept(id, definition, command, resource.profile().policy(), worker,
+                OpaquePayload.of("{\"intent\":\"Read the disposable repository without modifying any file.\"}".getBytes(), "application/json"),
+                CLOCK.instant(), CLOCK.instant().plusSeconds(120)).claim(worker.runnerId(), CLOCK.instant(), Duration.ofSeconds(120));
+        return new RunnerAssignment(1, resource.workspaceId(), accepted, resource, lifecycle);
+    }
+
+    /** Reads the physical container, including a stopped per-invocation container; never trusts model claims. */
+    private static byte[] nativeWorkspaceFile(Path directory, String runtime, String relative, boolean required) throws Exception {
+        Path evidence = directory.resolve("filesystem-evidence-" + UUID.randomUUID());
+        var process = new ProcessBuilder(System.getProperty("ravenroot.runner.testDocker", "/usr/local/bin/docker"),
+                "cp", runtime + ":/workspace/" + relative, evidence.toString())
+                .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+        if (!process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
+            process.destroyForcibly(); throw new AssertionError("bounded filesystem evidence read timed out");
+        }
+        if (process.exitValue() != 0) {
+            assertFalse(required, "required filesystem evidence is absent: " + relative);
+            return null;
+        }
+        assertTrue(java.nio.file.Files.size(evidence) <= 16_384, "evidence remains within the configured sample payload bound");
+        return java.nio.file.Files.readAllBytes(evidence);
+    }
+
     private ai.ravenroot.core.runner.LocalContainerRunner sampleDriver(Path directory, RunnerRegistration registration,
                                                                      String image) throws Exception {
         var artifacts = new ai.ravenroot.core.runner.RunnerArtifactStore(directory.toRealPath().resolve("artifacts"));
+        String configured = System.getProperty("ravenroot.runner.testAgentConfiguration", "");
+        if (configured.isBlank()) throw new IllegalArgumentException("real model acceptance requires ravenroot.runner.testAgentConfiguration (worker JSON)");
+        var config = ai.ravenroot.core.runner.RunnerJson.read(java.nio.file.Files.readAllBytes(Path.of(configured)));
         return new ai.ravenroot.core.runner.LocalContainerRunner(registration,
                 Path.of(System.getProperty("ravenroot.runner.testDocker", "/usr/local/bin/docker")),
-                directory.toRealPath().resolve("worker-state"), Map.of("reference", image), CLOCK,
-                (assignment, kind, bytes) -> artifacts.put(assignment.job(), kind, new java.io.ByteArrayInputStream(bytes)));
+                directory.toRealPath().resolve("worker-state"), Map.of("agent", image), CLOCK,
+                (assignment, kind, bytes) -> artifacts.put(assignment.job(), kind, new java.io.ByteArrayInputStream(bytes)),
+                new ai.ravenroot.core.runner.RunnerWorkerConfiguration(2, Duration.ofSeconds(1), Duration.ofSeconds(5),
+                        Duration.ofSeconds(30), Duration.ofSeconds(30)))
+                .withAgentRuntime(ai.ravenroot.core.runner.RunnerAgentRuntime.fromConfiguration(
+                        ai.ravenroot.core.runner.RunnerJson.map(config.get("agentRuntime")),
+                        new ai.ravenroot.core.security.EnvironmentCredentialResolver()));
     }
 
     @Test void sequentialRunnerResultsResumeExactAttemptsAndExplicitCommandsAfterReopen(@TempDir Path directory) {
         Path database = directory.resolve("runner.db");
         var key = new ExecutionKey("tenant", UUID.randomUUID());
         UUID traversal = UUID.randomUUID();
-        var graph = new GraphDefinition(List.of(GraphNode.start("start"), agent("planner"), agent("developer"), GraphNode.end("end")),
-                List.of(new GraphEdge("start", "planner", "continue", Map.of("command", "plan")),
+        var graph = new GraphDefinition(List.of(GraphNode.start("start"),
+                new GraphNode("repository", NodeKind.BEHAVIOR, "workspace", Map.of("workspaceProfile", "development")),
+                agent("planner"), agent("developer"), GraphNode.end("end")),
+                List.of(new GraphEdge("start", "repository", "continue", Map.of("command", "open")),
+                        new GraphEdge("repository", "planner", "ready", Map.of("command", "plan")),
                         new GraphEdge("planner", "developer", "answered", Map.of("command", "validate-change")),
                         new GraphEdge("developer", "end", "completed")));
         RunnerJobIdentity planned;
@@ -279,9 +434,11 @@ class WorkspaceAgentRuntimeTest {
                 assertInstanceOf(RunnerJobSuspension.class, failure.getCause());
                 assertEquals(0, runner.admissionGateCount());
             }
+            var opened = finish(service, queued(store, key).identity(), "ready");
+            resume(store, engine, behaviors, graph, key, opened, true);
             var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
             workspaceId = workspace.workspaceId();
-            planned = workspace.jobs().values().iterator().next().job().identity();
+            planned = queued(store, key).identity();
             assertEquals(traversal, planned.traversalId());
             assertEquals("plan", workspace.jobs().get(planned.runnerJobId()).job().command().name());
             assertEquals(Set.of(RunnerPolicy.Capability.WORKSPACE_READ), workspace.jobs().get(planned.runnerJobId()).job().authority().capabilities());
@@ -292,7 +449,7 @@ class WorkspaceAgentRuntimeTest {
             resume(store, engine, behaviors, graph, key, first, true);
             var workspace = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
             assertEquals(workspaceId, workspace.workspaceId());
-            assertEquals(2, workspace.jobs().size());
+            assertEquals(3, workspace.jobs().size());
             var second = workspace.jobs().values().stream().map(RunnerWorkspaceState.Entry::job)
                     .filter(job -> !job.state().terminal()).findFirst().orElseThrow();
             assertEquals("validate-change", second.command().name(), "approved custom vocabulary is not limited to standard suggestions");
@@ -327,14 +484,24 @@ class WorkspaceAgentRuntimeTest {
     }
 
     private static RunnerJob finish(RunnerJobService service, RunnerJobIdentity id, String outcome) {
-        service.mutate(SECURITY, id.execution(), new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30)));
+        var state = service.mutate(SECURITY, id.execution(), new RunnerJobOperation.Claim(id.runnerJobId(), "local", Duration.ofSeconds(30), SESSION));
         return service.mutate(SECURITY, id.execution(), new RunnerJobOperation.Complete(id.runnerJobId(), "local", 1,
                 new RunnerResult(outcome, OpaquePayload.of("{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"),
-                        List.of(), UUID.randomUUID()))).jobs().get(id.runnerJobId()).job();
+                        List.of(), UUID.randomUUID(), new RunnerResult.WorkspaceObservation(
+                                state.workspaces().get("repository").workspaceId(), "conformance-runtime", null))))
+                .jobs().get(id.runnerJobId()).job();
+    }
+    private static RunnerJob queued(ExecutionStore store, ExecutionKey key) {
+        return store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow().jobs().values().stream()
+                .map(RunnerWorkspaceState.Entry::job).filter(job -> !job.state().terminal()).findFirst().orElseThrow();
+    }
+    private static void advertise(ExecutionStore store, String tenant, String runner, String runtime) {
+        store.renewRunnerAvailability(new RunnerAvailability(tenant, runner, SESSION, 8, 0, Set.of(runtime),
+                CLOCK.instant(), CLOCK.instant().plusSeconds(120)), Duration.ofSeconds(120)).toCompletableFuture().join();
     }
     private static GraphNode agent(String id) {
-        return new GraphNode(id, NodeKind.BEHAVIOR, "workspace-agent",
-                Map.of("agentDefinition", "specialist", "agentVersion", "1", "runner", "local"));
+        return new GraphNode(id, NodeKind.BEHAVIOR, "agent",
+                Map.of("agentDefinition", "specialist", "agentVersion", "1", "workspaceRef", "repository"));
     }
     private static RunnerJobService service(ExecutionStore store) {
         var policy = new RunnerPolicy(Set.of(RunnerPolicy.Capability.WORKSPACE_READ, RunnerPolicy.Capability.WORKSPACE_WRITE),
@@ -345,7 +512,13 @@ class WorkspaceAgentRuntimeTest {
                 "implement", new AgentCommand("implement", false, policy, AgentCommand.STANDARD_OUTCOMES),
                 "validate-change", new AgentCommand("validate-change", true, policy, AgentCommand.STANDARD_OUTCOMES)), Set.of(), Set.of(),
                 policy, Duration.ofDays(7), "development-result");
-        var registration = new RunnerRegistration(1, "tenant", "local", "sandboxed", Set.of(), policy);
-        return new RunnerJobService(store, CLOCK, List.of(definition), List.of(registration), Map.of("tenant", policy));
+        var registration = new RunnerRegistration(1, "tenant", "local", "sandboxed", Set.of("development"), policy);
+        store.renewRunnerAvailability(new RunnerAvailability("tenant", "local", SESSION, 7, 0, Set.of("reference"),
+                CLOCK.instant(), CLOCK.instant().plusSeconds(30)), Duration.ofSeconds(30)).toCompletableFuture().join();
+        var profile = new WorkspaceProfile(new AgentDefinition.Reference("tenant", "development", 1),
+                WorkspaceProfile.Scope.PROCESS_INSTANCE, WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE,
+                "development", "reference", policy, new WorkspaceProfile.Capacity(1, 7, 8, 8_000_000, 64, 1024,
+                WorkspaceProfile.Admission.QUEUE), Duration.ofDays(7), WorkspaceProfile.CompletionPolicy.ABORT, Set.of("specialist"));
+        return new RunnerJobService(store, CLOCK, List.of(definition), List.of(registration), Map.of("tenant", policy), List.of(profile));
     }
 }

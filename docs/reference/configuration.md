@@ -23,7 +23,7 @@ be changed to strings before upgrading.
 ## Runtime and behavior resolution
 
 `RAVENROOT_RUNNER_CONFIG` is an opt-in operator-owned JSON file path for the
-[governed workspace-agent plane](../operator-guide/governed-runners.md). Unset leaves the existing
+[governed Workspace and Agent runner plane](../operator-guide/governed-runners.md). Unset leaves the existing
 bounded Agent behavior unchanged and runner routes unavailable. The file is at most 1 MiB, uses
 protocol version 1, requires a durable execution store, and is resolved once at startup. Graphs
 cannot set this path or its authority. Workspace retention must be shorter than terminal-process

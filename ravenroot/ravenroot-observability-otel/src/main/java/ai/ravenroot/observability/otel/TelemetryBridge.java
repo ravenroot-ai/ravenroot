@@ -176,6 +176,10 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
     private final LongCounter agentBudget;
     private final LongCounter runnerObservations;
     private final java.util.concurrent.atomic.AtomicLong runnerActive = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong runnerCapacity = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong runnerAvailable = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.Map<ai.ravenroot.core.runner.RunnerTelemetry.PageGauge, java.util.concurrent.atomic.AtomicLong> runnerPage =
+            new java.util.EnumMap<>(ai.ravenroot.core.runner.RunnerTelemetry.PageGauge.class);
     private final DoubleHistogram nodeDuration;
     private final DoubleHistogram executionDuration;
     private final DoubleHistogram joinWait;
@@ -211,8 +215,20 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
                 .setDescription("Process-local runner recovery, unknown-effect, conflict and worker failure observations; fixed counter enum only.")
                 .build();
         meter.gaugeBuilder("ravenroot.runner.worker.active").ofLongs()
-                .setDescription("Current occupied local runner worker slots, bounded to four; not a fleet-wide active-job total.")
+                .setDescription("Current occupied local runner worker slots under operator-configured capacity; not a fleet-wide total.")
                 .buildWithCallback(measurement -> measurement.record(runnerActive.get()));
+        meter.gaugeBuilder("ravenroot.runner.worker.capacity").ofLongs()
+                .setDescription("Operator-configured local worker job capacity; no product-level maximum.")
+                .buildWithCallback(measurement -> measurement.record(runnerCapacity.get()));
+        meter.gaugeBuilder("ravenroot.runner.worker.available").ofLongs()
+                .setDescription("Currently available local worker job slots.")
+                .buildWithCallback(measurement -> measurement.record(runnerAvailable.get()));
+        for (var gauge : ai.ravenroot.core.runner.RunnerTelemetry.PageGauge.values()) {
+            var value = new java.util.concurrent.atomic.AtomicLong(); runnerPage.put(gauge, value);
+            meter.gaugeBuilder("ravenroot.runner.recovery_page." + gauge.name().toLowerCase(java.util.Locale.ROOT)).ofLongs()
+                    .setDescription("Last bounded tenant recovery page observation, not a fleet total. No identity labels.")
+                    .buildWithCallback(measurement -> measurement.record(value.get()));
+        }
         this.nodeDuration = meter.histogramBuilder("ravenroot.node.duration")
                 .setDescription("Node invocation duration, start to terminal outcome (completed or "
                         + "bypassed or failed). Bounded: labeled only by ravenroot.event_type.")
@@ -313,8 +329,15 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         runnerObservations.add(1, Attributes.of(METRIC_ATTR_RUNNER_COUNTER, counter.name()));
     }
     @Override public void activeJobs(int count) {
-        if (count < 0 || count > 4) throw new IllegalArgumentException("invalid runner active-job measurement");
+        if (count < 0) throw new IllegalArgumentException("invalid runner active-job measurement");
         runnerActive.set(count);
+    }
+    @Override public void workerCapacity(int configured, int available) {
+        if (configured < 1 || available < 0 || available > configured) throw new IllegalArgumentException("invalid worker capacity observation");
+        runnerCapacity.set(configured); runnerAvailable.set(available);
+    }
+    @Override public void recoveryPage(java.util.Map<ai.ravenroot.core.runner.RunnerTelemetry.PageGauge, Long> values) {
+        runnerPage.forEach((key, gauge) -> gauge.set(values.getOrDefault(key, 0L)));
     }
 
     @Override public void record(ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Dimension dimension,

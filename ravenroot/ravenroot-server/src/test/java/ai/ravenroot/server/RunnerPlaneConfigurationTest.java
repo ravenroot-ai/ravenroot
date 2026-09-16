@@ -11,6 +11,18 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerPlaneConfigurationTest {
+    @Test void workerAndDriverCapacitiesAndTimingsAreOperatorOwned() {
+        for (int capacity : new int[]{2, 37}) {
+            var configured = RunnerWorkerMain.configuration(Map.of("maxConcurrentJobs", capacity,
+                    "driverCommandTimeout", "PT47S", "driverOutputTimeout", "PT13S", "maxSupervisorOutputBytes", 131_072));
+            assertEquals(capacity, configured.maxConcurrentJobs());
+            assertEquals(java.time.Duration.ofSeconds(47), configured.driverCommandTimeout());
+            assertEquals(java.time.Duration.ofSeconds(13), configured.driverOutputTimeout());
+            assertEquals(131_072, configured.maxSupervisorOutputBytes());
+        }
+        assertThrows(IllegalArgumentException.class, () -> RunnerWorkerMain.configuration(Map.of("driverCommandTimeout", "PT0S")));
+        assertThrows(IllegalArgumentException.class, () -> RunnerWorkerMain.configuration(Map.of("maxSupervisorOutputBytes", 0)));
+    }
     @Test void optInSampleSeedsDurableCatalogAndRejectsUnsafeDeploymentModes(@TempDir Path directory) throws Exception {
         assertNull(RunnerPlaneConfiguration.fromEnvironment(Map.of()));
         var sample = new LinkedHashMap<>(RunnerJson.read(Files.readAllBytes(Path.of("../../docs/examples/governed-runner/control-plane.json"))));
@@ -25,7 +37,9 @@ class RunnerPlaneConfigurationTest {
         }
         try (var store = new SqliteExecutionStore(directory.resolve("store.db"), Clock.systemUTC())) {
             configuration.service(store, Clock.systemUTC());
-            assertEquals(6, store.runnerResources("example-tenant").toCompletableFuture().join().size());
+            assertEquals(7, store.runnerResources("example-tenant").toCompletableFuture().join().size());
+            assertEquals(8, configuration.control().continuationThreads());
+            assertEquals(1, configuration.workspaceProfiles().size());
             configuration.service(store, Clock.systemUTC());
             assertTrue(store.runnerResources("other-tenant").toCompletableFuture().join().isEmpty());
         }

@@ -469,6 +469,20 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     }
                     if (runnerWorkspace != null) {
                         runnerWorkspace = runnerWorkspace.observeProcess(folded, now);
+                        var availability = runnerAvailability.getOrDefault(key.tenantId(), Map.of()).values();
+                        for (var operation : batch.runnerOperations()) ai.ravenroot.api.runner.RunnerFleetAdmission.verifyWorkerOperation(runnerWorkspace, operation, availability, now);
+                        if (batch.runnerOperations().stream().anyMatch(operation -> operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.Submit
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.Claim
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceRelease
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.WorkspacePlace)) {
+                            var fleet = new ArrayList<ai.ravenroot.api.runner.RunnerWorkspaceState>();
+                            instances.forEach((owner, value) -> { if (!owner.equals(key) && value.runnerWorkspace != null) fleet.add(value.runnerWorkspace); });
+                            fleet.add(runnerWorkspace);
+                           ai.ravenroot.api.runner.RunnerFleetAdmission.validate(fleet);
+                            for (var operation : batch.runnerOperations()) ai.ravenroot.api.runner.RunnerFleetAdmission.verifyNamedAdmission(fleet, operation);
+                            if (batch.runnerOperations().stream().anyMatch(value -> value instanceof ai.ravenroot.api.runner.RunnerJobOperation.Claim))
+                                ai.ravenroot.api.runner.RunnerFleetAdmission.verifyWorkerCapacity(fleet, availability);
+                        }
                         ai.ravenroot.api.runner.RunnerCodec.workspace(runnerWorkspace);
                     }
                 } catch (IllegalArgumentException | IllegalStateException invalid) {
@@ -1046,6 +1060,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     // field: a purge that decided eligibility differently from what findProcessInstance
                     // reports would remove a row whose own deadline said it was safe.
                     Optional<Instant> deadline = retainedUntilOf(entry);
+                    if (entry.runnerWorkspace != null && !entry.runnerWorkspace.retentionSafe()) continue;
                     if (deadline.isEmpty() || deadline.get().isAfter(now)) {
                         continue;
                     }
@@ -1713,6 +1728,20 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return entry == null ? Optional.empty() : Optional.ofNullable(entry.runnerWorkspace);
             }
         });
+    }
+    private final Map<String, Map<String, ai.ravenroot.api.runner.RunnerAvailability>> runnerAvailability = new LinkedHashMap<>();
+    @Override public CompletionStage<List<ai.ravenroot.api.runner.RunnerAvailability>> runnerAvailability(String tenantId) {
+        return complete(() -> { synchronized (monitor) {
+            return List.copyOf(runnerAvailability.getOrDefault(Objects.requireNonNull(tenantId), Map.of()).values());
+        }});
+    }
+    @Override public CompletionStage<ai.ravenroot.api.runner.RunnerAvailability> renewRunnerAvailability(
+            ai.ravenroot.api.runner.RunnerAvailability proposed, Duration ttl) {
+        return complete(() -> { synchronized (monitor) {
+            var workers = runnerAvailability.computeIfAbsent(proposed.tenantId(), ignored -> new LinkedHashMap<>());
+            var accepted = proposed.renew(workers.get(proposed.runnerId()), ttl, clock.instant());
+            workers.put(accepted.runnerId(), accepted); return accepted;
+        }});
     }
 
     @Override

@@ -1,7 +1,7 @@
 # ADR 0041: Governed workspace agents execute through a fenced runner plane
 
 - Date: 2026-09-14
-- Status: Proposed implementation contract
+- Status: Superseded by [ADR 0042](0042-explicit-workspaces-and-runner-coordinators.md)
 - Related: ADRs 0007, 0022, 0023, 0024, 0034 and 0040
 
 ## Context
@@ -11,6 +11,9 @@ payloads. Durable specialist handoffs need a process-scoped ownership barrier, e
 trust, and recovery that distinguishes missed acknowledgements from permission to repeat work.
 
 ## Decision
+
+The following is the historical contract. ADR 0042 replaces the generic node, resource lifetimes,
+capacity assumptions and deployment topology; it preserves the fenced recovery/security foundations.
 
 Keep the bounded conversational Agent behavior unchanged. Introduce an explicitly composed
 `workspace-agent` worker behavior whose graph properties name an immutable, tenant-owned agent
@@ -95,7 +98,8 @@ the graph transition. Retrieval and cleanup anchor retention to that timestamp; 
 extend it. Version-one envelopes remain readable and are conservatively retained until an explicit
 reconciliation creates a store-clock anchor. Runner protocol version 1 is unchanged.
 The existing OpenTelemetry exporter receives fixed-enum observation counters and an unlabelled
-0–4 worker-active gauge. These describe local observations, not global or distinct durable job counts.
+worker-active gauge (its former fixed slot ceiling is replaced by operator configuration in ADR 0042).
+These describe local observations, not global or distinct durable job counts.
 
 ## Consequences
 

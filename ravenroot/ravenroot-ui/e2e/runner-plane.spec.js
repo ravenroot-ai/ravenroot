@@ -14,9 +14,12 @@ test('runner workbench exposes fenced uncertainty and renders retained evidence 
       workspaceId: 'workspace', runnerId: 'designated', revision: 17, jobs: [{
         runnerJobId: jobId, command: 'read', state: 'COMPLETED', fence: 7,
         definition: 'researcher', definitionVersion: 2, readOnly: true, continuationUncertain: true,
+        result: { result: 'Reviewed the uncommitted change.' },
         artifacts: [{ artifactId, kind: 'STDERR', sizeBytes: 12, sha256: 'a'.repeat(64) }],
       }, { runnerJobId: '44444444-4444-4444-8444-444444444444', command: 'implement',
         state: 'UNKNOWN', fence: 2, definition: 'developer', definitionVersion: 1, artifacts: [] }],
+      workspaces: [{ nodeId: 'repository', state: 'READY', workspaceId: 'workspace', runtimeId: 'runtime', runnerId: 'designated',
+        profile: { workspaceScope: 'PROCESS_INSTANCE', runtimeLifecycle: 'PER_WORKSPACE', runnerPool: 'development' } }],
     };
     if (path.endsWith('/artifacts/' + artifactId)) body = { content: '<img src=x onerror="window.runnerEscaped=true">', truncated: false };
     if (request.method() === 'POST') operations.push(path);
@@ -37,6 +40,11 @@ test('runner workbench exposes fenced uncertainty and renders retained evidence 
   await dialog.getByRole('button', { name: 'Inspect workspace' }).click();
   await expect(dialog).toContainText('Successor delivery is uncertain');
   await expect(dialog).toContainText('Effect unknown');
+  await expect(dialog).toContainText('Reviewed the uncommitted change.');
+  await expect(dialog.getByText('Technical job identity and authority').first()).toBeVisible();
+  expect(await dialog.locator('details').first().getAttribute('open')).toBeNull();
+  await expect(dialog).toContainText('repository · READY');
+  await expect(dialog.getByRole('button', { name: 'Stop this Workspace' })).toBeVisible();
   await dialog.getByRole('button', { name: /^STDERR/ }).click();
   await expect(dialog.getByLabel('Bounded artifact preview')).toContainText('<img');
   expect(await page.evaluate(() => window.runnerEscaped)).toBeUndefined();

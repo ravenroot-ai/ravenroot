@@ -71,6 +71,7 @@ import {
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
+import { namedAgentPresets } from './named-agent-presets.js';
 import {
   canvasInteractionState,
   isAdditiveSelection,
@@ -388,6 +389,7 @@ const NODE_ICONS = {
   terminal: '⊙ ',
   consumer: '⩓ ', handler:  '↩ ',
   agent:    '⬡ ', flow:     '⚙ ',
+  workspace: `${COMMON_NODE_GLYPHS.workspace} `,
   actor:    '◉ ', system:   '▪ ', trace: `${COMMON_NODE_GLYPHS.trace} `,
   'human-task': `${COMMON_NODE_GLYPHS['human-task']} `
 };
@@ -559,6 +561,9 @@ function createStylesheet(palette = rendererPalette) {
   { selector: 'node[nodeType="agent"]', style: {
     'background-color': surface.agent,
     'border-color': node.agent, 'border-width': 2,
+  }},
+  { selector: 'node[nodeType="workspace"]', style: {
+    'background-color': surface.workspace, 'border-color': node.workspace, 'border-width': 3,
   }},
   { selector: 'node[nodeType="terminal"]', style: {
     shape: 'ellipse', 'background-color': surface.terminal,
@@ -973,6 +978,7 @@ let activeSourceSession = null;
 let activeGraphVersion = null;
 let activeExecutionReconciliation = 'known';
 let nodeTypeCatalog = [];
+let namedAgentCatalog = [];
 // Why the palette is empty, kept apart from the catalog itself: a failed request and a service
 // that legitimately has nothing to offer are different states and are shown differently.
 let nodeCatalogFailure = null;
@@ -6649,7 +6655,7 @@ function renderNodeForm(model, creating) {
 }
 
 function catalogDescriptor(behavior) {
-  return nodeTypeCatalog.find(type => type.behavior === behavior) || null;
+  return nodeTypeCatalog.find(type => type.behavior === behavior) || namedAgentCatalog.find(type => type.presetId === behavior) || null;
 }
 
 function programCatalogEditorDescriptor(descriptor) {
@@ -6959,6 +6965,14 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // HTML placeholder label option and `required` still stops the save until the author decides.
       control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
         `<option value="${escapeAttribute(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
+    } else if (property.type === 'WORKSPACE_REFERENCE') {
+      const choices = (graphData?.nodes || []).filter(node => node.kind === 'BEHAVIOR' && node.behavior === 'workspace');
+      const missing = String(value) !== '' && !choices.some(node => node.id === String(value));
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="WORKSPACE_REFERENCE"${accessibility} ${nativeRequired ? 'required' : ''}>`
+        + `<option value="" ${String(value) === '' ? 'selected' : ''}>No Workspace (ordinary Agent)</option>`
+        + (missing ? `<option value="${escapeAttribute(value)}" selected>Missing Workspace: ${escapeHtml(value)}</option>` : '')
+        + choices.map(node => `<option value="${escapeAttribute(node.id)}" ${node.id === String(value) ? 'selected' : ''}>${escapeHtml(node.label || node.id)} · ${escapeHtml(node.id)}</option>`).join('')
+        + '</select>';
     } else if (property.type === 'SECRET_REFERENCE') {
       // CHOOSE, NEVER TYPE.
       //
@@ -9023,7 +9037,7 @@ function renderNodeCatalog() {
     container.innerHTML = `<div class="catalog-empty" data-catalog-state="${escapeAttribute(state.kind)}">${escapeHtml(state.message)}</div>`;
     return;
   }
-  renderNodeCatalogItems(container, nodeTypeCatalog, {
+  renderNodeCatalogItems(container, [...nodeTypeCatalog, ...namedAgentCatalog], {
     iconFor: type => catalogNodeIcon(type, NODE_ICONS),
     selectedBehavior: selectedCatalogBehavior,
     onActivate: selectCatalogNodeType,
@@ -10985,6 +10999,7 @@ async function connectRuntime(atBoot = false) {
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
   });
+  namedAgentCatalog = [];
   // The assistant reaches THE SAME Ravenroot service with THE SAME user authentication, and
   // nothing else — it has no base URL of its own to be pointed elsewhere. That is what makes "a
   // denial to the user is a denial to the panel" true here rather than merely intended, and it is
@@ -11046,6 +11061,13 @@ async function connectRuntime(atBoot = false) {
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = catalog;
+      namedAgentCatalog = [];
+      if (catalog.some(type => type.behavior === 'workspace')) {
+        connectedClient.runnerCatalog().then(result => {
+          if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient || workspaceAuthority.state !== 'ready') return;
+          namedAgentCatalog = namedAgentPresets(catalog, result.items); renderNodeCatalog();
+        }).catch(() => { /* A denied runner catalog never hides the ordinary node catalog. */ });
+      }
       nodeCatalogFailure = null;
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
@@ -11057,6 +11079,7 @@ async function connectRuntime(atBoot = false) {
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = [];
+      namedAgentCatalog = [];
       nodeCatalogFailure = error;
       nodeCatalogLoaded = true;
       nodeCatalogPending = false;
@@ -11119,6 +11142,7 @@ async function revokeRuntimeAccess() {
   deploymentsWindow?.close();
   void deploymentsWindow?.setClient(null);
   nodeTypeCatalog = [];
+  namedAgentCatalog = [];
   nodeCatalogFailure = null;
   nodeCatalogLoaded = false;
   nodeCatalogPending = false;

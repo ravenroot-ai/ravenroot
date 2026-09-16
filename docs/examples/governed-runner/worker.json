@@ -5,7 +5,7 @@
     "runnerId": "workspace-runner",
     "trustProfile": "local-container-v1",
     "labels": [
-      "reference-v1"
+      "development"
     ],
     "capabilities": {
       "capabilities": [
@@ -33,6 +33,19 @@
   "docker": "/usr/bin/docker",
   "stateDirectory": "/var/lib/ravenroot-runner",
   "runtimeImages": {
-    "reference": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    "agent": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "worker": {"maxConcurrentJobs": 8, "pollInterval": "PT1S", "heartbeatInterval": "PT10S",
+    "cleanupTimeout": "PT1M", "shutdownTimeout": "PT20S"},
+  "agentRuntime": {
+    "modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048,
+    "protocolBytes": 262144, "toolOutputBytes": 8192, "listedFiles": 128,
+    "testCommand": ["python3", "-m", "unittest", "discover", "-v"],
+    "skills": {}, "connectTimeout": "PT10S",
+    "models": {"governed-model": {
+      "endpoint": "https://models.example.test/v1/chat/completions",
+      "model": "operator-approved-model", "credentialReference": "runner-model",
+      "maxConcurrency": 8, "maxRequestBytes": 262144, "maxResponseBytes": 65536
+    }}
   }
 }

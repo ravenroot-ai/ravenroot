@@ -837,6 +837,17 @@ export class RavenrootRuntimeClient {
     return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId),
       { method: 'GET', headers: { Accept: 'application/json' } });
   }
+  runnerAvailability() {
+    return this.#json('/v1/runner-plane/availability',
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  stopRunnerWorkspace(processId, nodeId, expectedRevision) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !nodeId) throw new Error('Exact Workspace and revision required');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/resources/' + encodeURIComponent(nodeId) + '/abort',
+    { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision }) });
+  }
   runnerOperation(processId, jobId, operation) {
     if (!['cancel', 'reconcile'].includes(operation)) throw new Error('Unsupported operator runner action');
     return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)

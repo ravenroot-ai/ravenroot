@@ -30,7 +30,7 @@ public final class RunnerJson {
         if (!(raw instanceof Number number)) throw new IllegalArgumentException("missing runner number");
         return new java.math.BigDecimal(number.toString()).longValueExact();
     }
-    private static Set<String> strings(Object raw) {
+    public static Set<String> strings(Object raw) {
         if (!(raw instanceof List<?> list)) throw new IllegalArgumentException("runner list required");
         return list.stream().map(value -> { if (!(value instanceof String)) throw new IllegalArgumentException("runner string required"); return (String) value; })
                 .collect(Collectors.toUnmodifiableSet());
@@ -63,6 +63,9 @@ public final class RunnerJson {
         result.put("modelProfile", definition.modelProfile()); result.put("skills", definition.skills());
         result.put("runnerRequirements", definition.runnerRequirements()); result.put("policy", policy(definition.policy()));
         result.put("workspaceRetention", definition.workspaceRetention().toString()); result.put("outputSchema", definition.outputSchema());
+        result.put("budgets", Map.of("modelTurns", definition.budgets().modelTurns(), "toolCalls", definition.budgets().toolCalls(),
+                "modelTokens", definition.budgets().modelTokens(), "tokensPerTurn", definition.budgets().tokensPerTurn()));
+        result.put("skillInstructions", definition.skillInstructions());
         result.put("commands", definition.commands().values().stream().sorted(Comparator.comparing(AgentCommand::name))
                 .map(command -> Map.of("name", command.name(), "readOnly", command.readOnly(),
                         "policy", policy(command.policy()), "outcomes", command.outcomes())).toList());
@@ -76,10 +79,19 @@ public final class RunnerJson {
             if (mapped.put(name, new AgentCommand(name, bool(command, "readOnly"), policy(map(command.get("policy"))),
                     strings(command.get("outcomes")))) != null) throw new IllegalArgumentException("duplicate runner command");
         }
+        var budgets = value.containsKey("budgets") ? map(value.get("budgets")) : null;
+        var bodies = new LinkedHashMap<String, String>();
+        if (value.containsKey("skillInstructions")) map(value.get("skillInstructions")).forEach((name, body) -> {
+            if (!(body instanceof String text)) throw new IllegalArgumentException("skill body must be text");
+            bodies.put(name, text);
+        });
         return new AgentDefinition(new AgentDefinition.Reference(tenant, text(value, "name"), number(value, "version")),
                 text(value, "instructions"), text(value, "runtimeProfile"), text(value, "modelProfile"), mapped,
                 strings(value.get("skills")), strings(value.get("runnerRequirements")), policy(map(value.get("policy"))),
-                Duration.parse(text(value, "workspaceRetention")), text(value, "outputSchema"));
+                Duration.parse(text(value, "workspaceRetention")), text(value, "outputSchema"),
+                budgets == null ? AgentDefinition.Budgets.LEGACY : new AgentDefinition.Budgets(
+                    Math.toIntExact(number(budgets, "modelTurns")), Math.toIntExact(number(budgets, "toolCalls")),
+                    number(budgets, "modelTokens"), Math.toIntExact(number(budgets, "tokensPerTurn"))), bodies);
     }
     public static Map<String, Object> registration(RunnerRegistration registration) {
         return Map.of("protocolVersion", registration.protocolVersion(), "runnerId", registration.runnerId(),
@@ -90,25 +102,34 @@ public final class RunnerJson {
                 text(value, "trustProfile"), strings(value.get("labels")), policy(map(value.get("capabilities"))));
     }
     public static Map<String, Object> resource(GovernedRunnerResource resource) {
-        Object body = resource.kind() == GovernedRunnerResource.Kind.AGENT_DEFINITION
-                ? definition(RunnerCodec.definition(resource.document().bytes())) : registration(RunnerCodec.registration(resource.document().bytes()));
+        Object body = switch (resource.kind()) {
+            case AGENT_DEFINITION -> definition(RunnerCodec.definition(resource.document().bytes()));
+            case RUNNER -> registration(RunnerCodec.registration(resource.document().bytes()));
+            case WORKSPACE_PROFILE -> workspaceProfile(RunnerCodec.workspaceProfile(resource.document().bytes()));
+        };
         return Map.of("kind", resource.kind().name(), "name", resource.name(), "version", resource.version(),
                 "approved", resource.approved(), "revision", resource.revision(), "actor", resource.actor(),
                 "updatedAt", resource.updatedAt().toString(), "document", body);
     }
     public static GovernedRunnerResource resource(String tenant, Map<String, Object> value) {
         var kind = GovernedRunnerResource.Kind.valueOf(text(value, "kind"));
-        byte[] document = kind == GovernedRunnerResource.Kind.AGENT_DEFINITION
-                ? RunnerCodec.definition(definition(tenant, map(value.get("document"))))
-                : RunnerCodec.registration(registration(tenant, map(value.get("document"))));
+        byte[] document = switch (kind) {
+            case AGENT_DEFINITION -> RunnerCodec.definition(definition(tenant, map(value.get("document"))));
+            case RUNNER -> RunnerCodec.registration(registration(tenant, map(value.get("document"))));
+            case WORKSPACE_PROFILE -> RunnerCodec.workspaceProfile(workspaceProfile(tenant, map(value.get("document"))));
+        };
         return new GovernedRunnerResource(kind, tenant, text(value, "name"), number(value, "version"),
-                bool(value, "approved"), OpaquePayload.of(document, kind == GovernedRunnerResource.Kind.AGENT_DEFINITION
-                        ? "application/vnd.ravenroot.agent-definition.v1" : "application/vnd.ravenroot.runner-registration.v1"),
+                bool(value, "approved"), OpaquePayload.of(document, switch (kind) {
+                    case AGENT_DEFINITION -> "application/vnd.ravenroot.agent-definition.v1";
+                    case RUNNER -> "application/vnd.ravenroot.runner-registration.v1";
+                    case WORKSPACE_PROFILE -> "application/vnd.ravenroot.workspace-profile.v1";
+                }),
                 0, "untrusted-ingress", Instant.EPOCH);
     }
     public static Map<String, Object> entry(RunnerWorkspaceState.Entry entry) {
         var value = new LinkedHashMap<>(job(entry.job()));
-        value.put("continuationUncertain", entry.continuationUncertain()); return value;
+        value.put("continuationUncertain", entry.continuationUncertain());
+        value.put("workspaceRef", entry.workspaceNodeId()); value.put("lifecycleCommand", entry.lifecycleCommand()); return value;
     }
     public static Map<String, Object> job(RunnerJob job) {
         var id = job.identity(); var result = new LinkedHashMap<String, Object>();
@@ -121,8 +142,71 @@ public final class RunnerJson {
         result.put("deadline", job.deadline().toString()); result.put("leaseUntil", job.leaseUntil() == null ? null : job.leaseUntil().toString());
         result.put("authority", policy(job.authority())); result.put("stopReason", job.stopReason().name());
         result.put("outcome", job.result() == null ? null : job.result().outcome());
+        result.put("result", job.result() == null ? null : directResult(job.result().payload()));
         result.put("artifacts", job.result() == null ? List.of() : job.result().artifacts().stream().map(RunnerJson::artifact).toList());
         return result;
+    }
+    private static Object directResult(OpaquePayload payload) {
+        if (payload.size() == 0) return null;
+        if (payload.contentType().equals("application/json") || payload.contentType().endsWith("+json"))
+            return PayloadJson.read(payload.bytes(), LIMITS).toJava();
+        // Legacy drivers may return opaque bytes. Inspection must remain available for recovery,
+        // without silently interpreting arbitrary encodings as structured Agent output.
+        return Map.of("contentType", payload.contentType(), "sizeBytes", payload.size(), "opaque", true);
+    }
+    public static Map<String, Object> workspaceProfile(WorkspaceProfile profile) {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("name", profile.reference().name()); result.put("version", profile.reference().version());
+        result.put("workspaceScope", profile.workspaceScope().name()); result.put("runtimeLifecycle", profile.runtimeLifecycle().name());
+        result.put("runnerPool", profile.runnerPool()); result.put("runtimeProfile", profile.runtimeProfile());
+        result.put("policy", policy(profile.policy())); result.put("retention", profile.retention().toString());
+        result.put("completionPolicy", profile.completionPolicy().name()); result.put("allowedAgents", profile.allowedAgents());
+        var c = profile.capacity();
+        result.put("capacity", Map.of("mutatingUsers", c.mutatingUsers(), "readOnlyUsers", c.readOnlyUsers(),
+                "materializedWorkspaces", c.materializedWorkspaces(), "aggregateStorageBytes", c.aggregateStorageBytes(),
+                "queuedJobs", c.queuedJobs(), "retainedJobs", c.retainedJobs(), "admission", c.admission().name()));
+        var fleet = new LinkedHashMap<String, Object>();
+        profile.fleetLimits().scopes().forEach((scope, ceiling) -> fleet.put(scope.name(), Map.of(
+                "claimedJobs", ceiling.claimedJobs(), "queuedJobs", ceiling.queuedJobs(),
+                "retainedWorkspaces", ceiling.retainedWorkspaces(), "storageBytes", ceiling.storageBytes())));
+        result.put("fleetLimits", fleet);
+        result.put("cpuMillicores", profile.cpuMillicores());
+        return result;
+    }
+    public static WorkspaceProfile workspaceProfile(String tenant, Map<String, Object> value) {
+        var c = map(value.get("capacity"));
+        var capacity = new WorkspaceProfile.Capacity(Math.toIntExact(number(c, "mutatingUsers")), Math.toIntExact(number(c, "readOnlyUsers")),
+                Math.toIntExact(number(c, "materializedWorkspaces")), number(c, "aggregateStorageBytes"),
+                Math.toIntExact(number(c, "queuedJobs")), Math.toIntExact(number(c, "retainedJobs")),
+                WorkspaceProfile.Admission.valueOf(text(c, "admission")));
+        RunnerFleetLimits fleetLimits = RunnerFleetLimits.from(capacity);
+        if (value.containsKey("fleetLimits")) {
+            var scopes = new java.util.EnumMap<RunnerFleetLimits.Scope, RunnerFleetLimits.Ceiling>(RunnerFleetLimits.Scope.class);
+            map(value.get("fleetLimits")).forEach((scope, raw) -> {
+                var ceiling = map(raw);
+                scopes.put(RunnerFleetLimits.Scope.valueOf(scope), new RunnerFleetLimits.Ceiling(
+                        Math.toIntExact(number(ceiling, "claimedJobs")), Math.toIntExact(number(ceiling, "queuedJobs")),
+                        Math.toIntExact(number(ceiling, "retainedWorkspaces")), number(ceiling, "storageBytes")));
+            });
+            fleetLimits = new RunnerFleetLimits(scopes);
+        }
+        return new WorkspaceProfile(new AgentDefinition.Reference(tenant, text(value, "name"), number(value, "version")),
+                WorkspaceProfile.Scope.valueOf(text(value, "workspaceScope")),
+                WorkspaceProfile.RuntimeLifecycle.valueOf(text(value, "runtimeLifecycle")),
+                text(value, "runnerPool"), text(value, "runtimeProfile"), policy(map(value.get("policy"))),
+                capacity,
+                Duration.parse(text(value, "retention")), WorkspaceProfile.CompletionPolicy.valueOf(text(value, "completionPolicy")),
+                strings(value.get("allowedAgents")), fleetLimits,
+                value.containsKey("cpuMillicores") ? Math.toIntExact(number(value, "cpuMillicores")) : 1000);
+    }
+    public static Map<String, Object> workspace(WorkspaceResource workspace) {
+        var value = new LinkedHashMap<String, Object>();
+        value.put("nodeId", workspace.nodeId()); value.put("workspaceId", workspace.workspaceId().toString());
+        value.put("profile", workspaceProfile(workspace.profile())); value.put("runnerId", workspace.runnerId());
+        value.put("state", workspace.state().name()); value.put("runtimeId", workspace.runtimeId() == null ? null : workspace.runtimeId().toString());
+        value.put("ownershipGeneration", workspace.generation());
+        value.put("checkpoint", workspace.checkpoint()); value.put("stopRequested", workspace.stopRequested());
+        value.put("updatedAt", workspace.updatedAt().toString()); return value;
     }
     public static Map<String, Object> artifact(RunnerArtifact artifact) {
         return Map.of("artifactId", artifact.artifactId().toString(), "kind", artifact.kind().name(),

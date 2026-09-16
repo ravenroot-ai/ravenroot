@@ -1,0 +1,28 @@
+[Unit]
+Description=Ravenroot governed worker %i
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ravenroot-runner
+Group=ravenroot-runner
+SupplementaryGroups=docker
+Environment=RAVENROOT_RUNNER_INSTANCE=%i
+EnvironmentFile=-/etc/ravenroot/workers/%i.environment
+ExecStart=/usr/bin/java -cp /opt/ravenroot/ravenroot.jar ai.ravenroot.server.RunnerWorkerMain /etc/ravenroot/workers/%i.json
+Restart=on-failure
+RestartSec=5
+StateDirectory=ravenroot-runner-%i
+ReadWritePaths=/var/lib/ravenroot-runner-%i
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

@@ -63,8 +63,16 @@ if template.count(expected_mapping) != 1:
 runtime = (root / "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/"
            "programming/graalvm/GraalVmProgramRuntime.java").read_text()
 compact = " ".join(runtime.split())
-if ('integerEnvironment(environment, "RAVENROOT_PROGRAM_TIMEOUT_MS", 5_000, 100, 300_000)' not in compact):
-    raise SystemExit("Helm carrier range no longer matches GraalVmProgramRuntime")
+configuration = (root / "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/"
+                 "programming/graalvm/GraalVmRuntimeConfiguration.java").read_text()
+typed = " ".join(configuration.split())
+if ('fromConfiguration(GraalVmRuntimeConfiguration.resolve(properties, environment))' not in compact
+        or any(fragment not in typed for fragment in (
+            'DEFAULT_TIMEOUT_MS = 5_000;', 'MIN_TIMEOUT_MS = 100;', 'MAX_TIMEOUT_MS = 300_000;',
+            'int timeout = integer(selected(properties, environment, "ravenroot.program.timeout-ms", "RAVENROOT_PROGRAM_TIMEOUT_MS"),',
+            '"ravenroot.program.timeout-ms", DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);',
+            'javaPath, Duration.ofMillis(timeout), heap, placement);'))):
+    raise SystemExit("Helm carrier range no longer matches the typed Graal runtime authority")
 if '${RAVENROOT_PROGRAM_TIMEOUT_MS:-30000}' not in (root / "compose.yaml").read_text():
     raise SystemExit("Compose must retain its explicit local-development timeout override")
 documentation = (root / "docs/reference/configuration.md").read_text()

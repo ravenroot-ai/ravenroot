@@ -135,6 +135,12 @@ public final class ProcessLifecycleService {
                     }
                 }
             }
+            if (command == Command.STOP && !replay && store.supports(ai.ravenroot.api.persistence.StoreCapability.RUNNER_JOBS)) {
+                var workspace = await(store.loadRunnerWorkspace(key)).orElse(null);
+                if (workspace != null) for (String node : workspace.workspaces().keySet()) {
+                    builder.runner(new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceStop(UUID.randomUUID(), node));
+                }
+            }
             var stored = await(store.apply(builder.build()));
             State effective = currentState(key);
             if (effective != state(command)) return new Result(Code.REPLAYED, processInstanceId,

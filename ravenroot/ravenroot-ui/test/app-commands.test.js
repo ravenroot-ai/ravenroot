@@ -196,7 +196,7 @@ describe('application command catalog', () => {
     ]);
     expect(Math.min(...layered.map(command => command.order)))
       .toBeGreaterThan(Math.max(...established.map(command => command.order)));
-    expect(layered.every(command => command.kind == null
+    expect(layered.every(command => command.kind === 'radio'
       && command.placements.includes('menu.layout') && command.placements.includes('help'))).toBe(true);
     expect(layered.every(command => command.isEnabled({ hasDocument: true, renderMode: 'design' }))).toBe(true);
     expect(layered.some(command => command.isEnabled({ hasDocument: true, renderMode: 'monitoring' }))).toBe(false);
@@ -219,7 +219,7 @@ describe('application command catalog', () => {
     expect(arrangeCommands.map(command => command.label)).toEqual([
       'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
     ]);
-    expect(arrangeCommands.every(command => command.kind == null
+    expect(arrangeCommands.every(command => command.kind === 'radio'
       && command.placements.includes('menu.layout')
       && command.placements.includes('help'))).toBe(true);
     expect(arrangeCommands.every(command => command.isEnabled({
@@ -232,6 +232,12 @@ describe('application command catalog', () => {
       hasDocument: false, renderMode: 'design',
     }))).toBe(false);
     expect(byId['layout.arrange.keep'].help).toMatch(/fit the graph/i);
+    expect(byId['layout.arrange.flow'].isChecked({
+      hasDocument: true, renderMode: 'design', designArrangement: 'flow',
+    })).toBe(true);
+    expect(byId['layout.arrange.flow'].isChecked({
+      hasDocument: true, renderMode: 'monitoring', designArrangement: 'flow',
+    })).toBe(false);
 
     const arrange = vi.fn();
     const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));

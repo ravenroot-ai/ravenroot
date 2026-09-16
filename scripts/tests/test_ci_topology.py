@@ -22,6 +22,9 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_full_tier_exposes_independently_actionable_jobs(self) -> None:
         expected = {
+            "admission-policy",
+            "admission-ui",
+            "admission-backend",
             "full-docs-policy",
             "full-python-contracts",
             "full-shell-contracts",
@@ -40,6 +43,8 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "full-runtime-auth-smoke",
             "full-runtime-jar-smoke",
             "full-runtime-container-smoke",
+            "full-preflight",
+            "full-regression",
         }
         self.assertTrue(expected.issubset(self.jobs))
         self.assertTrue({"full-policy", "full-ui", "full-runtime"}.isdisjoint(self.jobs))
@@ -59,13 +64,14 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_verified_artifact_dependencies_are_explicit(self) -> None:
         artifact_consumers = {
-            "full-ui-e2e-harness": {"full-ui-build"},
-            "full-ui-e2e-shard": {"full-ui-build"},
-            "backend-test": {"backend-build"},
-            "full-plugin-boundary": {"backend-build"},
-            "full-runtime-auth-smoke": {"backend-build"},
-            "full-runtime-jar-smoke": {"backend-build"},
+            "full-ui-e2e-harness": {"full-preflight", "full-ui-build"},
+            "full-ui-e2e-shard": {"full-preflight", "full-ui-build"},
+            "backend-test": {"full-preflight", "backend-build"},
+            "full-plugin-boundary": {"full-preflight", "backend-build"},
+            "full-runtime-auth-smoke": {"full-preflight", "backend-build"},
+            "full-runtime-jar-smoke": {"full-preflight", "backend-build"},
             "full-runtime-container-smoke": {
+                "full-regression",
                 "full-ui-build",
                 "backend-build",
                 "full-plugin-boundary",
@@ -100,7 +106,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("npx playwright test", shard)
         self.assertNotIn("--grep", shard)
         self.assertNotIn("testIgnore", shard)
-        self.assertIn("fail-fast: false", shard)
+        self.assertIn("fail-fast: true", shard)
         # The JVM harness is a separate real-process test and must keep running in full.
         self.assertIn(
             "HumanTaskConfirmationBrowserProcessIntegrationTest", self.jobs["full-ui-e2e-harness"]
@@ -120,38 +126,40 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "only the download side may repeat a producer's artifact name",
         )
 
-    def test_the_fast_feedback_runs_the_same_contracts_as_the_gate(self) -> None:
-        """The fast tier repeats these commands; this keeps the copy from drifting from the original."""
+    def test_feature_feedback_is_ultralight_and_does_not_repeat_test_suites(self) -> None:
         fast = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))["fast-policy"]
+        all_fast = FAST_WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn("python3 -m unittest", all_fast)
+        self.assertNotIn("./scripts/tests/", all_fast)
+        self.assertNotIn("npm test", all_fast)
+        self.assertNotIn("clean install", all_fast)
+        self.assertIn("fetch-depth: 0", fast)
 
-        def commands(block: str) -> set[str]:
-            return {
-                line.strip()
-                for line in block.splitlines()
-                if line.strip().startswith(("python3 ", "./scripts/tests/", "./dev.sh ", "docker ", "git diff"))
-            }
+    def test_operational_configuration_audit_runs_once_in_the_full_tier(self) -> None:
+        block = self.jobs["full-python-contracts"]
+        self.assertIn("fetch-depth: 0", block)
+        self.assertEqual(1, block.count("python3 -m unittest scripts.tests.test_audit_operational_configuration"))
+        self.assertEqual(1, block.count("python3 scripts/audit_operational_configuration.py --check"))
 
-        full = set()
-        for job in ("full-python-contracts", "full-shell-contracts", "full-source-policy"):
-            full |= commands(self.jobs[job])
-        self.assertEqual(commands(fast), full)
-
-    def test_operational_configuration_gate_runs_with_complete_history_on_both_tiers(self) -> None:
-        fast = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))
-        for job, block in (("fast-policy", fast["fast-policy"]),
-                           ("full-python-contracts", self.jobs["full-python-contracts"])):
+    def test_expensive_regressions_wait_for_the_light_preflight(self) -> None:
+        preflight = declared_needs(self.jobs["full-preflight"])
+        self.assertEqual(
+            preflight,
+            {
+                "release-classification", "docs-site", "full-docs-policy", "full-source-policy",
+                "full-ui-audit", "full-ui-unit-tests", "full-ui-build", "backend-build",
+            },
+        )
+        for job in (
+            "full-python-contracts", "full-shell-contracts", "full-ui-e2e-harness",
+            "full-ui-e2e-shard", "full-backend-tests", "backend-test", "full-plugin-boundary",
+            "full-api-documentation", "full-runtime-auth-smoke", "full-runtime-jar-smoke",
+        ):
             with self.subTest(job=job):
-                self.assertIn("fetch-depth: 0", block)
-                self.assertEqual(
-                    1,
-                    block.count(
-                        "python3 -m unittest scripts.tests.test_audit_operational_configuration"
-                    ),
-                )
-                self.assertEqual(
-                    1,
-                    block.count("python3 scripts/audit_operational_configuration.py --check"),
-                )
+                self.assertIn("full-preflight", declared_needs(self.jobs[job]))
+
+    def test_container_smoke_waits_for_every_parallel_regression(self) -> None:
+        self.assertIn("full-regression", declared_needs(self.jobs["full-runtime-container-smoke"]))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Explicit behavior composition; no reflection and no dependency-injection container. */
 public final class BehaviorRegistry {
+    private ai.ravenroot.core.runner.RunnerJobService runnerJobs;
+
+    /** Explicit composition opt-in; existing bounded Agent and embedding behavior remain unchanged. */
+    public BehaviorRegistry withRunnerJobs(ai.ravenroot.core.runner.RunnerJobService service) {
+        if (runnerJobs != null) throw new IllegalStateException("runner jobs already configured");
+        registerFactory(new ai.ravenroot.core.runner.WorkspaceAgentBehavior(service), NodeCatalogSource.core());
+        runnerJobs = service;
+        return this;
+    }
+
+    public ai.ravenroot.core.runner.RunnerJobService runnerJobs() { return runnerJobs; }
     private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
             "log", "delay", "human-task", "template", "json-parse", "cel-transform",
             "cel-decision", "json-path", "boundary-guard");

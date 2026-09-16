@@ -156,7 +156,8 @@ public final class NodePackages {
             // PinnedNodePackage.of imposes no shape on either string, so in fact nothing here can
             // fail; the placement is what keeps that true if it ever changes.
             plans.add(new RegistrationPlan(packageId,
-                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()),
+                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract(),
+                            nodePackage.operationalPolicyDigest()),
                     serviceAware, packageServices, packageServices.egressCapacityProfile(),
                     List.copyOf(validated)));
         }
@@ -224,6 +225,14 @@ public final class NodePackages {
                 throw new IllegalArgumentException("Node package '" + nodePackage.id() + "' behavior '"
                         + name + "' declares property '" + property.name() + "' in the reserved '"
                         + ReservedGraphProperties.PREFIX + "' namespace, which graph content may never set.");
+            }
+        }
+        for (ai.ravenroot.api.catalog.NodePropertyGroupDescriptor group
+                : descriptor.additionalProperties()) {
+            if (ReservedGraphProperties.isReserved(group.name() + ".")) {
+                throw new IllegalArgumentException("Node package '" + nodePackage.id() + "' behavior '"
+                        + name + "' declares additional-property group '" + group.name()
+                        + "' in the reserved namespace");
             }
         }
         return behavior;
@@ -369,7 +378,8 @@ public final class NodePackages {
             }
             Map<String, Object> owned = new LinkedHashMap<>();
             node.properties().forEach((name, value) -> {
-                if (declared.contains(name)) {
+                if (declared.contains(name) || descriptor().additionalProperties().stream()
+                        .anyMatch(group -> group.match(name).isPresent())) {
                     owned.put(name, value);
                 }
             });

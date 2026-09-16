@@ -21,7 +21,7 @@ final class LogNodeBehaviorFactory implements NodeBehaviorFactory {
     public NodeTypeDescriptor descriptor() {
         return new NodeTypeDescriptor("log", "Log", "Actions",
                 "Writes an intentional workflow message to the server log and passes the payload through.",
-                "handler", false, List.of(
+                "trace", false, List.of(
                 NodePropertyDescriptor.optional("message", "Message", NodePropertyType.TEXT,
                         "Supports {{payload}}, {{attributes.name}} and {{properties.name}} placeholders.",
                         "{{payload}}")), Set.of("deterministic", "side-effect"))

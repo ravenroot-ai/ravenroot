@@ -34,26 +34,8 @@ import java.util.Optional;
  */
 public record LlmProfile(String name, URI endpoint, String model,
                          Optional<OutboundCredentialBinding> credentialBinding,
-                         int timeoutMs, int maxResponseBytes, int maxConcurrency,
+                         int timeoutMs, int maxRequestBytes, int maxResponseBytes, int maxConcurrency,
                          String systemPreamble) {
-
-    /**
-     * Longest opening an operator may put in front of an author's instructions.
-     *
-     * <p>The preamble is read by the {@code agent} node only. <b>{@code llm-prompt} sends no system
-     * message at all and this field does not change that</b> — the field lives on the profile, which
-     * is the operator's, because the whole point of the documented contract is that the operator owns the top of
-     * the operator-only system turn; graph-authored instructions use a separate user turn.</p>
-     *
-     * <p>Bounded because it is prepended to every turn of an agent loop: an unbounded preamble is
-     * paid for once per turn, not once per run.</p>
-     */
-    public static final int MAX_SYSTEM_PREAMBLE_LENGTH = 8 * 1024;
-
-    /** Longest completion this bundle will ever read, whatever a profile asks for. */
-    public static final int HARD_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-    /** Longest deadline this bundle will ever ask the managed channel for. */
-    public static final int HARD_MAX_TIMEOUT_MS = 600_000;
 
     public LlmProfile {
         Objects.requireNonNull(name, "name");
@@ -79,19 +61,19 @@ public record LlmProfile(String name, URI endpoint, String model,
         if (model.isBlank() || model.length() > 256) {
             throw new IllegalArgumentException("model");
         }
-        if (timeoutMs < 1 || timeoutMs > HARD_MAX_TIMEOUT_MS) {
+        if (timeoutMs < 1) {
             throw new IllegalArgumentException("timeoutMs");
         }
-        if (maxResponseBytes < 1 || maxResponseBytes > HARD_MAX_RESPONSE_BYTES) {
+        if (maxRequestBytes < 1) {
+            throw new IllegalArgumentException("maxRequestBytes");
+        }
+        if (maxResponseBytes < 1) {
             throw new IllegalArgumentException("maxResponseBytes");
         }
-        if (maxConcurrency < 1 || maxConcurrency > 256) {
+        if (maxConcurrency < 1) {
             throw new IllegalArgumentException("maxConcurrency");
         }
         systemPreamble = systemPreamble == null ? "" : systemPreamble;
-        if (systemPreamble.length() > MAX_SYSTEM_PREAMBLE_LENGTH) {
-            throw new IllegalArgumentException("systemPreamble");
-        }
     }
 
     /**
@@ -105,6 +87,16 @@ public record LlmProfile(String name, URI endpoint, String model,
     public LlmProfile(String name, URI endpoint, String model,
                       Optional<OutboundCredentialBinding> credentialBinding,
                       int timeoutMs, int maxResponseBytes, int maxConcurrency) {
-        this(name, endpoint, model, credentialBinding, timeoutMs, maxResponseBytes, maxConcurrency, "");
+        this(name, endpoint, model, credentialBinding, timeoutMs, maxResponseBytes,
+                maxResponseBytes, maxConcurrency, "");
+    }
+
+    /** Compatibility constructor preserving the pre-request-limit shape with a system preamble. */
+    public LlmProfile(String name, URI endpoint, String model,
+                      Optional<OutboundCredentialBinding> credentialBinding,
+                      int timeoutMs, int maxResponseBytes, int maxConcurrency,
+                      String systemPreamble) {
+        this(name, endpoint, model, credentialBinding, timeoutMs, maxResponseBytes,
+                maxResponseBytes, maxConcurrency, systemPreamble);
     }
 }

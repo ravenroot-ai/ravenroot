@@ -117,10 +117,12 @@ class RecordingLifecycleTarget implements DeploymentLifecycleTarget {
     public CompletionStage<Boolean> drain(Duration bound, long deploymentGeneration) {
         String operation = "drain";
         calls.add(operation + "@" + deploymentGeneration);
-        if (!applied.add(operation + "@" + deploymentGeneration)) {
+        String operationGeneration = operation + "@" + deploymentGeneration;
+        if (applied.contains(operationGeneration)) {
             return CompletableFuture.completedFuture(drainFinishes);
         }
         if (raise()) return CompletableFuture.failedFuture(consumeFailure());
+        applied.add(operationGeneration);
         effects.add(operation + "@" + deploymentGeneration);
         if (drainFinishes) {
             inFlight = 0;
@@ -152,8 +154,10 @@ class RecordingLifecycleTarget implements DeploymentLifecycleTarget {
         // The port's contract: applying the same operation twice at one generation has the effect of
         // applying it once. Recorded rather than merely honoured, so a test can prove the second call
         // reached the runtime and still did nothing.
-        if (!applied.add(operation + "@" + generation)) return CompletableFuture.completedFuture(null);
+        String operationGeneration = operation + "@" + generation;
+        if (applied.contains(operationGeneration)) return CompletableFuture.completedFuture(null);
         if (raise()) return CompletableFuture.failedFuture(consumeFailure());
+        applied.add(operationGeneration);
         effects.add(operation + "@" + generation);
         body.run();
         return CompletableFuture.completedFuture(null);

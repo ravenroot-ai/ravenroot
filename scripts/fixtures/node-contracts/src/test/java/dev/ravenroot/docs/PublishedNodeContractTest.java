@@ -1,6 +1,7 @@
 package dev.ravenroot.docs;
 
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyGroupDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeRuntimeConcurrency;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
@@ -430,8 +431,19 @@ final class PublishedNodeContractTest {
                     .map(value -> (value.parameterized() ? "$" + value.fromProperty() : value.name())
                             + ": " + value.description())
                     .collect(java.util.stream.Collectors.joining("; "));
-            List<NodePropertyDescriptor> properties = descriptor.properties().isEmpty()
-                    ? List.of((NodePropertyDescriptor) null) : descriptor.properties();
+            var published = new ArrayList<NodePropertyDescriptor>(descriptor.properties());
+            for (NodePropertyGroupDescriptor group : descriptor.additionalProperties()) {
+                for (NodePropertyDescriptor field : group.fields()) {
+                    published.add(new NodePropertyDescriptor(
+                            group.name() + ".<N>." + field.name(),
+                            group.displayName() + " item " + field.displayName(), field.type(), true,
+                            group.description() + " " + field.description(), "", field.allowedValues(),
+                            false, null, null, field.minimumValue(), field.maximumValue(),
+                            field.maximumUtf8Bytes(), field.maximumItems(), field.maximumItemUtf8Bytes()));
+                }
+            }
+            List<NodePropertyDescriptor> properties = published.isEmpty()
+                    ? List.of((NodePropertyDescriptor) null) : List.copyOf(published);
             for (NodePropertyDescriptor property : properties) {
                 out.append(cell(descriptor.behavior())).append('\t')
                         .append(cell(descriptor.displayName())).append('\t')
@@ -477,7 +489,8 @@ final class PublishedNodeContractTest {
         return new NodeTypeDescriptor(descriptor.behavior(), descriptor.displayName(), descriptor.category(),
                 descriptor.description(), descriptor.visualType(), descriptor.agentic(), properties,
                 descriptor.capabilities(), descriptor.defaultNature(), descriptor.allowedNatures(),
-                descriptor.commands(), descriptor.outcomes(), descriptor.runtimeConcurrency());
+                descriptor.commands(), descriptor.outcomes(), descriptor.runtimeConcurrency(),
+                descriptor.additionalProperties());
     }
 
     private static NodeTypeDescriptor replaceProperty(NodeTypeDescriptor descriptor,

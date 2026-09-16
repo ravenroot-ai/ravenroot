@@ -30,10 +30,20 @@ function element(doc, name, className = '', text = '') {
 export function renderHumanTaskInspector(host, state, nodeId, {
   onSelect = () => {}, onNext = () => {}, onPrevious = () => {}, onRefresh = () => {},
 } = {}) {
-  host.querySelector('[data-human-task-inspector]')?.remove();
   const doc = host.ownerDocument;
+  const previous = host.querySelector('[data-human-task-inspector]');
+  const active = doc.activeElement;
+  // A reconnect can replace ready → loading → ready after dialog focus was restored.
+  // Carry only focus already owned by this node's Inspector, never a deferred focus claim
+  // that could steal focus from a dialog, another control, or a newly selected node.
+  const restoreFocus = previous?.contains(active) && previous.dataset.humanTaskNodeId === nodeId
+    && active.matches('[data-human-task-id], .human-task-status');
+  const focusedId = active?.dataset.humanTaskId ?? active?.dataset.humanTaskFocusId;
+  const focusedGeneration = active?.dataset.humanTaskGeneration ?? active?.dataset.humanTaskFocusGeneration;
+  previous?.remove();
   const section = element(doc, 'section', 'human-task-inspector');
   section.dataset.humanTaskInspector = '';
+  section.dataset.humanTaskNodeId = nodeId;
   section.setAttribute('aria-labelledby', 'human-task-inspector-title');
   const heading = element(doc, 'div', 'editor-section-title');
   const title = element(doc, 'h3', '', 'Human tasks');
@@ -111,6 +121,19 @@ export function renderHumanTaskInspector(host, state, nodeId, {
   // remain below it, but a long property list must not bury a time-sensitive confirmation.
   host.prepend(section);
   host.scrollTop = 0;
+  if (restoreFocus) {
+    const rows = [...section.querySelectorAll('[data-human-task-id]')];
+    const target = rows.find(row => row.dataset.humanTaskId === focusedId
+      && row.dataset.humanTaskGeneration === focusedGeneration) || rows[0] || status;
+    if (target === status) {
+      status.tabIndex = -1;
+      if (focusedId !== undefined) {
+        status.dataset.humanTaskFocusId = focusedId;
+        status.dataset.humanTaskFocusGeneration = focusedGeneration;
+      }
+    }
+    target.focus({ preventScroll: true });
+  }
   return section;
 }
 
@@ -118,6 +141,10 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   if (!dialog) return { open() {}, close() {}, suspend() {}, selected: () => null };
   const prompt = dialog.querySelector('[data-human-task-prompt]');
   const identity = dialog.querySelector('[data-human-task-identity]');
+  const review = dialog.querySelector('[data-human-task-review]');
+  const reviewStatus = dialog.querySelector('[data-human-task-review-status]');
+  const reviewText = dialog.querySelector('[data-human-task-review-text]');
+  const reviewDigest = dialog.querySelector('[data-human-task-review-digest]');
   const commentField = dialog.querySelector('[data-human-task-comment-field]');
   const comment = dialog.querySelector('[data-human-task-comment]');
   const commentHint = dialog.querySelector('[data-human-task-comment-hint]');
@@ -127,6 +154,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   let capability = null;
   let submitting = false;
   let generation = 0;
+  let notifyAfterNativeClose = false;
 
   const taskKey = value => value && `${value.taskId}\u0000${value.generation}`;
   function advance() { generation += 1; }
@@ -146,16 +174,36 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     dialog.setAttribute('aria-busy', String(value));
   }
 
+  function clearReview() {
+    review.hidden = true;
+    reviewStatus.textContent = '';
+    reviewText.textContent = '';
+    reviewDigest.textContent = '';
+  }
+
+  function identify(value) {
+    prompt.textContent = value.presentation?.prompt || '';
+    identity.textContent = `Task ${value.taskId} · process ${value.processInstanceId || 'pending'}`
+      + `${value.traversalId ? ` · traversal ${value.traversalId}` : ''}`
+      + `${value.deploymentId ? ` · deployment ${value.deploymentId}` : ''}`
+      + ` · generation ${value.generation}`;
+  }
+
   function close() {
     if (submitting) return;
     advance();
     task = null;
     capability = null;
     comment.value = '';
+    clearReview();
     say();
-    if (dialog.open && typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
-    onClose();
+    if (dialog.open && typeof dialog.close === 'function') {
+      notifyAfterNativeClose = true;
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+      onClose();
+    }
   }
 
   function suspend() {
@@ -165,7 +213,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     task = null;
     capability = null;
     comment.value = '';
+    clearReview();
     say();
+    notifyAfterNativeClose = false;
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
     else dialog.removeAttribute('open');
   }
@@ -200,6 +250,11 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   });
   dialog.querySelector('[data-human-task-close]').addEventListener('click', close);
   dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+  dialog.addEventListener('close', () => {
+    if (!notifyAfterNativeClose) return;
+    notifyAfterNativeClose = false;
+    onClose();
+  });
   dialog.addEventListener('keydown', event => event.stopPropagation());
   comment.addEventListener('input', () => {
     say();
@@ -207,16 +262,51 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   });
 
   return {
+    loading(nextTask, nextCapability, { show = false } = {}) {
+      advance();
+      submitting = false;
+      task = nextTask;
+      capability = nextCapability;
+      identify(task);
+      review.hidden = false;
+      reviewStatus.textContent = 'Loading authorized review content…';
+      reviewText.textContent = '';
+      reviewDigest.textContent = '';
+      commentField.hidden = true;
+      actions.replaceChildren();
+      say();
+      dialog.setAttribute('aria-busy', 'true');
+      if (show && !dialog.open) {
+        dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
+      }
+    },
+    unavailable(message) {
+      if (!task) return;
+      dialog.removeAttribute('aria-busy');
+      review.hidden = false;
+      reviewStatus.textContent = message;
+      reviewText.textContent = '';
+      reviewDigest.textContent = '';
+      say(message);
+      if (!dialog.open) {
+        dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
+      }
+    },
     open(nextTask, nextCapability) {
       advance();
       setBusy(false);
       task = nextTask;
       capability = nextCapability;
-      prompt.textContent = task.presentation.prompt;
-      identity.textContent = `Task ${task.taskId} · process ${task.processInstanceId}`
-        + ` · traversal ${task.traversalId}`
-        + `${task.deploymentId ? ` · deployment ${task.deploymentId}` : ''}`
-        + ` · generation ${task.generation}`;
+      identify(task);
+      clearReview();
+      if (task.reviewPresentation) {
+        review.hidden = false;
+        reviewStatus.textContent = task.reviewPresentation.text.length
+          ? 'Exact inert text/plain content pinned when this task was created.'
+          : 'This task has an empty plain-text review value.';
+        reviewText.textContent = task.reviewPresentation.text;
+        reviewDigest.textContent = `Content ${task.reviewPresentation.contentDigest}`;
+      }
       const mode = task.presentation.commentRequirement;
       commentField.hidden = mode === 'DISALLOWED';
       comment.required = mode === 'REQUIRED';
@@ -235,7 +325,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         return button;
       }));
       say();
-      dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
+      if (!dialog.open) {
+        dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
+      }
       (mode === 'REQUIRED' ? comment : actions.querySelector('button'))?.focus();
     },
     close, suspend,

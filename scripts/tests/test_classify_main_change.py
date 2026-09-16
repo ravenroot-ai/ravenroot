@@ -45,13 +45,13 @@ PROMOTION_HEAD = {"head_ref": "dev", "head_repository": REPOSITORY, "repository"
 
 
 class ClassifyTest(unittest.TestCase):
-    def test_pull_request_to_dev_is_full(self):
-        """`dev` is the verification point, so its pull requests carry the whole functional suite."""
+    def test_pull_request_to_dev_is_admission(self):
+        """Review gets quick diagnostics; the queue verifies the integration commit in full."""
         self.assertEqual(
             classify(event_name="pull_request", base_ref="dev", ref_name="feature/x", labels=set(), paths=[])[
                 "tier"
             ],
-            "full",
+            "admission",
         )
 
     def test_main_requires_exactly_one_release_label(self):
@@ -152,7 +152,7 @@ class ClassifyTest(unittest.TestCase):
                 labels=set(),
                 paths=["ravenroot/ravenroot-ui/package-lock.json"],
             )["tier"],
-            "full",
+            "admission",
         )
 
     def test_a_merge_group_commit_is_full(self):
@@ -191,16 +191,15 @@ class ClassifyTest(unittest.TestCase):
                     classify(event_name="workflow_dispatch", base_ref="", ref_name="dev", labels=set(), paths=[],
                              routed_inputs={**unrouted, name: "9e75c71c061bdc7390dace58be761d21db4b4ad3"})
 
-    def test_push_to_dev_and_manual_dispatch_are_full(self):
-        for event_name, ref_name in (("push", "dev"), ("workflow_dispatch", "main")):
-            result = classify(
-                event_name=event_name,
-                base_ref="",
-                ref_name=ref_name,
-                labels=set(),
-                paths=["docs/index.md"],
-            )
-            self.assertEqual(result["tier"], "full")
+    def test_push_to_dev_is_postmerge(self):
+        result = classify(event_name="push", base_ref="", ref_name="dev", labels=set(), paths=[])
+        self.assertEqual(result["tier"], "postmerge")
+
+    def test_manual_dispatch_is_full(self):
+        result = classify(
+            event_name="workflow_dispatch", base_ref="", ref_name="main", labels=set(), paths=[]
+        )
+        self.assertEqual(result["tier"], "full")
 
 
 if __name__ == "__main__":

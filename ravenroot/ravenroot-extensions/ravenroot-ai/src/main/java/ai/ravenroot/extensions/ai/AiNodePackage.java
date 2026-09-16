@@ -5,6 +5,7 @@ import ai.ravenroot.api.node.NodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The AI node bundle: the node types that invoke a model, with their own adapter inside.
@@ -21,11 +22,25 @@ import java.util.List;
 public final class AiNodePackage implements NodePackage {
     /** The package id an operator names in {@code RAVENROOT_ENABLED_PLUGINS} and in a service grant. */
     public static final String ID = "ai.ravenroot.extensions.ai";
+    private final AgentOperationalConfiguration operationalConfiguration;
+
+    /** Creates the package from the process-startup AI policy environment. */
+    public AiNodePackage() {
+        this(AgentOperationalConfiguration.fromEnvironment(System.getenv()));
+    }
+
+    AiNodePackage(AgentOperationalConfiguration operationalConfiguration) {
+        this.operationalConfiguration = operationalConfiguration;
+    }
 
     @Override public String id() { return ID; }
     @Override public String version() { return "1.0.0"; }
     @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+    @Override public Optional<String> operationalPolicyDigest() {
+        return Optional.of(operationalConfiguration.compatibilityDigest());
+    }
     @Override public List<NodeBehavior> behaviors() {
-        return List.of(new LlmPromptNodeBehavior(), new AgentNodeBehavior());
+        return List.of(new LlmPromptNodeBehavior(operationalConfiguration),
+                new AgentNodeBehavior(operationalConfiguration));
     }
 }

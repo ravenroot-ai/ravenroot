@@ -8,6 +8,7 @@ import ai.ravenroot.api.application.SourceSessionState;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.deployment.DeploymentAdmissionException;
+import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.node.InboundSourceCapable;
@@ -71,6 +72,92 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
               </graph>
             </graphml>
             """;
+
+    @Test
+    void durableRegistrationKeepsTheLocalAliasButPublishesTheAuthorityIdentity() {
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+                new RecordingSourceBehavior());
+        try {
+            DeploymentId authorityId = DeploymentId.of("registry-42");
+            LocalDeploymentStatus status = application.registerDurableLocalDeployment(
+                    TENANT_A, "friendly-name", authorityId, graph(NO_SOURCE_GRAPH));
+
+            assertEquals("friendly-name", status.deploymentId());
+            var target = application.localDeploymentTargets()
+                    .resolve(TENANT_A.tenantId(), authorityId).orElseThrow();
+            target.start(1, 1).toCompletableFuture().join();
+            assertEquals(ai.ravenroot.api.deployment.registry.DeploymentRegistry.ObservedKind.READY,
+                    target.observe().toCompletableFuture().join().state());
+            assertTrue(application.localDeploymentTargets()
+                    .resolve(TENANT_A.tenantId(), DeploymentId.of("friendly-name")).isEmpty());
+        } finally {
+            application.close();
+        }
+    }
+
+    @Test
+    void durableControlRecordsIntentBeforeDrivingPauseResumeCancelAndDrain() {
+        var clock = java.time.Clock.systemUTC();
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+                new RecordingSourceBehavior());
+        var registry = new ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry(
+                clock, tenant -> DeploymentId.of("authority-" + tenant));
+        var singleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
+        var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(
+                registry, application.localDeploymentTargets(), singleFlight,
+                ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING, "owner",
+                Duration.ofMinutes(1), Duration.ofSeconds(1), clock);
+        var control = new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
+                application, registry, coordinator, clock);
+        try {
+            var registered = control.register(TENANT_A, "friendly-name",
+                    NO_SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8));
+            assertEquals("friendly-name", registered.local().deploymentId());
+            assertEquals("authority-tenant-a", registered.durable().deploymentId().value());
+
+            assertTrue(control.submit("tenant-a", "friendly-name",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Start(
+                            "start-1", 1, ai.ravenroot.api.deployment.registry.DeploymentRegistry
+                            .UpdateStrategy.STOP_FIRST),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(0)).isPresent());
+            var running = control.get("tenant-a", "friendly-name").orElseThrow();
+            assertEquals(ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.RUNNING,
+                    running.desired().kind());
+            assertEquals(running.generation(), running.observed().observedGeneration());
+
+            control.submit("tenant-a", "friendly-name",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Pause("pause-1", "review"),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(running.generation()));
+            var paused = control.get("tenant-a", "friendly-name").orElseThrow();
+            assertEquals(ai.ravenroot.api.deployment.registry.DeploymentRegistry.ObservedKind.PAUSED,
+                    paused.observed().state());
+
+            control.submit("tenant-a", "friendly-name",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Resume("resume-1"),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(paused.generation()));
+            var resumed = control.get("tenant-a", "friendly-name").orElseThrow();
+            control.submit("tenant-a", "friendly-name",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Cancel("cancel-1", "operator"),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(resumed.generation()));
+            var cancelledGeneration = control.get("tenant-a", "friendly-name").orElseThrow();
+            assertEquals(ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.CANCEL,
+                    cancelledGeneration.lastLifecycleCommand());
+            assertEquals(ai.ravenroot.api.deployment.registry.DeploymentRegistry.DesiredKind.RUNNING,
+                    cancelledGeneration.desired().kind());
+
+            control.submit("tenant-a", "friendly-name",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Drain(
+                            "drain-1", Duration.ofSeconds(1)),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation
+                            .exactly(cancelledGeneration.generation()));
+            var drained = control.get("tenant-a", "friendly-name").orElseThrow();
+            assertEquals(ai.ravenroot.api.deployment.registry.DeploymentRegistry.ObservedKind.DRAINED,
+                    drained.observed().state());
+            assertTrue(control.get("tenant-b", "friendly-name").isEmpty());
+        } finally {
+            application.close();
+        }
+    }
 
     @Test
     void missingDurableHumanTaskCapabilityRefusesLocalAdmissionBeforeRegistration() {

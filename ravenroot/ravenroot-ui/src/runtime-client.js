@@ -507,6 +507,29 @@ export class RavenrootRuntimeClient {
     return this.#controlExecution(executionId, 'cancel', options);
   }
 
+  async controlProcess(processInstanceId, operation, expectedGeneration,
+    { idempotencyKey, reason = '', signal } = {}) {
+    const id = String(processInstanceId || '');
+    const allowed = new Set(['pause', 'resume', 'cancel', 'drain', 'stop']);
+    if (!id || !allowed.has(operation) || !Number.isSafeInteger(expectedGeneration)
+        || expectedGeneration < 1 || typeof idempotencyKey !== 'string' || !idempotencyKey) {
+      throw new Error('Process lifecycle command is invalid');
+    }
+    const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    const result = await this.#json(`/v1/processes/${encodeURIComponent(id)}/${operation}${query}`, {
+      method: 'POST', signal, headers: {
+        Accept: 'application/json', 'Idempotency-Key': idempotencyKey,
+        'X-Ravenroot-Expected-Generation': String(expectedGeneration),
+      },
+    });
+    if (!result || result.processInstanceId !== id || !Number.isSafeInteger(result.generation)
+        || typeof result.outcome !== 'string' || typeof result.state !== 'string'
+        || typeof result.reason !== 'string' || !Array.isArray(result.traversals)) {
+      throw new Error(`Process ${operation} response is invalid`);
+    }
+    return result;
+  }
+
   /**
    * The durable, tenant-scoped process inventory (issue 154): what the runtime's own persisted
    * record says exists, surviving a restart. This is the authoritative source the UI shares with
@@ -786,6 +809,52 @@ export class RavenrootRuntimeClient {
       `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
     return this.#json(`/v1/program-artifacts/${encodeURIComponent(id)}/${operation}${query ? `?${query}` : ''}`,
       { method: 'POST', ...request, headers: { Accept: 'application/json', ...(request.headers || {}) } });
+  }
+
+  runnerCatalog() {
+    return this.#json('/v1/runner-plane/catalog', { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerHealth(cursor = null) {
+    return this.#json('/v1/runner-plane/health' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerAudit(afterOffset = 0) {
+    if (!Number.isSafeInteger(afterOffset) || afterOffset < 0) throw new Error('Invalid runner audit offset');
+    return this.#json('/v1/runner-plane/audit?afterOffset=' + afterOffset,
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerResource(key) {
+    return this.#json('/v1/runner-plane/catalog/' + encodeURIComponent(key),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  saveRunnerResource(resource) {
+    const body = JSON.stringify(resource);
+    if (new TextEncoder().encode(body).length > 1_048_576) throw new Error('Runner definition exceeds the document limit');
+    return this.#json('/v1/runner-plane/catalog', { method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body });
+  }
+  runnerWorkspace(processId) {
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerOperation(processId, jobId, operation) {
+    if (!['cancel', 'reconcile'].includes(operation)) throw new Error('Unsupported operator runner action');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/' + operation,
+    { method: 'POST', headers: { Accept: 'application/json' } });
+  }
+  runnerArtifact(processId, jobId, artifactId) {
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodeURIComponent(artifactId),
+    { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  resolveRunnerContinuation(processId, jobId, expectedRevision, resolution) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+        || !['RESUME', 'ACKNOWLEDGE', 'ABANDON'].includes(resolution)) throw new Error('Explicit runner continuation revision and resolution required');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/resolve-continuation',
+    { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision, resolution }) });
   }
 
   async #json(path, options) {

@@ -86,7 +86,11 @@ class PostgresDeploymentMigrationUpgradeTest {
                     "the snapshot must actually cover the schema; a lookup that found no tables would "
                             + "compare two empty maps and pass no matter what the migration did");
 
-            assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
+            // This snapshot tests the registry step, not later migrations that intentionally
+            // add/backfill aggregate columns. Full upgrades are exercised separately below.
+            var throughRegistry = PostgresSchema.migrations().stream()
+                    .filter(migration -> migration.version() <= registryMigrationVersion()).toList();
+            assertEquals(registryMigrationVersion(), SchemaRunner.migrate(connection, throughRegistry, CLOCK));
             assertTrue(tableExists(connection, "deployment"));
             assertTrue(tableExists(connection, "deployment_version"));
             assertTrue(tableExists(connection, "deployment_command"));
@@ -106,7 +110,7 @@ class PostgresDeploymentMigrationUpgradeTest {
             }
 
             // Re-running is a no-op, which is what an ordinary restart does.
-            assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
+            assertEquals(registryMigrationVersion(), SchemaRunner.migrate(connection, throughRegistry, CLOCK));
             assertEquals(1, historyRowsFor(connection, registryMigrationVersion()));
         }
     }

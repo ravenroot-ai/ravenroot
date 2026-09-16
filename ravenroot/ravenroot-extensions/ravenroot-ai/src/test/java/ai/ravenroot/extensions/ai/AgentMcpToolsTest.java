@@ -737,7 +737,7 @@ class AgentMcpToolsTest {
         var http = new AiTestSupport.RoutedHttp(CHAT).chatting(AiTestSupport.answers("never reached"));
         var declared = new ArrayList<String>();
         var profiles = new ArrayList<McpProfile>();
-        for (int index = 0; index <= AgentNodeBehavior.MAX_MCP_SERVERS; index++) {
+        for (int index = 0; index <= AgentOperationalConfiguration.DEFAULT_MAX_MCP_SERVERS; index++) {
             String name = "srv" + index;
             declared.add(name);
             profiles.add(AiTestSupport.mcpProfile(name, ALPHA + index, "search"));

@@ -17,6 +17,7 @@ import java.util.UUID;
  * so adding an operation category later stays source-compatible.</p>
  */
 public final class ExecutionBatch {
+    private final List<ai.ravenroot.api.runner.RunnerJobOperation> runnerOperations;
     private final ExecutionKey key;
     private final RevisionExpectation expectation;
     private final Long fencingToken;
@@ -37,6 +38,7 @@ public final class ExecutionBatch {
     private final List<ExecutionPauseTransition> executionPauseTransitions;
 
     private ExecutionBatch(Builder builder) {
+        this.runnerOperations = List.copyOf(builder.runnerOperations);
         this.key = builder.key;
         this.expectation = builder.expectation;
         this.fencingToken = builder.fencingToken;
@@ -68,7 +70,7 @@ public final class ExecutionBatch {
                 && toolApprovalTransitions.isEmpty()
                 && humanTasksToRegister.isEmpty() && humanTaskTransitions.isEmpty()
                 && executionPausesToRegister.isEmpty() && executionPauseTransitions.isEmpty()
-                && agentBudgetOperations.isEmpty()) {
+                && agentBudgetOperations.isEmpty() && runnerOperations.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -89,6 +91,12 @@ public final class ExecutionBatch {
     public ExecutionKey key() {
         return key;
     }
+
+    /**
+     * Runner mutations share this batch's graph, fencing, revision and journal transaction.
+     * @return immutable ordered runner operations in the atomic write set
+     */
+    public List<ai.ravenroot.api.runner.RunnerJobOperation> runnerOperations() { return runnerOperations; }
 
 /**
  * Returns the revision condition enforced when applying this batch.
@@ -322,6 +330,17 @@ public final class ExecutionBatch {
  * Defines the builder contract exposed to Ravenroot integrators.
  */
     public static final class Builder {
+        private final List<ai.ravenroot.api.runner.RunnerJobOperation> runnerOperations = new ArrayList<>();
+
+        /**
+         * Adds a store-clock runner operation to the atomic write set.
+         * @param operation validated operation whose scope must match this batch
+         * @return this builder
+         */
+        public Builder runner(ai.ravenroot.api.runner.RunnerJobOperation operation) {
+            runnerOperations.add(java.util.Objects.requireNonNull(operation));
+            return this;
+        }
         private final ExecutionKey key;
         private RevisionExpectation expectation = RevisionExpectation.any();
         private Long fencingToken;

@@ -1093,7 +1093,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        self.assertEqual(1227, len(program["candidateIds"]))
+        self.assertEqual(1230, len(program["candidateIds"]))
         self.assertEqual(164, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
@@ -1920,16 +1920,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_508_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_588_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(53, len(details))
+            self.assertEqual(79, len(details))
             self.assertEqual(
-                {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54},
+                {"methods": 87, "path": 79, "summary": 389, "successStatuses": 80},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(515, len(entries))
+            self.assertEqual(635, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -1940,6 +1940,53 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "2147483647 + 1", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
             self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
+
+    def test_runner_routes_include_put_without_opening_the_method_vocabulary(self) -> None:
+        source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
+        partitions, details, candidates = audit.route_table_candidate_partitions(source)
+        runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
+        self.assertEqual(18, len(runner_routes))
+        put_routes = {
+            item["path"] for item in runner_routes
+            if any(candidates[identifier].expression == '"PUT"'
+                   for identifier in item["candidateIds"]["methods"])
+        }
+        self.assertEqual({"/v1/runner-plane/catalog"}, put_routes)
+        self.assertFalse(any(item["path"] == "/v1/runner-plane" or "{operation}" in item["path"] for item in runner_routes))
+        self.assertTrue(any(item["path"].endswith("/resolve-continuation") for item in runner_routes))
+        self.assertEqual(set(candidates), {identifier for ids in partitions.values() for identifier in ids})
+        self.assertIsNone(audit.route_table_candidate_partitions(source.replace('"PUT"', '"TRACE"', 1)))
+
+    def test_runner_inventory_distinguishes_bounds_protocol_and_presentation(self) -> None:
+        document = audit.load_inventory(audit.INVENTORY)
+        rows = document["entries"]
+        expectations = {
+            ("RunnerRegistration.java", "1"): "protocol-or-format-invariant",
+            ("RunnerCodec.java", "0x52524a31"): "protocol-or-format-invariant",
+            ("RunnerCodec.java", "0x52524a32"): "protocol-or-format-invariant",
+            ("RunnerCodec.java", "16_777_216"): "security-ceiling-or-default",
+            ("RunnerPolicy.java", "1_048_576"): "security-ceiling-or-default",
+            ("RunnerPlaneConfiguration.java", "RAVENROOT_RUNNER_CONFIG"): "protocol-or-format-invariant",
+            ("RunnerPlaneConfiguration.java", "1_048_577"): "security-ceiling-or-default",
+            ("LocalContainerRunner.java", '"--network=none"'): "security-ceiling-or-default",
+            ("runner-panel.js", "'Governed agents and runners'"): "presentation-text",
+            ("RunnerArtifactStore.java", "64"): "security-ceiling-or-default",
+            ("TelemetryBridge.java", 'ravenroot.runner.observations'): "protocol-or-format-invariant",
+            ("TelemetryBridge.java", 'ravenroot.runner.worker.active'): "protocol-or-format-invariant",
+        }
+        for (filename, expression), classification in expectations.items():
+            with self.subTest(filename=filename, expression=expression):
+                matching = [row for row in rows if Path(row["path"]).name == filename
+                            and row["expression"] == expression]
+                self.assertTrue(matching)
+                self.assertTrue(all(row["classification"] == classification and row["status"] == "retained"
+                                    for row in matching))
+        configuration = (ROOT / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java").read_text()
+        self.assertIn("if (configured == null || configured.isBlank()) return null;", configuration)
+        self.assertIn("store.supports(StoreCapability.DURABLE)", configuration)
+        command_rows = [row for row in rows if Path(row["path"]).name == "AgentCommand.java"]
+        self.assertEqual(26, sum(row["classification"] == "protocol-or-format-invariant" for row in command_rows))
+        self.assertEqual(5, sum(row["classification"] == "security-ceiling-or-default" for row in command_rows))
 
     def test_route_table_authority_rejects_metadata_and_position_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as location:
@@ -3984,7 +4031,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
+                mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -4227,7 +4275,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 348 |",
+                "| Retained published contract descriptions | 389 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4235,7 +4283,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 347 |",
+                "| Retained published contract descriptions | 388 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -5789,6 +5837,19 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertEqual([], audit.reconciliation_plan_errors(
                 root, source_document, (candidate,), plan)[0])
 
+            empty_semantic_reviews = copy.deepcopy(plan)
+            empty_semantic_reviews["semanticReviews"] = []
+            self.assertEqual([], audit.reconciliation_plan_errors(
+                root, source_document, (candidate,), empty_semantic_reviews)[0])
+            malformed_semantic_review = copy.deepcopy(plan)
+            malformed_semantic_review["semanticReviews"] = [{
+                "candidateId": "oc-new", "approved": False,
+                "rationale": "Not approved.", "beforeMetadata": {}, "afterMetadata": {},
+            }]
+            self.assertTrue(any("source-anchored row approval" in error for error in
+                                audit.reconciliation_plan_errors(
+                                    root, source_document, (candidate,), malformed_semantic_review)[0]))
+
             with mock.patch.object(audit, "current_route_table_authority", return_value={}):
                 remapped, remap_errors = audit.apply_reconciliation(
                     root, source_document, (candidate,), plan)
@@ -5965,7 +6026,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "jwk_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))
@@ -6095,6 +6157,68 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:
             audit.main(["--accept-retired-pending"])
         self.assertEqual(2, failure.exception.code)
+
+
+class AiOperationalPolicyAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.candidates = audit.discover(ROOT)
+        cls.discovered = {candidate.id: candidate for candidate in cls.candidates}
+        cls.inventory = audit.load_inventory()
+        cls.entries = {entry["id"]: entry for entry in cls.inventory["entries"]}
+
+    def test_source_derived_authority_covers_every_typed_setting_and_binding(self) -> None:
+        authority = audit.ai_operational_authority_from_source(ROOT, self.discovered)
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        self.assertEqual(31, len(authority["settings"]))
+        environments = {environment for _setting, _field, environment, _default
+                        in audit.AI_OPERATIONAL_SETTINGS}
+        self.assertEqual(
+            environments,
+            {contract["environment"] for contract in authority["settings"]},
+        )
+        self.assertEqual(
+            {candidate.id for candidate in self.candidates
+             if candidate.kind == "environment-binding"
+             and candidate.expression in environments},
+            {identifier for contract in authority["settings"]
+             for identifier in contract["candidateIds"]},
+        )
+        self.assertEqual(7, len(authority["semanticPartitions"]))
+        retained = {identifier for partition in authority["semanticPartitions"]
+                    for identifier in partition["candidateIds"]}
+        self.assertEqual(54, len(retained))
+        self.assertEqual(retained, audit.ai_operational_retained_cohort(self.discovered))
+        self.assertEqual(
+            [],
+            audit.ai_operational_authority_errors(
+                ROOT, self.inventory["aiOperationalAuthorities"],
+                self.entries, self.discovered),
+        )
+
+    def test_missing_binding_marker_cannot_escape_the_closed_partition(self) -> None:
+        entries = copy.deepcopy(self.entries)
+        identifier = self.inventory["aiOperationalAuthorities"][
+            audit.AI_OPERATIONAL_AUTHORITY_ID]["candidateIds"][0]
+        entries[identifier].pop("aiOperationalAuthority")
+        errors = audit.ai_operational_authority_errors(
+            ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered)
+        self.assertTrue(any("partition" in error for error in errors), errors)
+
+    def test_retained_ai_partition_relabel_or_new_payload_limit_fails_closed(self) -> None:
+        retained_id = self.inventory["aiOperationalAuthorities"][
+            audit.AI_OPERATIONAL_AUTHORITY_ID]["semanticPartitions"][0]["candidateIds"][0]
+        entries = copy.deepcopy(self.entries)
+        entries[retained_id]["classification"] = "protocol-or-format-invariant"
+        self.assertTrue(audit.ai_operational_authority_errors(
+            ROOT, self.inventory["aiOperationalAuthorities"], entries, self.discovered))
+
+        from dataclasses import replace
+        source = self.discovered[retained_id]
+        injected = replace(source, id="oc-injected-ai-envelope", expression="999")
+        changed = {**self.discovered, injected.id: injected}
+        self.assertIsNone(audit.ai_operational_authority_from_source(ROOT, changed))
 
 
 class ProgramGithubPolicyAuditTest(unittest.TestCase):

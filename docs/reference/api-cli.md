@@ -28,6 +28,7 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `POST /v1/executions/{id}/cancel` | Cancellation request |
 | `POST /v1/executions/{id}/pause` | Pause after in-flight work |
 | `POST /v1/executions/{id}/resume` | Resume dispatch |
+| `POST /v1/processes/{processInstanceId}/{pause\|resume\|cancel\|drain\|stop}` | Durable process-scoped control over every contained traversal. Requires `Idempotency-Key` and `X-Ravenroot-Expected-Generation` (the inventory `revision`); returns typed applied, replay, stale-generation, partial, terminal, and not-found outcomes. Pause blocks future Human Task re-entry, Drain admits already accepted re-entry while closing the process intent, Cancel is terminal, and Stop releases only this process's runtime resources for recovery. |
 | `GET /v1/events` | Live SSE |
 | `GET /v1/events/recent` | Cursor-based retained events |
 
@@ -73,6 +74,7 @@ plus the repository's service, bundle, development, build, and test scripts.
 | `ravenroot run FILE` | Execute with Run semantics |
 | `ravenroot inventory` | List the tenant's whole durable process inventory (`GET /v1/executions/inventory`, paged to completion internally — never a partial page); unfiltered, terminal rows **included** by default; a trailing `retained-from=` line always prints, even for an idle tenant |
 | `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`), also followed by a trailing `retained-from=` line; the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |
+| `ravenroot process PROCESS-INSTANCE-ID COMMAND EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Apply a durable process Pause, Resume, Cancel, Drain, or recoverable Stop through the remote server; prints the typed outcome, new generation, state, and retained reason |
 | `ravenroot-server` | Start the standalone service |
 
 CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Authentication and ownership checks are identical to HTTP because the CLI is a client, not a privileged bypass.

@@ -103,6 +103,26 @@ class DefaultAuthorizationServiceTest {
                 AuthorizationAction.STATUS_READ, ProtectedResource.collection("service", "tenant-a")));
     }
 
+    @Test
+    void runnerPrincipalAndTenantRefusalsAreRecordedAsDeniedEvenForPlatformAdmins() {
+        var events = new ArrayList<AuthorizationAuditEvent>();
+        var service = new DefaultAuthorizationService(events::add);
+        for (var action : Set.of(AuthorizationAction.RUNNER_ADMIN, AuthorizationAction.RUNNER_CONTROL,
+                AuthorizationAction.RUNNER_DISPATCH)) {
+            var wrongType = action == AuthorizationAction.RUNNER_DISPATCH ? PrincipalType.USER : PrincipalType.WORKLOAD;
+            var actor = new RequestContext("request", "runner", wrongType, "issuer", "tenant-a",
+                    Set.of(Role.PLATFORM_ADMIN), Set.of(action.requiredScope()));
+            assertFalse(service.decide(actor, action, ProtectedResource.owned("runner", "runner", "tenant-a")).allowed());
+        }
+        for (var action : Set.of(AuthorizationAction.RUNNER_READ, AuthorizationAction.RUNNER_ADMIN,
+                AuthorizationAction.RUNNER_CONTROL, AuthorizationAction.RUNNER_DISPATCH)) {
+            assertFalse(service.decide(contextFor(action, "tenant-a", Set.of(Role.PLATFORM_ADMIN), Set.of(action.requiredScope())),
+                    action, ProtectedResource.owned("runner", "runner", "tenant-b")).allowed());
+        }
+        assertEquals(7, events.size());
+        assertTrue(events.stream().noneMatch(AuthorizationAuditEvent::allowed));
+    }
+
     private static RequestContext context(String tenant, Set<Role> roles, Set<String> scopes) {
         return new RequestContext("request-1", "alice", PrincipalType.USER, "issuer", tenant, roles, scopes);
     }
@@ -110,23 +130,23 @@ class DefaultAuthorizationServiceTest {
     private static RequestContext contextFor(AuthorizationAction action, String tenant,
                                              Set<Role> roles, Set<String> scopes) {
         return new RequestContext("request-1", "alice",
-                action == AuthorizationAction.EMBED_SESSION_CREATE
+                action == AuthorizationAction.EMBED_SESSION_CREATE || action == AuthorizationAction.RUNNER_DISPATCH
                         ? PrincipalType.WORKLOAD : PrincipalType.USER,
                 "issuer", tenant, roles, scopes);
     }
 
     private static Role permittedRole(AuthorizationAction action) {
         return switch (action) {
-            case STATUS_READ, CATALOG_READ, ARTIFACT_LIST, EMBED_GRAPH_READ,
+            case RUNNER_READ, STATUS_READ, CATALOG_READ, ARTIFACT_LIST, EMBED_GRAPH_READ,
                     EMBED_SESSION_CREATE -> Role.VIEWER;
             // EMBED_REGISTRATION_ADMIN is deliberately not in the VIEWER arm above, unlike the
             // two embed actions beside it. Deciding which snapshot an embed may expose is operations.
-            case GRAPH_READ, EXECUTION_START, EXECUTION_READ, EXECUTION_CONTROL,
+            case RUNNER_CONTROL, RUNNER_DISPATCH, GRAPH_READ, EXECUTION_START, EXECUTION_READ, EXECUTION_CONTROL,
                     EMBED_REGISTRATION_ADMIN -> Role.OPERATOR;
             case ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
             case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE -> Role.APPROVER;
             case RUNTIME_OBSERVE, AGENT_AUTHORITY_CONTROL, AUDIT_ADMIN -> Role.PLATFORM_ADMIN;
-            case AUDIT_READ, AUDIT_EXPORT -> Role.TENANT_ADMIN;
+            case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN -> Role.TENANT_ADMIN;
             // EXECUTION_CONTROL moved out of this reserved arm the same commit it became
             // available -- see enforcesTheCompleteRoleAndScopeMatrix, which now exercises it through
             // the positive branch above (allowed with role+scope, denied with wrong role, denied with
@@ -138,7 +158,7 @@ class DefaultAuthorizationServiceTest {
     }
 
     private static boolean isViewerAction(AuthorizationAction action) {
-        return action == AuthorizationAction.STATUS_READ || action == AuthorizationAction.CATALOG_READ
+        return action == AuthorizationAction.RUNNER_READ || action == AuthorizationAction.STATUS_READ || action == AuthorizationAction.CATALOG_READ
                 || action == AuthorizationAction.ARTIFACT_LIST
                 || action == AuthorizationAction.EMBED_GRAPH_READ
                 || action == AuthorizationAction.EMBED_SESSION_CREATE;

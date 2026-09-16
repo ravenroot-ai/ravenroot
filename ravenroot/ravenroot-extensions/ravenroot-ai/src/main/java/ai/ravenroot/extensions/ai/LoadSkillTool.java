@@ -32,9 +32,9 @@ import java.util.concurrent.CompletionStage;
  * <h2>One body per run, and that bound is not only about tidiness</h2>
  * <p>A second call for a skill already loaded returns a pointer to it rather than the body again.
  * The obvious reason is that a repeated body is context paid for twice for nothing. The less obvious
- * one is that this rule, with {@link AgentSkill#MAX_SKILLS}, is what bounds the total body text one
- * run can accumulate — {@code MAX_SKILLS × MAX_INSTRUCTIONS_CHARS}, whatever the model does — without
- * relying on the endpoint reporting token usage, which not every endpoint does.</p>
+ * one is that this rule, with the aggregate skill-payload ceiling, bounds the total body text one
+ * run can accumulate, whatever the model does, without relying on the endpoint reporting token
+ * usage, which not every endpoint does.</p>
  *
  * <h2>Loaded bodies are paid for out of the token budget</h2>
  * <p>They are, and by construction rather than by an addition made here: {@code AgentNodeBehavior}
@@ -65,9 +65,9 @@ final class LoadSkillTool implements AgentTool {
      * reader's budget is the cheapest place to say so. A model that emits something enormous here
      * gets a refusal it can act on instead of an allocation.</p>
      */
-    private static final PayloadLimits ARGUMENT_LIMITS = new PayloadLimits(4 * 1024, 4, 32, 64, 1_024, 64);
-
     private final List<AgentSkill> skills;
+    private final int maximumNameChars;
+    private final PayloadLimits argumentLimits;
 
     /**
      * Names already handed over during this run, lower-cased.
@@ -81,7 +81,18 @@ final class LoadSkillTool implements AgentTool {
     private final Set<String> loaded = new LinkedHashSet<>();
 
     LoadSkillTool(List<AgentSkill> skills) {
+        this(skills, AgentOperationalConfiguration.DEFAULT_MAX_SKILL_NAME_CHARS);
+    }
+
+    LoadSkillTool(List<AgentSkill> skills, int maximumNameChars) {
         this.skills = List.copyOf(skills);
+        this.maximumNameChars = maximumNameChars;
+        int maximumNameBytes = this.skills.stream()
+                .mapToInt(skill -> skill.name().getBytes(StandardCharsets.UTF_8).length)
+                .max().orElse(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_NAME_CHARS);
+        int documentBytes = Math.max(4 * 1024, Math.addExact(maximumNameBytes, 256));
+        this.argumentLimits = new PayloadLimits(documentBytes, 4, 32, 64,
+                Math.max(1_024, maximumNameBytes), 64);
     }
 
     @Override
@@ -164,13 +175,13 @@ final class LoadSkillTool implements AgentTool {
      * model's point of view — it did not name a skill — and answering them separately would tell it
      * about this bundle's parser rather than about what to do next.</p>
      */
-    private static String requestedName(String argumentsJson) {
+    private String requestedName(String argumentsJson) {
         if (argumentsJson == null || argumentsJson.isBlank()) {
             return "";
         }
         try {
             PayloadValue parsed = PayloadJson.read(
-                    argumentsJson.getBytes(StandardCharsets.UTF_8), ARGUMENT_LIMITS);
+                    argumentsJson.getBytes(StandardCharsets.UTF_8), argumentLimits);
             if (parsed instanceof PayloadValue.MapValue root
                     && root.entries().get("name") instanceof PayloadValue.TextValue name) {
                 return name.value().strip();
@@ -185,14 +196,14 @@ final class LoadSkillTool implements AgentTool {
      * The requested name, made safe to quote back.
      *
      * <p>It is remote text and it is going into a message the model reads next, so control characters
-     * are dropped and the length is bounded: a name is at most {@link AgentSkill#MAX_NAME_CHARS}, so
+     * are dropped and the length is bounded: a name is at most the configured name ceiling, so
      * anything longer was never a name this node could have had. Nothing here reaches a log, an
      * execution attribute or a failure message — {@link AgentException} forbids that, and this string
      * never travels to one.</p>
      */
-    private static String sanitized(String requested) {
-        String bounded = requested.length() > AgentSkill.MAX_NAME_CHARS
-                ? requested.substring(0, AgentSkill.MAX_NAME_CHARS)
+    private String sanitized(String requested) {
+        String bounded = requested.length() > maximumNameChars
+                ? requested.substring(0, maximumNameChars)
                 : requested;
         var clean = new StringBuilder(bounded.length());
         bounded.codePoints().forEach(codePoint -> {

@@ -104,6 +104,7 @@ const ENGLISH_MESSAGES = Object.freeze({
   // The ellipsis is the product's existing spelling for "this opens something", as in `Open…`,
   // `Replace Active…`, `Graphs…` and `Panels…`.
   'commands.run.credentials.label': 'Credentials…',
+  'commands.run.runners.label': 'Agents and runners…',
   'commands.run.deployments.label': 'Deployments…',
   'commands.canvas.cursor.label': 'Move graph cursor',
   'commands.canvas.cursor.help': 'Move the graph cursor between nodes',

@@ -11,7 +11,7 @@ import java.util.Map;
 final class ModelInputProvenance {
     static final String AGENT_ATTRIBUTE = "agent.inputProvenance";
     static final String PROMPT_ATTRIBUTE = "llm.inputProvenance";
-    private static final int MAX_ENTRIES = 4096;
+    private final int maximumEntries;
 
     enum Kind {
         GRAPH_INSTRUCTIONS,
@@ -28,8 +28,13 @@ final class ModelInputProvenance {
 
     private final List<Map<String, Object>> entries = new ArrayList<>();
 
+    ModelInputProvenance(int maximumEntries) {
+        if (maximumEntries < 1) throw new IllegalArgumentException("maximumEntries must be positive");
+        this.maximumEntries = maximumEntries;
+    }
+
     void add(Kind kind, String source, Object content) {
-        if (entries.size() >= MAX_ENTRIES) {
+        if (entries.size() >= maximumEntries) {
             // Omitting an input would make the provenance claim incomplete. Refuse the invocation
             // instead of silently truncating the evidence an operator relies on.
             throw new IllegalStateException("model input provenance limit exceeded");
@@ -48,7 +53,7 @@ final class ModelInputProvenance {
 
     /** Restores only the bounded payload-free projection written by {@link #snapshot()}. */
     void restore(Object value) {
-        if (!(value instanceof List<?> restored) || restored.size() > MAX_ENTRIES) {
+        if (!(value instanceof List<?> restored) || restored.size() > maximumEntries) {
             throw new IllegalArgumentException("invalid model input provenance checkpoint");
         }
         entries.clear();

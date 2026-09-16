@@ -2,7 +2,11 @@ import cytoscape from 'cytoscape';
 import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
 import { createVisualGroup, editVisualGroups } from './graph-editing.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
-import { normalizedCanvasState, visualGroupPresentation } from './graph-view-state.js';
+import {
+  DESIGN_ARRANGEMENTS,
+  normalizedCanvasState,
+  visualGroupPresentation,
+} from './graph-view-state.js';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
@@ -11,6 +15,12 @@ import {
   LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
 } from './layered-layout.js';
 import * as d3 from 'd3';
+import {
+  additionalPropertyGroupsValid,
+  nextAdditionalPropertyGroupItem,
+  serializeAdditionalPropertyGroups,
+  splitAdditionalPropertyGroups,
+} from './additional-property-groups.js';
 import {
   detectAndParse,
   GFY_MAX_WARN,
@@ -48,10 +58,16 @@ import {
   planJoinSemanticsMigration,
   serializeGraphML,
   setEdgeFailureRoute,
+  setGraphPresentation,
   validateWorkflow,
 } from './graph-document.js';
 import { catalogEmptyState } from './catalog-empty-state.js';
-import { catalogNodeIcon, resolveDescriptorNodeType } from './catalog-node-icon.js';
+import {
+  catalogNodeIcon,
+  COMMON_NODE_GLYPHS,
+  nodeTypeCardShape,
+  resolveDescriptorNodeType,
+} from './catalog-node-icon.js';
 import { createLayoutSessions } from './layout-session.js';
 import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
@@ -78,6 +94,7 @@ import { invokesModelProvider, PROVIDER_CONFIG_POINTER } from './generative-capa
 // SECRET_REFERENCE control.
 import { RavenrootCredentialClient } from './credential-client.js';
 import { createCredentialsWindow } from './credential-panel.js';
+import { createRunnerWindow } from './runner-panel.js';
 // A construction site of the same shape as the credential window above, and for the
 // same reason: the Deployments window reaches THE SAME Ravenroot service with THE SAME runtime
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
@@ -371,7 +388,8 @@ const NODE_ICONS = {
   terminal: '⊙ ',
   consumer: '⩓ ', handler:  '↩ ',
   agent:    '⬡ ', flow:     '⚙ ',
-  actor:    '◉ ', system:   '▪ ', trace: '▤ ', 'human-task': '♙ '
+  actor:    '◉ ', system:   '▪ ', trace: `${COMMON_NODE_GLYPHS.trace} `,
+  'human-task': `${COMMON_NODE_GLYPHS['human-task']} `
 };
 
 /**
@@ -560,11 +578,11 @@ function createStylesheet(palette = rendererPalette) {
     'border-color': node.system, 'border-width': 1.5,
   }},
   { selector: 'node[nodeType="trace"]', style: {
-    shape: 'rectangle', 'background-color': surface.trace,
+    shape: 'roundrectangle', 'background-color': surface.trace,
     'border-color': node.trace, 'border-width': 2,
   }},
   { selector: 'node[nodeType="human-task"]', style: {
-    shape: 'ellipse', 'background-color': surface['human-task'],
+    shape: 'roundrectangle', 'background-color': surface['human-task'],
     'border-color': node['human-task'], 'border-width': 2.5,
   }},
   { selector: 'node[humanTaskPending > 0]', style: {
@@ -747,6 +765,7 @@ function beginWorkspaceAuthority(client, state = 'pending') {
   suspendHumanTaskRecovery();
   humanTaskController?.configure(null, null, workspace.active);
   void credentialsWindow?.setClient(null);
+  runnerWindow?.setClient(null);
   void deploymentsWindow?.setClient(null);
   refreshCommands();
   return workspaceAuthority.generation;
@@ -924,6 +943,7 @@ let graphData   = null;
 let activeDocumentIncarnation = null;
 let renderMode  = DEFAULT_RENDER_MODE;
 let layoutMode  = 'cyto';
+let designArrangement = null;
 let visualStyle = DEFAULT_VISUAL_STYLE;
 let layoutBusy = false;
 let filterActive = null;   // { elType, type } or null
@@ -1106,7 +1126,14 @@ function renderSelectedHumanTasks(owner = workspace.active) {
       const capability = currentHumanTaskCapability();
       if (!capability || !tenantAuthorityAllows(owner)) return;
       rememberHumanTaskSelection(task);
-      humanTaskDecisionDialog.open(task, capability);
+      // The summary row deliberately has no service origin. Exact-detail reconciliation must use
+      // the opaque locator we just persisted, otherwise sameHumanTaskSelection compares that absent
+      // field with the stored origin and silently retires every successful explicit selection.
+      const locator = readHumanTaskSelection();
+      if (!locator) return;
+      const recoveryGeneration = humanTaskRecoveryGeneration;
+      humanTaskDecisionDialog.loading(task, capability, { show: true });
+      void loadHumanTaskDetail(owner, locator, capability, recoveryGeneration);
     },
     onNext: () => humanTaskController?.nextPage(),
     onPrevious: () => humanTaskController?.previousPage(),
@@ -1169,6 +1196,12 @@ async function recoverHumanTaskSelection(owner) {
   if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
       || typeof locator.taskId !== 'string'
       || !Number.isSafeInteger(locator.generation) || locator.generation < 1) return;
+  humanTaskDecisionDialog.loading(locator, capability);
+  return loadHumanTaskDetail(owner, locator, capability, recoveryGeneration);
+}
+
+async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneration) {
+  const client = runtimeClient;
   try {
     // The locator deliberately carries no graph, deployment, process, presentation, or auth data.
     // The authenticated exact-task projection reconstructs those durable details after reload,
@@ -1180,11 +1213,20 @@ async function recoverHumanTaskSelection(owner) {
         || !sameHumanTaskSelection(readHumanTaskSelection(), locator)) return;
     const task = page.items.find(item => item.taskId === locator.taskId
       && item.generation === locator.generation);
-    if (!task) { clearHumanTaskSelection(); return; }
-    if (!humanTaskDecisionDialog.selected()) humanTaskDecisionDialog.open(task, capability);
-  } catch {
+    if (!task) {
+      humanTaskDecisionDialog.unavailable(
+        'This task detail is unavailable. It may be stale, settled, or outside your current authority.');
+      clearHumanTaskSelection();
+      return;
+    }
+    humanTaskDecisionDialog.open(task, capability);
+  } catch (error) {
     // A rejected or unreachable lookup carries no proof that the durable task disappeared. Keep
     // only the locator and let the next authenticated reconnect try again; never cache the row.
+    if (recoveryGeneration === humanTaskRecoveryGeneration) {
+      humanTaskDecisionDialog.unavailable(
+        'Authorized task detail could not be loaded. Refresh or reconnect before deciding.');
+    }
   }
 }
 
@@ -1202,6 +1244,7 @@ let assistantClient = null;
 // service that answered is "you have none to choose"; an empty list because nobody asked yet is "we
 // do not know", and a value already on the node must survive it untouched.
 let credentialsWindow = null;
+let runnerWindow = null;
 let credentialReferences = { loaded: false, credentials: [] };
 
 // ── DEPLOYMENTS ────────────────────────────────────────────────────────────────────
@@ -2329,7 +2372,11 @@ function captureActiveDocument() {
   document_.displayName = graphDisplayName;
   document_.renderMode = renderMode;
   document_.layoutMode = layoutMode;
+  document_.designArrangement = designArrangement;
   document_.visualStyle = visualStyle;
+  if (document_.graph?.format === 'graphml') {
+    setGraphPresentation(document_.graph, { renderMode, layoutMode, designArrangement });
+  }
   document_.layoutBusy = layoutBusy;
   document_.filterActive = filterActive;
   document_.traceActive = traceActive;
@@ -2418,6 +2465,7 @@ function applyActiveDocument() {
     && document_.visualStyle === presentation.visualStyle);
   renderMode = presentation.renderMode;
   layoutMode = presentation.layoutMode;
+  designArrangement = presentation.designArrangement;
   visualStyle = presentation.visualStyle;
   if (document_) Object.assign(document_, presentation);
   layoutBusy = document_?.layoutBusy ?? false;
@@ -3240,7 +3288,8 @@ function forkActiveDocument() {
     mode: fork.mode,
     provenance: fork.provenance,
     presentation: { ...visualGroupPresentation(fork), renderMode: fork.renderMode,
-      layoutMode: fork.layoutMode, visualStyle: fork.visualStyle, fontSize: fork.fontSize },
+      layoutMode: fork.layoutMode, designArrangement: fork.designArrangement,
+      visualStyle: fork.visualStyle, fontSize: fork.fontSize },
   });
   addActivityMessage('editor', `Forked immutable ${source.mode} snapshot as an editable draft`, 'completed');
   scheduleWorkspacePersistence();
@@ -3280,10 +3329,15 @@ function completeReplaceActiveDocument(target, graph, name) {
   graphDisplayName = allocateDocumentDisplayName(name);
   target.name = graphName;
   target.displayName = graphDisplayName;
-  // Replacement starts in the canonical Design view without moving the incoming persisted
-  // coordinates. Install that projection on the owner before `initCy`: its internal paint calls
-  // `setVisualStyle`, which must not observe the retired Monitoring layout and rewrite it to preset.
-  installActiveRenderModePresentation(target, DEFAULT_RENDER_MODE);
+  // Restore an explicitly saved presentation, while legacy documents still normalize to Design,
+  // without moving the incoming persisted coordinates. Install it before `initCy`: its internal
+  // paint calls `setVisualStyle`, which must not observe the retired renderer's layout.
+  const incomingPresentation = documentPresentationState({ graph });
+  Object.assign(target, incomingPresentation);
+  renderMode = incomingPresentation.renderMode;
+  layoutMode = incomingPresentation.layoutMode;
+  designArrangement = incomingPresentation.designArrangement;
+  visualStyle = incomingPresentation.visualStyle;
   filterActive = null;
   traceActive = false;
   n8nActive = false;
@@ -3301,6 +3355,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   recentRuntimeEvents = [];
   editHistory = createCommandHistory();
   initLoadedGraph(graph, visualStyle);
+  if (renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   clearActivity();
   addActivityMessage('editor', `Loaded ${name}`, 'completed');
   captureActiveDocument();
@@ -4118,7 +4173,7 @@ const N8N_ICONS_CHAR = {
   consumer: '⧒', handler:  '↩',
   agent:    '🧠', flow:     '⚙',
   actor:    '◎', system:   '▤',
-  trace:    '▤', 'human-task': '♙',
+  trace:    COMMON_NODE_GLYPHS.trace, 'human-task': COMMON_NODE_GLYPHS['human-task'],
 };
 let N8N_BG = rendererPalette.nodeSurfaceByType;
 let N8N_BORDER = rendererPalette.nodeType;
@@ -4577,7 +4632,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
     const bg = N8N_BG[t]         || rendererPalette.nodeSurface;
     const bd = N8N_BORDER[t]     || rendererPalette.nodeBorder;
     n.style({
-      shape:                  'roundrectangle',
+      shape:                  nodeTypeCardShape(t),
       width:                   80,
       height:                  80,
       'background-color':      bg,
@@ -5072,16 +5127,6 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
-const DESIGN_ARRANGEMENTS = Object.freeze({
-  hierarchical: Object.freeze({ layout: 'hierarchical' }),
-  flow: Object.freeze({ layout: 'dagre' }),
-  organic: Object.freeze({ layout: 'cose' }),
-  keep: Object.freeze({ preservePositions: true }),
-  // Additive layered drawings (ADR 0036). The four entries above are untouched by design.
-  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
-  'layered-down': Object.freeze({ layout: 'layered-down' }),
-});
-
 function renderModeLabel(mode) {
   const semanticMode = normalizeRenderMode(mode);
   return commandRegistry.get(`layout.${semanticMode}`)?.label || 'Graph';
@@ -5442,12 +5487,14 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   }
   renderMode = semanticMode;
   owner.renderMode = semanticMode;
-  // Product choices project onto existing internal engines. Design owns a deterministic full
-  // relayout plus the established Cyto routing; Monitoring owns the continuous D3 lifecycle.
+  // Product choices project onto existing internal engines. Design restores its exact selected
+  // arrangement; Monitoring owns the continuous D3 lifecycle.
   const style = 'cyto';
-  const layout = semanticMode === 'design' ? 'cyto' : 'elastic';
+  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
   target.batch(() => applyVisualStyle(style, target, owner));
-  setLayout(layout);
+  setLayout(semanticMode === 'design' ? (arrangement?.layout || 'cyto') : 'elastic',
+    semanticMode === 'design' && designArrangement === 'keep'
+      ? { preservePositions: true, keepPositions: true } : {});
   scheduleWorkspacePersistence();
 }
 
@@ -5458,6 +5505,8 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
   }
+  designArrangement = name;
+  owner.designArrangement = name;
   setLayout(name === 'keep' ? owner.layoutMode || layoutMode || 'preset' : arrangement.layout, {
     preservePositions: arrangement.preservePositions,
     keepPositions: name === 'keep',
@@ -5465,6 +5514,7 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
     fitAfterLayout: !arrangement.preservePositions,
     commandLabel: commandRegistry.get(`layout.arrange.${name}`)?.label || 'Arrange graph',
   });
+  scheduleWorkspacePersistence();
   return true;
 }
 
@@ -5983,6 +6033,8 @@ function readNodeEditorPatch(form, model) {
   const values = new FormData(form);
   const id = String(values.get('id') || '').trim();
   const custom = readPropertyEditor(form);
+  const additionalGroups = readAdditionalPropertyGroupEditor(
+    form, catalogDescriptor(String(values.get('behavior') || '').trim()));
   const catalog = readCatalogPropertyEditor(form);
   const nature = readNatureEditor(form);
   // The bypass flag is read HERE and not at the submit site, and that placement is the
@@ -6022,11 +6074,11 @@ function readNodeEditorPatch(form, model) {
     // under a default type, which is the kind of divergence that only surfaces on a GraphML round
     // trip, so the two lists are kept in the same order to make an omission visible by eye.
     properties: {
-      ...custom.properties, ...catalog.properties, ...nature.properties,
+      ...custom.properties, ...additionalGroups.properties, ...catalog.properties, ...nature.properties,
       ...bypass.properties, ...runtimeConcurrency.properties, ...join.properties,
     },
     propertyTypes: {
-      ...custom.propertyTypes, ...catalog.propertyTypes, ...nature.propertyTypes,
+      ...custom.propertyTypes, ...additionalGroups.propertyTypes, ...catalog.propertyTypes, ...nature.propertyTypes,
       ...bypass.propertyTypes, ...runtimeConcurrency.propertyTypes, ...join.propertyTypes,
     },
   };
@@ -6444,8 +6496,11 @@ function renderNodeForm(model, creating) {
     DEFAULT_MAX_CONCURRENCY_PROPERTY, descriptor?.maxConcurrencyProperty,
     bypassPropertyName(descriptor, nodeTypeCatalog),
   ].filter(Boolean));
+  const additionalGroups = splitAdditionalPropertyGroups(
+    descriptor, model.properties || {}, model.propertyTypes || {});
   const extras = additionalProperties(model, 'node')
-    .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name));
+    .filter(property => !catalogNames.has(property.name) && !platformExclusions.has(property.name)
+      && !additionalGroups.claimed.has(property.name));
   const visualTypes = NODE_TYPES.map(type =>
     `<option value="${type.type}" ${type.type === model.nodeType ? 'selected' : ''}>${escapeHtml(type.label)}</option>`)
     .join('');
@@ -6476,6 +6531,7 @@ function renderNodeForm(model, creating) {
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
         catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
+      <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
         ${creating ? '' : '<button class="btn danger" type="button" id="delete-node">Delete</button>'}
@@ -6508,6 +6564,8 @@ function renderNodeForm(model, creating) {
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
       programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
+    document.getElementById('additional-property-groups').innerHTML = additionalPropertyGroupsHtml(
+      splitAdditionalPropertyGroups(selected, model.properties || {}, model.propertyTypes || {}).groups);
     bindProgramWorkspace(form, model);
   });
   // `NodeBypassValidator` refuses the key on every non-BEHAVIOR node, `false` included, so
@@ -8706,6 +8764,110 @@ function propertyEditorHtml(id, properties) {
     <div id="${id}" class="property-editor">${properties.map(propertyRowHtml).join('')}</div>`;
 }
 
+function additionalPropertyGroupsHtml(groups) {
+  return groups.map(group => `<section class="additional-property-group"
+      data-additional-group="${escapeAttribute(group.definition.name)}">
+    <div class="editor-section-title"><span>${escapeHtml(group.definition.displayName || group.definition.name)}</span>
+      <button class="property-add" type="button" data-add-additional-group>＋ Add</button></div>
+    ${group.definition.description ? `<p>${escapeHtml(group.definition.description)}</p>` : ''}
+    <div data-additional-group-items>${group.items.map(item => additionalPropertyGroupItemHtml(
+      group.definition, item)).join('')}</div>
+  </section>`).join('');
+}
+
+function additionalPropertyGroupItemHtml(definition, item) {
+  return `<fieldset class="additional-property-group-item"><legend>${escapeHtml(
+    definition.displayName || definition.name)}</legend>
+    ${(definition.fields || []).map(field => {
+      const entry = item.fields[field.name];
+      return `<label class="editor-field">${escapeHtml(field.displayName || field.name)}
+        ${additionalPropertyGroupFieldControlHtml(field, entry)}</label>`;
+    }).join('')}
+    <button type="button" class="property-remove" data-remove-additional-group>Remove group</button>
+  </fieldset>`;
+}
+
+function additionalPropertyGroupFieldControlHtml(field, entry) {
+  const type = String(field.type || 'STRING');
+  const value = String(entry?.value ?? field.defaultValue ?? '');
+  const fieldName = escapeAttribute(field.name);
+  const data = ` data-additional-field="${fieldName}" data-additional-type="${escapeAttribute(
+    type.toLowerCase())}"`;
+  const required = field.required ? ' required' : '';
+  const numericBounds = `${field.minimumValue != null && field.minimumValue !== ''
+    ? ` min="${escapeAttribute(field.minimumValue)}"` : ''}`
+    + `${field.maximumValue != null && field.maximumValue !== ''
+      ? ` max="${escapeAttribute(field.maximumValue)}"` : ''}`;
+  const encodedBounds = `${field.maximumUtf8Bytes > 0
+    ? ` data-maximum-utf8-bytes="${field.maximumUtf8Bytes}"` : ''}`
+    + `${field.maximumItems > 0 ? ` data-maximum-items="${field.maximumItems}"` : ''}`
+    + `${field.maximumItemUtf8Bytes > 0
+      ? ` data-maximum-item-utf8-bytes="${field.maximumItemUtf8Bytes}"` : ''}`;
+  if (field.allowedValues?.length) {
+    const declared = field.allowedValues.some(option => String(option) === value);
+    const undeclared = value === ''
+      ? '<option value="" selected>Not declared</option>' : '';
+    const mismatched = value !== '' && !declared
+      ? `<option value="${escapeAttribute(value)}" selected>Current value not among the declared alternatives: ${escapeHtml(value)}</option>` : '';
+    return `<select${data}${required}>${undeclared}${mismatched}${field.allowedValues.map(option =>
+      `<option value="${escapeAttribute(option)}" ${String(option) === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
+  }
+  if (type === 'SECRET_REFERENCE') {
+    return `<select${data}${required}>${secretReferenceOptionsHtml(value)}</select>`;
+  }
+  if (type === 'TEXT' || type === 'CEL_EXPRESSION') {
+    return `<textarea${data}${encodedBounds}${required}>${escapeHtml(value)}</textarea>`;
+  }
+  if (type === 'BOOLEAN') {
+    const recognized = value === '' || value === 'true' || value === 'false';
+    const undeclared = value === '' ? '<option value="" selected>Not declared</option>' : '';
+    const mismatched = recognized ? ''
+      : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
+    return `<select${data}${required}>${undeclared}${mismatched}`
+      + `<option value="false" ${value === 'false' ? 'selected' : ''}>false</option>`
+      + `<option value="true" ${value === 'true' ? 'selected' : ''}>true</option></select>`;
+  }
+  const inputType = type === 'INTEGER' || type === 'DECIMAL' ? 'number' : 'text';
+  const step = type === 'DECIMAL' ? ' step="any"' : '';
+  return `<input${data} type="${inputType}"${step}${numericBounds}${encodedBounds}`
+    + ` value="${escapeAttribute(value)}"${required}>`;
+}
+
+function removeAdditionalPropertyGroupItem(control) {
+  const item = control?.closest('.additional-property-group-item');
+  if (!item) return false;
+  item.remove();
+  return true;
+}
+
+function appendAdditionalPropertyGroupItem(section, definition) {
+  const items = section?.querySelector('[data-additional-group-items]');
+  if (!items || !definition) return false;
+  const group = { definition, items: Array.from(
+    section.querySelectorAll('.additional-property-group-item')) };
+  items.insertAdjacentHTML('beforeend',
+    additionalPropertyGroupItemHtml(definition, nextAdditionalPropertyGroupItem(group)));
+  return true;
+}
+
+function readAdditionalPropertyGroupEditor(form, descriptor) {
+  const definitions = new Map((descriptor?.additionalProperties || [])
+    .map(group => [group.name, group]));
+  const groups = Array.from(form.querySelectorAll('[data-additional-group]')).map(section => ({
+    definition: definitions.get(section.dataset.additionalGroup)
+      || { name: section.dataset.additionalGroup, fields: [] },
+    items: Array.from(section.querySelectorAll('.additional-property-group-item')).map(item => ({
+      fields: Object.fromEntries(Array.from(item.querySelectorAll('[data-additional-field]'))
+        .map(input => [input.dataset.additionalField,
+          { value: input.value, type: input.dataset.additionalType }])),
+    })),
+  }));
+  if (!additionalPropertyGroupsValid(groups)) {
+    throw new TypeError('additional property group is incomplete');
+  }
+  return serializeAdditionalPropertyGroups(groups);
+}
+
 function propertyRowHtml(property = { name: '', type: 'string', value: '' }) {
   const types = ['string', 'boolean', 'int', 'long', 'float', 'double'];
   return `<div class="property-row">
@@ -10852,6 +11014,7 @@ async function connectRuntime(atBoot = false) {
         void credentialsWindow?.setClient(
           new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
         void deploymentsWindow?.setClient(connectedClient);
+        runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
       } else if (scope === false) {
@@ -10948,6 +11111,8 @@ async function revokeRuntimeAccess() {
   // back to preserving whatever a node already declares rather than continuing to offer a list read
   // under an authentication that has just been withdrawn.
   credentialsWindow?.close();
+  runnerWindow?.close();
+  runnerWindow?.setClient(null);
   void credentialsWindow?.setClient(null);
   // the deployment window loses its client with everything else, for the identical
   // reason -- a listing read under an authentication that has just been withdrawn must not linger.
@@ -14085,6 +14250,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   authenticate: () => authenticateRuntime(),
   forgetToken: () => revokeRuntimeAccess(),
   openCredentials: () => credentialsWindow?.open(),
+  openRunners: () => runnerWindow?.open(),
   openDeployments: () => deploymentsWindow?.open(),
   graphKey: (_context, invocation) => handleGraphKeydown(invocation.event),
   dismiss: () => dismissTransientUi(),
@@ -14126,6 +14292,7 @@ function commandContext() {
       && canDuplicateNode(graphData, selectedNodes.first().id(), layoutMode)),
     hasJoinSemanticsMarker: Boolean(graphData && hasDeclaredJoinSemantics(graphData)),
     layoutMode,
+    designArrangement,
     visualStyle,
     renderMode,
     workspaceLayoutMode: workspaceLayout.mode,
@@ -14544,6 +14711,20 @@ document.addEventListener('click', event => {
     }
     return;
   }
+  const removeAdditionalGroup = event.target.closest('[data-remove-additional-group]');
+  if (removeAdditionalGroup) {
+    removeAdditionalPropertyGroupItem(removeAdditionalGroup);
+    return;
+  }
+  const addAdditionalGroup = event.target.closest('[data-add-additional-group]');
+  if (addAdditionalGroup) {
+    const section = addAdditionalGroup.closest('[data-additional-group]');
+    const descriptor = catalogDescriptor(section.closest('form')?.elements.behavior?.value);
+    const definition = (descriptor?.additionalProperties || [])
+      .find(group => group.name === section.dataset.additionalGroup);
+    appendAdditionalPropertyGroupItem(section, definition);
+    return;
+  }
   const addProperty = event.target.closest('[data-add-property]');
   if (addProperty) {
     addPropertyRow(addProperty.dataset.addProperty);
@@ -14713,6 +14894,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
 // `data-action` namespace. `onCredentials` is the only wire between the window and the rest of the
 // application: the node inspector's SECRET_REFERENCE control reads exactly what the last listing
 // established, and nothing else about a credential ever reaches this file.
+runnerWindow = createRunnerWindow({ dialog: document.getElementById('runner-dialog') });
 credentialsWindow = createCredentialsWindow({
   dialog: document.getElementById('credentials-dialog'),
   onCredentials: held => {

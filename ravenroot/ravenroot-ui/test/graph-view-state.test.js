@@ -7,6 +7,7 @@ import { parseGraphML } from '../src/graph-parsers.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
+  DESIGN_ARRANGEMENTS,
   DESIGN_LAYOUT_MODES,
   DESIGN_RENDER_MODE,
   documentPresentationState,
@@ -16,6 +17,7 @@ import {
   loadedGraphLayoutPlan,
   MONITORING_RENDER_MODE,
   normalizeRenderMode,
+  normalizeDesignArrangement,
   normalizeVisualStyle,
   renderGraphStatistics,
   renderModePresentation,
@@ -54,30 +56,36 @@ describe('Cytoscape layout lifecycle', () => {
     for (const layoutMode of DESIGN_LAYOUT_MODES) {
       expect(documentPresentationState({
         renderMode: 'design', layoutMode, visualStyle: 'n8n4',
-      })).toEqual({ renderMode: 'design', layoutMode, visualStyle: 'n8n4' });
+      })).toEqual({ renderMode: 'design', layoutMode, visualStyle: 'n8n4',
+        designArrangement: normalizeDesignArrangement(null, layoutMode) });
     }
   });
 
   it('restores a presentation persisted as GraphML graph properties', () => {
     expect(documentPresentationState({ graph: { graphProperties: {
       'ravenroot.renderMode': 'design', 'ravenroot.layoutMode': 'layered-down',
-    } } })).toEqual({ renderMode: 'design', layoutMode: 'layered-down', visualStyle: 'cyto' });
+      'ravenroot.designArrangement': 'keep',
+    } } })).toEqual({ renderMode: 'design', layoutMode: 'layered-down', visualStyle: 'cyto',
+      designArrangement: 'keep' });
     expect(documentPresentationState({ graph: { graphProperties: {
       'ravenroot.renderMode': 'monitoring', 'ravenroot.layoutMode': 'elastic',
-    } } })).toEqual({ renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto' });
+      'ravenroot.designArrangement': 'flow',
+    } } })).toEqual({ renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto',
+      designArrangement: 'flow' });
   });
 
   it('normalizes every legacy split or combined preference into two semantic modes', () => {
     for (const legacy of ['dagre', 'cose', 'elk', 'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto', 'preset']) {
       expect(documentPresentationState({ layoutMode: legacy })).toEqual({
         renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto',
+        designArrangement: normalizeDesignArrangement(null, legacy),
       });
     }
     expect(documentPresentationState({ layoutMode: 'elastic', visualStyle: 'n8n4' })).toEqual({
-      renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto',
+      renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto', designArrangement: null,
     });
     expect(documentPresentationState({ renderMode: 'monitoring', layoutMode: 'dagre' })).toEqual({
-      renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto',
+      renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto', designArrangement: 'flow',
     });
     expect(visualStyleFromLegacyLayout('dagre')).toBe(DEFAULT_VISUAL_STYLE);
   });
@@ -94,13 +102,21 @@ describe('Cytoscape layout lifecycle', () => {
     expect(normalizeVisualStyle(undefined)).toBe('cyto');
     expect(normalizeVisualStyle('not-a-style')).toBe('cyto');
     expect(documentPresentationState({ renderMode: 'invalid', layoutMode: 'elastic' })).toEqual({
-      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto',
+      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto', designArrangement: null,
     });
     expect(documentPresentationState({
       renderMode: 'design', layoutMode: 'not-a-layout', visualStyle: 'not-a-style',
-    })).toEqual({ renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto' });
+    })).toEqual({ renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto', designArrangement: null });
     expect(documentPresentationState({ renderMode: 'design', layoutMode: 'n8n4' }))
-      .toEqual({ renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto' });
+      .toEqual({ renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto', designArrangement: null });
+  });
+
+  it('keeps an exact Design Arrange choice separate from its layout engine', () => {
+    expect(DESIGN_ARRANGEMENTS.flow.layout).toBe('dagre');
+    expect(DESIGN_ARRANGEMENTS.organic.layout).toBe('cose');
+    expect(normalizeDesignArrangement(null, 'dagre')).toBe('flow');
+    expect(normalizeDesignArrangement('keep', 'dagre')).toBe('keep');
+    expect(normalizeDesignArrangement('unknown', 'cyto')).toBeNull();
   });
   it('keeps the established position-planning default independent from the visual style', () => {
     expect(initialLayoutForGraph(createWorkflowDocument())).toBe('n8n');

@@ -1,0 +1,38 @@
+{
+  "tenantId": "example-tenant",
+  "registration": {
+    "protocolVersion": 1,
+    "runnerId": "workspace-runner",
+    "trustProfile": "local-container-v1",
+    "labels": [
+      "reference-v1"
+    ],
+    "capabilities": {
+      "capabilities": [
+        "WORKSPACE_READ",
+        "WORKSPACE_WRITE",
+        "PROCESS_EXECUTE"
+      ],
+      "tools": [],
+      "network": [],
+      "secrets": [],
+      "mounts": [],
+      "limits": {
+        "wallTime": "PT2M",
+        "memoryBytes": 134217728,
+        "processes": 32,
+        "workspaceBytes": 67108864,
+        "artifactBytes": 131072,
+        "logBytes": 8192,
+        "payloadBytes": 16384
+      }
+    }
+  },
+  "endpoint": "https://ravenroot.example.test",
+  "tokenFile": "/run/secrets/runner-token",
+  "docker": "/usr/bin/docker",
+  "stateDirectory": "/var/lib/ravenroot-runner",
+  "runtimeImages": {
+    "reference": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

@@ -53,12 +53,16 @@ class HumanTaskConfigurationTest {
     void confirmationValuesUseTheSamePropertyEnvironmentAndPolicyAuthority() {
         var policy = HumanTaskConfiguration.fromSources(
                 Map.of("ravenroot.human-task.max-confirmation-prompt-bytes", "8192",
-                        "ravenroot.human-task.default-attention-page-size", "25"),
+                        "ravenroot.human-task.default-attention-page-size", "25",
+                        "ravenroot.human-task.default-review-text-bytes", "32768"),
                 Map.of("RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES", "4096",
-                        "RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE", "80"));
+                        "RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE", "80",
+                        "RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES", "131072"));
         assertEquals(8_192, policy.confirmation().maxPromptUtf8Bytes());
         assertEquals(25, policy.confirmation().attentionDefaultPageSize());
         assertEquals(80, policy.confirmation().attentionMaxPageSize());
+        assertEquals(32_768, policy.confirmation().defaultReviewTextUtf8Bytes());
+        assertEquals(131_072, policy.confirmation().maxReviewTextUtf8Bytes());
     }
 
     @Test

@@ -15,7 +15,8 @@ const graph = () => ({ format: 'graphml', sourceXml: '<graphml/>', nodes: [{ id:
   edges: [], nodeMap: { start: { id: 'start' } } });
 const document_ = (id, tenantId = 'tenant-a') => ({ documentId: id, tenantId, mode: 'draft',
   name: `${id}.graphml`, displayName: id, graph: graph(), renderMode: 'design', layoutMode: 'cyto',
-  visualStyle: 'cyto', fontSize: 20, provenance: { originMode: 'draft', sourceDocumentId: null,
+  designArrangement: 'keep', visualStyle: 'cyto', fontSize: 20,
+  provenance: { originMode: 'draft', sourceDocumentId: null,
     sourceGraphVersion: null, deploymentId: null }, execution: { executionId: 'never-store', client: {} },
   sourceSession: { sessionId: 'never-store' } });
 
@@ -65,12 +66,25 @@ describe('tenant workspace snapshot', () => {
     expect(restored.documents.map(item => item.documentId)).toEqual(['a', 'b']);
     expect(restored.activeDocumentId).toBe('a');
     expect(restored.documents[0].graph.nodeMap.start.id).toBe('start');
-    expect(restored.documents[0].presentation).toMatchObject({ renderMode: 'design', layoutMode: 'cyto' });
+    expect(restored.documents[0].presentation).toMatchObject({
+      renderMode: 'design', layoutMode: 'cyto', designArrangement: 'keep',
+    });
     expect(validateWorkspaceSnapshot({ ...snapshot, activeDocumentId: 'stale' }, scope))
       .toMatchObject({ activeDocumentId: 'b', recoveredStaleSelection: true });
     expect(() => validateWorkspaceSnapshot({ ...snapshot,
       documents: [{ ...snapshot.documents[0], tenantId: 'tenant-b' }] }, scope))
       .toThrow(/tenant or document identity isolation/);
+  });
+
+  it('retains the exact Design arrangement for a Graphify view without writing graph metadata', () => {
+    const source = document_('graphify');
+    source.graph = { format: 'graphify', sourceJson: '{}', nodes: [{ id: 'file' }], edges: [],
+      nodeMap: { file: { id: 'file' } } };
+    source.layoutMode = 'cose';
+    source.designArrangement = 'organic';
+    const stored = persistedDocument(source);
+    expect(stored.presentation).toMatchObject({ layoutMode: 'cose', designArrangement: 'organic' });
+    expect(stored.graph).not.toHaveProperty('graphProperties');
   });
 
   it('reports open and blocked storage failures without inventing a replacement database', async () => {

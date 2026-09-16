@@ -1,0 +1,500 @@
+{
+  "protocolVersion": 1,
+  "runnerIssuer": "https://identity.example.test",
+  "artifactDirectory": "/var/lib/ravenroot/runner-artifacts",
+  "tenants": {
+    "example-tenant": {
+      "policy": {
+        "capabilities": [
+          "WORKSPACE_READ",
+          "WORKSPACE_WRITE",
+          "PROCESS_EXECUTE"
+        ],
+        "tools": [],
+        "network": [],
+        "secrets": [],
+        "mounts": [],
+        "limits": {
+          "wallTime": "PT2M",
+          "memoryBytes": 134217728,
+          "processes": 32,
+          "workspaceBytes": 67108864,
+          "artifactBytes": 131072,
+          "logBytes": 8192,
+          "payloadBytes": 16384
+        }
+      },
+      "definitions": [
+        {
+          "name": "planner",
+          "version": 1,
+          "instructions": "Act as the planner for this process. Keep results bounded and report uncertainty explicitly.",
+          "runtimeProfile": "reference",
+          "modelProfile": "deterministic-reference",
+          "skills": [],
+          "runnerRequirements": [
+            "reference-v1"
+          ],
+          "policy": {
+            "capabilities": [
+              "WORKSPACE_READ",
+              "WORKSPACE_WRITE",
+              "PROCESS_EXECUTE"
+            ],
+            "tools": [],
+            "network": [],
+            "secrets": [],
+            "mounts": [],
+            "limits": {
+              "wallTime": "PT2M",
+              "memoryBytes": 134217728,
+              "processes": 32,
+              "workspaceBytes": 67108864,
+              "artifactBytes": 131072,
+              "logBytes": 8192,
+              "payloadBytes": 16384
+            }
+          },
+          "workspaceRetention": "PT1H",
+          "outputSchema": "development-result",
+          "commands": [
+            {
+              "name": "resume", "readOnly": true,
+              "policy": {
+                "capabilities": ["WORKSPACE_READ"], "tools": [], "network": [], "secrets": [], "mounts": [],
+                "limits": {"wallTime": "PT2M", "memoryBytes": 134217728, "processes": 32,
+                  "workspaceBytes": 67108864, "artifactBytes": 131072, "logBytes": 8192, "payloadBytes": 16384}
+              },
+              "outcomes": ["completed", "blocked", "escalation"]
+            },
+            {
+              "name": "read", "readOnly": true,
+              "policy": {
+                "capabilities": ["WORKSPACE_READ"], "tools": [], "network": [], "secrets": [], "mounts": [],
+                "limits": {"wallTime": "PT2M", "memoryBytes": 134217728, "processes": 32,
+                  "workspaceBytes": 67108864, "artifactBytes": 131072, "logBytes": 8192, "payloadBytes": 16384}
+              },
+              "outcomes": ["answered", "inconclusive", "blocked", "escalation"]
+            },
+            {
+              "name": "plan",
+              "readOnly": true,
+              "policy": {
+                "capabilities": [
+                  "WORKSPACE_READ",
+                  "WORKSPACE_WRITE",
+                  "PROCESS_EXECUTE"
+                ],
+                "tools": [],
+                "network": [],
+                "secrets": [],
+                "mounts": [],
+                "limits": {
+                  "wallTime": "PT2M",
+                  "memoryBytes": 134217728,
+                  "processes": 32,
+                  "workspaceBytes": 67108864,
+                  "artifactBytes": 131072,
+                  "logBytes": 8192,
+                  "payloadBytes": 16384
+                }
+              },
+              "outcomes": [
+                "completed",
+                "needs-input",
+                "needs-work",
+                "blocked",
+                "escalation",
+                "answered",
+                "inconclusive",
+                "approved",
+                "changes-requested",
+                "passed",
+                "failed",
+                "flaky",
+                "fixed",
+                "not-fixed",
+                "continue"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "developer",
+          "version": 1,
+          "instructions": "Act as the developer for this process. Keep results bounded and report uncertainty explicitly.",
+          "runtimeProfile": "reference",
+          "modelProfile": "deterministic-reference",
+          "skills": [],
+          "runnerRequirements": [
+            "reference-v1"
+          ],
+          "policy": {
+            "capabilities": [
+              "WORKSPACE_READ",
+              "WORKSPACE_WRITE",
+              "PROCESS_EXECUTE"
+            ],
+            "tools": [],
+            "network": [],
+            "secrets": [],
+            "mounts": [],
+            "limits": {
+              "wallTime": "PT2M",
+              "memoryBytes": 134217728,
+              "processes": 32,
+              "workspaceBytes": 67108864,
+              "artifactBytes": 131072,
+              "logBytes": 8192,
+              "payloadBytes": 16384
+            }
+          },
+          "workspaceRetention": "PT1H",
+          "outputSchema": "development-result",
+          "commands": [
+            {
+              "name": "implement",
+              "readOnly": false,
+              "policy": {
+                "capabilities": [
+                  "WORKSPACE_READ",
+                  "WORKSPACE_WRITE",
+                  "PROCESS_EXECUTE"
+                ],
+                "tools": [],
+                "network": [],
+                "secrets": [],
+                "mounts": [],
+                "limits": {
+                  "wallTime": "PT2M",
+                  "memoryBytes": 134217728,
+                  "processes": 32,
+                  "workspaceBytes": 67108864,
+                  "artifactBytes": 131072,
+                  "logBytes": 8192,
+                  "payloadBytes": 16384
+                }
+              },
+              "outcomes": [
+                "completed",
+                "needs-input",
+                "needs-work",
+                "blocked",
+                "escalation",
+                "answered",
+                "inconclusive",
+                "approved",
+                "changes-requested",
+                "passed",
+                "failed",
+                "flaky",
+                "fixed",
+                "not-fixed",
+                "continue"
+              ]
+            },
+            {
+              "name": "remediate",
+              "readOnly": false,
+              "policy": {
+                "capabilities": [
+                  "WORKSPACE_READ",
+                  "WORKSPACE_WRITE",
+                  "PROCESS_EXECUTE"
+                ],
+                "tools": [],
+                "network": [],
+                "secrets": [],
+                "mounts": [],
+                "limits": {
+                  "wallTime": "PT2M",
+                  "memoryBytes": 134217728,
+                  "processes": 32,
+                  "workspaceBytes": 67108864,
+                  "artifactBytes": 131072,
+                  "logBytes": 8192,
+                  "payloadBytes": 16384
+                }
+              },
+              "outcomes": [
+                "completed",
+                "needs-input",
+                "needs-work",
+                "blocked",
+                "escalation",
+                "answered",
+                "inconclusive",
+                "approved",
+                "changes-requested",
+                "passed",
+                "failed",
+                "flaky",
+                "fixed",
+                "not-fixed",
+                "continue"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "tester",
+          "version": 1,
+          "instructions": "Act as the tester for this process. Keep results bounded and report uncertainty explicitly.",
+          "runtimeProfile": "reference",
+          "modelProfile": "deterministic-reference",
+          "skills": [],
+          "runnerRequirements": [
+            "reference-v1"
+          ],
+          "policy": {
+            "capabilities": [
+              "WORKSPACE_READ",
+              "WORKSPACE_WRITE",
+              "PROCESS_EXECUTE"
+            ],
+            "tools": [],
+            "network": [],
+            "secrets": [],
+            "mounts": [],
+            "limits": {
+              "wallTime": "PT2M",
+              "memoryBytes": 134217728,
+              "processes": 32,
+              "workspaceBytes": 67108864,
+              "artifactBytes": 131072,
+              "logBytes": 8192,
+              "payloadBytes": 16384
+            }
+          },
+          "workspaceRetention": "PT1H",
+          "outputSchema": "development-result",
+          "commands": [
+            {
+              "name": "test",
+              "readOnly": false,
+              "policy": {
+                "capabilities": [
+                  "WORKSPACE_READ",
+                  "WORKSPACE_WRITE",
+                  "PROCESS_EXECUTE"
+                ],
+                "tools": [],
+                "network": [],
+                "secrets": [],
+                "mounts": [],
+                "limits": {
+                  "wallTime": "PT2M",
+                  "memoryBytes": 134217728,
+                  "processes": 32,
+                  "workspaceBytes": 67108864,
+                  "artifactBytes": 131072,
+                  "logBytes": 8192,
+                  "payloadBytes": 16384
+                }
+              },
+              "outcomes": [
+                "completed",
+                "needs-input",
+                "needs-work",
+                "blocked",
+                "escalation",
+                "answered",
+                "inconclusive",
+                "approved",
+                "changes-requested",
+                "passed",
+                "failed",
+                "flaky",
+                "fixed",
+                "not-fixed",
+                "continue"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reviewer",
+          "version": 1,
+          "instructions": "Act as the reviewer for this process. Keep results bounded and report uncertainty explicitly.",
+          "runtimeProfile": "reference",
+          "modelProfile": "deterministic-reference",
+          "skills": [],
+          "runnerRequirements": [
+            "reference-v1"
+          ],
+          "policy": {
+            "capabilities": [
+              "WORKSPACE_READ",
+              "WORKSPACE_WRITE",
+              "PROCESS_EXECUTE"
+            ],
+            "tools": [],
+            "network": [],
+            "secrets": [],
+            "mounts": [],
+            "limits": {
+              "wallTime": "PT2M",
+              "memoryBytes": 134217728,
+              "processes": 32,
+              "workspaceBytes": 67108864,
+              "artifactBytes": 131072,
+              "logBytes": 8192,
+              "payloadBytes": 16384
+            }
+          },
+          "workspaceRetention": "PT1H",
+          "outputSchema": "development-result",
+          "commands": [
+            {
+              "name": "review",
+              "readOnly": true,
+              "policy": {
+                "capabilities": [
+                  "WORKSPACE_READ",
+                  "WORKSPACE_WRITE",
+                  "PROCESS_EXECUTE"
+                ],
+                "tools": [],
+                "network": [],
+                "secrets": [],
+                "mounts": [],
+                "limits": {
+                  "wallTime": "PT2M",
+                  "memoryBytes": 134217728,
+                  "processes": 32,
+                  "workspaceBytes": 67108864,
+                  "artifactBytes": 131072,
+                  "logBytes": 8192,
+                  "payloadBytes": 16384
+                }
+              },
+              "outcomes": [
+                "completed",
+                "needs-input",
+                "needs-work",
+                "blocked",
+                "escalation",
+                "answered",
+                "inconclusive",
+                "approved",
+                "changes-requested",
+                "passed",
+                "failed",
+                "flaky",
+                "fixed",
+                "not-fixed",
+                "continue"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "coordinator",
+          "version": 1,
+          "instructions": "Act as the coordinator for this process. Keep results bounded and report uncertainty explicitly.",
+          "runtimeProfile": "reference",
+          "modelProfile": "deterministic-reference",
+          "skills": [],
+          "runnerRequirements": [
+            "reference-v1"
+          ],
+          "policy": {
+            "capabilities": [
+              "WORKSPACE_READ",
+              "WORKSPACE_WRITE",
+              "PROCESS_EXECUTE"
+            ],
+            "tools": [],
+            "network": [],
+            "secrets": [],
+            "mounts": [],
+            "limits": {
+              "wallTime": "PT2M",
+              "memoryBytes": 134217728,
+              "processes": 32,
+              "workspaceBytes": 67108864,
+              "artifactBytes": 131072,
+              "logBytes": 8192,
+              "payloadBytes": 16384
+            }
+          },
+          "workspaceRetention": "PT1H",
+          "outputSchema": "development-result",
+          "commands": [
+            {
+              "name": "handoff",
+              "readOnly": false,
+              "policy": {
+                "capabilities": [
+                  "WORKSPACE_READ",
+                  "WORKSPACE_WRITE",
+                  "PROCESS_EXECUTE"
+                ],
+                "tools": [],
+                "network": [],
+                "secrets": [],
+                "mounts": [],
+                "limits": {
+                  "wallTime": "PT2M",
+                  "memoryBytes": 134217728,
+                  "processes": 32,
+                  "workspaceBytes": 67108864,
+                  "artifactBytes": 131072,
+                  "logBytes": 8192,
+                  "payloadBytes": 16384
+                }
+              },
+              "outcomes": [
+                "completed",
+                "needs-input",
+                "needs-work",
+                "blocked",
+                "escalation",
+                "answered",
+                "inconclusive",
+                "approved",
+                "changes-requested",
+                "passed",
+                "failed",
+                "flaky",
+                "fixed",
+                "not-fixed",
+                "continue"
+              ]
+            }
+          ]
+        }
+      ],
+      "runners": [
+        {
+          "protocolVersion": 1,
+          "runnerId": "workspace-runner",
+          "trustProfile": "local-container-v1",
+          "labels": [
+            "reference-v1"
+          ],
+          "capabilities": {
+            "capabilities": [
+              "WORKSPACE_READ",
+              "WORKSPACE_WRITE",
+              "PROCESS_EXECUTE"
+            ],
+            "tools": [],
+            "network": [],
+            "secrets": [],
+            "mounts": [],
+            "limits": {
+              "wallTime": "PT2M",
+              "memoryBytes": 134217728,
+              "processes": 32,
+              "workspaceBytes": 67108864,
+              "artifactBytes": 131072,
+              "logBytes": 8192,
+              "payloadBytes": 16384
+            }
+          }
+        }
+      ]
+    }
+  }
+}

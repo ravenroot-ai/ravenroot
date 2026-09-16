@@ -265,6 +265,10 @@ public final class RavenrootServerMain {
         // The composition root chooses the adapter. Core names only the port; the concrete adapter
         // appears here and nowhere else so the primary path has a store to write through.
         ai.ravenroot.api.persistence.ExecutionStore executionStore = managedExecutionStore;
+        var runnerConfiguration = RunnerPlaneConfiguration.fromEnvironment(System.getenv());
+        var runnerJobs = runnerConfiguration == null ? null
+                : runnerConfiguration.service(executionStore, java.time.Clock.systemUTC());
+        if (runnerJobs != null) behaviors.withRunnerJobs(runnerJobs);
         // The composition root also chooses the SEC-09 mode. Core holds the seam and deliberately no
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
@@ -280,11 +284,21 @@ public final class RavenrootServerMain {
                 graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore(),
                 executionRuntime.applicationRunnerShutdownStepBound(),
                 executionOwnershipConfiguration.runtimeOwnership(), programAuthoringLimits);
+        var processLifecycle = executionStore == null ? null
+                : new ai.ravenroot.core.process.ProcessLifecycleService(
+                        executionStore, application, humanTasks, java.time.Clock.systemUTC());
+        var deploymentRegistry = executionStoreOwner.deploymentRegistry();
+        var deploymentSingleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
         // two composition sites was updated and the other was not, and the refusals that followed
         // would look like corrupt manifests rather than like a composition mistake.
         var executionManifests = application.executionManifests();
+        var runnerContinuations = runnerJobs == null ? null : new ai.ravenroot.core.runner.PinnedRunnerContinuationExecutor(
+                runnerJobs, executionStoreOwner.graphDefinitionStore(), engine, behaviors, monitor,
+                graphExecutionLimits, executionManifests, humanTasks, toolApprovals, agentBudgets);
+        var runnerRecovery = runnerJobs == null ? null : new ai.ravenroot.core.runner.RunnerRecoveryLoop(
+                runnerJobs, runnerContinuations, runnerConfiguration.policies().keySet(), java.time.Clock.systemUTC());
         // Recovery is composed whenever there is durable state to recover, not only when a durable
         // decision service happens to be enabled. The two are unrelated: work interrupted mid-flight
         // is outstanding whether or not this deployment also approves tool calls, and gating the
@@ -331,8 +345,16 @@ public final class RavenrootServerMain {
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
                         executionManifests, executionRuntime.humanTaskRunnerShutdownStepBound());
+                var deploymentReentryGate = deploymentRegistry == null
+                        ? ai.ravenroot.core.humantask.HumanTaskReentryGate.OPEN
+                        : new ai.ravenroot.core.humantask.DeploymentHumanTaskReentryGate(
+                                executionStore, deploymentRegistry);
+                ai.ravenroot.core.humantask.HumanTaskReentryGate reentryGate = task ->
+                        deploymentReentryGate.admits(task)
+                                && processLifecycle.admitsReentry(task.key().tenantId(),
+                                        task.key().processInstanceId());
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
-                        executionStore, humanTasks, continuationExecutor));
+                        executionStore, humanTasks, continuationExecutor, reentryGate));
             }
             // One authority over the pinned document and the manifest, shared by the coordinator's
             // fail-closed gate and by the declaration source below, so the answer a sweep acts on
@@ -369,6 +391,30 @@ public final class RavenrootServerMain {
         // by the shutdown sequence further down.
         var readinessConfiguration = ai.ravenroot.server.readiness.ReadinessConfiguration.fromEnvironment(
                 System.getenv());
+        ai.ravenroot.core.deployment.DurableLocalDeploymentControl durableDeploymentControl = null;
+        if (deploymentRegistry != null) {
+            var deploymentClock = java.time.Clock.systemUTC();
+            var deploymentOwner = executionOwnershipConfiguration.runtimeOwnership();
+            var applicationTargets = application.localDeploymentTargets();
+            ai.ravenroot.core.deployment.DeploymentTargets lifecycleTargets = (tenantId, deploymentId) ->
+                    applicationTargets.resolve(tenantId, deploymentId).map(target -> humanTasks == null
+                            ? target
+                            : new ai.ravenroot.core.deployment.HumanTaskCancellingLifecycleTarget(
+                                    tenantId, deploymentId, target, humanTasks));
+            var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(
+                    deploymentRegistry, lifecycleTargets, deploymentSingleFlight,
+                    ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING,
+                    deploymentOwner.identity().value(), deploymentOwner.leaseTtl(),
+                    readinessConfiguration.drainGracePeriod(), deploymentClock);
+            var reconciler = new ai.ravenroot.core.deployment.DeploymentReconciler(
+                    deploymentRegistry, lifecycleTargets, deploymentSingleFlight,
+                    java.util.List.of(), deploymentOwner.identity().value(), deploymentOwner.leaseTtl(),
+                    readinessConfiguration.drainGracePeriod(), 100, deploymentClock);
+            durableDeploymentControl = new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
+                    application, deploymentRegistry, coordinator, reconciler,
+                    java.time.Duration.ofSeconds(1), deploymentClock);
+        }
+        var installedDeploymentControl = durableDeploymentControl;
         // Both required durable dependencies contribute to readiness. The execution-store probe is
         // omitted only under the explicit disabled configuration, preserving the supported ephemeral
         // mode without pretending a nonexistent store can be checked.
@@ -402,6 +448,9 @@ public final class RavenrootServerMain {
         // switch it describes cannot.
         var authorization = new ai.ravenroot.api.security.DefaultAuthorizationService(
                 new AuditTrailAuthorizationSink(auditTrail));
+        var runnerControl = runnerJobs == null ? null : new ai.ravenroot.core.runner.AuthorizedRunnerControl(
+                runnerJobs, authorization, runnerConfiguration.issuer(),
+                runnerConfiguration.artifacts(), java.time.Clock.systemUTC());
         // The durable operator authority the packaged process was missing under the relevant contract. It is a
         // local SQLite file opened here and nowhere else, and provision/revoke reach it only through
         // the operator CLI's reference monitor -- there is no HTTP administration route. Default-off:
@@ -480,6 +529,7 @@ public final class RavenrootServerMain {
                 if (humanTasks != null) {
                     server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant, humanTaskPolicy);
                 }
+                if (runnerControl != null) server.installRunnerPlane(runnerControl, runnerContinuations);
                 if (interactionWebSockets.enabled()) {
                     server.installInteractionWebSockets(interactionWebSockets);
                 }
@@ -488,6 +538,12 @@ public final class RavenrootServerMain {
                 }
                 if (executionManifests != null) {
                     server.installExecutionManifests(executionManifests);
+                }
+                if (installedDeploymentControl != null) {
+                    server.installDurableDeploymentControl(installedDeploymentControl);
+                }
+                if (processLifecycle != null) {
+                    server.installProcessLifecycle(processLifecycle);
                 }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(
@@ -522,7 +578,7 @@ public final class RavenrootServerMain {
         try {
             telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
                     ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor,
-                    agentBudgetTelemetry);
+                    agentBudgetTelemetry, runnerJobs == null ? null : runnerJobs.telemetry());
         } catch (RuntimeException | Error telemetryFailure) {
             startupHandle.close();
             userCredentials.close();
@@ -541,6 +597,7 @@ public final class RavenrootServerMain {
                 startupHandle.gracefulShutdown();
             } finally {
                 if (approvalRecovery != null) approvalRecovery.close();
+                if (runnerRecovery != null) runnerRecovery.close();
                 if (recoveryDiscovery != null) recoveryDiscovery.close();
                 try {
                     registered.activation().close();
@@ -597,9 +654,11 @@ public final class RavenrootServerMain {
             // should know what it inherited before it begins acting on it.
             if (recoveryDiscovery != null) recoveryDiscovery.start();
             if (approvalRecovery != null) approvalRecovery.start();
+            if (runnerRecovery != null) runnerRecovery.start();
         } catch (RuntimeException | Error startFailure) {
             if (recoveryDiscovery != null) recoveryDiscovery.close();
             if (approvalRecovery != null) approvalRecovery.close();
+            if (runnerRecovery != null) runnerRecovery.close();
             userCredentials.close();
             closeEmbedRegistrations(embedRegistrations);
             assistantComposition.close();

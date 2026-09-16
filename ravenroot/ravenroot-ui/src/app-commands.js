@@ -25,6 +25,15 @@ export function createNodeActionCatalog({ targetLabel, capabilities, handlers })
   }));
 }
 
+function asSelectableArrangement(command, id) {
+  return {
+    ...command,
+    isChecked: context => context.hasDocument && context.renderMode === 'design'
+      && context.designArrangement === id,
+    kind: 'radio',
+  };
+}
+
 function localizeCommand(command, t) {
   const labelKey = `commands.${command.id}.label`;
   const helpKey = `commands.${command.id}.help`;
@@ -197,14 +206,16 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     renderMode('design', 10),
     renderMode('monitoring', 20),
-    arrangement('hierarchical', 10),
-    arrangement('flow', 20),
-    arrangement('organic', 30),
-    arrangement('keep', 40),
+    asSelectableArrangement(arrangement('hierarchical', 10), 'hierarchical'),
+    asSelectableArrangement(arrangement('flow', 20), 'flow'),
+    asSelectableArrangement(arrangement('organic', 30), 'organic'),
+    asSelectableArrangement(arrangement('keep', 40), 'keep'),
     // The layered drawings are additive: a sibling group after the established arrangements, so
     // the existing four keep their ids, order and contiguity, and the menu separates the two sets.
-    arrangement('hierarchical-new', 50, 'design-arrange-layered'),
-    arrangement('layered-down', 60, 'design-arrange-layered'),
+    asSelectableArrangement(
+      arrangement('hierarchical-new', 50, 'design-arrange-layered'), 'hierarchical-new'),
+    asSelectableArrangement(
+      arrangement('layered-down', 60, 'design-arrange-layered'), 'layered-down'),
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,
@@ -260,6 +271,8 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     // guess why teaches them nothing. Its own status line says it in a sentence instead.
     { id: 'run.credentials', group: 'credentials', order: 110,
       placements: ['menu.run'], execute: actions.openCredentials },
+    { id: 'run.runners', group: 'credentials', order: 115,
+      placements: ['menu.run'], execute: actions.openRunners },
 
     // Its own group, same reasoning as `run.credentials` just above: a line separates
     // "sign this editor in" and "store a credential" from "manage a registered deployment", because

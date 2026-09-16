@@ -2,6 +2,8 @@ const LIVE_STATUSES = new Set(['WAITING', 'ESCALATED']);
 const ALL_STATUSES = new Set([...LIVE_STATUSES, 'RESOLVED', 'DENIED', 'EXPIRED', 'CANCELLED']);
 const ACTIONS = new Set(['RESOLVE', 'DENY', 'CANCEL']);
 const COMMENT_MODES = new Set(['DISALLOWED', 'OPTIONAL', 'REQUIRED']);
+const REVIEW_DIGEST = /^sha256:[0-9a-f]{64}$/u;
+const BIDI_FORMATTING = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
 function object(value, message) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(message);
@@ -75,8 +77,10 @@ export function humanTaskActionLabelKey(value) {
 export function validateHumanTaskCapability(value) {
   const capability = object(value, 'Human Task capability is missing');
   const versions = capability.confirmationPresentationVersions;
+  const reviewVersions = capability.reviewPresentationVersions;
   if (capability.schemaVersion !== 1 || !Array.isArray(versions) || versions.length !== 1
-      || versions[0] !== 1) {
+      || versions[0] !== 1 || !Array.isArray(reviewVersions) || reviewVersions.length !== 1
+      || reviewVersions[0] !== 1) {
     throw new Error('Human Task capability is not a valid schema version 1 document');
   }
   const attentionPollMillis = integer(capability.attentionPollMillis, 'poll interval', 1);
@@ -89,9 +93,15 @@ export function validateHumanTaskCapability(value) {
   const confirmationActionLabelMaxUtf8Bytes = integer(capability.confirmationActionLabelMaxUtf8Bytes,
     'action-label maximum', 1);
   const commentMaxUtf8Bytes = integer(capability.commentMaxUtf8Bytes, 'comment maximum', 1);
+  const reviewTextMaxUtf8Bytes = integer(capability.reviewTextMaxUtf8Bytes,
+    'review-text maximum', 1);
+  if (reviewTextMaxUtf8Bytes > 1024 * 1024) {
+    throw new Error('Human Task review-text maximum exceeds the technical ceiling');
+  }
   return Object.freeze({
     schemaVersion: 1,
     confirmationPresentationVersions: Object.freeze([...new Set(versions)]),
+    reviewPresentationVersions: Object.freeze([...new Set(reviewVersions)]),
     attentionPollMillis,
     attentionBackoffMaxMillis,
     attentionPageSize,
@@ -99,7 +109,32 @@ export function validateHumanTaskCapability(value) {
     confirmationPromptMaxUtf8Bytes,
     confirmationActionLabelMaxUtf8Bytes,
     commentMaxUtf8Bytes,
+    reviewTextMaxUtf8Bytes,
   });
+}
+
+export function validateHumanTaskReviewPresentation(value, capability) {
+  const review = object(value, 'Human Task review presentation is invalid');
+  const version = integer(review.version, 'review presentation version', 1);
+  if (!capability.reviewPresentationVersions.includes(version) || review.contentType !== 'text/plain'
+      || typeof review.text !== 'string' || typeof review.contentDigest !== 'string'
+      || !REVIEW_DIGEST.test(review.contentDigest)) {
+    throw new Error('Human Task review presentation is not supported');
+  }
+  const maxUtf8Bytes = integer(review.maxUtf8Bytes, 'review-text pinned maximum', 1);
+  if (maxUtf8Bytes > 1024 * 1024) {
+    throw new Error('Human Task review-text pinned maximum exceeds the technical ceiling');
+  }
+  if ((typeof review.text.isWellFormed === 'function' && !review.text.isWellFormed())
+      || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(review.text)
+      || BIDI_FORMATTING.test(review.text)) {
+    throw new Error('Human Task review text contains unsafe plain text');
+  }
+  if (utf8Length(review.text) > maxUtf8Bytes) {
+    throw new Error('Human Task review text exceeds its pinned maximum');
+  }
+  return Object.freeze({ version, contentType: review.contentType, text: review.text,
+    contentDigest: review.contentDigest, maxUtf8Bytes });
 }
 
 export function validateHumanTaskPresentation(value, capability, pinnedLimits) {
@@ -140,7 +175,8 @@ export function validateHumanTaskPresentation(value, capability, pinnedLimits) {
     actions: Object.freeze(actions), labels });
 }
 
-export function validateHumanTaskRow(candidate, capability, { actionable = false, index = 0 } = {}) {
+export function validateHumanTaskRow(candidate, capability,
+  { actionable = false, exact = false, index = 0 } = {}) {
   const item = object(candidate, `Human Task row ${index + 1} is invalid`);
   if (!ALL_STATUSES.has(item.status) || (actionable && !LIVE_STATUSES.has(item.status))) {
     throw new Error(`Human Task row ${index + 1} is not ${actionable ? 'actionable' : 'valid'}`);
@@ -162,6 +198,11 @@ export function validateHumanTaskRow(candidate, capability, { actionable = false
   if (item.availableActions.some(action => !presentation.actions.includes(action))) {
     throw new Error('Human Task available action is outside the pinned presentation');
   }
+  if (!exact && item.reviewPresentation != null) {
+    throw new Error('Human Task summary row disclosed review content');
+  }
+  const reviewPresentation = item.reviewPresentation == null ? null
+    : validateHumanTaskReviewPresentation(item.reviewPresentation, capability);
   return Object.freeze({
     taskId: text(item.taskId, 'task id'), generation, status: item.status,
     graphVersion: text(item.graphVersion, 'graph version'),
@@ -172,7 +213,7 @@ export function validateHumanTaskRow(candidate, capability, { actionable = false
     createdAt: timestamp(item.createdAt, 'creation time'),
     expiresAt: timestamp(item.expiresAt, 'expiry time'),
     escalateAt: timestamp(item.escalateAt, 'escalation time', { optional: true }),
-    presentation, availableActions: Object.freeze([...new Set(item.availableActions)]),
+    presentation, reviewPresentation, availableActions: Object.freeze([...new Set(item.availableActions)]),
     ...pinnedLimits,
   });
 }
@@ -193,7 +234,8 @@ export function validateHumanTaskAttention(value, capability, expected = {}) {
   const escalated = integer(counts.escalated, 'escalated count');
   if (escalated > pending) throw new Error('Human Task escalated count exceeds pending count');
   const items = page.items.map((candidate, index) =>
-    validateHumanTaskRow(candidate, capability, { actionable: true, index }));
+    validateHumanTaskRow(candidate, capability, { actionable: true, index,
+      exact: expected.taskId != null && expected.generation != null }));
   if (pending < items.length
       || escalated < items.filter(item => item.status === 'ESCALATED').length) {
     throw new Error('Human Task attention counts are smaller than the returned page');

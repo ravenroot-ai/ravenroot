@@ -43,6 +43,7 @@ Detailed contract: [Agent authority](configuration.md#agent-authority-and-budget
 | `RAVENROOT_AGENT_RATE_CARD_VERSION` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AGENT_RUNTIME_INSTANCE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RUNNER_CONFIG` | unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart |
 
 ## Authoring assistant
 
@@ -74,6 +75,37 @@ Detailed contract: [Bundle profile](bundles/).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
+| `RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_PROFILE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_PROFILE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_SERVERS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_NAME_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CONSUMER_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_PROFILE_` | See the linked contract for exact type, default, and applicability. |
@@ -194,6 +226,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | See the linked contract for exact type, default, and applicability. |
@@ -207,6 +240,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |

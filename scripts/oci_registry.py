@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 REPOSITORY = "ghcr.io/ravenroot-ai/ravenroot"
+IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 PREDICATES = {
     "https://spdx.dev/Document",
     "https://slsa.dev/provenance/v1",
@@ -81,8 +82,12 @@ def validate_predicate(
     path: Path, predicate_type: str, image_digest: str, version: str
 ) -> None:
     statement = read_json(path)
-    if statement.get("_type") != "https://in-toto.io/Statement/v0.1":
-        raise OciRegistryError(f"{predicate_type} is not an in-toto statement")
+    statement_type = statement.get("_type")
+    if statement_type != IN_TOTO_STATEMENT_TYPE:
+        raise OciRegistryError(
+            f"{predicate_type} statement type must be {IN_TOTO_STATEMENT_TYPE!r}, "
+            f"found {statement_type!r}"
+        )
     if statement.get("predicateType") != predicate_type:
         raise OciRegistryError(f"{predicate_type} annotation differs from its statement")
     subjects = statement.get("subject")

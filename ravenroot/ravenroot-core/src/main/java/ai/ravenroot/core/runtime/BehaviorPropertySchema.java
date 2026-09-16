@@ -122,6 +122,39 @@ public final class BehaviorPropertySchema {
         for (NodePropertyDescriptor property : declared) {
             validateProperty(node, property, unconfigured, declared);
         }
+        validateAdditionalProperties(node, catalogued.get().additionalProperties());
+    }
+
+    private void validateAdditionalProperties(
+            GraphNode node,
+            List<ai.ravenroot.api.catalog.NodePropertyGroupDescriptor> groups) {
+        for (ai.ravenroot.api.catalog.NodePropertyGroupDescriptor group : groups) {
+            Map<Integer, Map<String, NodePropertyDescriptor>> items = new java.util.TreeMap<>();
+            for (String key : node.properties().keySet()) {
+                if (!key.startsWith(group.name() + ".")) continue;
+                var match = group.match(key).orElseThrow(() -> new BehaviorPropertyException(
+                        node.id(), key, "does not match the dynamic '" + group.name()
+                                + ".<positive-index>.<field>' contract"));
+                items.computeIfAbsent(match.index(), ignored -> new LinkedHashMap<>())
+                        .put(match.field().name(), group.property(match.index(), match.field()));
+            }
+            int expected = 1;
+            for (var item : items.entrySet()) {
+                if (item.getKey() != expected) {
+                    throw new BehaviorPropertyException(node.id(), group.name() + "." + item.getKey(),
+                            "is not contiguous; dynamic collection indices must start at 1 and have no gaps");
+                }
+                for (NodePropertyDescriptor field : group.fields()) {
+                    NodePropertyDescriptor concrete = item.getValue().get(field.name());
+                    if (concrete == null) {
+                        throw new BehaviorPropertyException(node.id(), group.name() + "." + item.getKey(),
+                                "is incomplete; required field '" + field.name() + "' is missing");
+                    }
+                    validateProperty(node, concrete, false, List.of(concrete));
+                }
+                expected++;
+            }
+        }
     }
 
     /**

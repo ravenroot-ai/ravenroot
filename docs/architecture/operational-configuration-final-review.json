@@ -1813,8 +1813,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
-          "assertion": "The operator reference publishes strict Boolean syntax and false default."
+          "digest": "b79d8f2adee5e5ed51642f8eaf6bc6e0f93fd59828c06b5816598a02215e4673",
+          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 5,
@@ -2484,8 +2484,8 @@
         },
         {
           "path": "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/RemoteBackend.java",
-          "digest": "93a88183ec2b9374eb174c06216ae2e21ca1b17ab51f6fbd1bae2654112ced24",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "25e11372c7b304f0cf14db71e8258e18c18203ffca6c04c93285e68a58ffffcd",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 3,
@@ -5472,8 +5472,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
-          "assertion": "Operator reference publishes supported extension bindings."
+          "digest": "b79d8f2adee5e5ed51642f8eaf6bc6e0f93fd59828c06b5816598a02215e4673",
+          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 44,
@@ -5766,8 +5766,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
-          "assertion": "Operator reference publishes supported server bindings."
+          "digest": "b79d8f2adee5e5ed51642f8eaf6bc6e0f93fd59828c06b5816598a02215e4673",
+          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 95,
@@ -8533,8 +8533,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "436f80e0ff2ad3bc66e7fa25bf8e58f7df292e8266253fb6178dda3893f70fa6",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
@@ -8829,8 +8829,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
-          "assertion": "UI resolves catalog entries through stable lookup tokens."
+          "digest": "436f80e0ff2ad3bc66e7fa25bf8e58f7df292e8266253fb6178dda3893f70fa6",
+          "assertion": "UI resolves catalog entries through stable lookup tokens. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 131,
@@ -8987,8 +8987,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "436f80e0ff2ad3bc66e7fa25bf8e58f7df292e8266253fb6178dda3893f70fa6",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 43,
@@ -10766,8 +10766,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "436f80e0ff2ad3bc66e7fa25bf8e58f7df292e8266253fb6178dda3893f70fa6",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
@@ -11429,8 +11429,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "49584447d0406fed17c8d6687f94c689251c4809489e2c4fecbac0c1f427b588",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
+          "digest": "436f80e0ff2ad3bc66e7fa25bf8e58f7df292e8266253fb6178dda3893f70fa6",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",
@@ -11498,8 +11498,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults."
+          "digest": "b79d8f2adee5e5ed51642f8eaf6bc6e0f93fd59828c06b5816598a02215e4673",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "docs/reference/environment-variables.md",
@@ -11572,8 +11572,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults."
+          "digest": "b79d8f2adee5e5ed51642f8eaf6bc6e0f93fd59828c06b5816598a02215e4673",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "docs/reference/environment-variables.md",
@@ -11643,8 +11643,8 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "5b54aac24c299954a70b01dd1508f600e01401f7c3cd9a54ab6cf2adc241b39f",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults."
+          "digest": "b79d8f2adee5e5ed51642f8eaf6bc6e0f93fd59828c06b5816598a02215e4673",
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "docs/reference/environment-variables.md",

@@ -4,32 +4,6 @@
   "additionalProperties": false,
   "required": ["replicaCount", "runnerPlane", "image", "service", "auth", "engine", "executionRuntime", "graph", "ai", "humanTask", "assistant", "programAuthoring", "rateLimit", "programTimeoutMs", "resources", "podSecurityContext", "securityContext", "probes", "tmpfs", "persistence"],
   "properties": {
-    "runnerPlane": {
-      "type": "object", "additionalProperties": false,
-      "required": ["enabled", "configMap", "sharedEnvironmentSecret", "artifactClaim", "coordinatorReplicas", "coordinatorPort", "coordinatorHttpThreads", "coordinatorHttpQueue", "coordinatorResources", "workerPools"],
-      "properties": {
-        "enabled": {"type": "boolean"}, "configMap": {"type": "string"},
-        "sharedEnvironmentSecret": {"type": "string"}, "artifactClaim": {"type": "string"},
-        "coordinatorReplicas": {"type": "integer", "minimum": 1},
-        "coordinatorPort": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "coordinatorHttpThreads": {"type": "integer", "minimum": 1},
-        "coordinatorHttpQueue": {"type": "integer", "minimum": 1},
-        "coordinatorResources": {"$ref": "#/properties/resources"},
-        "workerPools": {"type": "array", "items": {
-          "type": "object", "additionalProperties": false,
-          "required": ["name", "replicas", "image", "configMap", "identitySecret", "modelSecret", "socketHostPath", "nodeSelector", "stateSize", "storageClass", "resources"],
-          "properties": {
-            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
-            "replicas": {"type": "integer", "minimum": 0},
-            "image": {"type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$"},
-            "configMap": {"type": "string", "minLength": 1}, "identitySecret": {"type": "string", "minLength": 1},
-            "modelSecret": {"type": "string", "minLength": 1}, "socketHostPath": {"type": "string", "pattern": "^/"},
-            "nodeSelector": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
-            "stateSize": {"type": "string", "minLength": 1}, "storageClass": {"type": "string"}, "resources": {"$ref": "#/properties/resources"}
-          }
-        }}
-      }
-    },
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "programTimeoutMs": {
       "x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
@@ -504,7 +478,8 @@
       "properties": {
         "sizeLimit": { "$ref": "#/definitions/kubernetesPositiveQuantity" }
       }
-    }
+    },
+    "runnerPlane": { "$ref": "#/definitions/runnerPlaneConfiguration" }
   },
   "definitions": {
     "kubernetesNonNegativeQuantity": {
@@ -637,6 +612,43 @@
         "maxSystemPreambleChars": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS", "$ref": "#/definitions/aiPositive" },
         "maxHttpDecompressionRatio": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO", "$ref": "#/definitions/aiPositive" },
         "maxModelInputProvenanceEntries": { "x-ravenroot-environment": "RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES", "$ref": "#/definitions/aiPositive" }
+      }
+    },
+    "runnerPlaneConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "configMap", "sharedEnvironmentSecret", "artifactClaim", "coordinatorReplicas", "coordinatorPort", "coordinatorHttpThreads", "coordinatorHttpQueue", "coordinatorResources", "workerPools"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "configMap": {"type": "string"},
+        "sharedEnvironmentSecret": {"type": "string"},
+        "artifactClaim": {"type": "string"},
+        "coordinatorReplicas": {"type": "integer", "minimum": 1},
+        "coordinatorPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "coordinatorHttpThreads": {"type": "integer", "minimum": 1},
+        "coordinatorHttpQueue": {"type": "integer", "minimum": 1},
+        "coordinatorResources": {"$ref": "#/properties/resources"},
+        "workerPools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "replicas", "image", "configMap", "identitySecret", "modelSecret", "socketHostPath", "nodeSelector", "stateSize", "storageClass", "resources"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+              "replicas": {"type": "integer", "minimum": 0},
+              "image": {"type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$"},
+              "configMap": {"type": "string", "minLength": 1},
+              "identitySecret": {"type": "string", "minLength": 1},
+              "modelSecret": {"type": "string", "minLength": 1},
+              "socketHostPath": {"type": "string", "pattern": "^/"},
+              "nodeSelector": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+              "stateSize": {"type": "string", "minLength": 1},
+              "storageClass": {"type": "string"},
+              "resources": {"$ref": "#/properties/resources"}
+            }
+          }
+        }
       }
     }
   }

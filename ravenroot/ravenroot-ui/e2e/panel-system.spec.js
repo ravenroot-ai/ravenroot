@@ -1526,9 +1526,9 @@ test.describe('the short form', () => {
       const first = items[0].getBoundingClientRect();
       return { count: items.length, rows: rows.size, cell: Math.round(first.width) };
     });
-    // Twelve items on twelve rows become twelve items on three adaptive compact rows here.
-    expect(rowsBefore).toBe(12);
-    expect(grid.count).toBe(12);
+    // The explicit Workspace adds a thirteenth identity; all remain present after adaptive reflow.
+    expect(rowsBefore).toBe(13);
+    expect(grid.count).toBe(13);
     expect(grid.rows).toBe(3);
     // The cell clears the 24px WCAG 2.5.8 floor that the 23px full-form row misses by one pixel.
     expect(grid.cell).toBe(32);
@@ -1547,7 +1547,8 @@ test.describe('the short form', () => {
       glyphShown: getComputedStyle(item.querySelector('.li-glyph')).display !== 'none',
       labelHidden: getComputedStyle(item.querySelector('.li-label')).display === 'none',
     })));
-    expect(marks).toHaveLength(12);
+    expect(marks).toHaveLength(13);
+    expect(marks.some(mark => mark.name === 'Filter node type: Workspace')).toBe(true);
     for (const mark of marks) {
       expect(mark.name, 'a chip lost its accessible name').toBeTruthy();
       expect(mark.glyph, `${mark.name} has no glyph`).not.toBe('');

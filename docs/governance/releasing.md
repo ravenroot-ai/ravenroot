@@ -319,6 +319,10 @@ Never delete, replace, or reuse a released version. Re-run **Publish immutable r
 existing tag ref and provide that same tag as the input. The workflow rebuilds deterministic payloads
 from the tag, then follows these rules:
 
+If publication stops before the first external write because the tagged workflow itself is defective,
+preserve that tag as failed release evidence. Fix the pipeline through the normal `dev` and `main`
+review path and publish the next patch prerelease; never move the failed tag to the corrected commit.
+
 - if no Central component exists, it uploads and automatically publishes one complete signed bundle;
 - if every Central component exists, it rebuilds locally without uploading and compares every immutable
   payload byte-for-byte with Central, verifies all four published checksums, and verifies every

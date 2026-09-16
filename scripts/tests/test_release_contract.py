@@ -249,6 +249,31 @@ class MainAuthorizationTest(unittest.TestCase):
 
 
 class RepositoryConfigurationTest(unittest.TestCase):
+    def test_release_checksum_manifest_has_canonical_filename_separator(self):
+        repository = Path(__file__).resolve().parents[2]
+        workflow = (repository / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        command = (
+            "find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 "
+            "| sort -z | xargs -0 sha256sum | sed 's#  \\./#  #' > SHA256SUMS"
+        )
+        self.assertIn("sed 's#  \\./#  #'", workflow)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "artifact.jar").write_bytes(b"artifact")
+            (directory / "release archive.zip").write_bytes(b"archive")
+            subprocess.run(command, cwd=directory, shell=True, check=True, executable="/bin/bash")
+            manifest = (directory / "SHA256SUMS").read_text(encoding="utf-8")
+            self.assertNotIn("   ", manifest)
+            completed = subprocess.run(
+                ["sha256sum", "--check", "SHA256SUMS"],
+                cwd=directory,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_publishable_module_boundary_excludes_non_shipping_projects(self):
         artifacts = set(publishable_artifacts())
         self.assertEqual(artifacts, set(PUBLISHABLE_ARTIFACTS))

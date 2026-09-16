@@ -218,6 +218,8 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.4.1-alpha.1 release notes
+      url: /releases/v0.4.1-alpha.1.html
     - title: Ravenroot 0.4.0-alpha.1 release notes
       url: /releases/v0.4.0-alpha.1.html
     - title: Ravenroot 0.3.0-alpha.1 release notes

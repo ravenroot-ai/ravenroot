@@ -26,6 +26,12 @@ import java.util.UUID;
 public final class RunnerCodec {
     /** Maximum encoded document size, including its corruption-detection digest. */
     public static final int MAX_BYTES = 16_777_216;
+    /**
+     * Payload/catalog field bound of the existing runner protocol envelopes. This is an
+     * interoperability bound, not a job-capacity default; widening it requires a versioned reader
+     * migration. The effective operator policy normally selects a smaller payload budget.
+     */
+    public static final int MAX_PAYLOAD_BYTES = 1_048_576;
     private static final int MAGIC = 0x52524a31;
     private static final int WORKSPACE_V2 = 0x52524a32;
     private static final int WORKSPACE_V3 = 0x52524a33;

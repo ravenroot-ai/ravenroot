@@ -1679,3 +1679,81 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | `maxMessageBytes` | Maximum message bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxFragments` | Maximum fragments | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `timeoutMs` | Deadline (ms) | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## Governed Workspace and named Agent variant
+
+Enabling the [runner plane](../operator-guide/governed-runners.md) adds `workspace` and
+extends `agent`; it does not replace ordinary Agent graphs. This separate compiled-descriptor
+snapshot is checked by the same `PublishedNodeContractTest`, which also validates the
+[minimal team](../examples/governed-runner/three-agents.graphml) and
+[development cycle](../examples/governed-runner/development-cycle.graphml). Regenerate it with
+the command above. There is no `workspace-agent` compatibility alias.
+
+`workspaceRef` is a same-graph typed node reference, not a filesystem path. The Workspace
+profile owns scope, runtime lifecycle, placement and capacity; graph selectors may only agree
+with its approved immutable version. Agent definitions own role, instructions, model profile,
+tools, budgets and output contract. `agentDefinition` can also be selected without a Workspace;
+the ordinary managed AI extension then executes it without filesystem authority. With neither
+selector, the legacy Agent descriptor and behavior above remain applicable.
+
+### `agent` (governed plane)
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Agent |
+| Category | AI |
+| Description | Named bounded Agent with optional governed Workspace access. |
+| Visual type | agent |
+| Agentic | true |
+| Capabilities | agentic,ai,credential-reference,external-provider,network |
+| Declared default nature | WORKER |
+| Declared allowed natures | WORKER |
+| Application command allowlist | handoff,implement,integrate,plan,read,remediate,research,resume,review,summarize,test |
+| Outcomes | continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.; answered: Governed Agent result.; approved: Governed Agent result.; blocked: Governed Agent result.; changes-requested: Governed Agent result.; completed: Governed Agent result.; escalation: Governed Agent result.; failed: Governed Agent result.; fixed: Governed Agent result.; flaky: Governed Agent result.; inconclusive: Governed Agent result.; needs-input: Governed Agent result.; needs-work: Governed Agent result.; not-fixed: Governed Agent result.; passed: Governed Agent result. |
+| Runtime concurrency | default 64; ceiling 256 |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
+| `instructions` | Instructions | Who the agent is and how it should work. Sent as untrusted graph content, separate from operator policy. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
+| `objective` | Objective | The task for this invocation. Sent as the first user turn. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
+| `model` | Model | Overrides the profile's model. The endpoint is not overridable. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `mcpServers` | MCP servers | Comma-separated names of MCP servers this deployment declared in its environment (RAVENROOT_MCP_SERVER_<hex(name)>). Their tools are offered to the model as <server>__<tool>. The executing runtime applies its configured admission ceiling. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `maxTurns` | Max turns | Model turns this run may take before it is refused. Defaults to the executing runtime default and may not exceed its configured ceiling. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `maxTotalTokens` | Max tokens | Cumulative reported tokens across the whole run before it is refused. The operator's finite ceiling still applies when absent. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `timeoutMs` | Deadline | Deadline for the WHOLE run, not for one turn. May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `maxTokens` | Max tokens per turn | Upper bound on one generated turn, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `temperature` | Temperature | Sampling temperature forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `topP` | Top-p | Nucleus sampling parameter forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `seed` | Seed | Sampling seed, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | agentDefinition:BLANK: | Not declared | Not declared |
+| `workspaceRef` | Workspace | An explicitly declared Workspace in this graph. Blank retains bounded conversational execution. | `WORKSPACE_REFERENCE` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `agentDefinition` | Named Agent | Approved versioned Agent identity, instructions, model and tools. | `STRING` | false | Not declared | Not declared | false | Not declared | workspaceRef:PRESENT: | Not declared |
+| `agentVersion` | Agent version | Exact immutable approved definition version. | `INTEGER` | false | 1 | Not declared | false | Not declared | Not declared | min 1; max 9223372036854775807 |
+| `skills.<N>.name` | Skill item Name | An ordered collection of complete name, description, and instructions groups. The executing runtime applies its configured payload ceilings. Name passed to load_skill; matched ignoring case. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.<N>.description` | Skill item Description | An ordered collection of complete name, description, and instructions groups. The executing runtime applies its configured payload ceilings. One line telling the model when the skill is worth loading. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.<N>.instructions` | Skill item Instructions | An ordered collection of complete name, description, and instructions groups. The executing runtime applies its configured payload ceilings. Body returned only when the model calls load_skill. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+### `workspace` (governed plane)
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Workspace |
+| Category | Resources |
+| Description | Opens, inspects, checkpoints, closes or aborts an explicitly declared governed workspace. |
+| Visual type | workspace |
+| Agentic | false |
+| Capabilities | durable,restart-safe,runner |
+| Declared default nature | WORKER |
+| Declared allowed natures | WORKER |
+| Application command allowlist | abort,checkpoint,close,inspect,open |
+| Outcomes | ready: Workspace lifecycle result.; inspected: Workspace lifecycle result.; checkpointed: Workspace lifecycle result.; closed: Workspace lifecycle result.; aborted: Workspace lifecycle result.; blocked: Workspace lifecycle result. |
+| Runtime concurrency | default 64; ceiling 256 |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `workspaceProfile` | Workspace profile | Approved immutable workspace policy. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `workspaceVersion` | Profile version | Exact approved version. | `INTEGER` | false | 1 | Not declared | false | Not declared | Not declared | min 1; max 9223372036854775807 |
+| `workspaceScope` | Workspace scope | Must agree with the approved profile. | `STRING` | false | Not declared | EPHEMERAL,PROCESS_INSTANCE,NAMED | false | Not declared | Not declared | Not declared |
+| `runtimeLifecycle` | Runtime lifecycle | Must agree with the approved profile; independent of filesystem scope. | `STRING` | false | Not declared | PER_INVOCATION,PER_WORKSPACE | false | Not declared | Not declared | Not declared |
+| `runnerPool` | Runner pool | Approved profile placement pool. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `runtimeProfile` | Runtime profile | Approved profile image/runtime binding. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |

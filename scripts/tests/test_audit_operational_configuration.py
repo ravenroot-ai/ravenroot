@@ -1970,11 +1970,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ("RunnerCodec.java", "0x52524a31"): "protocol-or-format-invariant",
             ("RunnerCodec.java", "0x52524a32"): "protocol-or-format-invariant",
             ("RunnerCodec.java", "16_777_216"): "security-ceiling-or-default",
-            ("RunnerPolicy.java", "1_048_576"): "security-ceiling-or-default",
+            ("RunnerCodec.java", "1_048_576"): "security-ceiling-or-default",
             ("RunnerPlaneConfiguration.java", "RAVENROOT_RUNNER_CONFIG"): "protocol-or-format-invariant",
             ("RunnerPlaneConfiguration.java", "1_048_577"): "security-ceiling-or-default",
-            ("LocalContainerRunner.java", '"--network=none"'): "security-ceiling-or-default",
-            ("runner-panel.js", "'Governed agents and runners'"): "presentation-text",
+            ("runner-panel.js", "'Workspaces, named Agents and runners'"): "presentation-text",
             ("RunnerArtifactStore.java", "64"): "security-ceiling-or-default",
             ("TelemetryBridge.java", 'ravenroot.runner.observations'): "protocol-or-format-invariant",
             ("TelemetryBridge.java", 'ravenroot.runner.worker.active'): "protocol-or-format-invariant",
@@ -1989,6 +1988,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         configuration = (ROOT / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java").read_text()
         self.assertIn("if (configured == null || configured.isBlank()) return null;", configuration)
         self.assertIn("store.supports(StoreCapability.DURABLE)", configuration)
+        driver = (ROOT / "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java").read_text()
+        # These are now direct daemon arguments, not fixed-declaration candidates. Keep exact
+        # isolation evidence for the quota probe, legacy fixture and governed runtime launches.
+        self.assertEqual(3, driver.count('"--network=none"'))
         command_rows = [row for row in rows if Path(row["path"]).name == "AgentCommand.java"]
         self.assertEqual(26, sum(row["classification"] == "protocol-or-format-invariant" for row in command_rows))
         self.assertEqual(5, sum(row["classification"] == "security-ceiling-or-default" for row in command_rows))

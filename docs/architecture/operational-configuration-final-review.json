@@ -8378,8 +8378,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "d3a72c798179521b92c444690c295d52b5c9a19a810a4b433ea682043fb216ce",
-          "assertion": "Reference publisher enumerates environment vocabulary."
+          "digest": "51a9a5393fa5c57107e234bf9d311fef4d36f948ef58565305ee03bf6dd7d59d",
+          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -11503,8 +11503,8 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
-          "assertion": "The environment reference publishes each exact binding name."
+          "digest": "023b95101dd5df22036affea1156eaa1ec948b65bbfa6f0c5be6584ec315bd4e",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 4,
@@ -11577,8 +11577,8 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
-          "assertion": "The environment reference publishes each exact binding name."
+          "digest": "023b95101dd5df22036affea1156eaa1ec948b65bbfa6f0c5be6584ec315bd4e",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 1,
@@ -11648,8 +11648,8 @@
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "cacdb2d354ba2d5fd495d66edde62c313a47642e273dceb8a85983f5545f7292",
-          "assertion": "The environment reference publishes each exact binding name."
+          "digest": "023b95101dd5df22036affea1156eaa1ec948b65bbfa6f0c5be6584ec315bd4e",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
       "candidateCount": 1,

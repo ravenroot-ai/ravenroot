@@ -35,7 +35,7 @@ public record GovernedRunnerResource(Kind kind, String tenantId, String name, lo
         Objects.requireNonNull(kind); Objects.requireNonNull(document); Objects.requireNonNull(updatedAt);
         name = RunnerPolicy.identifier(name);
         if (revision < 0 || version < 1 || actor == null || actor.isBlank() || actor.length() > 1024
-                || tenantId == null || tenantId.isBlank() || tenantId.length() > 256 || document.size() > 1_048_576) {
+                || tenantId == null || tenantId.isBlank() || tenantId.length() > 256 || document.size() > RunnerCodec.MAX_PAYLOAD_BYTES) {
             throw new IllegalArgumentException("invalid governed runner resource");
         }
         if (kind == Kind.AGENT_DEFINITION) {

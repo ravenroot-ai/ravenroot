@@ -421,6 +421,17 @@ Detailed contract: [Server lifecycle](configuration.md#server-process-and-readin
 | `RAVENROOT_UI_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_UNKNOWN_BEHAVIOR` | See the linked contract for exact type, default, and applicability. |
 
+## Governed runner coordination
+
+Detailed contract: [Governed runner coordination](../operator-guide/governed-runners.md#graph-lifecycle-and-independent-scaling).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE` | positive integer HTTP executor queue capacity; unset defaults to `64`; coordinator startup only, independent of worker queues |
+| `RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS` | positive integer HTTP executor threads; unset defaults to `16`; coordinator startup only, independent of worker job capacity |
+| `RAVENROOT_RUNNER_INSTANCE` | operator-supplied stable worker identity replaces `{instance}` in registration.runnerId and tokenFile; absent is valid only when neither field uses that placeholder |
+| `RAVENROOT_RUNNER_SHARED_ARTIFACTS` | must equal `true` to attest one shared POSIX-locking artifact volume for the PostgreSQL runner-only coordinator topology; unset refuses that executable |
+
 ## Tool and approval policy
 
 Detailed contract: [Tool and approval policy](configuration.md#tool-and-approval-policy).

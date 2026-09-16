@@ -51,7 +51,7 @@ public record RunnerResult(String outcome, OpaquePayload payload, List<RunnerArt
         Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(quiescenceId, "quiescenceId");
         artifacts = List.copyOf(Objects.requireNonNull(artifacts, "artifacts"));
-        if (payload.size() > 1_048_576 || payload.contentType().length() > 128 || artifacts.size() > 128) {
+        if (payload.size() > RunnerCodec.MAX_PAYLOAD_BYTES || payload.contentType().length() > 128 || artifacts.size() > 128) {
             throw new IllegalArgumentException("runner result exceeds protocol bounds");
         }
         var ids = new HashSet<UUID>();

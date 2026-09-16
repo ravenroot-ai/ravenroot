@@ -50,7 +50,7 @@ authentication, never GraphML, query strings, report fields or a runner advertis
 ## Run the designated worker
 
 The standalone entry point is `ai.ravenroot.server.RunnerWorkerMain`, taking one
-[worker configuration](../examples/governed-runner/worker.json). Install the reference runtime image
+[worker configuration](../examples/governed-runner/worker.json). Install the real model-backed runtime image
 locally and replace the example all-zero image digest with its real `sha256:` image ID.
 The entry point refuses non-digest image selections. The workload credential file must be
 owner-only; rotate that file rather than copying a token into the graph, definition or state directory.
@@ -123,6 +123,8 @@ and coordinator replicas mount that same volume. `coordinatorReplicas`, `coordin
 configMap, workload identitySecret, modelSecret, quota-host nodeSelector and state storage. Ordinal
 pod names become stable worker IDs; preapprove every intended ID and provide its matching token key.
 The operator worker JSON may use `{instance}` in registration.runnerId and tokenFile.
+`RAVENROOT_RUNNER_INSTANCE` supplies that stable value (the Helm pod name); it does not grant
+registration approval or change the identity proved by the separately mounted workload token.
 
 `RunnerCoordinatorMain` requires PostgreSQL, OIDC and `RAVENROOT_RUNNER_SHARED_ARTIFACTS=true`. It
 exposes only `/v1/runner-plane/`; graph execution, authoring credentials, consent, program builds and

@@ -52,10 +52,15 @@ GROUPS = {
     "program": Group("Programs and artifacts", "configuration.md#programmable-artifacts"),
     "rate": Group("HTTP rate and representation limits", "configuration.md#http-rate-and-representation-limits"),
     "runtime": Group("Server lifecycle", "configuration.md#server-process-and-readiness"),
+    "runner": Group("Governed runner coordination", "../operator-guide/governed-runners.md#graph-lifecycle-and-independent-scaling"),
     "tool": Group("Tool and approval policy", "configuration.md#tool-and-approval-policy"),
 }
 
 ROW_BOUNDARIES = {
+    "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS": "positive integer HTTP executor threads; unset defaults to `16`; coordinator startup only, independent of worker job capacity",
+    "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE": "positive integer HTTP executor queue capacity; unset defaults to `64`; coordinator startup only, independent of worker queues",
+    "RAVENROOT_RUNNER_SHARED_ARTIFACTS": "must equal `true` to attest one shared POSIX-locking artifact volume for the PostgreSQL runner-only coordinator topology; unset refuses that executable",
+    "RAVENROOT_RUNNER_INSTANCE": "operator-supplied stable worker identity replaces `{instance}` in registration.runnerId and tokenFile; absent is valid only when neither field uses that placeholder",
     "RAVENROOT_RUNNER_CONFIG": "unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart",
     "RAVENROOT_MATRIX_CONFIG": (
         "canonical padded Base64 of strict JSON containing bounded `store` settings and a nonempty "
@@ -165,6 +170,9 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name in {"RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
+                "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE"}:
+        return "runner"
     if name == "RAVENROOT_RUNNER_CONFIG":
         return "agent"
     if name in {

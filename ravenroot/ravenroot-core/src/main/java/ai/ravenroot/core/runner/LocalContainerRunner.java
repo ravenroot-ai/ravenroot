@@ -253,7 +253,7 @@ public final class LocalContainerRunner implements RunnerDriver {
                             || !original.workspaceId().equals(assignment.workspaceId())) throw new IllegalArgumentException("dispatch identity mismatch");
                     requireStopped(assignment);
                     Path result = workspace.resolve(assignment.job().identity().runnerJobId() + ".result");
-                    if (Files.exists(result, LinkOption.NOFOLLOW_LINKS)) return RunnerCodec.result(read(result, 1_048_576));
+                    if (Files.exists(result, LinkOption.NOFOLLOW_LINKS)) return RunnerCodec.result(read(result, RunnerCodec.MAX_BYTES));
                     if (assignment.job().stopReason() != RunnerJob.StopReason.NONE) {
                         // A killed process may have no application envelope. Proven quiescence
                         // still seals its partial workspace; the control plane owns stop precedence.

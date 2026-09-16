@@ -54,7 +54,7 @@ public record RunnerPolicy(Set<Capability> capabilities, Set<String> tools, Set<
             Objects.requireNonNull(wallTime, "wallTime");
             if (wallTime.isZero() || wallTime.isNegative()
                     || memoryBytes < 1 || processes < 1 || workspaceBytes < 1 || artifactBytes < 1
-                    || logBytes < 1 || payloadBytes < 1 || payloadBytes > 1_048_576) {
+                    || logBytes < 1 || payloadBytes < 1 || payloadBytes > RunnerCodec.MAX_PAYLOAD_BYTES) {
                 throw new IllegalArgumentException("invalid runner resource limits");
             }
             try { wallTime.toNanos(); }

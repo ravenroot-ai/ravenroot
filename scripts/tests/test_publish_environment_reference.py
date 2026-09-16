@@ -19,6 +19,14 @@ from scripts.publish_environment_reference import (
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
+    def test_runner_coordinator_bindings_are_exact_and_have_independent_semantics(self):
+        expected = {"RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
+                    "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE"}
+        self.assertEqual(expected, {name for name in variables() if group(name) == "runner"})
+        self.assertIn("`16`", boundary("RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS"))
+        self.assertIn("`64`", boundary("RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE"))
+        self.assertIn("POSIX", boundary("RAVENROOT_RUNNER_SHARED_ARTIFACTS"))
+        self.assertIn("{instance}", boundary("RAVENROOT_RUNNER_INSTANCE"))
     def test_inventory_covers_high_risk_and_dynamic_groups(self):
         names = variables()
         self.assertIn("RAVENROOT_ASSISTANT_PROVIDER", names)

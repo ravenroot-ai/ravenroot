@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "docs/reference/node-descriptor-contracts.tsv"
+GOVERNED_SOURCE = ROOT / "docs/reference/governed-node-descriptor-contracts.tsv"
 OUTPUT = ROOT / "docs/reference/node-contracts.md"
 CORE = {"log", "delay", "human-task", "template", "json-parse", "cel-transform",
         "cel-decision", "json-path", "http-request", "program", "boundary-guard"}
@@ -151,7 +152,52 @@ def render() -> str:
                 adapter=row["adapterBinding"], visible=display(row["visibleWhen"]),
                 required_when=display(row["requiredWhen"]), limits=constraint(row)))
         out.append("")
+    out.extend(governed_reference())
     return "\n".join(line.rstrip() for line in out).rstrip() + "\n"
+
+
+def governed_reference() -> list[str]:
+    """Publish the opt-in variant independently, preserving the ordinary Agent contract."""
+    grouped: OrderedDict[str, list[dict[str, str]]] = OrderedDict()
+    with GOVERNED_SOURCE.open(encoding="utf-8", newline="") as source:
+        for row in csv.DictReader(source, delimiter="\t"):
+            grouped.setdefault(row["behavior"], []).append(row)
+    if set(grouped) != {"agent", "workspace"}:
+        raise SystemExit("governed node inventory must contain exactly agent and workspace")
+    out = ["## Governed Workspace and named Agent variant", "",
+           "Enabling the [runner plane](../operator-guide/governed-runners.md) adds `workspace` and ",
+           "extends `agent`; it does not replace ordinary Agent graphs. This separate compiled-descriptor ",
+           "snapshot is checked by the same `PublishedNodeContractTest`, which also validates the ",
+           "[minimal team](../examples/governed-runner/three-agents.graphml) and ",
+           "[development cycle](../examples/governed-runner/development-cycle.graphml). Regenerate it with ",
+           "the command above. There is no `workspace-agent` compatibility alias.", "",
+           "`workspaceRef` is a same-graph typed node reference, not a filesystem path. The Workspace ",
+           "profile owns scope, runtime lifecycle, placement and capacity; graph selectors may only agree ",
+           "with its approved immutable version. Agent definitions own role, instructions, model profile, ",
+           "tools, budgets and output contract. `agentDefinition` can also be selected without a Workspace; ",
+           "the ordinary managed AI extension then executes it without filesystem authority. With neither ",
+           "selector, the legacy Agent descriptor and behavior above remain applicable.", ""]
+    for behavior, rows in grouped.items():
+        descriptor = rows[0]
+        out.extend([f"### `{behavior}` (governed plane)", "",
+                    "| Catalog field | Runtime descriptor value |", "|---|---|"])
+        for label, field in (("Display name", "displayName"), ("Category", "category"),
+                             ("Description", "description"), ("Visual type", "visualType"),
+                             ("Agentic", "agentic"), ("Capabilities", "capabilities"),
+                             ("Declared default nature", "defaultNature"),
+                             ("Declared allowed natures", "allowedNatures"),
+                             ("Application command allowlist", "commands"), ("Outcomes", "descriptorOutcomes")):
+            out.append(f"| {label} | {display(descriptor[field])} |")
+        out.extend([f"| Runtime concurrency | default {descriptor['runtimeConcurrencyDefault']}; ceiling {descriptor['runtimeConcurrencyCeiling']} |", "",
+                    "| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |",
+                    "|---|---|---|---|---:|---|---|---:|---|---|---|"])
+        for row in rows:
+            cells = [f"`{row['property']}`", display(row["propertyDisplayName"]), display(row["propertyDescription"]),
+                     f"`{row['type']}`", row["required"], display(row["default"]), display(row["allowed"]),
+                     row["adapterBinding"], display(row["visibleWhen"]), display(row["requiredWhen"]), constraint(row)]
+            out.append("| " + " | ".join(cells) + " |")
+        out.append("")
+    return out
 
 
 def main() -> int:

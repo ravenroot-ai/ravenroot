@@ -7,6 +7,24 @@ import static ai.ravenroot.api.runner.RunnerFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerCodecTest {
+    @Test void existingProtocolPayloadBoundaryIsDistinctFromConfiguredJobCapacity() {
+        var limits = definition().policy().limits();
+        for (int bytes : new int[] {4096, 65536, RunnerCodec.MAX_PAYLOAD_BYTES}) {
+            var configured = new RunnerPolicy.Limits(limits.wallTime(), limits.memoryBytes(), limits.processes(),
+                    limits.workspaceBytes(), limits.artifactBytes(), limits.logBytes(), bytes);
+            assertEquals(bytes, configured.payloadBytes());
+            var result = new RunnerResult("completed", ai.ravenroot.api.persistence.OpaquePayload.of(
+                    new byte[bytes], "application/octet-stream"), java.util.List.of(), UUID.randomUUID());
+            assertEquals(result, RunnerCodec.result(RunnerCodec.result(result)));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new RunnerPolicy.Limits(limits.wallTime(),
+                limits.memoryBytes(), limits.processes(), limits.workspaceBytes(), limits.artifactBytes(),
+                limits.logBytes(), RunnerCodec.MAX_PAYLOAD_BYTES + 1));
+        assertThrows(IllegalArgumentException.class, () -> new RunnerResult("completed",
+                ai.ravenroot.api.persistence.OpaquePayload.of(new byte[RunnerCodec.MAX_PAYLOAD_BYTES + 1],
+                        "application/octet-stream"), java.util.List.of(), UUID.randomUUID()));
+        assertThrows(IllegalArgumentException.class, () -> RunnerCodec.result(new byte[RunnerCodec.MAX_BYTES + 1]));
+    }
     @Test void workspaceVersionThreeReadsBothLegacyVersionsWithoutInventingTerminationTime() throws Exception {
         var job = job();
         var state = new RunnerWorkspaceState(job.identity().execution(), UUID.randomUUID(), RUNNER,

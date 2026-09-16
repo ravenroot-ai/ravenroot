@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 22450 |
+| Atomic operational candidates discovered | 22522 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 22450 |
+| Reviewed | 22522 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 311 |
@@ -51,10 +51,10 @@ semantic review and focused source inventories remain required for those boundar
 | Retained published contract descriptions | 483 |
 | Retained presentation text | 578 |
 | Retained derived values | 1045 |
-| Test fixtures | 7525 |
+| Test fixtures | 7597 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1889.
+Retired source candidates preserved in inventory history: 1893.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 56.
+Checked source reconciliations: 57.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 22450 candidates.
+zero-count or unclassified rows as needed and sums to 22522 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 22450 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 20799 |
+| retained | 20871 |
 
 ### Classification counts
 
@@ -89,7 +89,7 @@ zero-count or unclassified rows as needed and sums to 22450 candidates.
 | protocol-or-format-invariant | 9340 |
 | published-contract-description | 483 |
 | security-ceiling-or-default | 1828 |
-| test-fixture | 7525 |
+| test-fixture | 7597 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -100,7 +100,7 @@ zero-count or unclassified rows as needed and sums to 22450 candidates.
 | deployment-example | 20 |
 | java | 6936 |
 | script | 2198 |
-| test-fixture | 7525 |
+| test-fixture | 7597 |
 | ui | 3036 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1469 |
 | #321 | 8578 |
-| Retained; no remediation required | 11854 |
+| Retained; no remediation required | 11926 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 22450 |
-| Unchanged identities | 22450 |
-| Approved identity migrations | 0 |
-| Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 22450 |
+| Unchanged identities | 22428 |
+| Approved identity migrations | 18 |
+| Approved retirements | 4 |
+| Semantically classified additions | 76 |
+| Current candidates | 22522 |
 
 ## Final semantic review
 
@@ -5199,20 +5199,20 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-faba8d293ea3cf02499b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:386` `for` | java | retained | protocol-or-format-invariant | Runner wire field, authentication header, exact driver command/selector or deployment configuration carrier; not an embedded operator resource default. Reviewed issue #414 atom: "images". |
 | `oc-fcbb274066b494e230e3` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:386` `for` | java | retained | protocol-or-format-invariant | Runner wire field, authentication header, exact driver command/selector or deployment configuration carrier; not an embedded operator resource default. Reviewed issue #414 atom: "--no-trunc". |
 | `oc-7b583e566761618cd8f2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:387` `for` | java | retained | protocol-or-format-invariant | Runner wire field, authentication header, exact driver command/selector or deployment configuration carrier; not an embedded operator resource default. Reviewed issue #414 atom: "--filter=label=ravenroot.workspace=". |
-| `oc-34b3456b0e582c689f36` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:541` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-a43690501a77b98903a1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:542` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-ed3b015ef88a88439bd7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:542` `if` | java | retained | protocol-or-format-invariant | Local receipt parsing bounds the fixed SHA-256/container identity or integer quota metadata envelope; it does not cap Agent payload, storage or job capacity. |
-| `oc-ef7b960342792cf06eb1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:542` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-d425690ab0aa8175cd31` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:615` `checkpoint` | java | retained | derived | Empty/zero initial state or derived protocol branch sentinel, not a configurable service limit. |
-| `oc-808517b6c134dc964c4a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:618` `checkpoint` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-9f1a82f2d19b93579ebf` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:618` `checkpoint` | java | retained | protocol-or-format-invariant | Local receipt parsing bounds the fixed SHA-256/container identity or integer quota metadata envelope; it does not cap Agent payload, storage or job capacity. |
-| `oc-668396ace7d430ab9205` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:620` `checkpoint` | java | retained | security-ceiling-or-default | Fixed fail-closed resource, lease, parser, page, shutdown or control-I/O ceiling; tenant job limits may narrow authority, never disable this safety bound. Reviewed issue #414 atom: 256. |
-| `oc-031324d7cf4d3d3c5219` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:621` `checkpoint` | java | retained | protocol-or-format-invariant | Local receipt parsing bounds the fixed SHA-256/container identity or integer quota metadata envelope; it does not cap Agent payload, storage or job capacity. |
-| `oc-113fe4201c44a530b003` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:621` `checkpoint` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-6e8ff891f62b73f43a39` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:621` `checkpoint` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-99f7ce95bfb3ad5658be` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:622` `checkpoint` | java | retained | protocol-or-format-invariant | Runner wire field, authentication header, exact driver command/selector or deployment configuration carrier; not an embedded operator resource default. Reviewed issue #414 atom: "--change=LABEL ravenroot.workspace=". |
-| `oc-3677da46cc02b4e61d9c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:685` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
-| `oc-c7e14f69cf48a6ca7201` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:776` `bounded` | java | retained | derived | Zero accumulator/comparison origin or one-byte overflow sentinel derived from the enclosing bounded operation. Reviewed issue #414 atom: 1. |
+| `oc-34b3456b0e582c689f36` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:548` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-a43690501a77b98903a1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:549` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-ed3b015ef88a88439bd7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:549` `if` | java | retained | protocol-or-format-invariant | Local receipt parsing bounds the fixed SHA-256/container identity or integer quota metadata envelope; it does not cap Agent payload, storage or job capacity. |
+| `oc-ef7b960342792cf06eb1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:549` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-d425690ab0aa8175cd31` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:624` `checkpoint` | java | retained | derived | Empty/zero initial state or derived protocol branch sentinel, not a configurable service limit. |
+| `oc-808517b6c134dc964c4a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:627` `checkpoint` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-9f1a82f2d19b93579ebf` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:627` `checkpoint` | java | retained | protocol-or-format-invariant | Local receipt parsing bounds the fixed SHA-256/container identity or integer quota metadata envelope; it does not cap Agent payload, storage or job capacity. |
+| `oc-668396ace7d430ab9205` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:629` `checkpoint` | java | retained | security-ceiling-or-default | Fixed fail-closed resource, lease, parser, page, shutdown or control-I/O ceiling; tenant job limits may narrow authority, never disable this safety bound. Reviewed issue #414 atom: 256. |
+| `oc-031324d7cf4d3d3c5219` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:630` `checkpoint` | java | retained | protocol-or-format-invariant | Local receipt parsing bounds the fixed SHA-256/container identity or integer quota metadata envelope; it does not cap Agent payload, storage or job capacity. |
+| `oc-113fe4201c44a530b003` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:630` `checkpoint` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-6e8ff891f62b73f43a39` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:630` `checkpoint` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-99f7ce95bfb3ad5658be` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:631` `checkpoint` | java | retained | protocol-or-format-invariant | Runner wire field, authentication header, exact driver command/selector or deployment configuration carrier; not an embedded operator resource default. Reviewed issue #414 atom: "--change=LABEL ravenroot.workspace=". |
+| `oc-3677da46cc02b4e61d9c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:694` `if` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
+| `oc-c7e14f69cf48a6ca7201` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java:785` `bounded` | java | retained | derived | Zero accumulator/comparison origin or one-byte overflow sentinel derived from the enclosing bounded operation. Reviewed issue #414 atom: 1. |
 | `oc-9b80c5ee658f01146827` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/RemoteRunnerClient.java:65` `release` | java | retained | derived | Empty/zero initial state or derived protocol branch sentinel, not a configurable service limit. |
 | `oc-c347349fae581564c0ed` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/RemoteRunnerClient.java:65` `release` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
 | `oc-c99ed289a30a7de8ce67` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/RemoteRunnerClient.java:65` `release` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |

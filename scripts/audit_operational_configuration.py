@@ -13540,6 +13540,77 @@ def dual_source_binding_authority_errors(root: Path, setting: str, contract: dic
     return errors
 
 
+RUNNER_COORDINATOR_BINDING_KIND = "java-runner-coordinator-environment-v1"
+RUNNER_COORDINATOR_CONFIGURATION_PATH = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorConfiguration.java"
+RUNNER_COORDINATOR_BINDINGS = {
+    "runner.coordinator.port": ("port", "8080", "RAVENROOT_PORT"),
+    "runner.coordinator.httpThreads": ("httpThreads", "16", "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS"),
+    "runner.coordinator.httpQueue": ("httpQueue", "64", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE"),
+}
+# Closed, reviewed source: all three record slots, strict parsing/range validation,
+# the actual HTTP consumer, and executable alternate-capacity/refusal assertions.
+# Updating an inventory cannot approve a change to any of these source contracts.
+RUNNER_COORDINATOR_SOURCE_PROOFS = {
+    RUNNER_COORDINATOR_CONFIGURATION_PATH: "0205aa5cc0141c2a3a7f68b45fe5d8e6216e9a7a4e39783762fc5e802e21c6b4",
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorMain.java":
+        "d55a1a2f04c4ac51280b140801039fb658369294a345a7e9c877a20c59ee0f85",
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RunnerCoordinatorConfigurationTest.java":
+        "7201a3941aca3d432995010f945efe20783d55a9ac1f2e2cde2fc67c27fac4a8",
+}
+
+
+def runner_coordinator_binding_authority(root: Path, setting: str,
+                                         discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    specification = RUNNER_COORDINATOR_BINDINGS.get(setting)
+    if specification is None:
+        return None
+    for path, expected in RUNNER_COORDINATOR_SOURCE_PROOFS.items():
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if hashlib.sha256(normalized(strip_c_comments(source)).encode("utf-8")).hexdigest() != expected:
+            return None
+    field, default, environment = specification
+    candidates = [candidate for candidate in discovered.values()
+                  if candidate.path == RUNNER_COORDINATOR_CONFIGURATION_PATH]
+    defaults = sorted(candidate.id for candidate in candidates
+                      if candidate.kind == "fixed-declaration" and candidate.role == "DEFAULTS"
+                      and candidate.expression == default)
+    bindings = sorted(candidate.id for candidate in candidates
+                      if candidate.kind == "environment-binding" and candidate.expression == environment)
+    if len(candidates) != 6 or len(defaults) != 1 or len(bindings) != 1:
+        return None
+    return {"kind": RUNNER_COORDINATOR_BINDING_KIND, "field": field,
+            "environment": environment, "default": default,
+            "defaultCandidateIds": defaults, "environmentCandidateIds": bindings,
+            "sourceProofs": dict(RUNNER_COORDINATOR_SOURCE_PROOFS)}
+
+
+def runner_coordinator_binding_errors(root: Path, setting: str, contract: dict[str, object],
+                                      setting_entries: list[dict[str, object]],
+                                      entries: dict[str, dict[str, object]],
+                                      discovered: dict[str, Candidate]) -> list[str]:
+    expected = runner_coordinator_binding_authority(root, setting, discovered)
+    if expected is None:
+        return [f"{setting}: unsupported or drifted closed runner coordinator authority"]
+    errors: list[str] = []
+    if contract.get("bindingAuthority") != expected:
+        errors.append(f"{setting}: runner coordinator binding authority has drifted")
+    if contract.get("owner") != RUNNER_COORDINATOR_CONFIGURATION_PATH + "#RunnerCoordinatorConfiguration" \
+            or contract.get("field") != expected["field"] \
+            or contract.get("bindings") != [expected["environment"]] \
+            or contract.get("default") != expected["default"] \
+            or contract.get("defaultEvidence") != expected["defaultCandidateIds"] \
+            or contract.get("defaultAuthority") is not None:
+        errors.append(f"{setting}: runner coordinator owner, binding, or default has drifted")
+    identifiers = sorted(expected["defaultCandidateIds"] + expected["environmentCandidateIds"])
+    if sorted(str(entry["id"]) for entry in setting_entries) != identifiers \
+            or any(entries.get(identifier, {}).get("setting") != setting for identifier in identifiers):
+        errors.append(f"{setting}: runner coordinator candidate partition has drifted")
+    return errors
+
+
 def binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
                              setting_entries: list[dict[str, object]],
                              entries: dict[str, dict[str, object]],
@@ -13550,6 +13621,10 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
         entry for entry in setting_entries if entry.get("kind") == "environment-binding"
     ]
     authority = contract.get("bindingAuthority")
+    if setting in RUNNER_COORDINATOR_BINDINGS or (isinstance(authority, dict)
+            and authority.get("kind") == RUNNER_COORDINATOR_BINDING_KIND):
+        return runner_coordinator_binding_errors(
+            root, setting, contract, setting_entries, entries, discovered)
     if isinstance(authority, dict) \
             and authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
         return manifest_pin_attempt_authority_errors(

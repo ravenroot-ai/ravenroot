@@ -7183,6 +7183,88 @@ class EmbedEnabledAuditTest(unittest.TestCase):
                 self.entries, self.discovered, {}))
 
 
+class RunnerCoordinatorBindingAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        for relative in audit.RUNNER_COORDINATOR_SOURCE_PROOFS:
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "ravenroot"], cwd=self.root, check=True)
+        self.discovered = {candidate.id: candidate for candidate in audit.discover(self.root)}
+
+    def fixture(self, setting):
+        authority = audit.runner_coordinator_binding_authority(self.root, setting, self.discovered)
+        self.assertIsNotNone(authority)
+        contract = {"bindingAuthority": authority, "field": authority["field"],
+                    "owner": audit.RUNNER_COORDINATOR_CONFIGURATION_PATH + "#RunnerCoordinatorConfiguration",
+                    "bindings": [authority["environment"]], "default": authority["default"],
+                    "defaultEvidence": authority["defaultCandidateIds"]}
+        identifiers = authority["defaultCandidateIds"] + authority["environmentCandidateIds"]
+        entries = {identifier: dict(self.discovered[identifier].source_fields(), setting=setting)
+                   for identifier in identifiers}
+        return contract, entries
+
+    def errors(self, setting, contract, entries):
+        return audit.binding_authority_errors(self.root, setting, contract, list(entries.values()),
+                                              entries, self.discovered, {})
+
+    def test_closed_authority_covers_each_typed_setting_and_actual_consumer(self):
+        all_ids = set()
+        for setting in audit.RUNNER_COORDINATOR_BINDINGS:
+            contract, entries = self.fixture(setting)
+            self.assertEqual([], self.errors(setting, contract, entries))
+            self.assertFalse(all_ids.intersection(entries))
+            all_ids.update(entries)
+        self.assertEqual(6, len(all_ids))
+
+    def test_metadata_and_candidate_partition_cannot_reassign_authority(self):
+        setting = "runner.coordinator.httpThreads"
+        contract, entries = self.fixture(setting)
+        for field, value in (("owner", "other#Type"), ("field", "httpQueue"), ("bindings", []),
+                             ("default", "4"), ("defaultEvidence", []), ("bindingAuthority", None),
+                             ("defaultAuthority", {"kind": "unreviewed"})):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(contract)
+                changed[field] = value
+                self.assertTrue(self.errors(setting, changed, entries))
+        changed = copy.deepcopy(contract)
+        changed["bindingAuthority"]["sourceProofs"] = {}
+        self.assertTrue(self.errors(setting, changed, entries))
+        self.assertTrue(self.errors("another.setting", contract, entries))
+        self.assertTrue(self.errors(setting, contract, {}))
+        changed_entries = copy.deepcopy(entries)
+        next(iter(changed_entries.values()))["setting"] = "another.setting"
+        self.assertTrue(self.errors(setting, contract, changed_entries))
+
+    def test_parser_defaults_consumer_and_executable_assertions_are_closed(self):
+        setting = "runner.coordinator.httpThreads"
+        contract, entries = self.fixture(setting)
+        mutations = (
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "(8080, 16, 64)", "(8080, 4, 64)"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "DEFAULTS.httpThreads()", "DEFAULTS.httpQueue()"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "UNBOUND_THREADS"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "httpThreads < 1", "httpThreads < 0"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "return Integer.parseInt", "return 4; // Integer.parseInt"),
+            ("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorMain.java", "http.httpThreads()", "4"),
+            ("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RunnerCoordinatorConfigurationTest.java", "{2, 37}", "{4}"),
+            ("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RunnerCoordinatorConfigurationTest.java", "assertThrows", "ignoredAssertion"),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(source=relative, mutation=after):
+                path = self.root / relative
+                original = path.read_text()
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after))
+                    self.assertTrue(self.errors(setting, contract, entries))
+                finally:
+                    path.write_text(original)
+
+
 class InteractionWebSocketPolicyAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

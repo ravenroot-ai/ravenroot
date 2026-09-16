@@ -97,6 +97,32 @@ class LocalRunnerSupervisorTest {
         }
     }
 
+    @Test void immediateRestartWaitsForThePriorStoreLeaseWithoutTakingOverALiveSession() throws Exception {
+        try (var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(directory.resolve("restart.db"), clock)) {
+            var jobs = new RunnerJobService(store, clock, List.of(definition), List.of(registration), Map.of("local", policy), List.of(profile));
+            var control = new AuthorizedRunnerControl(jobs, new DefaultAuthorizationService(ignored -> { }), plane().issuer(), new RunnerArtifactStore(directory.resolve("restart-artifacts")), clock);
+            var configured = new LinkedHashMap<>(document());
+            configured.put("worker", Map.of("pollInterval", "PT0.01S", "heartbeatInterval", "PT0.02S", "availabilityTtl", "PT0.5S"));
+            java.util.function.Supplier<RunnerDriver> idleDriver = () -> new RunnerDriver() {
+                public RunnerRegistration registration() { return registration; }
+                public Set<String> runtimeProfiles() { return Set.of("agent"); }
+                public CompletionStage<RunnerResult> execute(RunnerAssignment assignment) { throw new AssertionError("empty catalog must not dispatch"); }
+                public CompletionStage<RunnerResult> reconcile(RunnerAssignment assignment) { throw new AssertionError("empty catalog must not reconcile"); }
+                public CompletionStage<Void> cancel(RunnerAssignment assignment) { throw new AssertionError("empty catalog has no active jobs"); }
+                public void close() { }
+            };
+            try (var first = new LocalRunnerSupervisor(jobs, control, plane(), configured)) { first.start(idleDriver.get()); }
+            var previous = store.runnerAvailability("local").toCompletableFuture().join().getFirst();
+            assertTrue(previous.live(clock.instant()), "the restart regression requires a still-live persisted incarnation");
+            try (var replacement = new LocalRunnerSupervisor(jobs, control, plane(), configured)) {
+                replacement.start(idleDriver.get());
+                var accepted = store.runnerAvailability("local").toCompletableFuture().join().getFirst();
+                assertNotEquals(previous.sessionId(), accepted.sessionId());
+                assertFalse(accepted.observedAt().isBefore(previous.leaseUntil()), "no live-session takeover is permitted");
+            }
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"idle", "opening", "failed-quiescence"})
     void shutdownStopsRetainedAndOpeningWorkspacesAndNeverInventsQuiescence(String mode) throws Exception {
@@ -118,7 +144,7 @@ class LocalRunnerSupervisorTest {
                     clock.instant().plusSeconds(300), resource.workspaceId(), OpaquePayload.empty("application/vnd.ravenroot.runner-continuation.v1"), resource, "open");
             store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent()).apply(new ExecutionTransition.ProcessCreated(process, new GraphVersionPin("local-test")))
                     .runner(submit).build()).toCompletableFuture().join();
-            client.availability(7, 0, Set.of("agent"), Duration.ofSeconds(30));
+            client.availability(7, 0, Set.of("agent"), Duration.ofSeconds(1));
             var claimed = client.claim(key.processInstanceId(), identity.runnerJobId(), false);
             if (!mode.equals("opening")) client.complete(claimed, new RunnerResult("ready", OpaquePayload.of("{}".getBytes(), "application/json"), List.of(), UUID.randomUUID(),
                     new RunnerResult.WorkspaceObservation(resource.workspaceId(), "retained-container", null)));

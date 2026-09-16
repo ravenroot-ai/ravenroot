@@ -63,6 +63,10 @@ confirmed physical quiescence before closing storage. Restart preserves database
 and those stops; it does not silently reopen a stopped resource. A crash or cleanup failure retains
 recovery obligations. Configure `RAVENROOT_LOCAL_RUNNER_STOP_GRACE` (default `5m`) to cover the HTTP
 drain and your configured Workspace cleanup budget. Do not force-kill or discard worker state.
+An immediate restart waits for the previous worker's persisted availability lease to expire;
+it never reuses that session or takes over a live lease. The approved worker policy's `wallTime`
+bounds this wait. Set `RAVENROOT_COMPOSE_WAIT_TIMEOUT` to cover the prior `worker.availabilityTtl`
+and normal startup, especially when increasing the advertisement lifetime.
 
 Definitions are immutable by tenant, name and version. A changed body needs a new version.
 Approval changes use `expectedRevision`; a stale editor receives a conflict. Bootstrap creates

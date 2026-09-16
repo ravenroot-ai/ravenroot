@@ -93,7 +93,25 @@ final class LocalRunnerSupervisor implements AutoCloseable {
     private void startWorker() throws Exception {
         worker = new RunnerWorker(client, driver, configuration);
         worker.telemetry().install(jobs.telemetry());
+        awaitPreviousIncarnation();
         worker.start();
+    }
+
+    private void awaitPreviousIncarnation() throws Exception {
+        // Graceful stop does not rewrite a store-clock liveness lease. The replacement must
+        // wait for expiry, never impersonate the previous session or steal its live authority.
+        long deadline = System.nanoTime() + registration.capabilities().limits().wallTime().toNanos();
+        for (;;) {
+            var previous = jobs.store().runnerAvailability("local").toCompletableFuture()
+                    .get(configuration.driverCommandTimeout().toMillis(), TimeUnit.MILLISECONDS).stream()
+                    .filter(value -> value.runnerId().equals(registration.runnerId())).findFirst().orElse(null);
+            var now = Clock.systemUTC().instant();
+            if (previous == null || !previous.live(now)) return;
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) throw new IllegalStateException("previous local worker incarnation is still live; startup refused");
+            TimeUnit.NANOSECONDS.sleep(Math.min(configuration.pollInterval().toNanos(),
+                    Math.min(remaining, java.time.Duration.between(now, previous.leaseUntil()).toNanos())));
+        }
     }
 
     @Override public synchronized void close() {

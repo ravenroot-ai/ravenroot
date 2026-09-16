@@ -199,6 +199,9 @@ idle PER_WORKSPACE containers. Only physical driver quiescence permits the stopp
 then the worker/driver closes before storage. A failure remains visible and retains stop/recovery
 obligations; it is not relabelled successful cleanup. Restart preserves the durable store, artifacts,
 receipts and sticky stops. Compose's operator shutdown grace must cover configured drain/cleanup time.
+Replacement startup waits for the prior store-clock worker advertisement to expire, bounded by
+the approved registration's wall-time ceiling; it never steals or reuses a live incarnation.
+The operator Compose health-wait budget must cover that availability TTL plus normal startup.
 
 ## Consequences
 

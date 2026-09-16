@@ -75,12 +75,12 @@ coordinates are:
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-core</artifactId>
-    <version>0.3.0-alpha.1</version>
+    <version>0.4.0-alpha.1</version>
   </dependency>
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-pekko</artifactId>
-    <version>0.3.0-alpha.1</version>
+    <version>0.4.0-alpha.1</version>
     <scope>runtime</scope>
   </dependency>
 </dependencies>

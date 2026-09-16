@@ -16,7 +16,7 @@ resource while another process is isolated. `PER_WORKSPACE` retains one pinned r
 invocation retains its own durable job/fence and physical observation. Sequential Agents share the
 Workspace only after the prior invocation is known quiescent. There is no second Agent-to-Agent lease.
 Named Agent session identity is tenant/process/definition-version scoped, independent of traversal
-and Workspace identity. See [ADR 0042](../../adr/0042-explicit-workspaces-and-runner-coordinators.md).
+and Workspace identity. See [ADR 0042](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0042-explicit-workspaces-and-runner-coordinators.md).
 
 ## HTTP surface
 

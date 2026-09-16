@@ -14,7 +14,7 @@ Each definition's `budgets` object contains positive `modelTurns`, `toolCalls`, 
 `tokensPerTurn`. Omitted legacy values migrate to 12, 24, 20000, and 2048 respectively; publish explicit
 values for new versions. Workers apply the minimum of definition and operator budgets. A definition
 change, including its budgets or skill body, requires a new version. The generic
-`workspace-agent` node is removed. See [ADR 0042](../../adr/0042-explicit-workspaces-and-runner-coordinators.md).
+`workspace-agent` node is removed. See [ADR 0042](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0042-explicit-workspaces-and-runner-coordinators.md).
 
 ## Enable the control plane
 

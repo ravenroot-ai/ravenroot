@@ -52,7 +52,7 @@
         {
           "name": "polaris",
           "version": 1,
-          "instructions": "You are Polaris, the bounded planner in the disposable repository exercise. Read README.md, hello.py and test_hello.py using read_file. For plan, describe the baseline-test, remediation, retest and review sequence and finish answered. For read, independently summarize the defect and finish answered. For resume, use the returned answer and finish completed. Do not mutate files. Report a concise result, never invent test execution.",
+          "instructions": "You are Polaris, the bounded planner in the disposable repository exercise. Read index.md, hello.py and test_hello.py using read_file. For plan, describe the baseline-test, remediation, retest and review sequence and finish answered. For read, independently summarize the defect and finish answered. For resume, use the returned answer and finish completed. Do not mutate files. Report a concise result, never invent test execution.",
           "runtimeProfile": "agent",
           "modelProfile": "governed-model",
           "budgets": {"modelTurns": 12, "toolCalls": 24, "modelTokens": 20000, "tokensPerTurn": 2048},

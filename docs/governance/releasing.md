@@ -295,7 +295,9 @@ Portal API; publication never rebuilds or substitutes its contents.
 
 The GHCR tag is the SemVer value without `v`. The runtime image-manifest digest commits its config,
 layers, labels, version, and revision and is the content identity used for retry comparison. BuildKit
-predicate envelopes contain run-specific evidence, so their bytes may differ on a deterministic
+is selected by an immutable daemon-image digest and its expected version is checked before the
+release image is built. Its SPDX and SLSA predicates use the in-toto Statement v1 envelope. Predicate
+envelopes contain run-specific evidence, so their bytes may differ on a deterministic
 rebuild; a retry therefore also requires one subject-bound attestation manifest containing both the
 SPDX SBOM and SLSA provenance predicates. The retry downloads those predicate blobs by the published
 attestation-manifest digest, checks every descriptor digest and byte size, parses each in-toto

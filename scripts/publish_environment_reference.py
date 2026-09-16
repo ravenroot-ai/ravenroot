@@ -56,6 +56,7 @@ GROUPS = {
 }
 
 ROW_BOUNDARIES = {
+    "RAVENROOT_RUNNER_CONFIG": "unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart",
     "RAVENROOT_MATRIX_CONFIG": (
         "canonical padded Base64 of strict JSON containing bounded `store` settings and a nonempty "
         "tenant/profile map; unset or malformed configuration is tolerated while the Matrix package is "
@@ -106,7 +107,7 @@ def boundary(name: str) -> str:
     return ROW_BOUNDARIES.get(name, "See the linked contract for exact type, default, and applicability.")
 
 BUNDLE_PREFIXES = (
-    "RAVENROOT_AMQP091_", "RAVENROOT_DISCORD_", "RAVENROOT_FILESYSTEM_",
+    "RAVENROOT_AI_", "RAVENROOT_AMQP091_", "RAVENROOT_DISCORD_", "RAVENROOT_FILESYSTEM_",
     "RAVENROOT_GITHUB_", "RAVENROOT_GIT_WORKSPACE_", "RAVENROOT_IMAP_",
     "RAVENROOT_JDBC_", "RAVENROOT_KAFKA_", "RAVENROOT_LLM_", "RAVENROOT_MAIL_",
     "RAVENROOT_MATRIX_", "RAVENROOT_MATTERMOST_", "RAVENROOT_MCP_",
@@ -164,6 +165,8 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name == "RAVENROOT_RUNNER_CONFIG":
+        return "agent"
     if name in {
         "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",
         "RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS",

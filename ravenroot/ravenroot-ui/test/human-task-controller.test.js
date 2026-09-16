@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHumanTaskController } from '../src/human-task-controller.js';
 
 const capability = { schemaVersion: 1, confirmationPresentationVersions: [1],
+  reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
   confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
   attentionPollMillis: 1000, attentionBackoffMaxMillis: 8000,
   attentionPageSize: 2, attentionPageSizeMax: 10, commentMaxUtf8Bytes: 4096 };

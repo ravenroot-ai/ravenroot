@@ -80,8 +80,10 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes,
         var confirmation = humanTaskPolicy.confirmation();
         return ",\"humanTasks\":{\"schemaVersion\":1"
                 + ",\"confirmationPresentationVersions\":[1]"
+                + ",\"reviewPresentationVersions\":[1]"
                 + ",\"confirmationPromptMaxUtf8Bytes\":" + confirmation.maxPromptUtf8Bytes()
                 + ",\"confirmationActionLabelMaxUtf8Bytes\":" + confirmation.maxActionLabelUtf8Bytes()
+                + ",\"reviewTextMaxUtf8Bytes\":" + confirmation.maxReviewTextUtf8Bytes()
                 + ",\"commentMaxUtf8Bytes\":" + confirmation.maxCommentUtf8Bytes()
                 + ",\"attentionPollMillis\":" + confirmation.pollAfterMillis()
                 + ",\"attentionBackoffMaxMillis\":" + confirmation.pollBackoffMaxMillis()

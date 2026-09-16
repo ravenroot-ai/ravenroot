@@ -2,6 +2,14 @@ package ai.ravenroot.api.security;
 
 /** Application actions evaluated by the single policy decision point. */
 public enum AuthorizationAction {
+    /** Inspect tenant-scoped runner inventory and retained evidence. */
+    RUNNER_READ("ravenroot.runner.read", true),
+    /** Publish immutable definitions and approve or retire runner profiles. */
+    RUNNER_ADMIN("ravenroot.runner.admin", true),
+    /** Cancel or reconcile governed runner work. */
+    RUNNER_CONTROL("ravenroot.runner.control", true),
+    /** Designated workload runner protocol, never operator governance. */
+    RUNNER_DISPATCH("ravenroot.runner.dispatch", true),
     /** Read the application status endpoint. */
     STATUS_READ("ravenroot.read", true),
     /** Observe runtime health and operational state. */
@@ -57,6 +65,9 @@ public enum AuthorizationAction {
      * controls over execution, while retaining their distinct operation semantics.
      */
     EXECUTION_CONTROL("ravenroot.execution.control", true),
+
+    /** Inspect and reconcile durable Human Tasks through the guarded administrative surface. */
+    HUMAN_TASK_ADMIN("ravenroot.human-task.admin", true),
 
     /** Trip or reset the store-global first-party agent authority epoch. */
     AGENT_AUTHORITY_CONTROL("ravenroot.agent.authority.control", true),

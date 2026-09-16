@@ -69,7 +69,7 @@ class PostgresExecutionStoreContractTest extends ExecutionStoreContract {
                         StoreCapability.CROSS_PROCESS_LEASE, StoreCapability.IDEMPOTENCY_PURGE,
                         StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
                         StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
-                        StoreCapability.EXECUTION_RESULTS, StoreCapability.DURABLE_HANDLERS,
+                        StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS, StoreCapability.DURABLE_HANDLERS,
                         StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
                         StoreCapability.HUMAN_TASK_CONFIRMATIONS, StoreCapability.EXECUTION_PAUSES,
                         StoreCapability.AGENT_AUTHORITY_BUDGETS),

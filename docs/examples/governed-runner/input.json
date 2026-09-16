@@ -1,0 +1,7 @@
+{
+  "files": {
+    "hello.py": "def add(a, b):\n    return a - b\n",
+    "test_hello.py": "import unittest\nfrom hello import add\n\nclass HelloTest(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n"
+  },
+  "remediationFiles": {"hello.py": "def add(a, b):\n    return a + b\n"}
+}

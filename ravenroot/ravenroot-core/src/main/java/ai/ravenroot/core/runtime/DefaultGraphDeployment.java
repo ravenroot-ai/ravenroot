@@ -776,6 +776,11 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         this.managedIngress = Objects.requireNonNull(managedIngress, "managedIngress");
     }
 
+    /** Establishes the already-authorized identity used by durable authority-driven starts. */
+    synchronized void bindLifecycleIdentity(SecurityContext security) {
+        this.lifecycleIdentity = Objects.requireNonNull(security, "security");
+    }
+
     @Override
     public DeploymentStatus status() {
         lock.lock();

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -194,6 +195,27 @@ class AgentNodeBehaviorTest {
     }
 
     @Test
+    @DisplayName("an oversized local request releases a retryable attempt before dispatch")
+    void oversizedRequestNeverDispatchesOrSpendsTheReservation() {
+        var resources = new AiTestSupport.TrackingAgentResources();
+        var http = new AiTestSupport.ScriptedHttp().resources(resources)
+                .then(AiTestSupport.answers("must not be sent"));
+        var tiny = new LlmProfile("local", URI.create(ENDPOINT), "test", Optional.empty(),
+                1_000, 1, 1_024 * 1_024, 1, "");
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(tiny));
+
+        AgentException failure = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.REQUEST_TOO_LARGE, failure.code());
+        assertEquals(0, http.calls());
+        assertEquals(0, resources.modelDispatches.get());
+        assertEquals(1, resources.modelReleases.get());
+        assertEquals(0, resources.modelIndeterminate.get());
+        assertEquals(1, resources.failedAttempts.get(), "local preflight remains retryable");
+    }
+
+    @Test
     @DisplayName("a tool call is executed and its result comes back as a tool message on the next turn")
     void aToolCallRoundTrips() throws Exception {
         var http = new AiTestSupport.ScriptedHttp()
@@ -266,7 +288,7 @@ class AgentNodeBehaviorTest {
         failureOf(behavior.create(configuration(Map.of(
                 "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
 
-        assertEquals(AgentNodeBehavior.DEFAULT_MAX_TURNS, http.calls());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_TURNS, http.calls());
     }
 
     @Test
@@ -280,7 +302,7 @@ class AgentNodeBehaviorTest {
                 "provider", "local", "instructions", "be terse", "objective", "say hi",
                 "maxTurns", "100000")), http));
 
-        assertEquals(AgentNodeBehavior.MAX_TURNS_CEILING, http.calls());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_TURNS_CEILING, http.calls());
     }
 
     @Test
@@ -575,7 +597,7 @@ class AgentNodeBehaviorTest {
     @DisplayName("a skill over the ceiling refuses when the node is built, not when a message arrives")
     void anOversizeSkillRefusesAtConstruction() {
         Map<String, Object> properties = AgentSkillTest.withSkills(1);
-        properties.put("skills.1.instructions", "x".repeat(AgentSkill.MAX_INSTRUCTIONS_CHARS + 1));
+        properties.put("skills.1.instructions", "x".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_INSTRUCTIONS_CHARS + 1));
         var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
 
         // create() and not handle(): NodeBehavior#create reserves a throw for a node the behavior can
@@ -667,7 +689,7 @@ class AgentNodeBehaviorTest {
         // cut at index MAX_NAME_CHARS lands exactly on a pair boundary -- 32 whole pairs of two UTF-16
         // units -- and no lone surrogate is ever produced, so the test would pass whether the hazard
         // were handled or not. Shifting by one puts a HIGH surrogate at the last kept index.
-        String astral = "n" + "\uD83D\uDE80".repeat(AgentSkill.MAX_NAME_CHARS);
+        String astral = "n" + "\uD83D\uDE80".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_NAME_CHARS);
         var http = new AiTestSupport.ScriptedHttp()
                 .then(AiTestSupport.asksFor("call-1", LoadSkillTool.NAME,
                         "{\"name\":\"" + astral + "\"}"))

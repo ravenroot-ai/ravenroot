@@ -14,6 +14,22 @@ import {
   validateSourceSessionStatus,
 } from '../src/runtime-client.js';
 
+it('requires an explicit revision and authenticates continuation resolution', async () => {
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ revision: 8, resolution: 'RESUME' }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'token' });
+  expect(() => client.resolveRunnerContinuation('process', 'job', 0, 'RESUME')).toThrow();
+  expect(() => client.resolveRunnerContinuation('process', 'job', 7, 'RETRY')).toThrow();
+  expect(fetchImpl).not.toHaveBeenCalled();
+  await client.resolveRunnerContinuation('process', 'job', 7, 'RESUME');
+  const [url, request] = fetchImpl.mock.calls[0];
+  expect(url).toBe('https://runtime.example/v1/runner-plane/workspaces/process/jobs/job/resolve-continuation');
+  expect(request.method).toBe('POST');
+  expect(request.headers.Authorization).toBe('Bearer token');
+  expect(request.headers['Content-Type']).toBe('application/json');
+  expect(JSON.parse(request.body)).toEqual({ expectedRevision: 7, resolution: 'RESUME' });
+});
+
 function versionedRingEvent(overrides = {}) {
   return {
     schemaVersion: 1, source: 'RING', id: '1', eventType: 'EXECUTION_STARTED',
@@ -266,6 +282,7 @@ describe('runtime configuration client', () => {
 
   it('retains the complete Human Task capability and rejects an incomplete one', () => {
     const humanTasks = { schemaVersion: 1, confirmationPresentationVersions: [1],
+      reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
       confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
       commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
       attentionPageSize: 25, attentionPageSizeMax: 1000 };
@@ -277,6 +294,7 @@ describe('runtime configuration client', () => {
 
 describe('embedded Human Task runtime client', () => {
   const capability = { schemaVersion: 1, confirmationPresentationVersions: [1],
+    reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
     confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
     commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
     attentionPageSize: 25, attentionPageSizeMax: 1000 };
@@ -434,6 +452,27 @@ describe('execution lifecycle client', () => {
     const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
 
     await expect(client.pauseExecution('execution-a')).rejects.toThrow(/invalid/);
+  });
+});
+
+describe('process lifecycle client', () => {
+  it('sends the durable process identity, command generation, and idempotency key', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ outcome: 'APPLIED', processInstanceId: 'process/one',
+        generation: 8, state: 'PAUSED', reason: 'inspect', traversals: [] }),
+    });
+    const client = new RavenrootRuntimeClient('https://runtime.example/', {
+      fetchImpl, accessToken: 'operator-token',
+    });
+    await client.controlProcess('process/one', 'pause', 7,
+      { idempotencyKey: 'pause-7', reason: 'inspect' });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://runtime.example/v1/processes/process%2Fone/pause?reason=inspect',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({
+        'Idempotency-Key': 'pause-7', 'X-Ravenroot-Expected-Generation': '7',
+      }) }),
+    );
   });
 });
 

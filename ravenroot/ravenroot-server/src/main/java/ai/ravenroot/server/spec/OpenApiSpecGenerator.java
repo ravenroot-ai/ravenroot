@@ -72,6 +72,8 @@ public final class OpenApiSpecGenerator {
     }
 
     private static String operationEntry(RouteDescriptor route, String method) {
+        if (route.path().startsWith("/v1/runner-plane/")) return RunnerOpenApi.operation(route, method);
+        if (route.path().equals("/v1/processes/{processInstanceId}/{command}")) return ProcessOpenApi.operation(route, method);
         StringBuilder entry = new StringBuilder();
         entry.append("      \"").append(method.toLowerCase(java.util.Locale.ROOT)).append("\": {\n");
         entry.append("        \"summary\": \"").append(JsonStrings.escape(route.summary())).append("\",\n");
@@ -342,6 +344,11 @@ public final class OpenApiSpecGenerator {
                 + "\"actions\": {\"type\": \"array\", \"items\": {\"type\": \"string\", "
                 + "\"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}}, \"resolveLabel\": {\"type\": \"string\"}, "
                 + "\"denyLabel\": {\"type\": \"string\"}, \"cancelLabel\": {\"type\": \"string\"}}},\n"
+                + "      \"HumanTaskReviewPresentation\": {\"type\": \"object\", \"additionalProperties\": false, "
+                + "\"required\": [\"version\", \"contentType\", \"text\", \"contentDigest\", \"maxUtf8Bytes\"], \"properties\": {"
+                + "\"version\": {\"type\": \"integer\", \"enum\": [1]}, \"contentType\": {\"type\": \"string\", \"enum\": [\"text/plain\"]}, "
+                + "\"text\": {\"type\": \"string\"}, \"contentDigest\": {\"type\": \"string\", \"pattern\": \"^sha256:[0-9a-f]{64}$\"}, "
+                + "\"maxUtf8Bytes\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1048576}}},\n"
                 + "      \"HumanTaskAttentionItem\": {\"type\": \"object\", \"required\": [\"taskId\", "
                 + "\"generation\", \"status\", \"graphVersion\", \"deploymentId\", \"processInstanceId\", "
                 + "\"traversalId\", \"nodeId\", \"createdAt\", \"expiresAt\", \"escalateAt\", "
@@ -355,6 +362,7 @@ public final class OpenApiSpecGenerator {
                 + "\"escalateAt\": {\"type\": \"string\", \"format\": \"date-time\", \"nullable\": true}, "
                 + "\"promptMaxUtf8Bytes\": {\"type\": \"integer\"}, \"actionLabelMaxUtf8Bytes\": {\"type\": \"integer\"}, "
                 + "\"commentMaxUtf8Bytes\": {\"type\": \"integer\"}, \"presentation\": {\"$ref\": \"#/components/schemas/HumanTaskConfirmationPresentation\"}, "
+                + "\"reviewPresentation\": {\"$ref\": \"#/components/schemas/HumanTaskReviewPresentation\"}, "
                 + "\"availableActions\": {\"type\": \"array\", \"items\": {\"type\": \"string\", \"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}}}},\n"
                 + "      \"HumanTaskAttentionCounts\": {\"type\": \"object\", \"required\": [\"pending\", \"escalated\"], "
                 + "\"properties\": {\"pending\": {\"type\": \"integer\"}, \"escalated\": {\"type\": \"integer\"}}},\n"

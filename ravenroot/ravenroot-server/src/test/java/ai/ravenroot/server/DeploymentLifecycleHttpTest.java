@@ -41,6 +41,8 @@ import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -63,6 +65,40 @@ class DeploymentLifecycleHttpTest {
      * contained it already would be a defect rather than a false match.</p>
      */
     private static final String CORRELATION_PLACEHOLDER = "<correlation>";
+
+    @Test
+    void durableLifecycleHttpCommandsExposeGenerationAndIdempotentOutcomes() throws Exception {
+        try (var fixture = new Fixture(true)) {
+            assertEquals(200, fixture.request(
+                    "POST", "/v1/deployments?id=durable", NO_SOURCE_GRAPH, "tenant-a").statusCode());
+
+            var start = fixture.command("/v1/deployments/durable/start", "tenant-a",
+                    "start-1", 0, null);
+            assertEquals(200, start.statusCode(), start.body());
+            assertTrue(start.body().contains("\"outcome\":\"ACCEPTED\""), start.body());
+            assertTrue(start.body().contains("\"generation\":1"), start.body());
+
+            var pause = fixture.command("/v1/deployments/durable/pause", "tenant-a",
+                    "pause-1", 1, "maintenance");
+            assertTrue(pause.body().contains("\"generation\":2"), pause.body());
+            var replay = fixture.command("/v1/deployments/durable/pause", "tenant-a",
+                    "pause-1", 1, "maintenance");
+            assertTrue(replay.body().contains("\"outcome\":\"REPLAYED\""), replay.body());
+
+            var stale = fixture.command("/v1/deployments/durable/resume", "tenant-a",
+                    "resume-stale", 1, null);
+            assertTrue(stale.body().contains("\"outcome\":\"STALE_GENERATION\""), stale.body());
+            var resume = fixture.command("/v1/deployments/durable/resume", "tenant-a",
+                    "resume-1", 2, null);
+            assertTrue(resume.body().contains("\"generation\":3"), resume.body());
+            var cancel = fixture.command("/v1/deployments/durable/cancel", "tenant-a",
+                    "cancel-1", 3, "operator request");
+            assertTrue(cancel.body().contains("\"generation\":4"), cancel.body());
+            var drain = fixture.command("/v1/deployments/durable/drain", "tenant-a",
+                    "drain-1", 4, null);
+            assertTrue(drain.body().contains("\"generation\":5"), drain.body());
+        }
+    }
 
     @Test
     void aSourcelessGraphIsRegisteredStartedStoppedRestartedAndUndeployedOverHttp() throws Exception {
@@ -321,6 +357,10 @@ class DeploymentLifecycleHttpTest {
         private final RavenrootServer server;
 
         Fixture() throws Exception {
+            this(false);
+        }
+
+        Fixture(boolean durable) throws Exception {
             var behavior = new SourceBehavior();
             NodePackage nodePackage = new NodePackage() {
                 @Override public String id() { return "test.deployment.http.package"; }
@@ -339,7 +379,32 @@ class DeploymentLifecycleHttpTest {
             server = new RavenrootServer(application,
                     new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, true,
                     new HeaderTenantAuthenticator(), httpSecurity);
+            if (durable) {
+                var clock = Clock.systemUTC();
+                var registry = new ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry(
+                        clock, tenant -> ai.ravenroot.api.deployment.DeploymentId.of(UUID.randomUUID().toString()));
+                var singleFlight = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
+                var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(
+                        registry, application.localDeploymentTargets(), singleFlight,
+                        ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING,
+                        "http-owner", Duration.ofMinutes(1), Duration.ofSeconds(1), clock);
+                server.installDurableDeploymentControl(
+                        new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
+                                application, registry, coordinator, clock));
+            }
             server.start();
+        }
+
+        HttpResponse<String> command(String path, String tenant, String key, long generation,
+                                     String reason) throws Exception {
+            HttpRequest.Builder request = HttpRequest.newBuilder(
+                            URI.create("http://127.0.0.1:" + server.port() + path))
+                    .header("X-Test-Tenant", tenant)
+                    .header("Idempotency-Key", key)
+                    .header("X-Ravenroot-Expected-Generation", Long.toString(generation));
+            if (reason != null) request.header("X-Ravenroot-Reason", reason);
+            return HttpClient.newHttpClient().send(request.POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.ofString());
         }
 
         HttpResponse<String> request(String method, String path, String body, String tenant) throws Exception {

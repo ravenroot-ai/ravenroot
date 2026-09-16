@@ -51,6 +51,7 @@ import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -203,7 +204,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // instance. Recording refuses a conflicting outcome rather than overwriting
             // one, and the refusal is decided from the stored fingerprint alone, so it
             // is the same answer on every retry and across a reopen.
-            StoreCapability.EXECUTION_RESULTS);
+            StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -512,7 +513,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         ? existing.retainedUntil() : plusClamped(now, config.terminalRetention()))
                 : null;
 
-        writeInstanceRow(key, folded.status(), folded.terminationReason(), pin, revision, fencingToken,
+        writeInstanceRow(key, folded.status(), folded.terminationReason(), folded.controlState(), pin, revision, fencingToken,
                 now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
         writeTimers(key, batch);
@@ -524,6 +525,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         writeToolApprovals(key, batch, folded, pin, revision, now);
         writeAgentAuthorityBudget(key, batch, folded, now);
         writeExecutionPauses(key, batch, folded, pin, revision);
+        writeRunnerWorkspace(key, batch, folded, now);
         writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of the shared
@@ -2359,7 +2361,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 ProcessInstanceStatus status,
                                 ExecutionTerminationReason terminationReason, Instant updatedAt,
                                 Instant createdAt, long lifecycleGeneration, ExecutionOrigin origin,
-                                Instant retainedUntil) {
+                                Instant retainedUntil, String controlState) {
     }
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, UUID attemptId, int ordinal,
@@ -2368,7 +2370,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private InstanceMeta readMeta(ExecutionKey key) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, "
+                "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, control_state, "
                         + "updated_at_epoch_second, "
                         + "updated_at_nano, created_at_epoch_second, created_at_nano, "
                         + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
@@ -2389,7 +2391,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         rows.getLong("lifecycle_generation"),
                         ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
                                 rows.getString("correlation_id")),
-                        nullableInstant(rows, "retained_until"));
+                        nullableInstant(rows, "retained_until"), rows.getString("control_state"));
             }
         }
     }
@@ -2460,7 +2462,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private ProcessInstance readAggregate(ExecutionKey key, InstanceMeta meta) throws SQLException {
         try {
-            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason());
+            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason(),
+                    ai.ravenroot.api.application.ProcessControlState.valueOf(meta.controlState()));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             // The detection point the in-memory adapter can only simulate: rows that no longer
             // reconstruct into a legal aggregate must never escape into the runtime.
@@ -2470,7 +2473,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     private void writeInstanceRow(ExecutionKey key, ProcessInstanceStatus status,
-                                  ExecutionTerminationReason terminationReason, GraphVersionPin pin,
+                                  ExecutionTerminationReason terminationReason,
+                                  ai.ravenroot.api.application.ProcessControlState controlState, GraphVersionPin pin,
                                   long revision, long fencingToken, Instant now, Instant createdAt,
                                   long lifecycleGeneration, ExecutionOrigin origin,
                                   Instant retainedUntil) throws SQLException {
@@ -2487,13 +2491,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "revision, fencing_token, updated_at_epoch_second, updated_at_nano, "
                         + "created_at_epoch_second, created_at_nano, lifecycle_generation, "
                         + "deployment_id, workload_id, correlation_id, retained_until_epoch_second, "
-                        + "retained_until_nano) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "retained_until_nano, control_state) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET status = excluded.status, "
                         // Assigned on conflict, beside the status it qualifies and never apart from
                         // it: the pair is one fact, so a row must never carry a new status with the
                         // previous reason still attached to it.
-                        + "termination_reason = excluded.termination_reason, "
+                        + "termination_reason = excluded.termination_reason, control_state = excluded.control_state, "
                         + "graph_version_pin = excluded.graph_version_pin, revision = excluded.revision, "
                         + "updated_at_epoch_second = excluded.updated_at_epoch_second, "
                         + "updated_at_nano = excluded.updated_at_nano, "
@@ -2521,6 +2525,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             } else {
                 StoredInstant.bindValue(statement, index, retainedUntil);
             }
+            statement.setString(18, controlState.name());
             statement.executeUpdate();
         }
     }
@@ -3598,6 +3603,108 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.runner.RunnerWorkspaceState>> loadRunnerWorkspace(ExecutionKey key) {
+        return async(() -> inReadTransaction(key, () ->
+                Optional.ofNullable(readRunnerWorkspace(Objects.requireNonNull(key)))));
+    }
+
+@Override
+    public CompletionStage<List<ai.ravenroot.api.runner.GovernedRunnerResource>> runnerResources(String tenantId) {
+        Objects.requireNonNull(tenantId);
+        return async(() -> inReadTransaction(null, () -> readRunnerResources(tenantId)));
+    }
+
+    private List<ai.ravenroot.api.runner.GovernedRunnerResource> readRunnerResources(
+            String tenantId) throws SQLException {
+        var resources = new ArrayList<ai.ravenroot.api.runner.GovernedRunnerResource>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT document FROM runner_catalog WHERE tenant_id = ? ORDER BY resource_key")) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    var value = ai.ravenroot.api.runner.RunnerCodec.resource(rows.getBytes(1));
+                    if (!tenantId.equals(value.tenantId())
+                            || resources.size() == ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                        throw failure(ExecutionStoreFailure.invalid("invalid runner catalog scope or size"));
+                    }
+                    resources.add(value);
+                }
+            }
+        }
+        return List.copyOf(resources);
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.runner.GovernedRunnerResource> saveRunnerResource(
+            ai.ravenroot.api.runner.GovernedRunnerResource resource, long expectedRevision) {
+        Objects.requireNonNull(resource);
+        return async(() -> inWriteTransaction(null, () -> {
+            try (PreparedStatement tenant = connection.prepareStatement(
+                    "INSERT INTO runner_catalog_tenant (tenant_id) VALUES (?) ON CONFLICT (tenant_id) DO NOTHING")) {
+                tenant.setString(1, resource.tenantId()); tenant.executeUpdate();
+            }
+            var resources = readRunnerResources(resource.tenantId());
+            var existing = resources.stream().filter(value -> value.key().equals(resource.key())).findFirst().orElse(null);
+            if (existing == null && resources.size() >= ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                throw failure(ExecutionStoreFailure.invalid("runner catalog quota exceeded"));
+            }
+            var accepted = resource.accepted(existing, expectedRevision, clock.instant());
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO runner_catalog (tenant_id, resource_key, document) VALUES (?, ?, ?) "
+                            + "ON CONFLICT (tenant_id, resource_key) DO UPDATE SET document = excluded.document")) {
+                statement.setString(1, accepted.tenantId()); statement.setString(2, accepted.key());
+                statement.setBytes(3, ai.ravenroot.api.runner.RunnerCodec.resource(accepted)); statement.executeUpdate();
+            }
+            return accepted;
+        }));
+    }
+
+    private ai.ravenroot.api.runner.RunnerWorkspaceState readRunnerWorkspace(ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state FROM runner_workspace WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return null;
+                try {
+                    var state = ai.ravenroot.api.runner.RunnerCodec.workspace(rows.getBytes(1));
+                    if (!key.equals(state.execution())) throw new IllegalArgumentException("runner scope mismatch");
+                    return state;
+                } catch (RuntimeException invalid) {
+                    throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                            "invalid governed runner workspace"));
+                }
+            }
+        }
+    }
+
+    private void writeRunnerWorkspace(ExecutionKey key, ExecutionBatch batch,
+                                      ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.runnerOperations().isEmpty() && !folded.status().terminal()) return;
+        var state = readRunnerWorkspace(key);
+        if (state == null && batch.runnerOperations().isEmpty()) return;
+        if (batch.runnerOperations().isEmpty() && state.processTerminalAt() != null) return;
+        byte[] bytes;
+        try {
+            for (var operation : batch.runnerOperations()) {
+                state = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(key, state, operation, folded, now);
+            }
+            bytes = ai.ravenroot.api.runner.RunnerCodec.workspace(state.observeProcess(folded, now));
+        } catch (IllegalArgumentException | IllegalStateException invalid) {
+            throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO runner_workspace (tenant_id, process_instance_id, state) VALUES (?, ?, ?) "
+                        + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET state = excluded.state")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setBytes(3, bytes);
+            statement.executeUpdate();
+        }
+    }
+
     // ---------------------------------------------------------------- durable execution pauses
 
     @Override
@@ -4000,18 +4107,51 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "WHERE t.tenant_id = ? AND t.task_id = ? AND t.generation = ? "
                         + "AND t.status IN ('WAITING', 'ESCALATED') "
                         + "AND t.confirmation_version > 0";
+                HumanTaskAttentionItem item;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, tenantId);
                     statement.setString(2, locator.taskId().toString());
                     statement.setLong(3, locator.generation());
                     try (ResultSet rows = statement.executeQuery()) {
                         if (!rows.next()) return Optional.empty();
-                        return Optional.ofNullable(readHumanTaskAttentionItem(
-                                rows, tenantId, authorization));
+                        item = readHumanTaskAttentionItem(rows, tenantId, authorization);
+                        if (item == null) return Optional.empty();
                     }
                 }
+                // Keep the content-bearing query physically after authorization and after the
+                // summary cursor is closed. This ordering is part of the non-disclosure contract.
+                return readHumanTaskReviewPresentation(tenantId, locator)
+                        .map(review -> withReviewPresentation(item, review));
             });
         });
+    }
+
+    private Optional<HumanTaskReviewPresentation> readHumanTaskReviewPresentation(
+            String tenantId, HumanTaskAttentionLocator locator) throws SQLException {
+        String sql = "SELECT review_version, review_content_type, review_text, review_digest, "
+                + "review_max_utf8_bytes FROM human_task WHERE tenant_id = ? AND task_id = ? "
+                + "AND generation = ? AND status IN ('WAITING', 'ESCALATED')";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, locator.taskId().toString());
+            statement.setLong(3, locator.generation());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                return Optional.of(new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                        rows.getString("review_content_type"), rows.getString("review_text"),
+                        rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
+            }
+        }
+    }
+
+    private static HumanTaskAttentionItem withReviewPresentation(
+            HumanTaskAttentionItem item, HumanTaskReviewPresentation review) {
+        return new HumanTaskAttentionItem(item.taskId(), item.generation(), item.status(),
+                item.graphVersion(), item.deploymentId(), item.processInstanceId(),
+                item.traversalId(), item.nodeId(), item.createdAt(), item.expiresAt(),
+                item.escalateAt(), item.presentation(), item.promptMaxUtf8Bytes(),
+                item.actionLabelMaxUtf8Bytes(), item.commentMaxUtf8Bytes(),
+                item.availableActions(), review.present() ? Optional.of(review) : Optional.empty());
     }
 
     private static boolean after(HumanTaskAttentionItem item,
@@ -4179,10 +4319,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "confirmation_actions, confirmation_resolve_label, confirmation_deny_label, "
                 + "confirmation_cancel_label, confirmation_max_prompt_bytes, "
                 + "confirmation_max_action_label_bytes, confirmation_max_comment_bytes, "
+                + "review_version, review_content_type, review_text, review_digest, "
+                + "review_max_utf8_bytes, "
                 + "created_at_epoch_second, created_at_nano, "
                 + "status, actor, decision_comment, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(57) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(62) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             statement.setString(index++, task.key().processInstanceId().toString());
@@ -4240,6 +4382,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            HumanTaskReviewPresentation review = request.reviewPresentation();
+            statement.setInt(index++, review.version());
+            statement.setString(index++, review.contentType());
+            statement.setString(index++, review.text());
+            statement.setString(index++, review.contentDigest());
+            statement.setInt(index++, review.maxUtf8Bytes());
             index = StoredInstant.bindValue(statement, index, task.createdAt());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
@@ -4364,7 +4512,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             rows.getString("confirmation_cancel_label")),
                     new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
                             rows.getInt("confirmation_max_action_label_bytes"),
-                            rows.getInt("confirmation_max_comment_bytes")));
+                            rows.getInt("confirmation_max_comment_bytes")),
+                    new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                            rows.getString("review_content_type"), rows.getString("review_text"),
+                            rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getString("decision_comment"), rows.getLong("generation"),
@@ -4448,7 +4599,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(readHandler(rows, key, null));
+                    DurableHandler handler = readHandler(rows, key, null);
+                    if (handler.status().resumesProcess()) ready.add(handler);
                 }
             }
         }

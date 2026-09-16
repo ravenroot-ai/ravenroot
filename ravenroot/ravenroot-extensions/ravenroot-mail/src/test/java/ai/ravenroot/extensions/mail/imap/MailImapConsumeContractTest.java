@@ -299,7 +299,7 @@ class MailImapConsumeContractTest {
         ImapConsumerTestSupport.await(ingress.offered);
         awaitState(ImapConsumerSource.State.FAILED);
         assertTrue(ingress.advances.isEmpty());
-        assertTrue(context.degraded.contains("imap-message-poison-halted"));
+        awaitDegraded(context, "imap-message-poison-halted");
 
         source.stop().toCompletableFuture().join();
         var volatileIngress = new ImapConsumerTestSupport.Ingress();
@@ -312,7 +312,7 @@ class MailImapConsumeContractTest {
         ImapConsumerTestSupport.await(volatileIngress.offered);
         awaitState(ImapConsumerSource.State.FAILED);
         assertTrue(volatileIngress.advances.isEmpty());
-        assertTrue(secondContext.degraded.contains("durable-ingress-lost"));
+        awaitDegraded(secondContext, "durable-ingress-lost");
     }
 
     @Test void projectionFailureEmitsTypedPoisonOnlyAndAdvancesAfterDurableReceipt() throws Exception {
@@ -553,7 +553,7 @@ class MailImapConsumeContractTest {
         source.start(context).toCompletableFuture().join();
         owner.rollover(43);
         awaitState(ImapConsumerSource.State.FAILED);
-        assertTrue(context.degraded.contains("imap-uidvalidity-changed"));
+        awaitDegraded(context, "imap-uidvalidity-changed");
         assertEquals(1, protocol.openCalls.get());
         assertTrue(ingress.advances.isEmpty());
     }
@@ -746,6 +746,11 @@ class MailImapConsumeContractTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (source.state() != expected && System.nanoTime() < deadline) Thread.onSpinWait();
         assertEquals(expected, source.state());
+    }
+    private static void awaitDegraded(ImapConsumerTestSupport.Context context, String reason) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (!context.degraded.contains(reason) && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertTrue(context.degraded.contains(reason));
     }
     private static void awaitAdvances(ImapConsumerTestSupport.Ingress ingress, int count) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);

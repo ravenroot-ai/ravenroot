@@ -60,7 +60,10 @@ class EnvironmentMcpProfileResolverTest {
 
         assertEquals(Optional.empty(), profile.credentialBinding());
         assertEquals(30_000, profile.timeoutMs());
+        assertEquals(1_048_576, profile.maxRequestBytes());
+        assertEquals(1_048_576, profile.maxResponseBytes());
         assertEquals(4, profile.maxConcurrency());
+        assertEquals(1_024, profile.maxDiscoveredTools());
     }
 
     @Test
@@ -128,6 +131,27 @@ class EnvironmentMcpProfileResolverTest {
         assertTrue(resolver.resolve("corp/../etc").isEmpty());
         assertTrue(resolver.resolve("").isEmpty());
         assertTrue(resolver.resolve(null).isEmpty());
+    }
+
+    @Test
+    @DisplayName("operator ceilings allow repeated MCP collections beyond old fixed limits")
+    void operatorCeilingsAllowLargerToolCollections() {
+        StringBuilder tools = new StringBuilder();
+        for (int index = 0; index < 80; index++) {
+            if (index > 0) tools.append(',');
+            tools.append('"').append("tool_").append(index).append('"');
+        }
+        String json = "{\"endpoint\":\"https://mcp.example.test/mcp\",\"maxDiscoveredTools\":2048,"
+                + "\"allowedTools\":[" + tools + "]}";
+        AgentOperationalConfiguration policy = AgentOperationalConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER", "128",
+                "RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER", "2048"));
+        var resolver = new EnvironmentMcpProfileResolver(
+                Map.of(VARIABLE, AiTestSupport.encodedMcpProfile(json)), policy);
+
+        McpProfile profile = resolver.resolve(NAME).orElseThrow();
+        assertEquals(80, profile.allowedTools().size());
+        assertEquals(2048, profile.maxDiscoveredTools());
     }
 
     private static Optional<McpProfile> resolve(String json) {

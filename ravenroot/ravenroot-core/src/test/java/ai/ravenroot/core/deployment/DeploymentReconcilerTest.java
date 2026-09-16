@@ -38,6 +38,45 @@ class DeploymentReconcilerTest {
      * the deployment at all. That is what closes the window rather than merely narrowing it.</p>
      */
     @Test
+    void aRehostedRuntimeIsConvergedEvenWhenThePreviousObservationWasCurrent() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "rehosted");
+        DeploymentId id = fixture.idOf(target);
+        fixture.coordinator("owner-a").submit(TENANT, id,
+                new LifecycleCommand.Start("s", 1, DeploymentRegistry.UpdateStrategy.STOP_FIRST),
+                GenerationExpectation.exactly(0));
+
+        var outcome = fixture.reconciler("owner-a", TENANT).reconcileHosted(TENANT, id);
+
+        assertInstanceOf(DeploymentReconcileOutcome.Reconciled.class, outcome);
+        assertEquals(List.of("start:1@1", "start:1@1"), target.calls(),
+                "a new host cannot treat the previous process's READY evidence as its own runtime");
+        assertEquals(List.of("start:1@1"), target.effects(),
+                "the generation-idempotent target does not repeat an already applied effect");
+    }
+
+    @Test
+    void recoveryReplaysTheRecordedCancelBarrierInsteadOfOnlyItsHeldRunningLevel() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "cancel-recovery");
+        DeploymentId id = fixture.idOf(target);
+        var coordinator = fixture.coordinator("owner-a");
+        coordinator.submit(TENANT, id,
+                new LifecycleCommand.Start("s", 1, DeploymentRegistry.UpdateStrategy.STOP_FIRST),
+                GenerationExpectation.exactly(0));
+        target.failNext(new IllegalStateException("barrier interrupted"));
+        coordinator.submit(TENANT, id, new LifecycleCommand.Cancel("c", "operator"),
+                GenerationExpectation.exactly(1));
+
+        var outcomes = fixture.reconciler("owner-a", TENANT).sweepOnce();
+
+        assertInstanceOf(DeploymentReconcileOutcome.Reconciled.class, outcomes.get(0));
+        assertTrue(target.effects().contains("barrier@2"));
+        assertEquals(ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Kind.CANCEL,
+                fixture.record(TENANT, id).lastLifecycleCommand());
+    }
+
+    @Test
     void anIntentRecordedWithoutItsEffectIsResumedOnceAndThenLeftAlone() {
         var fixture = new CoordinatorFixture();
         DeploymentId id = fixture.unhostedDeployment(TENANT, "crashed");

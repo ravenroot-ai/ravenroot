@@ -234,7 +234,9 @@ class JdbcExecutorTest {
         assertEquals(JdbcFailure.Code.ADMISSION_REFUSED,
                 JdbcTestSupport.failure(assertThrows(CompletionException.class, second::join)).code());
         first.cancel(true);
-        for (int attempt = 0; attempt < 100 && state.closes.get() == 0; attempt++) Thread.sleep(5);
+        for (int attempt = 0; attempt < 100
+                && (state.closes.get() == 0 || state.cancels.get() == 0 && state.aborts.get() == 0);
+             attempt++) Thread.sleep(5);
         assertTrue(state.cancels.get() > 0 || state.aborts.get() > 0);
         assertTrue(state.closes.get() > 0);
         state.release.countDown();

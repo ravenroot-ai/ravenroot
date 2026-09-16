@@ -5,6 +5,14 @@ person. The wait is stored, not kept alive: no node actor, request thread, polli
 remains attached to the task. A worker can therefore resolve the task and continue the same process
 after a complete server restart.
 
+Settlement is a versioned three-part contract. The `action` (`RESOLVE`, `DENY`, or `CANCEL`) selects
+the task's lifecycle meaning and configured re-entry route. A successful `RESOLVE` also carries the
+bounded response declared by the task's media type, schema, schema version, payload kind, and byte
+limit; that response is the operational value emitted by the node. The optional `comment` is stored
+separately as immutable audit metadata. Ravenroot never uses a comment as a response, never emits it
+as workflow payload, and never accepts an operational response for `DENY` or `CANCEL`. Existing
+resolve, deny, and cancel APIs are compatibility projections of settlement contract version 1.
+
 ## Authoring contract
 
 The node publishes all of its fields through `GET /v1/node-types`, so the generic editor renders
@@ -55,6 +63,15 @@ does not depend on the Java or browser Unicode version. Controls in that separat
 structurally forbidden. Inactive labels do not participate. The task also pins its prompt,
 action-label, and comment byte limits, so a tighter or looser policy after restart does not reinterpret
 an existing decision.
+
+Confirmation version 1 may additionally opt into `reviewPresentationVersion=1`. The closed first
+review format is only `text/plain`: `reviewTextSource` is either `payload` or a dotted path such as
+`payload.body` selecting one incoming text value, and `reviewMaxUtf8Bytes` is an inclusive UTF-8
+limit. Ravenroot does not interpolate, coerce, parse, render markup, follow URLs, or truncate. A
+missing or non-text selection, malformed Unicode, unsafe control or bidirectional formatting
+character, or oversized selection refuses task creation. The exact text, authored byte limit, media
+type, version, and SHA-256 content binding are pinned with the task. A deterministic retry reuses the
+first admitted bytes even if upstream input changed.
 
 The service applies this admission contract to every current task creation. Supported durable adapters
 apply the same check only after exact deduplication, so an exact replay of an already accepted request
@@ -130,6 +147,12 @@ cursor carries its immutable `(createdAt,taskId)` boundary and is bound to the t
 actor, roles, and scopes. Deleting or settling a row therefore does not invalidate later boundaries,
 while a context or authority change requires a fresh first page.
 
+Aggregate, node, inbox, and other collection projections are always summary-only and never carry a
+review presentation. Only the exact `taskId` plus `generation` attention lookup may return
+`reviewPresentation`. The store first resolves the tenant and responder/requester authorization from
+the summary row, then performs a separately generation-fenced content read. Unauthorized, stale,
+terminal, cross-tenant, and absent locators therefore expose neither content nor an existence oracle.
+
 Browser restart recovery can use the smaller exact locator without cached graph or process context:
 
 ```http
@@ -143,7 +166,9 @@ return `nodeCounts: []`, so they disclose no unrelated graph attention.
 
 Each attention item carries only task and durable context identities, lifecycle and timer values,
 the pinned presentation, its three pinned byte limits, and the actions currently available to the
-caller. It omits request payload and attributes, requester and responder authority, response schema
+caller. An authorized exact-task detail may additionally carry the pinned inert review presentation.
+Every collection item omits it. All projections omit every other request payload and attribute,
+requester and responder authority, response schema
 and bytes, comments and actors, handler state, continuation bytes, and credentials.
 
 The embedded decision route is:
@@ -177,6 +202,26 @@ registration behavior again, and routes the selected outcome. Downstream payload
 ID, generation, disposition, schema metadata, and—only for `RESOLVED`—the validated response value.
 The traversal retains the original requester's execution identity; the responder is audit identity,
 not replacement execution authority.
+
+## Administrative inventory and reconciliation
+
+`GET /v1/admin/human-tasks` is separate from the responder inbox. It requires the
+`ravenroot.human-task.admin` scope and a tenant-admin or platform-admin role, pages at no more than
+100 rows, and accepts `tenant`, `taskId`, `status`, `deploymentId`, `graphVersion`,
+`processInstanceId`, `traversalId`, `nodeId`, `classification`, `createdBefore`, `expiresBefore`,
+`cursor`, and `limit`. A tenant administrator remains confined to their tenant; a platform
+administrator may select another tenant. Rows classify work as `ACTIONABLE`, `TERMINAL`,
+`ORPHANED`, or `NON_RESUMABLE` and report only lifecycle identities, states, deadlines, and task
+timer disposition. They never include request or response payloads, continuation bytes, credentials,
+responder requirements, or comments.
+
+`POST /v1/admin/human-tasks/purge` accepts those selectors plus `dryRun` (default `true`) and `mode`.
+It requires an `Idempotency-Key` header and refuses an unfiltered operation. `CANCEL` uses ordinary
+task cancellation and re-entry semantics. `FORCE_ABANDON` is for inconsistent or orphaned work: it
+atomically closes the task and handler, cancels both task timers, terminally cancels any remaining
+owning traversal/process work, publishes `HUMAN_TASK_ABANDONED`, and creates no re-entry. Both modes
+return a per-item outcome; dry run returns the exact bounded candidate set and planned transition
+without changing state. Terminal retained history is not deleted by either mode.
 
 ## What this is not
 

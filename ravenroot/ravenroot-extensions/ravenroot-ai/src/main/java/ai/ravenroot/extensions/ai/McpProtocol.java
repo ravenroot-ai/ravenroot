@@ -134,10 +134,15 @@ final class McpProtocol {
      *     states for the model endpoint, applied to the other far end
      */
     static PayloadValue.MapValue readResult(byte[] body, String contentType, int maxResponseBytes) {
+        return readResult(body, contentType, maxResponseBytes, 10_000);
+    }
+
+    static PayloadValue.MapValue readResult(byte[] body, String contentType, int maxResponseBytes,
+                                            int maximumCollectionSize) {
         if (body.length > maxResponseBytes) {
             throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_TOO_LARGE);
         }
-        PayloadValue parsed = parse(body, contentType, maxResponseBytes);
+        PayloadValue parsed = parse(body, contentType, maxResponseBytes, maximumCollectionSize);
         if (!(parsed instanceof PayloadValue.MapValue root)) {
             throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_UNREADABLE);
         }
@@ -168,8 +173,16 @@ final class McpProtocol {
     }
 
     static List<Announced> readTools(PayloadValue.MapValue result, long maximumOutputBytes) {
+        return readTools(result, maximumOutputBytes, Integer.MAX_VALUE);
+    }
+
+    static List<Announced> readTools(PayloadValue.MapValue result, long maximumOutputBytes,
+                                     int maximumTools) {
         if (!(result.entries().get("tools") instanceof PayloadValue.ListValue list)) {
             throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_UNREADABLE);
+        }
+        if (list.values().size() > maximumTools) {
+            throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_TOO_LARGE);
         }
         var announced = new ArrayList<Announced>(list.values().size());
         for (PayloadValue element : list.values()) {
@@ -270,14 +283,18 @@ final class McpProtocol {
         }
     }
 
-    private static PayloadValue parse(byte[] body, String contentType, int maxResponseBytes) {
+    private static PayloadValue parse(byte[] body, String contentType, int maxResponseBytes,
+                                      int maximumCollectionSize) {
         byte[] document = contentType != null && contentType.toLowerCase(java.util.Locale.ROOT)
                 .contains("text/event-stream")
                 ? eventStreamPayload(body)
                 : body;
         try {
+            int collections = Math.max(10_000, maximumCollectionSize);
+            int values = (int) Math.min(PayloadLimits.HARD_MAX_VALUE_COUNT,
+                    Math.max(200_000L, (long) collections * 4 + 1_000));
             return PayloadJson.read(document, new PayloadLimits(Math.max(1, maxResponseBytes), 48,
-                    10_000, 200_000, Math.max(1, maxResponseBytes / 2), 256));
+                    collections, values, Math.max(1, maxResponseBytes / 2), 256));
         } catch (RuntimeException unreadable) {
             throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_UNREADABLE);
         }

@@ -12,7 +12,7 @@
 
     <artifactId>ravenroot-persistence-sqlite</artifactId>
     <name>Ravenroot SQLite Execution Store</name>
-    <description>Durable single-host SQLite/WAL adapter for the ADR 0010 execution-store port. Not included in the standalone server or the default distribution; an adopter must add this module and wire it explicitly to use it.</description>
+    <description>Durable single-host SQLite/WAL adapter for the ADR 0010 execution-store port. Included in the standalone server and the default distribution, where it is the default store (RAVENROOT_EXECUTION_STORE=sqlite).</description>
 
     <dependencies>
         <dependency>

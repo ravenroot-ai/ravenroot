@@ -33,13 +33,22 @@ async function openLayoutMenu(page) {
 
 async function arrange(page, label) {
   await openLayoutMenu(page);
-  await page.getByRole('menuitem', { name: label, exact: true }).click();
+  await page.locator(`[data-command-id="layout.arrange.${arrangementCommandIds[label]}"]`).click();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
 }
 
 const positions = page => page.evaluate(() => Object.fromEntries(
   window.cy.nodes().map(node => [node.id(), { x: node.position('x'), y: node.position('y') }]),
 ));
+
+const arrangementCommandIds = Object.freeze({
+  'Arrange — Hierarchical': 'hierarchical',
+  'Arrange — Flow': 'flow',
+  'Arrange — Organic': 'organic',
+  'Keep positions': 'keep',
+  'Arrange — Hierarchical (new)': 'hierarchical-new',
+  'Arrange — Layered (top-down)': 'layered-down',
+});
 
 const parallelEdgeSnapshot = page => page.evaluate(() => ['parallel-0', 'parallel-1', 'parallel-2'].map(id => {
   const edge = window.cy.getElementById(id);
@@ -95,7 +104,7 @@ test.describe('Design arrangements', () => {
     await page.getByRole('menuitemradio', { name: 'Monitoring' }).click();
     await openLayoutMenu(page);
     for (const label of ['Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions']) {
-      await expect(page.getByRole('menuitem', { name: label, exact: true }))
+      await expect(page.locator(`[data-command-id="layout.arrange.${arrangementCommandIds[label]}"]`))
         .toHaveAttribute('aria-disabled', 'true');
     }
   });
@@ -148,7 +157,10 @@ test.describe('Design arrangements', () => {
           positions: Object.fromEntries(window.cy.nodes().map(node => [node.id(), node.position()])),
           layoutMode: window.ravenroot.activeDocument().layoutMode,
           renderMode: window.ravenroot.activeDocument().renderMode,
-          graph: JSON.stringify(window.ravenroot.activeDocument().graph),
+          graph: JSON.stringify({
+            nodes: window.ravenroot.activeDocument().graph.nodes,
+            edges: window.ravenroot.activeDocument().graph.edges,
+          }),
           depth: window.ravenroot.activeDocument().history.depth(),
           dirty: window.ravenroot.activeDocument().history.isDirty(),
         }));
@@ -158,10 +170,17 @@ test.describe('Design arrangements', () => {
           positions: Object.fromEntries(window.cy.nodes().map(node => [node.id(), node.position()])),
           layoutMode: window.ravenroot.activeDocument().layoutMode,
           renderMode: window.ravenroot.activeDocument().renderMode,
-          graph: JSON.stringify(window.ravenroot.activeDocument().graph),
+          graph: JSON.stringify({
+            nodes: window.ravenroot.activeDocument().graph.nodes,
+            edges: window.ravenroot.activeDocument().graph.edges,
+          }),
           depth: window.ravenroot.activeDocument().history.depth(),
           dirty: window.ravenroot.activeDocument().history.isDirty(),
         }))).toEqual(keepInvariant);
+        expect(await page.evaluate(() => ({
+          choice: window.ravenroot.activeDocument().designArrangement,
+          stored: window.ravenroot.activeDocument().graph.graphProperties['ravenroot.designArrangement'],
+        }))).toEqual({ choice: 'keep', stored: 'keep' });
         expect(await visualEdgeSnapshot(page)).toEqual(keepRoutes);
         await page.screenshot({ path: '/tmp/ravenroot-648-dense-hierarchical.png', fullPage: true });
         await page.evaluate(() => {
@@ -254,5 +273,60 @@ test.describe('Design arrangements', () => {
       .toBe('Autosaved before arrangement');
     await page.locator('#btn-undo').click();
     expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n5.name)).toBe('Node 5');
+  });
+
+  test('restores the exact Arrange choice across document, render, and reload lifecycles', async ({ page }) => {
+    await page.route('**/v1/configuration', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
+        workspace: { tenantId: 'arrangement-tenant' } }),
+    }));
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().writable)).toBe(true);
+    await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'arranged.graphml'), denseGraphMl());
+
+    await arrange(page, 'Arrange — Flow');
+    const firstId = await page.evaluate(() => window.ravenroot.activeDocument().id);
+    const arranged = await positions(page);
+    await openLayoutMenu(page);
+    await expect(page.locator('[data-command-id="layout.arrange.flow"]'))
+      .toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+
+    const secondId = await page.evaluate(() => window.ravenroot.openDocument({ name: 'second.graphml' }));
+    await page.evaluate(id => window.ravenroot.activateDocument(id), firstId);
+    expect(await page.evaluate(() => {
+      const owner = window.ravenroot.activeDocument();
+      return [owner.designArrangement, owner.layoutMode];
+    })).toEqual(['flow', 'dagre']);
+
+    await page.locator('#btn-monitoring').click();
+    await expect(page.locator('.doc-elastic-host.active')).toBeVisible();
+    await page.locator('#btn-design').click();
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
+    expect(await page.evaluate(() => {
+      const owner = window.ravenroot.activeDocument();
+      return [owner.renderMode, owner.designArrangement, owner.layoutMode];
+    })).toEqual(['design', 'flow', 'dagre']);
+
+    const afterLifecycle = await positions(page);
+    for (const [id, expected] of Object.entries(arranged)) {
+      expect(Math.abs(afterLifecycle[id].x - expected.x)).toBeLessThan(2);
+      expect(Math.abs(afterLifecycle[id].y - expected.y)).toBeLessThan(2);
+    }
+    await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().writable)).toBe(true);
+    expect(await page.evaluate(() => ({
+      active: window.ravenroot.activeDocument().id,
+      documents: window.ravenroot.documents().map(owner => owner.id),
+      choice: window.ravenroot.activeDocument().designArrangement,
+      layout: window.ravenroot.activeDocument().layoutMode,
+    }))).toEqual({ active: firstId, documents: [firstId, secondId], choice: 'flow', layout: 'dagre' });
+    await openLayoutMenu(page);
+    await expect(page.locator('[data-command-id="layout.arrange.flow"]'))
+      .toHaveAttribute('aria-checked', 'true');
+    await page.screenshot({ path: test.info().outputPath('restored-design-arrangement.png'), fullPage: true });
   });
 });

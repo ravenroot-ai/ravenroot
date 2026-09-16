@@ -44,22 +44,27 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
     /** Prefix of the one variable family this class reads. The suffix is {@code hex(profileName)}. */
     public static final String VARIABLE_PREFIX = "RAVENROOT_LLM_PROFILE_";
 
-    private static final int MAX_PROFILE_BYTES = 8 * 1024;
-    private static final PayloadLimits LIMITS = new PayloadLimits(MAX_PROFILE_BYTES, 8, 32, 256, 2048, 64);
     private static final Set<String> FIELDS = Set.of("endpoint", "model", "credentialBindingId",
-            "credentialReference", "timeoutMs", "maxResponseBytes", "maxConcurrency",
+            "credentialReference", "timeoutMs", "maxRequestBytes", "maxResponseBytes", "maxConcurrency",
             "systemPreamble");
     /** Same ASCII mask every other profile resolver applies before deriving a variable name. */
     private static final String NAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
 
     private final Map<String, String> environment;
+    private final AgentOperationalConfiguration policy;
 
     public EnvironmentLlmProfileResolver() {
-        this(System.getenv());
+        this(System.getenv(), AgentOperationalConfiguration.fromEnvironment(System.getenv()));
     }
 
     EnvironmentLlmProfileResolver(Map<String, String> environment) {
+        this(environment, AgentOperationalConfiguration.defaults());
+    }
+
+    EnvironmentLlmProfileResolver(Map<String, String> environment,
+                                  AgentOperationalConfiguration policy) {
         this.environment = Map.copyOf(environment);
+        this.policy = java.util.Objects.requireNonNull(policy, "policy");
     }
 
     /** The exact variable an operator must set to declare {@code profileName}. */
@@ -74,7 +79,8 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
         }
         try {
             String encoded = environment.get(environmentVariableName(profileName));
-            if (encoded == null || encoded.isBlank() || encoded.length() > MAX_PROFILE_BYTES * 2) {
+            if (encoded == null || encoded.isBlank()
+                    || encoded.length() > (long) policy.maxLlmProfileBytes() * 2) {
                 return Optional.empty();
             }
             byte[] json = Base64.getDecoder().decode(encoded);
@@ -84,7 +90,8 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
             if (!Base64.getEncoder().encodeToString(json).equals(encoded)) {
                 return Optional.empty();
             }
-            Object read = PayloadJson.read(json, LIMITS).toJava();
+            Object read = PayloadJson.read(json, new PayloadLimits(policy.maxLlmProfileBytes(), 8,
+                    32, 256, policy.maxLlmProfileBytes(), 64)).toJava();
             if (!(read instanceof Map<?, ?> raw)) {
                 return Optional.empty();
             }
@@ -99,14 +106,23 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
             Optional<OutboundCredentialBinding> credential = bindingId.isEmpty() && reference.isEmpty()
                     ? Optional.empty()
                     : Optional.of(new OutboundCredentialBinding(bindingId, reference));
+            int timeoutMs = integer(root.get("timeoutMs"), policy.defaultLlmTimeoutMs());
+            int maxRequestBytes = integer(root.get("maxRequestBytes"),
+                    policy.defaultLlmRequestBytes());
+            int maxResponseBytes = integer(root.get("maxResponseBytes"),
+                    policy.defaultLlmResponseBytes());
+            int maxConcurrency = integer(root.get("maxConcurrency"), policy.defaultLlmConcurrency());
+            String systemPreamble = text(root.get("systemPreamble"), "");
+            atMost("timeoutMs", timeoutMs, policy.maxLlmTimeoutMs());
+            atMost("maxRequestBytes", maxRequestBytes, policy.maxLlmRequestBytes());
+            atMost("maxResponseBytes", maxResponseBytes, policy.maxLlmResponseBytes());
+            atMost("maxConcurrency", maxConcurrency, policy.maxLlmConcurrency());
+            atMost("systemPreamble", systemPreamble.length(), policy.maxSystemPreambleChars());
             return Optional.of(new LlmProfile(profileName,
                     new URI(text(root.get("endpoint"), null)),
                     text(root.get("model"), null),
                     credential,
-                    integer(root.get("timeoutMs"), 60_000),
-                    integer(root.get("maxResponseBytes"), LlmProfile.HARD_MAX_RESPONSE_BYTES),
-                    integer(root.get("maxConcurrency"), 4),
-                    text(root.get("systemPreamble"), "")));
+                    timeoutMs, maxRequestBytes, maxResponseBytes, maxConcurrency, systemPreamble));
         } catch (RuntimeException | java.net.URISyntaxException invalid) {
             return Optional.empty();
         }
@@ -125,7 +141,7 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
             }
             return defaultValue;
         }
-        if (!(value instanceof String text) || text.length() > 2048) {
+        if (!(value instanceof String text)) {
             throw new IllegalArgumentException("text");
         }
         return text.strip();
@@ -139,5 +155,9 @@ public final class EnvironmentLlmProfileResolver implements LlmProfileResolver {
             throw new IllegalArgumentException("integer");
         }
         return number.intValue();
+    }
+
+    private static void atMost(String field, int value, int ceiling) {
+        if (value > ceiling) throw new IllegalArgumentException(field);
     }
 }

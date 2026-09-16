@@ -1,10 +1,12 @@
 package ai.ravenroot.server;
 
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyGroupDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,5 +28,23 @@ class CatalogPropertyBoundsProjectionTest {
         json = (String) encoder.invoke(null, number);
         assertTrue(json.contains("\"minimumValue\":\"1\""), json);
         assertTrue(json.contains("\"maximumValue\":\"5184000\""), json);
+    }
+
+    @Test
+    void catalogJsonPublishesAtomicDynamicPropertyGroups() throws Exception {
+        var group = new NodePropertyGroupDescriptor("skills", "Skills", "Ordered skills.", List.of(
+                NodePropertyDescriptor.required("name", "Name", NodePropertyType.STRING, "Name."),
+                NodePropertyDescriptor.required("instructions", "Instructions", NodePropertyType.TEXT,
+                        "Body.")));
+        Method encoder = RavenrootServer.class.getDeclaredMethod("nodePropertyGroupJson",
+                NodePropertyGroupDescriptor.class);
+        encoder.setAccessible(true);
+
+        String json = (String) encoder.invoke(null, group);
+
+        assertTrue(json.contains("\"name\":\"skills\""), json);
+        assertTrue(json.contains("\"indexStart\":1,\"contiguous\":true"), json);
+        assertTrue(json.contains("\"fields\":[{\"name\":\"name\""), json);
+        assertTrue(json.contains("\"name\":\"instructions\""), json);
     }
 }

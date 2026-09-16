@@ -19,7 +19,21 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
                                   Duration expiryDelay,
                                   HumanTaskReentryMapping reentryMapping,
                                   HumanTaskExecutionLimits executionLimits,
-                                  HumanTaskConfirmationPresentation confirmationPresentation) {
+                                  HumanTaskConfirmationPresentation confirmationPresentation,
+                                  HumanTaskReviewDefinition reviewDefinition) {
+    /** Compatibility constructor retaining the definition shape before review presentations. */
+    public HumanTaskDefinition(HumanTaskMetadata metadata,
+                               HumanTaskResponseSchema responseSchema,
+                               HandlerAuthorization responderRequirements,
+                               Optional<Duration> escalationDelay,
+                               Duration expiryDelay,
+                               HumanTaskReentryMapping reentryMapping,
+                               HumanTaskExecutionLimits executionLimits,
+                               HumanTaskConfirmationPresentation confirmationPresentation) {
+        this(metadata, responseSchema, responderRequirements, escalationDelay, expiryDelay,
+                reentryMapping, executionLimits, confirmationPresentation,
+                HumanTaskReviewDefinition.none());
+    }
     /** Compatibility constructor using the legacy response and retry budgets. */
     public HumanTaskDefinition(HumanTaskMetadata metadata,
                                HumanTaskResponseSchema responseSchema,
@@ -29,7 +43,7 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
                                HumanTaskReentryMapping reentryMapping) {
         this(metadata, responseSchema, responderRequirements, escalationDelay, expiryDelay,
                 reentryMapping, HumanTaskExecutionLimits.legacy(responseSchema.maxBytes()),
-                HumanTaskConfirmationPresentation.none());
+                HumanTaskConfirmationPresentation.none(), HumanTaskReviewDefinition.none());
     }
 
     /** Compatibility constructor retaining execution limits before embedded confirmations. */
@@ -58,6 +72,10 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
         executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
         confirmationPresentation = Objects.requireNonNull(confirmationPresentation,
                 "confirmationPresentation");
+        reviewDefinition = Objects.requireNonNull(reviewDefinition, "reviewDefinition");
+        if (reviewDefinition.version() != 0 && !confirmationPresentation.embedded()) {
+            throw new IllegalArgumentException("review presentation requires embedded confirmation");
+        }
         if (executionLimits.responsePayload().maxEncodedBytes() != responseSchema.maxBytes()) {
             throw new IllegalArgumentException(
                     "response payload encoded-byte limit must match response schema maxBytes");

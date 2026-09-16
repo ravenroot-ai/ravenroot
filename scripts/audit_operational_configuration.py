@@ -8347,7 +8347,14 @@ PROGRAM_GITHUB_SHARED_METHODS = {'core': ['DefaultRavenrootApplication',
  'api': ['RavenrootApplication', ['programAuthoringLimits']],
  'ui': ['', ['currentProgramAuthoringLimits', 'ensureProgramGraphReady']]}
 
-PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-00dc7c6b323744d9427e',
+# The four exact local-worker guard atoms belong to #423's trusted-local startup contract,
+# not the program/GitHub settings family. The reviewed run-method digest still seals their body;
+# new or changed atoms cannot inherit these exclusions. Their inventory classifications remain mandatory.
+PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
+ 'oc-1450a0deaf3d5a2d2865',
+ 'oc-83cd267a603bc543e1de',
+ 'oc-7472c211aa6980103e4b',
+ 'oc-00dc7c6b323744d9427e',
  'oc-107e73202ff972e53169',
  'oc-20f796f0e15a1c389586',
  'oc-23f50ddca7ea65fc2aec',

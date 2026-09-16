@@ -63,6 +63,7 @@ def make_layout(
     predicates=None,
     subject_version: str | None = None,
     statement_predicate_type: str | None = None,
+    statement_type: str = "https://in-toto.io/Statement/v1",
 ) -> str:
     predicates = predicates or {
         "https://spdx.dev/Document",
@@ -89,7 +90,7 @@ def make_layout(
         add_descriptor(
             root,
             {
-                "_type": "https://in-toto.io/Statement/v0.1",
+                "_type": statement_type,
                 "predicateType": statement_predicate_type or predicate,
                 "subject": [subject],
                 "predicate": {},
@@ -176,6 +177,23 @@ class OciRegistryTest(unittest.TestCase):
             make_layout(layout, subject_version="9.9.9")
             with self.assertRaisesRegex(OciRegistryError, "wrong image subject"):
                 validate_local(layout, VERSION, COMMIT)
+
+    def test_rejects_obsolete_or_unknown_statement_types(self):
+        for statement_type in (
+            "https://in-toto.io/Statement/v0.1",
+            "https://example.invalid/Statement/v9",
+        ):
+            with (
+                self.subTest(statement_type=statement_type),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                layout = Path(directory)
+                make_layout(layout, statement_type=statement_type)
+                with self.assertRaisesRegex(
+                    OciRegistryError,
+                    r"statement type must be 'https://in-toto.io/Statement/v1'.*found",
+                ):
+                    validate_local(layout, VERSION, COMMIT)
 
     def test_only_authoritative_manifest_absence_allows_publication(self):
         authoritative = (

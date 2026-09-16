@@ -19,6 +19,12 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+import importlib.util
+
+_endpoint_spec = importlib.util.spec_from_file_location("model_protocol_endpoint", Path(__file__).with_name("model_protocol_endpoint.py"))
+_endpoint_module = importlib.util.module_from_spec(_endpoint_spec)
+_endpoint_spec.loader.exec_module(_endpoint_module)
+ModelProtocolEndpoint = _endpoint_module.ModelProtocolEndpoint
 
 ROOT = Path(__file__).resolve().parents[2]
 # Official Python 3.13.15 / Alpine 3.24, linux/amd64; immutable manifest inspected during review.
@@ -39,9 +45,8 @@ def prerequisites(environment: dict[str, str]) -> Path:
     for tool in TOOLS:
         if shutil.which(tool) is None:
             raise RuntimeError(f"quota acceptance prerequisite missing: {tool}; no packages are installed implicitly")
-    configured = environment.get("RAVENROOT_RUNNER_ACCEPTANCE_CONFIG", "")
-    if not configured or not Path(configured).is_file():
-        raise RuntimeError("real model acceptance requires RAVENROOT_RUNNER_ACCEPTANCE_CONFIG: operator worker JSON with an approved endpoint, model and credential reference; no deterministic substitute is allowed")
+    if environment.get("RAVENROOT_RUNNER_ACCEPTANCE_CONFIG"):
+        raise RuntimeError("CI acceptance is secretless: external model configuration is forbidden")
     parent = Path(environment["RUNNER_TEMP"]).resolve(strict=True)
     if not parent.is_dir() or parent == Path("/"):
         raise RuntimeError("an existing dedicated runner temporary directory is required")
@@ -141,7 +146,7 @@ def verify_report(path: Path) -> None:
             or cases[0].get("classname") != TEST_CLASS
             or cases[0].get("name") != TEST + "(Path)"
             or any(child.tag not in ("system-out", "system-err") for child in cases[0])):
-        raise RuntimeError("the real-model explicit Workspace acceptance did not execute successfully exactly once")
+        raise RuntimeError("the hermetic model-protocol explicit Workspace acceptance did not execute successfully exactly once")
 
 
 def run() -> None:
@@ -200,14 +205,20 @@ def run() -> None:
         report = ROOT / "ravenroot/ravenroot-core/target/surefire-reports/TEST-ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest.xml"
         if report.exists():
             report.unlink()  # Exact fixture report only; a stale green report is not acceptance.
-        subprocess.run(["mvn", "-B", "--no-transfer-progress", "-f", str(ROOT / "ravenroot/pom.xml"),
+        with ModelProtocolEndpoint() as model:
+            config = directory / "hermetic-model.json"
+            config.write_text(json.dumps(model.configuration()), encoding="utf-8")
+            subprocess.run(["mvn", "-B", "--no-transfer-progress", "-f", str(ROOT / "ravenroot/pom.xml"),
                         "-pl", "ravenroot-core", "-am", "-Dtest=WorkspaceAgentRuntimeTest#" + TEST,
                         "-Dsurefire.failIfNoSpecifiedTests=false", "-Dravenroot.runner.testWritableImage=" + image,
-                        "-Dravenroot.runner.testAgentConfiguration=" + str(Path(environment["RAVENROOT_RUNNER_ACCEPTANCE_CONFIG"]).resolve()),
+                        "-Dravenroot.runner.testAgentConfiguration=" + str(config),
+                        "-Dravenroot.runner.testHermeticModel=true",
                         "-Dravenroot.runner.testDocker=" + str(Path(shutil.which("docker")).resolve()), "test"],
-                       check=True, timeout=900, env=environment)
+                           check=True, timeout=900, env=environment)
+            if model.requests == 0:
+                raise RuntimeError("production model gateway never called the hermetic endpoint")
         verify_report(report)
-        print("RUNNER_REAL_MODEL_EXPLICIT_WORKSPACE_ACCEPTANCE=passed", flush=True)
+        print("RUNNER_HERMETIC_MODEL_PROTOCOL_EXPLICIT_WORKSPACE_ACCEPTANCE=passed", flush=True)
     finally:
         # Never address the host's default daemon or perform a global Docker prune.
         if daemon is not None and daemon.poll() is None:

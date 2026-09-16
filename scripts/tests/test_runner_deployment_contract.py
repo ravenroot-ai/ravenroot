@@ -13,6 +13,38 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RunnerDeploymentContract(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required")
+    def test_trusted_local_overlay_has_one_loopback_port_and_in_process_worker_without_token(self):
+        environment = dict(os.environ, RAVENROOT_DOCKER_CLI_IMAGE="docker@sha256:" + "a" * 64,
+                RAVENROOT_LOCAL_RUNNER_DIR="/operator/local-runner", RAVENROOT_LOCAL_DOCKER_SOCKET="/var/run/dedicated-docker.sock",
+                RAVENROOT_LOCAL_DOCKER_GID="999", RAVENROOT_AUTH_MODE="disabled", RAVENROOT_HOST_BIND_ADDRESS="127.0.0.1")
+        result = subprocess.run(["docker", "compose", "-f", "compose.yaml", "-f", "deploy/dev/compose.runner.yaml",
+                                 "config", "--format", "json"], cwd=ROOT, env=environment, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        services = json.loads(result.stdout)["services"]
+        self.assertEqual({"ravenroot"}, set(services))
+        service = services["ravenroot"]
+        self.assertEqual("local-runner", service["build"]["target"])
+        self.assertEqual(1, len(service["ports"]))
+        self.assertEqual("127.0.0.1", service["ports"][0]["host_ip"])
+        self.assertEqual("/etc/ravenroot/local-runner/worker.json", service["environment"]["RAVENROOT_LOCAL_RUNNER_CONFIG"])
+        self.assertNotIn("RAVENROOT_AUTH_LOCAL_TOKEN", service["environment"])
+        self.assertNotIn("tokenFile", json.dumps(service))
+        self.assertTrue(service["read_only"])
+        self.assertEqual(["999"], service["group_add"])
+        self.assertEqual("5m0s", service["stop_grace_period"])
+        self.assertIn("/var/run/docker.sock", [volume["target"] for volume in service["volumes"]])
+
+    def test_required_native_ci_is_secretless_and_live_smoke_is_never_scheduled(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        block = workflow.split("  full-backend-tests:", 1)[1].split("\n  backend-test:", 1)[0]
+        self.assertIn("python3 scripts/fixtures/runner_quota_acceptance.py", block)
+        self.assertNotIn("RAVENROOT_RUNNER_ACCEPTANCE_CONFIG", block)
+        self.assertNotIn("continue-on-error", block)
+        self.assertNotIn("secrets.", block)
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            self.assertNotIn("runner_live_provider_smoke.py", path.read_text())
+
     def test_systemd_templates_supervise_independent_instances_and_stop_their_process_groups(self):
         units = {}
         for name, main in (("ravenroot-runner@.service", "RunnerWorkerMain"),

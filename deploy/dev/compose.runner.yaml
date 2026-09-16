@@ -1,0 +1,27 @@
+# Explicit trusted-host mode only. The worker lives in the server JVM, not on a public HTTP channel.
+services:
+  ravenroot:
+    image: ${RAVENROOT_LOCAL_RUNNER_IMAGE:-ravenroot:local-runner}
+    build:
+      target: local-runner
+      args:
+        DOCKER_CLI_IMAGE: ${RAVENROOT_DOCKER_CLI_IMAGE:?Set an operator-approved Docker CLI image@sha256 digest}
+    environment:
+      RAVENROOT_RUNNER_CONFIG: /etc/ravenroot/local-runner/control-plane.json
+      RAVENROOT_LOCAL_RUNNER_CONFIG: /etc/ravenroot/local-runner/worker.json
+    volumes:
+      - type: bind
+        source: ${RAVENROOT_LOCAL_RUNNER_DIR:-./.ravenroot-local/runner}
+        target: /etc/ravenroot/local-runner
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RAVENROOT_LOCAL_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false
+    group_add:
+      - ${RAVENROOT_LOCAL_DOCKER_GID:?service.sh resolves the approved local socket group}
+    # Must cover the configured HTTP drain plus worker/Workspace cleanup budget.
+    stop_grace_period: ${RAVENROOT_LOCAL_RUNNER_STOP_GRACE:-5m}

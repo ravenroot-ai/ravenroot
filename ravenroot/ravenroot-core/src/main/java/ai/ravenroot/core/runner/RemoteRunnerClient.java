@@ -9,7 +9,7 @@ import java.util.*;
 import java.util.function.Supplier;
 
 /** Designated remote-runner integration for protocol v1; credentials never enter an assignment. */
-public final class RemoteRunnerClient {
+public final class RemoteRunnerClient implements RunnerControlClient {
     private final URI endpoint;
     private final Supplier<String> token;
     private final HttpClient http;

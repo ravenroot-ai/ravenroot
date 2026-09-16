@@ -401,7 +401,14 @@ class WorkspaceAgentRuntimeTest {
                         Duration.ofSeconds(30), Duration.ofSeconds(30)))
                 .withAgentRuntime(ai.ravenroot.core.runner.RunnerAgentRuntime.fromConfiguration(
                         ai.ravenroot.core.runner.RunnerJson.map(config.get("agentRuntime")),
-                        new ai.ravenroot.core.security.EnvironmentCredentialResolver()));
+                        Boolean.getBoolean("ravenroot.runner.testHermeticModel")
+                                ? new ai.ravenroot.api.security.SecretProvider() {
+                                    public String id() { return "hermetic-no-secrets"; }
+                                    public Optional<ai.ravenroot.api.security.SecretValue> get(String reference) {
+                                        throw new AssertionError("hermetic acceptance may never resolve credentials");
+                                    }
+                                }
+                                : new ai.ravenroot.core.security.EnvironmentCredentialResolver()));
     }
 
     @Test void sequentialRunnerResultsResumeExactAttemptsAndExplicitCommandsAfterReopen(@TempDir Path directory) {

@@ -62,6 +62,7 @@ ROW_BOUNDARIES = {
     "RAVENROOT_RUNNER_SHARED_ARTIFACTS": "must equal `true` to attest one shared POSIX-locking artifact volume for the PostgreSQL runner-only coordinator topology; unset refuses that executable",
     "RAVENROOT_RUNNER_INSTANCE": "operator-supplied stable worker identity replaces `{instance}` in registration.runnerId and tokenFile; absent is valid only when neither field uses that placeholder",
     "RAVENROOT_RUNNER_CONFIG": "unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart",
+    "RAVENROOT_LOCAL_RUNNER_CONFIG": "unset disables the private supervised local worker; otherwise a closed operator JSON file for tenant local, approved registration, runtime images and budgets; no endpoint/token fields; requires exact 127.0.0.1 exposure, disabled local authentication and durable governed control plane",
     "RAVENROOT_MATRIX_CONFIG": (
         "canonical padded Base64 of strict JSON containing bounded `store` settings and a nonempty "
         "tenant/profile map; unset or malformed configuration is tolerated while the Matrix package is "
@@ -171,7 +172,7 @@ def undocumented_variables() -> list[str]:
 
 def group(name: str) -> str:
     if name in {"RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
-                "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE"}:
+                "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE", "RAVENROOT_LOCAL_RUNNER_CONFIG"}:
         return "runner"
     if name == "RAVENROOT_RUNNER_CONFIG":
         return "agent"

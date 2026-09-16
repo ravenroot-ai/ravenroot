@@ -427,6 +427,7 @@ Detailed contract: [Governed runner coordination](../operator-guide/governed-run
 
 | Variable or family | Applicability and default boundary |
 |---|---|
+| `RAVENROOT_LOCAL_RUNNER_CONFIG` | unset disables the private supervised local worker; otherwise a closed operator JSON file for tenant local, approved registration, runtime images and budgets; no endpoint/token fields; requires exact 127.0.0.1 exposure, disabled local authentication and durable governed control plane |
 | `RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE` | positive integer HTTP executor queue capacity; unset defaults to `64`; coordinator startup only, independent of worker queues |
 | `RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS` | positive integer HTTP executor threads; unset defaults to `16`; coordinator startup only, independent of worker job capacity |
 | `RAVENROOT_RUNNER_INSTANCE` | operator-supplied stable worker identity replaces `{instance}` in registration.runnerId and tokenFile; absent is valid only when neither field uses that placeholder |

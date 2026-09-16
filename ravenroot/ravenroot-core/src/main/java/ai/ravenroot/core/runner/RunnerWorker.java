@@ -7,12 +7,13 @@ import java.util.concurrent.atomic.*;
 
 /** Operator-sized worker admission; durable control-plane fences authorize every execution. */
 public final class RunnerWorker implements AutoCloseable {
-    private final RemoteRunnerClient client;
+    private final RunnerControlClient client;
     private final RunnerDriver driver;
     private final RunnerWorkerConfiguration configuration;
     private final ScheduledExecutorService polling;
     private final ConcurrentMap<UUID, Slot> active = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean driverClosed = new AtomicBoolean();
     private final AtomicLong failures = new AtomicLong();
     private final RunnerTelemetry.Relay telemetry = new RunnerTelemetry.Relay();
     public RunnerTelemetry.Relay telemetry() { return telemetry; }
@@ -21,10 +22,10 @@ public final class RunnerWorker implements AutoCloseable {
         telemetry.activeJobs(active.size()); telemetry.workerCapacity(capacity(), availableJobs());
     }
     private String cursor;
-    public RunnerWorker(RemoteRunnerClient client, RunnerDriver driver) {
+    public RunnerWorker(RunnerControlClient client, RunnerDriver driver) {
         this(client, driver, RunnerWorkerConfiguration.defaults());
     }
-    public RunnerWorker(RemoteRunnerClient client, RunnerDriver driver, RunnerWorkerConfiguration configuration) {
+    public RunnerWorker(RunnerControlClient client, RunnerDriver driver, RunnerWorkerConfiguration configuration) {
         this.client = Objects.requireNonNull(client); this.driver = Objects.requireNonNull(driver);
         this.configuration = Objects.requireNonNull(configuration);
         polling = Executors.newScheduledThreadPool(Math.addExact(configuration.maxConcurrentJobs(), 1),
@@ -126,8 +127,11 @@ public final class RunnerWorker implements AutoCloseable {
     public int activeJobs() { return active.size(); }
     public int capacity() { return configuration.maxConcurrentJobs(); }
     public int availableJobs() { return Math.max(0, capacity() - activeJobs()); }
+    /** Stops new dispatch before the owning host durably fences and quiesces retained Workspaces. */
+    public synchronized void stopAdmissions() { closed.set(true); polling.shutdownNow(); }
     @Override public void close() {
-        closed.set(true); polling.shutdownNow();
+        stopAdmissions();
+        if (!driverClosed.compareAndSet(false, true)) return;
         var stops = new ArrayList<CompletableFuture<Void>>();
         for (var slot : active.values()) try { stops.add(driver.cancel(slot.assignment).toCompletableFuture()); }
         catch (RuntimeException refused) { failure(); }

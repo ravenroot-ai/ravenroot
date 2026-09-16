@@ -69,6 +69,8 @@
       url: /integrator-guide/ai-programs.html
     - title: Governed runner protocol
       url: /integrator-guide/runner-protocol.html
+    - title: Workspace acceptance evidence
+      url: /integrator-guide/workspace-acceptance.html
 
 - title: Architecture and security
   items:

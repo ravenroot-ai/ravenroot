@@ -94,7 +94,11 @@ supervisor. It consumes the resolved definition, command, effective authority, s
 only the supervisor resolves an approved model profile and credential reference. The container has
 no model credential or network. Model responses must include token usage; tool and model boundaries
 check cancellation and finite budgets. The final structured outcome/payload becomes the direct
-execution result. The deterministic fixture is never real-model acceptance evidence.
+execution result. The deterministic reference runtime is not Agent acceptance evidence. Secretless
+native CI instead connects this unchanged runtime and production gateway to a controlled loopback
+model-protocol endpoint: it proposes tools, while the real runtime performs their native effects.
+This proves protocol/lifecycle behavior, not trained-model inference; live inference is owner-only
+manual local smoke and is never a CI/release prerequisite.
 
 ## Commands and graph routing
 

@@ -27,7 +27,42 @@ For Compose, combine the root `compose.yaml` with the
 [runner override](../examples/governed-runner/compose.override.yaml), supplying the operator-owned
 configuration file and OIDC settings. Change `artifactDirectory` in that mounted file to
 `/opt/ravenroot/data/runner-artifacts`, under the existing control-plane data volume. Do not mount
-the Docker socket in the control plane. The worker runs separately on its designated trusted host.
+the Docker socket in a production control plane. The worker runs separately on its designated trusted host.
+
+### Tokenless trusted-local service
+
+For a single trusted developer host, `./service.sh start --runner` and
+`./service.sh restart --runner` supervise both control plane and worker in one JVM. No bearer token
+is entered, generated or hidden. The UI is structurally USER; the worker holds a private in-process
+WORKLOAD capability. No public route/header can select that identity. Production OIDC is unchanged.
+Only host **127.0.0.1** publication is accepted; an extra/wildcard port fails before startup.
+
+Prepare operator-owned `.ravenroot-local/runner/control-plane.json` and `worker.json` once:
+
+1. Adapt the example control-plane catalog to tenant `local` (replace the `example-tenant` key),
+   set `runnerIssuer` to `urn:ravenroot:local-worker`, and place `artifactDirectory` at
+   `/opt/ravenroot/data/runner-artifacts`. Retain exact approved definitions/profiles/registration.
+2. Adapt the worker example to `tenantId: local`, **remove** `endpoint` and `tokenFile`, use
+   `/usr/bin/docker` and `/opt/ravenroot/data/runner-state`, and install an immutable Agent image ID.
+   Keep the exact catalog registration. Configure an approved model profile and finite budgets;
+   a secretless local endpoint needs no `credentialReference`. Model credentials, if explicitly
+   selected for a manual local provider, remain separate operator secret-reference bindings.
+3. Set `RAVENROOT_DOCKER_CLI_IMAGE` to an approved `docker@sha256:<digest>` CLI image. Set
+   `RAVENROOT_LOCAL_DOCKER_SOCKET` only if the dedicated daemon uses a nondefault Unix socket.
+   `service.sh` derives its group and builds the explicit `local-runner` target. The ordinary
+   image does not contain that CLI or receive the socket. Existing `-si`/`-sb`/`-st` choices apply.
+
+Then run `./service.sh start --runner`. Configuring a model/approved runtime is separate from
+authenticating the local worker; no user token management is involved. The explicit local mode
+trusts this server host with its dedicated daemon, never an Agent container. Linux Landlock/seccomp
+and effective writable quotas remain mandatory; macOS/nono is not required or a substitute.
+
+`./service.sh stop` also stops the supervised worker. Shutdown first stops admission, durably
+requests sticky stops for owned active **and idle retained** Workspaces, and acknowledges only
+confirmed physical quiescence before closing storage. Restart preserves database/artifacts/receipts
+and those stops; it does not silently reopen a stopped resource. A crash or cleanup failure retains
+recovery obligations. Configure `RAVENROOT_LOCAL_RUNNER_STOP_GRACE` (default `5m`) to cover the HTTP
+drain and your configured Workspace cleanup budget. Do not force-kill or discard worker state.
 
 Definitions are immutable by tenant, name and version. A changed body needs a new version.
 Approval changes use `expectedRevision`; a stale editor receives a conflict. Bootstrap creates
@@ -267,7 +302,7 @@ is removed by normal terminal retention. The journal remains bounded audit histo
 
 ## Verification
 
-The documented sample deliberately fails its first unit test, applies `remediationFiles`, then
+The documented sample deliberately fails its first unit test, uses the Agent's write tool to remediate, then
 passes testing and review. It includes an explicit planner → reader → planner call/return using
 `read`, `answered`, and `resume`, with a new caller invocation and no waiting caller worker.
 Its planner, test and remediation nodes use explicit `joinPolicy=any` for the alternative loop
@@ -297,11 +332,14 @@ installs packages or changes the default Docker daemon. It creates a bounded 4 G
 formats only that file as XFS with project quotas, and starts a separate classic-overlay2 daemon
 with isolated data/state/socket/PID paths, no bridge and no firewall management. It builds the
 example from an immutable official Python image manifest, runs the production quota probe and
-the exact model-backed Workspace test, and rejects missing, skipped or failed test evidence. Set
-`RAVENROOT_RUNNER_ACCEPTANCE_CONFIG` to an operator-supplied worker JSON file whose
-`agentRuntime.models.governed-model` has the approved endpoint, model and credential reference
-described above. The CI supervisor must receive that referenced credential; neither an absent
-profile nor a deterministic endpoint is acceptance evidence. The test also starts the same Agent
+the exact model-backed Workspace test, and rejects missing, skipped or failed test evidence.
+The fixture starts its own bounded 127.0.0.1 chat-completions endpoint, generates a secretless profile,
+and uses a secret provider that throws on any attempted lookup. `RAVENROOT_RUNNER_ACCEPTANCE_CONFIG`
+is forbidden in this CI entry point. No live model endpoint or credential is accepted or required.
+The **hermetic model-protocol endpoint fixture** returns deterministic tool proposals, not final
+job reports: the unchanged production gateway and bounded Agent runtime execute real reads, writes,
+tests, results and remediation inside native containers. The endpoint has no Workspace/daemon access.
+This is protocol/lifecycle evidence, not trained-model inference. The test also starts the same Agent
 for independent processes, compares later-traversal session/container identities, and checks
 uncommitted filesystem sentinels and isolation. Teardown
 stops only its identified daemon, unmounts its filesystem and removes its own temporary directory.
@@ -309,6 +347,22 @@ Unsupported tooling, kernel, filesystem or quota behavior fails the job; it does
 an unbounded writable substrate. This fixture refuses local and self-hosted environments.
 Only a successful host-backed job is writable acceptance evidence; a passing fixture unit test
 or Docker's acceptance of a flag is not evidence of enforcement.
+
+Live-provider inference is a separate **owner-only local opt-in smoke**, never invoked by CI or a
+PR/merge/release gate:
+
+```sh
+python3 scripts/fixtures/runner_live_provider_smoke.py --owner-opt-in \
+  --worker-config /absolute/operator-worker.json --image sha256:<installed-agent-image-id>
+```
+
+Use an existing quota-enforcing Linux daemon and the approved `agentRuntime.models.governed-model`
+HTTPS endpoint, model, finite bounds and `credentialReference` described above. The owner supplies
+and attests that reference's authorized local binding; do not infer authorization from ambient
+credentials. The command refuses CI. Its absence never blocks contributors or merge. Optional local
+nono protection is additional only, never a replacement for the native Linux enforcement exercised
+by the mandatory secretless CI fixture. No real credentials or live provider may be added to required
+checks. See the [acceptance map](../integrator-guide/workspace-acceptance.md).
 Startup allows at most 60 seconds of monotonic elapsed time, including individual Docker probes
 (at most five seconds each). A successful CLI exit with server errors or empty server fields is
 not readiness. A live response using a different driver or data root fails immediately. Startup

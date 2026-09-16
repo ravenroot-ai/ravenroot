@@ -106,7 +106,8 @@ reservation alone does not free capacity. Preserve database, artifacts and worke
 ## Model and isolation boundary
 
 `Agent.Dockerfile` and `agent_runtime.py` provide the real model-backed bounded loop. The trusted
-worker selects an operator-approved HTTPS model profile and credential reference; credentials never
+worker selects an operator-approved HTTPS model profile and credential reference, or an explicitly
+approved secretless loopback model-protocol endpoint; credentials never
 enter the container. Model turns, tools, reported tokens, output, wall time and concurrency are finite.
 Missing token accounting or usage over the remaining budget is refused; reported usage enforcement
 does not claim that already billed provider tokens can be undone.
@@ -161,9 +162,43 @@ and a matching backup, never deletion of ownership rows.
 Shared-store tests cover independent Workspace stops/retention on all three adapters. Coordinator
 tests use real PostgreSQL for concurrent startup, claims, reports and incarnation fencing and prove
 unsafe routes absent. The existing full-server replica guard remains tested. Native Linux evidence
-additionally requires Landlock, quota-enforcing storage and a real model profile. Mock HTTP and
-deterministic reports prove conformance only; all thirteen issue #423 acceptance scenarios remain
-release gates and cannot be replaced by those fixtures.
+additionally requires Landlock/seccomp and quota-enforcing storage. Per owner clarification on
+issue #423 (comment 5704464414), automated evidence is mandatory, hermetic and secretless:
+`runner_quota_acceptance.py` starts a bounded loopback **model-protocol endpoint fixture** which
+returns deterministic chat completions and tool proposals. The production model gateway and
+unchanged bounded Agent runtime execute the actual turn/tool/result/remediation loop and native
+filesystem effects. The endpoint cannot access Workspaces or execute tools. This proves the runtime
+protocol and lifecycle, not trained-model inference. It never substitutes deterministic final job
+reports for the production runtime. All thirteen acceptance scenarios remain automated gates.
+
+Live-provider inference is a separate owner-only local opt-in smoke, never called by CI, required
+checks or release gates. No real credential, external model provider, offline weights, macOS or
+nono installation is a contributor prerequisite. Optional local nono protection cannot replace
+Linux Landlock/seccomp or XFS quota enforcement. Absence of owner smoke attestation never blocks merge.
+
+## Tokenless trusted-local composition
+
+`service.sh start --runner` and `restart --runner` explicitly compose one general server and an
+in-process supervised worker. Public loopback authentication remains USER. A fixed WORKLOAD
+RequestContext exists only in the host-created `LocalRunnerClient`, which directly invokes the same
+`AuthorizedRunnerControl` reference monitor. There is no worker listener, bearer token, hidden token,
+header-based identity switch or public bypass. Remote worker/OIDC composition is unchanged.
+
+Only exact IPv4 127.0.0.1 host publication is supported. Runtime validation additionally requires
+disabled local authentication and either that exact bind or the existing verified container-loopback
+contract; service.sh verifies the rendered single-port publication before any lifecycle effect.
+The local catalog and worker must share tenant `local`, exact preapproved registration and durable
+storage. Worker configuration rejects remote endpoint/token fields. This explicit host mode grants
+the server supervisor access to its dedicated Docker daemon; ordinary images/deployments do not gain
+that authority and Agent containers never receive it. Quota and Linux confinement checks remain
+mandatory, including on developer machines.
+
+Shutdown drains graph/HTTP admission and closes recovery before stopping worker admission. Every
+nonterminal retained Workspace owned by the local worker receives a durable sticky stop, including
+idle PER_WORKSPACE containers. Only physical driver quiescence permits the stopped acknowledgement;
+then the worker/driver closes before storage. A failure remains visible and retains stop/recovery
+obligations; it is not relabelled successful cleanup. Restart preserves the durable store, artifacts,
+receipts and sticky stops. Compose's operator shutdown grace must cover configured drain/cleanup time.
 
 ## Consequences
 

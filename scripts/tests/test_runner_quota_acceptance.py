@@ -215,13 +215,15 @@ class RunnerQuotaAcceptanceTest(unittest.TestCase):
             self.assertIn("/tmp/ravenroot-runner-quota-fixture/", value)
         self.assertRegex(fixture.BASE_IMAGE, r"^python@sha256:[0-9a-f]{64}$")
 
-    def test_missing_approved_model_configuration_is_not_skipped_or_replaced(self):
+    def test_secretless_configuration_is_mandatory_and_ambient_live_profile_is_refused(self):
         with patch.object(fixture.platform, "system", return_value="Linux"), \
                 patch.object(fixture.platform, "machine", return_value="x86_64"), \
                 patch.object(fixture.shutil, "which", return_value="/operator/tool"), \
-                patch.object(fixture.subprocess, "run") as command:
-            with self.assertRaisesRegex(RuntimeError, "no deterministic substitute"):
-                fixture.prerequisites({"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"})
+                patch.object(fixture.subprocess, "run") as command, tempfile.TemporaryDirectory() as directory:
+            environment = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_TEMP": directory}
+            self.assertEqual(fixture.prerequisites(environment), Path(directory).resolve())
+            with self.assertRaisesRegex(RuntimeError, "external model configuration is forbidden"):
+                fixture.prerequisites(dict(environment, RAVENROOT_RUNNER_ACCEPTANCE_CONFIG="/unused/live.json"))
             command.assert_not_called()
 
     def test_only_one_executed_green_model_backed_case_is_acceptance(self):

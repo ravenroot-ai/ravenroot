@@ -278,6 +278,7 @@ class WorkspaceAgentRuntimeTest {
                     if (!minimal && index == 4 && lifecycle == WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE) {
                         physicalExtraJobs.add(nativeLaterTraversalIsolation(directory, containerImage, registrations.getFirst(),
                                 definitions.stream().filter(value -> value.reference().name().equals("polaris")).findFirst().orElseThrow(),
+                                definitions.stream().filter(value -> value.reference().name().equals("tester")).findFirst().orElseThrow(),
                                 resource.observed("inspect", report.workspace().runtimeId(), report.workspace().checkpoint(), CLOCK.instant()),
                                 key, traversal, planSentinel));
                     }
@@ -317,7 +318,7 @@ class WorkspaceAgentRuntimeTest {
 
     /** Physical driver acceptance complements the persisted traversal/session and fleet contracts. */
     private UUID nativeLaterTraversalIsolation(Path directory, String image, RunnerRegistration registration,
-            AgentDefinition definition, WorkspaceResource original, ExecutionKey firstProcess,
+            AgentDefinition definition, AgentDefinition tester, WorkspaceResource original, ExecutionKey firstProcess,
             UUID firstTraversal, byte[] sentinel) throws Exception {
         var otherProcess = new ExecutionKey(firstProcess.tenantId(), UUID.randomUUID());
         var other = new WorkspaceResource(original.nodeId(), UUID.randomUUID(), original.profile(), registration.runnerId(),
@@ -352,20 +353,63 @@ class WorkspaceAgentRuntimeTest {
             assertEquals(other.runtimeId(), secondResult.workspace().runtimeId());
             assertArrayEquals(sentinel, nativeWorkspaceFile(directory, original.runtimeId(), "PLAN.md", true));
             assertNull(nativeWorkspaceFile(directory, other.runtimeId(), "PLAN.md", false));
-            var close = nativeAssignment(otherProcess, UUID.randomUUID(), lifecycle, "close", registration, other, "close");
-            foreignJobs.add(close.job().identity().runnerJobId());
-            assertEquals("closed", driver.execute(close).toCompletableFuture().get(120, java.util.concurrent.TimeUnit.SECONDS).outcome());
+            // Trusted fixture setup creates a bounded long-running test in the other disposable
+            // repository. Only the unchanged model gateway/Agent test tool may actually run it.
+            nativeDocker(directory, "exec", other.runtimeId(), "python3", "-c",
+                    "from pathlib import Path; Path('/workspace/test_hello.py').write_text('import unittest, time\\nclass StopProbe(unittest.TestCase):\\n    def test_wait(self): time.sleep(90)\\n')");
+            var testing = nativeAssignment(otherProcess, UUID.randomUUID(), tester, "test", registration, other, null);
+            foreignJobs.add(testing.job().identity().runnerJobId());
+            var activeTest = driver.execute(testing).toCompletableFuture();
+            long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+            while (!nativeDocker(directory, "top", other.runtimeId(), "-eo", "args").contains("-m unittest discover -v")) {
+                assertFalse(activeTest.isDone(), "the real Agent must launch its governed test child before cancellation");
+                assertTrue(System.nanoTime() < deadline, "the governed model/tool loop did not launch the native test child");
+                Thread.sleep(50);
+            }
+            var stopped = new RunnerAssignment(testing.protocolVersion(), testing.workspaceId(), testing.job(),
+                    other.request("abort", true, CLOCK.instant()), null);
+            driver.stopWorkspace(stopped).toCompletableFuture().get(30, java.util.concurrent.TimeUnit.SECONDS);
+            assertThrows(Exception.class, () -> activeTest.get(30, java.util.concurrent.TimeUnit.SECONDS),
+                    "a stopped native tool must not return a successful Agent result");
+            assertEquals("false", nativeDocker(directory, "inspect", "--format={{.State.Running}}", other.runtimeId()));
+            assertEquals("true", nativeDocker(directory, "inspect", "--format={{.State.Running}}", original.runtimeId()),
+                    "Workspace stop must not terminate the independent retained runtime");
+            assertArrayEquals(sentinel, nativeWorkspaceFile(directory, original.runtimeId(), "PLAN.md", true));
+            try (var restarted = sampleDriver(directory, registration, image)) {
+                restarted.stopWorkspace(stopped).toCompletableFuture().get(30, java.util.concurrent.TimeUnit.SECONDS);
+                var forbidden = nativeAssignment(otherProcess, UUID.randomUUID(), definition, "read", registration, other, null);
+                assertThrows(Exception.class, () -> restarted.execute(forbidden).toCompletableFuture().get(30, java.util.concurrent.TimeUnit.SECONDS),
+                        "durable physical stop fences later dispatch even after worker restart");
+            }
             driver.release(new RunnerWorkspaceRelease(1, otherProcess, other.workspaceId(), registration.runnerId(),
                     foreignJobs, CLOCK.instant())).toCompletableFuture().get(60, java.util.concurrent.TimeUnit.SECONDS);
             return later.job().identity().runnerJobId();
         }
     }
 
+    /** Bounded, exact-container physical evidence; no model assertion substitutes for Docker state. */
+    private static String nativeDocker(Path directory, String... arguments) throws Exception {
+        var command = new ArrayList<String>();
+        command.add(System.getProperty("ravenroot.runner.testDocker", "/usr/local/bin/docker"));
+        command.addAll(List.of(arguments));
+        Path output = directory.resolve("native-probe-" + UUID.randomUUID());
+        var process = new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD)
+                .redirectOutput(output.toFile()).start();
+        if (!process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
+            process.destroyForcibly(); throw new AssertionError("bounded native evidence probe timed out");
+        }
+        assertEquals(0, process.exitValue(), "native evidence probe failed");
+        assertTrue(java.nio.file.Files.size(output) <= 16_384, "native evidence output exceeded its fixture bound");
+        return java.nio.file.Files.readString(output).trim();
+    }
+
     private static RunnerAssignment nativeAssignment(ExecutionKey key, UUID traversal, AgentDefinition definition,
             String command, RunnerRegistration worker, WorkspaceResource resource, String lifecycle) {
         var id = new RunnerJobIdentity(key, traversal, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
         var accepted = RunnerJob.accept(id, definition, command, resource.profile().policy(), worker,
-                OpaquePayload.of("{\"intent\":\"Read the disposable repository without modifying any file.\"}".getBytes(), "application/json"),
+                OpaquePayload.of(ai.ravenroot.core.runner.RunnerJson.write(Map.of("intent", command.equals("test")
+                        ? "Run the operator-configured test tool on this disposable repository and report only its observed result."
+                        : "Read the disposable repository without modifying any file.")), "application/json"),
                 CLOCK.instant(), CLOCK.instant().plusSeconds(120)).claim(worker.runnerId(), CLOCK.instant(), Duration.ofSeconds(120));
         return new RunnerAssignment(1, resource.workspaceId(), accepted, resource, lifecycle);
     }

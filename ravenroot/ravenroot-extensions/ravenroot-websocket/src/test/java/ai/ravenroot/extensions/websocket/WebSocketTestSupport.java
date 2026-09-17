@@ -209,7 +209,8 @@ final class WebSocketTestSupport {
         volatile CountDownLatch release = new CountDownLatch(0);
 
         @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
-            calls.incrementAndGet(); payloads.add(payload); entered.countDown();
+            // Tests waiting on calls must also observe the payload for that call.
+            payloads.add(payload); calls.incrementAndGet(); entered.countDown();
             try {
                 if (!release.await(2, TimeUnit.SECONDS)) throw new AssertionError("ingress release timeout");
             } catch (InterruptedException interrupted) {

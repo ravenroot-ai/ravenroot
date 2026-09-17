@@ -73,6 +73,8 @@ class LocalContainerRunnerRecoveryTest {
         Path docker = docker(directory);
         RunnerResult result;
         try (var driver = driver(directory, docker)) {
+            assertThrows(java.nio.channels.OverlappingFileLockException.class, () -> driver(directory, docker),
+                    "restart cannot overlap the original supervisor's worker-state ownership");
             result = driver.execute(assignment).toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
         try (var restarted = driver(directory, docker)) {

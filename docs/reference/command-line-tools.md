@@ -39,6 +39,16 @@ image assembly, verification, update, and removal.
 
 ## `service.sh`
 
+`start --runner` and `restart --runner` enable the genuine tokenless trusted-local control plane
+and in-process supervised worker; public UI remains USER and the private worker channel WORKLOAD.
+`stop` includes retained Workspaces and worker shutdown. This mode only accepts exact 127.0.0.1
+publication and preserves native Linux quota/confinement requirements. Configure
+`RAVENROOT_LOCAL_RUNNER_DIR` (default `.ravenroot-local/runner`, operator-approved JSON files),
+`RAVENROOT_DOCKER_CLI_IMAGE` (approved immutable CLI image), `RAVENROOT_LOCAL_DOCKER_SOCKET`
+(default `/var/run/docker.sock`), and `RAVENROOT_LOCAL_RUNNER_STOP_GRACE` (default `5m`, must cover
+HTTP drain and Workspace cleanup). No bearer token is generated or handled. See the
+[complete local runner setup](../operator-guide/governed-runners.md#tokenless-trusted-local-service).
+
 Purpose: operate the repository Compose service or the Helm release. The default command is
 `restart`. Docker is required only for Compose commands; Helm and cluster access are required only
 for Kubernetes commands.

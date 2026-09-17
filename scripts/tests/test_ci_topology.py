@@ -62,6 +62,22 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertNotIn("npm test", self.jobs["full-ui-build"])
         self.assertNotIn("npm run build", self.jobs["full-ui-e2e-shard"])
 
+    def test_full_tier_requires_runner_deployment_evidence_without_tooling_skips(self) -> None:
+        job = self.jobs["full-shell-contracts"]
+        step = job.split("- name: Verify supervised runner deployment and independent replica topology", 1)[1]
+        self.assertNotIn("if:", step)
+        self.assertNotIn("continue-on-error", step)
+        required = (
+            "command -v helm",
+            "docker compose version",
+            "python3 -m unittest scripts.tests.test_runner_deployment_contract",
+            "./scripts/tests/test_helm_values_contract.sh",
+            "./scripts/tests/test_program_timeout_helm_contract.sh",
+            "./scripts/tests/test_execution_manifest_pin_helm_contract.sh",
+        )
+        positions = [step.index(command) for command in required]
+        self.assertEqual(sorted(positions), positions)
+
     def test_verified_artifact_dependencies_are_explicit(self) -> None:
         artifact_consumers = {
             "full-ui-e2e-harness": {"full-preflight", "full-ui-build"},

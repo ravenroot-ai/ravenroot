@@ -43,7 +43,10 @@ class SqliteProcessControlMigrationTest {
         // Restore the exact pre-control row shape. Journal bytes and all other tables are unchanged.
         try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database); var statement = connection.createStatement()) {
             statement.execute("ALTER TABLE process_instance DROP COLUMN control_state");
-            statement.execute("DELETE FROM store_schema_history WHERE version = 29");
+            statement.execute("DROP TABLE runner_fleet_guard");
+            statement.execute("DROP TABLE runner_availability");
+            statement.execute("DROP TABLE runner_retention_guard");
+            statement.execute("DELETE FROM store_schema_history WHERE version >= 29");
             statement.execute("PRAGMA user_version = 28");
             statement.execute("DELETE FROM event_journal WHERE tenant_id = 'missing' OR (tenant_id = 'latest' AND journal_offset = 1)");
             statement.execute("UPDATE journal_watermark SET retained_from = next_offset WHERE tenant_id = 'missing'");

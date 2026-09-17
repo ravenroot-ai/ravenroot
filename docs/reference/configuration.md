@@ -23,11 +23,25 @@ be changed to strings before upgrading.
 ## Runtime and behavior resolution
 
 `RAVENROOT_RUNNER_CONFIG` is an opt-in operator-owned JSON file path for the
-[governed workspace-agent plane](../operator-guide/governed-runners.md). Unset leaves the existing
+[governed Workspace and Agent runner plane](../operator-guide/governed-runners.md). Unset leaves the existing
 bounded Agent behavior unchanged and runner routes unavailable. The file is at most 1 MiB, uses
 protocol version 1, requires a durable execution store, and is resolved once at startup. Graphs
 cannot set this path or its authority. Workspace retention must be shorter than terminal-process
 retention so designated workers can collect retained volumes before inventory disappears.
+
+`RAVENROOT_LOCAL_RUNNER_CONFIG` opts the single trusted-local server into a supervised in-process
+worker. It is unset by default and reads an operator-owned JSON document (maximum 1 MiB) once at
+startup. Its closed keys are `tenantId` (exactly `local`), `registration`, `docker`, `stateDirectory`,
+`runtimeImages`, `agentRuntime`, and optional `worker` (the ordinary typed worker settings).
+There is no `endpoint`, `tokenFile`, principal override or generated token. It requires
+`RAVENROOT_RUNNER_CONFIG` with the exact approved local registration, durable storage and exact
+127.0.0.1 host exposure with disabled authentication; OIDC/remote composition rejects this mode.
+`service.sh --runner` selects `deploy/dev/compose.runner.yaml`. Its operator carriers are
+`RAVENROOT_LOCAL_RUNNER_DIR` (default `.ravenroot-local/runner`), `RAVENROOT_DOCKER_CLI_IMAGE`
+(required digest), `RAVENROOT_LOCAL_RUNNER_IMAGE` (default `ravenroot:local-runner`),
+`RAVENROOT_LOCAL_DOCKER_SOCKET` (default `/var/run/docker.sock`), socket-derived
+`RAVENROOT_LOCAL_DOCKER_GID`, and `RAVENROOT_LOCAL_RUNNER_STOP_GRACE` (default `5m`).
+The shutdown grace must cover configured HTTP drain plus all retained Workspace cleanup work.
 
 | Variable | Default | Accepted contract |
 |---|---|---|

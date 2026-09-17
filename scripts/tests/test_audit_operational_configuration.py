@@ -464,6 +464,11 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             for contract in authority["contracts"] for identifier in contract["candidateIds"]
         }
         mutations = (
+            (audit.HELM_VALUES_PATH, "coordinatorReplicas: 2", "coordinatorReplicas: 4"),
+            (audit.HELM_VALUES_PATH, "coordinatorPort: 8080", "coordinatorPort: 8188"),
+            (audit.HELM_TEMPLATE_PATHS[4], "replicas: {{ .Values.runnerPlane.coordinatorReplicas }}", "replicas: 4"),
+            (audit.HELM_TEMPLATE_PATHS[4], "replicas: {{ .replicas }}", "replicas: 4"),
+            ("scripts/tests/test_runner_deployment_contract.py", '"coordinatorReplicas": 3', '"coordinatorReplicas": 1'),
             (audit.HELM_VALUES_PATH, "programTimeoutMs: 15000", "programTimeoutMs: 15001"),
             (audit.HELM_VALUES_PATH, "runAsNonRoot: true", "runAsNonRoot: false"),
             (audit.HELM_VALUES_PATH, "allowPrivilegeEscalation: false", "allowPrivilegeEscalation: true"),
@@ -1920,16 +1925,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_588_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_660_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(79, len(details))
+            self.assertEqual(85, len(details))
             self.assertEqual(
-                {"methods": 87, "path": 79, "summary": 389, "successStatuses": 80},
+                {"methods": 94, "path": 85, "summary": 395, "successStatuses": 86},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(635, len(entries))
+            self.assertEqual(660, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -1945,7 +1950,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         source = (ROOT / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
         partitions, details, candidates = audit.route_table_candidate_partitions(source)
         runner_routes = [item for item in details if item["path"].startswith("/v1/runner-plane")]
-        self.assertEqual(18, len(runner_routes))
+        self.assertEqual(24, len(runner_routes))
         put_routes = {
             item["path"] for item in runner_routes
             if any(candidates[identifier].expression == '"PUT"'
@@ -1965,11 +1970,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ("RunnerCodec.java", "0x52524a31"): "protocol-or-format-invariant",
             ("RunnerCodec.java", "0x52524a32"): "protocol-or-format-invariant",
             ("RunnerCodec.java", "16_777_216"): "security-ceiling-or-default",
-            ("RunnerPolicy.java", "1_048_576"): "security-ceiling-or-default",
+            ("RunnerCodec.java", "1_048_576"): "security-ceiling-or-default",
             ("RunnerPlaneConfiguration.java", "RAVENROOT_RUNNER_CONFIG"): "protocol-or-format-invariant",
             ("RunnerPlaneConfiguration.java", "1_048_577"): "security-ceiling-or-default",
-            ("LocalContainerRunner.java", '"--network=none"'): "security-ceiling-or-default",
-            ("runner-panel.js", "'Governed agents and runners'"): "presentation-text",
+            ("runner-panel.js", "'Workspaces, named Agents and runners'"): "presentation-text",
             ("RunnerArtifactStore.java", "64"): "security-ceiling-or-default",
             ("TelemetryBridge.java", 'ravenroot.runner.observations'): "protocol-or-format-invariant",
             ("TelemetryBridge.java", 'ravenroot.runner.worker.active'): "protocol-or-format-invariant",
@@ -1984,6 +1988,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         configuration = (ROOT / "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java").read_text()
         self.assertIn("if (configured == null || configured.isBlank()) return null;", configuration)
         self.assertIn("store.supports(StoreCapability.DURABLE)", configuration)
+        driver = (ROOT / "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/LocalContainerRunner.java").read_text()
+        # These are now direct daemon arguments, not fixed-declaration candidates. Keep exact
+        # isolation evidence for the quota probe, legacy fixture and governed runtime launches.
+        self.assertEqual(3, driver.count('"--network=none"'))
         command_rows = [row for row in rows if Path(row["path"]).name == "AgentCommand.java"]
         self.assertEqual(26, sum(row["classification"] == "protocol-or-format-invariant" for row in command_rows))
         self.assertEqual(5, sum(row["classification"] == "security-ceiling-or-default" for row in command_rows))
@@ -4275,7 +4283,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 389 |",
+                "| Retained published contract descriptions | 395 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4283,7 +4291,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 388 |",
+                "| Retained published contract descriptions | 394 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -5972,6 +5980,25 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertEqual([], audit.reconciliation_history_errors(
                 root, reviewed, (candidate,)))
 
+            review_plan = {
+                "id": "approved-semantic-replacement", "issue": "#423",
+                "sourceRevision": review_revision, "targetRevision": review_revision,
+                "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+                "sourceInventoryDigest": audit.hashlib.sha256(inventory.read_bytes()).hexdigest(),
+                "targetCandidateDigest": audit.candidate_set_digest({candidate.id: candidate}),
+                "mappings": [], "retirements": [], "additions": [],
+                "semanticReviews": [{key: value for key, value in reviewed["semanticReviewHistory"][0].items()
+                                     if key != "sourceRevision"}],
+            }
+            with mock.patch.object(audit, "current_route_table_authority", return_value={}):
+                applied, errors = audit.apply_reconciliation(root, refreshed, (candidate,), review_plan)
+            self.assertEqual([], errors)
+            self.assertEqual(after_metadata, audit.candidate_semantic_payload(applied["entries"][0]))
+            self.assertEqual([], audit.reconciliation_history_errors(root, applied, (candidate,)))
+            refused_review = copy.deepcopy(review_plan)
+            refused_review["semanticReviews"][0]["approved"] = False
+            self.assertTrue(audit.reconciliation_plan_errors(root, refreshed, (candidate,), refused_review)[0])
+
     def test_unresolved_operator_authority_stays_deferred_and_exact(self) -> None:
         candidate = audit.Candidate(
             "oc-unresolved", "runtime/Policy.java", 1, "Policy", "fixed-declaration",
@@ -7157,6 +7184,88 @@ class EmbedEnabledAuditTest(unittest.TestCase):
             audit.binding_authority_errors(
                 self.root, "embed.enabled", contract, setting_entries,
                 self.entries, self.discovered, {}))
+
+
+class RunnerCoordinatorBindingAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        for relative in audit.RUNNER_COORDINATOR_SOURCE_PROOFS:
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "ravenroot"], cwd=self.root, check=True)
+        self.discovered = {candidate.id: candidate for candidate in audit.discover(self.root)}
+
+    def fixture(self, setting):
+        authority = audit.runner_coordinator_binding_authority(self.root, setting, self.discovered)
+        self.assertIsNotNone(authority)
+        contract = {"bindingAuthority": authority, "field": authority["field"],
+                    "owner": audit.RUNNER_COORDINATOR_CONFIGURATION_PATH + "#RunnerCoordinatorConfiguration",
+                    "bindings": [authority["environment"]], "default": authority["default"],
+                    "defaultEvidence": authority["defaultCandidateIds"]}
+        identifiers = authority["defaultCandidateIds"] + authority["environmentCandidateIds"]
+        entries = {identifier: dict(self.discovered[identifier].source_fields(), setting=setting)
+                   for identifier in identifiers}
+        return contract, entries
+
+    def errors(self, setting, contract, entries):
+        return audit.binding_authority_errors(self.root, setting, contract, list(entries.values()),
+                                              entries, self.discovered, {})
+
+    def test_closed_authority_covers_each_typed_setting_and_actual_consumer(self):
+        all_ids = set()
+        for setting in audit.RUNNER_COORDINATOR_BINDINGS:
+            contract, entries = self.fixture(setting)
+            self.assertEqual([], self.errors(setting, contract, entries))
+            self.assertFalse(all_ids.intersection(entries))
+            all_ids.update(entries)
+        self.assertEqual(6, len(all_ids))
+
+    def test_metadata_and_candidate_partition_cannot_reassign_authority(self):
+        setting = "runner.coordinator.httpThreads"
+        contract, entries = self.fixture(setting)
+        for field, value in (("owner", "other#Type"), ("field", "httpQueue"), ("bindings", []),
+                             ("default", "4"), ("defaultEvidence", []), ("bindingAuthority", None),
+                             ("defaultAuthority", {"kind": "unreviewed"})):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(contract)
+                changed[field] = value
+                self.assertTrue(self.errors(setting, changed, entries))
+        changed = copy.deepcopy(contract)
+        changed["bindingAuthority"]["sourceProofs"] = {}
+        self.assertTrue(self.errors(setting, changed, entries))
+        self.assertTrue(self.errors("another.setting", contract, entries))
+        self.assertTrue(self.errors(setting, contract, {}))
+        changed_entries = copy.deepcopy(entries)
+        next(iter(changed_entries.values()))["setting"] = "another.setting"
+        self.assertTrue(self.errors(setting, contract, changed_entries))
+
+    def test_parser_defaults_consumer_and_executable_assertions_are_closed(self):
+        setting = "runner.coordinator.httpThreads"
+        contract, entries = self.fixture(setting)
+        mutations = (
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "(8080, 16, 64)", "(8080, 4, 64)"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "DEFAULTS.httpThreads()", "DEFAULTS.httpQueue()"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "UNBOUND_THREADS"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "httpThreads < 1", "httpThreads < 0"),
+            (audit.RUNNER_COORDINATOR_CONFIGURATION_PATH, "return Integer.parseInt", "return 4; // Integer.parseInt"),
+            ("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorMain.java", "http.httpThreads()", "4"),
+            ("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RunnerCoordinatorConfigurationTest.java", "{2, 37}", "{4}"),
+            ("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RunnerCoordinatorConfigurationTest.java", "assertThrows", "ignoredAssertion"),
+        )
+        for relative, before, after in mutations:
+            with self.subTest(source=relative, mutation=after):
+                path = self.root / relative
+                original = path.read_text()
+                self.assertIn(before, original)
+                try:
+                    path.write_text(original.replace(before, after))
+                    self.assertTrue(self.errors(setting, contract, entries))
+                finally:
+                    path.write_text(original)
 
 
 class InteractionWebSocketPolicyAuditTest(unittest.TestCase):

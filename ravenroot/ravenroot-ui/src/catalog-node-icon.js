@@ -21,6 +21,7 @@ export function resolveDescriptorNodeType(descriptor) {
   // fallback ahead of `visualType` so a current editor connected to an older server repairs the
   // former generic `flow`/`handler` declarations instead of reproducing the shipped mismatch.
   if (descriptor?.behavior === 'human-task') return 'human-task';
+  if (descriptor?.behavior === 'workspace') return 'workspace';
   if (/^(trace|log|logger)$/i.test(descriptor?.behavior || '')) return 'trace';
   if (descriptor?.visualType) return descriptor.visualType;
   return descriptor?.agentic ? 'agent' : 'actor';
@@ -36,6 +37,7 @@ export function nodeTypeCardShape(nodeType) {
 // These semantic types share the ordinary node card. Their plain glyphs, not a bespoke silhouette,
 // provide the non-colour cue consistently in the catalog and every Design renderer.
 export const COMMON_NODE_GLYPHS = Object.freeze({
+  workspace: '▣',
   trace: '▤',
   'human-task': '👤',
 });

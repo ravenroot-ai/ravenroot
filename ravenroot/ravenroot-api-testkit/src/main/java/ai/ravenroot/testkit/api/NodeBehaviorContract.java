@@ -81,6 +81,7 @@ public abstract class NodeBehaviorContract {
             case DECIMAL -> "1.0";
             case URI -> "https://example.invalid/conformance";
             case SECRET_REFERENCE -> "conformance-secret-ref";
+            case WORKSPACE_REFERENCE -> "conformance-workspace";
             case STRING, TEXT, CEL_EXPRESSION -> "conformance";
         };
     }

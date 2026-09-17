@@ -26,59 +26,108 @@ import java.util.UUID;
 public final class RunnerCodec {
     /** Maximum encoded document size, including its corruption-detection digest. */
     public static final int MAX_BYTES = 16_777_216;
+    /**
+     * Payload/catalog field bound of the existing runner protocol envelopes. This is an
+     * interoperability bound, not a job-capacity default; widening it requires a versioned reader
+     * migration. The effective operator policy normally selects a smaller payload budget.
+     */
+    public static final int MAX_PAYLOAD_BYTES = 1_048_576;
     private static final int MAGIC = 0x52524a31;
     private static final int WORKSPACE_V2 = 0x52524a32;
+    private static final int WORKSPACE_V3 = 0x52524a33;
+    private static final int ASSIGNMENT_V2 = 0x52524132;
+    private static final int RESULT_V2 = 0x52525232;
+    private static final int DEFINITION_V2 = 0x52414432;
     private RunnerCodec() { }
+    /**
+     * Encodes a worker's incarnation lease with corruption detection.
+     * @param value store-clock advertisement
+     * @return immutable bounded wire bytes
+     */
+    public static byte[] availability(RunnerAvailability value) {
+        return encode(0x52525631, out -> {
+            string(out, value.tenantId()); string(out, value.runnerId()); uuid(out, value.sessionId());
+            out.writeInt(value.capacity()); out.writeInt(value.activeJobs()); strings(out, value.runtimeProfiles());
+            instant(out, value.observedAt()); instant(out, value.leaseUntil());
+        });
+    }
+    /**
+     * Decodes and validates a persisted worker incarnation lease.
+     * @param bytes complete advertisement envelope
+     * @return validated capacity and liveness evidence, not approval
+     */
+    public static RunnerAvailability availability(byte[] bytes) {
+        return decode(bytes, 0x52525631, in -> new RunnerAvailability(string(in), string(in), uuid(in), in.readInt(), in.readInt(),
+                strings(in), instant(in), instant(in)));
+    }
 
     /**
-     * Encodes trusted workspace storage version two; runner wire messages remain version one.
+     * Encodes trusted workspace storage version three, including explicit graph resources.
      * @param value validated immutable value
      * @return independent encoded bytes with an integrity digest
      */
     public static byte[] workspace(RunnerWorkspaceState value) {
-        return encode(WORKSPACE_V2, out -> {
+        return encode(WORKSPACE_V3, out -> {
             key(out, value.execution()); uuid(out, value.workspaceId()); string(out, value.runnerId());
             out.writeInt(value.jobs().size());
-            for (var entry : value.jobs().values()) { job(out, entry.job()); payload(out, entry.continuation()); out.writeBoolean(entry.continuationUncertain()); }
+            for (var entry : value.jobs().values()) {
+                job(out, entry.job()); payload(out, entry.continuation()); out.writeBoolean(entry.continuationUncertain());
+                nullableString(out, entry.workspaceNodeId()); nullableString(out, entry.lifecycleCommand());
+            }
             out.writeBoolean(value.processTerminalAt() != null);
             if (value.processTerminalAt() != null) instant(out, value.processTerminalAt());
+            out.writeInt(value.workspaces().size());
+            for (String node : new TreeSet<>(value.workspaces().keySet())) workspaceResource(out, value.workspaces().get(node));
         });
     }
 
     /**
      * Decodes a trusted process workspace, rejecting corruption, trailing bytes and invalid bounds.
-     * @param bytes complete workspace storage version-one or version-two document
+     * @param bytes complete workspace storage version-one, version-two or version-three document
      * @return validated immutable value
      */
     public static RunnerWorkspaceState workspace(byte[] bytes) {
         boolean versionTwo = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V2;
-        return decode(bytes, versionTwo ? WORKSPACE_V2 : MAGIC, in -> {
+        boolean versionThree = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V3;
+        return decode(bytes, versionThree ? WORKSPACE_V3 : versionTwo ? WORKSPACE_V2 : MAGIC, in -> {
             ExecutionKey execution = key(in); UUID workspace = uuid(in); String runner = string(in);
             var jobs = new LinkedHashMap<UUID, RunnerWorkspaceState.Entry>();
-            int size = count(in, RunnerWorkspaceState.MAX_JOBS);
+            int size = count(in, versionThree ? MAX_BYTES : RunnerWorkspaceState.MAX_JOBS);
             for (int i = 0; i < size; i++) {
-                RunnerJob job = job(in);
-                if (jobs.put(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, payload(in), in.readBoolean())) != null) {
+                RunnerJob job = job(in, versionThree);
+                var continuation = payload(in); boolean uncertain = in.readBoolean();
+                String node = versionThree ? nullableString(in) : null;
+                String command = versionThree ? nullableString(in) : null;
+                if (jobs.put(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, continuation, uncertain, node, command)) != null) {
                     throw new IllegalArgumentException("duplicate stored runner job");
                 }
             }
-            Instant terminalAt = versionTwo && in.readBoolean() ? instant(in) : null;
-            return new RunnerWorkspaceState(execution, workspace, runner, jobs, terminalAt);
+            Instant terminalAt = (versionTwo || versionThree) && in.readBoolean() ? instant(in) : null;
+            var resources = new LinkedHashMap<String, WorkspaceResource>();
+            int resourceCount = versionThree ? count(in, MAX_BYTES) : 0;
+            for (int i = 0; i < resourceCount; i++) {
+                var resource = workspaceResource(in);
+                if (resources.put(resource.nodeId(), resource) != null) throw new IllegalArgumentException("duplicate workspace node");
+            }
+            return new RunnerWorkspaceState(execution, workspace, runner, jobs, terminalAt, resources);
         });
     }
 
     /**
-     * Encodes a bounded immutable agent definition using protocol version one.
+     * Encodes a bounded immutable agent definition using storage version two, including budgets.
      * @param value validated immutable value
      * @return independent encoded bytes with an integrity digest
      */
-    public static byte[] definition(AgentDefinition value) { return encode(out -> definition(out, value)); }
+    public static byte[] definition(AgentDefinition value) { return encode(DEFINITION_V2, out -> definition(out, value)); }
     /**
      * Decodes a immutable agent definition, rejecting corruption, trailing bytes and invalid bounds.
-     * @param bytes complete version-one document
+     * @param bytes complete version-one or version-two definition document
      * @return validated immutable value
      */
-    public static AgentDefinition definition(byte[] bytes) { return decode(bytes, RunnerCodec::definition); }
+    public static AgentDefinition definition(byte[] bytes) {
+        boolean extended = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == DEFINITION_V2;
+        return decode(bytes, extended ? DEFINITION_V2 : MAGIC, in -> definition(in, extended));
+    }
     /**
      * Encodes a bounded runner capability advertisement using protocol version one.
      * @param value validated immutable value
@@ -96,20 +145,28 @@ public final class RunnerCodec {
      * @param value validated immutable value
      * @return independent encoded bytes with an integrity digest
      */
-    public static byte[] result(RunnerResult value) { return encode(out -> result(out, value)); }
+    public static byte[] result(RunnerResult value) { return encode(RESULT_V2, out -> result(out, value)); }
     /**
      * Decodes a sealed terminal report, rejecting corruption, trailing bytes and invalid bounds.
      * @param bytes complete version-one document
      * @return validated immutable value
      */
-    public static RunnerResult result(byte[] bytes) { return decode(bytes, RunnerCodec::result); }
+    public static RunnerResult result(byte[] bytes) {
+        boolean extended = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == RESULT_V2;
+        return decode(bytes, extended ? RESULT_V2 : MAGIC, in -> result(in, extended));
+    }
     /**
      * Encodes a bounded runner dispatch view without graph checkpoints using protocol version one.
      * @param value validated immutable value
      * @return independent encoded bytes with an integrity digest
      */
     public static byte[] assignment(RunnerAssignment value) {
-        return encode(out -> { out.writeInt(value.protocolVersion()); uuid(out, value.workspaceId()); job(out, value.job()); });
+        return encode(ASSIGNMENT_V2, out -> {
+            out.writeInt(value.protocolVersion()); uuid(out, value.workspaceId()); job(out, value.job());
+            out.writeBoolean(value.workspace() != null);
+            if (value.workspace() != null) workspaceResource(out, value.workspace());
+            nullableString(out, value.lifecycleCommand());
+        });
     }
     /**
      * Decodes a runner dispatch view without graph checkpoints, rejecting corruption, trailing bytes and invalid bounds.
@@ -117,8 +174,66 @@ public final class RunnerCodec {
      * @return validated immutable value
      */
     public static RunnerAssignment assignment(byte[] bytes) {
-        return decode(bytes, in -> new RunnerAssignment(in.readInt(), uuid(in), job(in)));
+        boolean extended = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == ASSIGNMENT_V2;
+        return decode(bytes, extended ? ASSIGNMENT_V2 : MAGIC, in -> new RunnerAssignment(in.readInt(), uuid(in), job(in, extended),
+                extended && in.readBoolean() ? workspaceResource(in) : null, extended ? nullableString(in) : null));
     }
+
+    /**
+     * Encodes an immutable approved resource profile and both independent lifecycle axes.
+     * @param value validated profile, including all scoped capacity ceilings
+     * @return integrity-protected storage document
+     */
+    public static byte[] workspaceProfile(WorkspaceProfile value) { return encode(out -> workspaceProfile(out, value)); }
+    /**
+     * Restores the exact approved profile without consulting mutable deployment defaults.
+     * @param value complete integrity-protected profile bytes
+     * @return validated immutable profile
+     */
+    public static WorkspaceProfile workspaceProfile(byte[] value) { return decode(value, RunnerCodec::workspaceProfile); }
+    private static void workspaceProfile(DataOutputStream out, WorkspaceProfile value) throws IOException {
+        string(out, value.reference().tenantId()); string(out, value.reference().name()); out.writeLong(value.reference().version());
+        string(out, value.workspaceScope().name()); string(out, value.runtimeLifecycle().name());
+        string(out, value.runnerPool()); string(out, value.runtimeProfile()); policy(out, value.policy());
+        var capacity = value.capacity();
+        out.writeInt(capacity.mutatingUsers()); out.writeInt(capacity.readOnlyUsers()); out.writeInt(capacity.materializedWorkspaces());
+        out.writeLong(capacity.aggregateStorageBytes()); out.writeInt(capacity.queuedJobs()); out.writeInt(capacity.retainedJobs());
+        string(out, capacity.admission().name()); string(out, value.retention().toString()); string(out, value.completionPolicy().name());
+        strings(out, value.allowedAgents());
+        for (var scope : RunnerFleetLimits.Scope.values()) {
+            var ceiling = value.fleetLimits().scopes().get(scope);
+            out.writeInt(ceiling.claimedJobs()); out.writeInt(ceiling.queuedJobs());
+            out.writeInt(ceiling.retainedWorkspaces()); out.writeLong(ceiling.storageBytes());
+        }
+        out.writeInt(value.cpuMillicores());
+    }
+    private static WorkspaceProfile workspaceProfile(DataInputStream in) throws IOException {
+        return new WorkspaceProfile(new AgentDefinition.Reference(string(in), string(in), in.readLong()),
+                WorkspaceProfile.Scope.valueOf(string(in)), WorkspaceProfile.RuntimeLifecycle.valueOf(string(in)),
+                string(in), string(in), policy(in), new WorkspaceProfile.Capacity(in.readInt(), in.readInt(), in.readInt(),
+                in.readLong(), in.readInt(), in.readInt(), WorkspaceProfile.Admission.valueOf(string(in))),
+                Duration.parse(string(in)), WorkspaceProfile.CompletionPolicy.valueOf(string(in)), strings(in), fleetLimits(in), in.readInt());
+    }
+    private static RunnerFleetLimits fleetLimits(DataInputStream in) throws IOException {
+        var scopes = new java.util.EnumMap<RunnerFleetLimits.Scope, RunnerFleetLimits.Ceiling>(RunnerFleetLimits.Scope.class);
+        for (var scope : RunnerFleetLimits.Scope.values()) scopes.put(scope,
+                new RunnerFleetLimits.Ceiling(in.readInt(), in.readInt(), in.readInt(), in.readLong()));
+        return new RunnerFleetLimits(scopes);
+    }
+    private static void workspaceResource(DataOutputStream out, WorkspaceResource value) throws IOException {
+        string(out, value.nodeId()); uuid(out, value.workspaceId()); workspaceProfile(out, value.profile());
+        string(out, value.runnerId()); string(out, value.state().name());
+        nullableString(out, value.runtimeId());
+        nullableString(out, value.checkpoint()); out.writeBoolean(value.stopRequested()); instant(out, value.updatedAt()); out.writeLong(value.generation());
+    }
+    private static WorkspaceResource workspaceResource(DataInputStream in) throws IOException {
+        return new WorkspaceResource(string(in), uuid(in), workspaceProfile(in), string(in), WorkspaceResource.State.valueOf(string(in)),
+                nullableString(in), nullableString(in), in.readBoolean(), instant(in), in.readLong());
+    }
+    private static void nullableString(DataOutputStream out, String value) throws IOException {
+        out.writeBoolean(value != null); if (value != null) string(out, value);
+    }
+    private static String nullableString(DataInputStream in) throws IOException { return in.readBoolean() ? string(in) : null; }
 
     /**
      * Encodes a bounded revisioned governed catalog document using protocol version one.
@@ -154,14 +269,14 @@ public final class RunnerCodec {
         if (value.result() != null) result(out, value.result());
     }
 
-    private static RunnerJob job(DataInputStream in) throws IOException {
-        RunnerJobIdentity identity = identity(in); AgentDefinition definition = definition(in); String command = string(in);
+    private static RunnerJob job(DataInputStream in, boolean extended) throws IOException {
+        RunnerJobIdentity identity = identity(in); AgentDefinition definition = definition(in, extended); String command = string(in);
         RunnerRegistration runner = registration(in); RunnerPolicy authority = policy(in); OpaquePayload input = payload(in);
         Instant deadline = instant(in); Instant updated = instant(in); long revision = in.readLong(); long fence = in.readLong();
         RunnerJob.State state = RunnerJob.State.valueOf(string(in));
         RunnerJob.StopReason reason = RunnerJob.StopReason.valueOf(string(in));
         Instant lease = in.readBoolean() ? instant(in) : null;
-        RunnerResult result = in.readBoolean() ? result(in) : null;
+        RunnerResult result = in.readBoolean() ? result(in, extended) : null;
         return RunnerJob.restore(identity, definition, command, runner, authority, input, deadline, updated,
                 revision, fence, state, reason, lease, result);
     }
@@ -176,9 +291,15 @@ public final class RunnerCodec {
         }
         strings(out, value.skills()); strings(out, value.runnerRequirements()); policy(out, value.policy());
         string(out, value.workspaceRetention().toString()); string(out, value.outputSchema());
+        out.writeInt(value.budgets().modelTurns()); out.writeInt(value.budgets().toolCalls());
+        out.writeLong(value.budgets().modelTokens()); out.writeInt(value.budgets().tokensPerTurn());
+        out.writeInt(value.skillInstructions().size());
+        for (String name : new TreeSet<>(value.skillInstructions().keySet())) {
+            string(out, name); string(out, value.skillInstructions().get(name));
+        }
     }
 
-    private static AgentDefinition definition(DataInputStream in) throws IOException {
+    private static AgentDefinition definition(DataInputStream in, boolean extended) throws IOException {
         var reference = new AgentDefinition.Reference(string(in), string(in), in.readLong());
         String instructions = string(in), runtime = string(in), model = string(in);
         var commands = new LinkedHashMap<String, AgentCommand>();
@@ -189,8 +310,17 @@ public final class RunnerCodec {
                 throw new IllegalArgumentException("duplicate agent command");
             }
         }
-        return new AgentDefinition(reference, instructions, runtime, model, commands, strings(in), strings(in),
-                policy(in), Duration.parse(string(in)), string(in));
+        var skills = strings(in); var requirements = strings(in); var policy = policy(in);
+        var retention = Duration.parse(string(in)); var schema = string(in);
+        var budgets = extended ? new AgentDefinition.Budgets(in.readInt(), in.readInt(), in.readLong(), in.readInt())
+                : AgentDefinition.Budgets.LEGACY;
+        var bodies = new LinkedHashMap<String, String>();
+        int bodyCount = extended ? count(in, 128) : 0;
+        for (int i = 0; i < bodyCount; i++) {
+            if (bodies.put(string(in), string(in)) != null) throw new IllegalArgumentException("duplicate skill body");
+        }
+        return new AgentDefinition(reference, instructions, runtime, model, commands, skills, requirements,
+                policy, retention, schema, budgets, bodies);
     }
 
     private static void policy(DataOutputStream out, RunnerPolicy value) throws IOException {
@@ -226,14 +356,21 @@ public final class RunnerCodec {
             identity(out, artifact.job()); uuid(out, artifact.artifactId()); string(out, artifact.kind().name());
             string(out, artifact.sha256()); out.writeLong(artifact.sizeBytes());
         }
+        out.writeBoolean(value.workspace() != null);
+        if (value.workspace() != null) {
+            uuid(out, value.workspace().workspaceId()); nullableString(out, value.workspace().runtimeId());
+            nullableString(out, value.workspace().checkpoint());
+        }
     }
 
-    private static RunnerResult result(DataInputStream in) throws IOException {
+    private static RunnerResult result(DataInputStream in, boolean extended) throws IOException {
         String outcome = string(in); OpaquePayload payload = payload(in); UUID quiescence = uuid(in);
         var artifacts = new ArrayList<RunnerArtifact>(); int count = count(in, 128);
         for (int i = 0; i < count; i++) artifacts.add(new RunnerArtifact(identity(in), uuid(in),
                 RunnerArtifact.Kind.valueOf(string(in)), string(in), in.readLong()));
-        return new RunnerResult(outcome, payload, artifacts, quiescence);
+        var workspace = extended && in.readBoolean()
+                ? new RunnerResult.WorkspaceObservation(uuid(in), nullableString(in), nullableString(in)) : null;
+        return new RunnerResult(outcome, payload, artifacts, quiescence, workspace);
     }
 
     private static void identity(DataOutputStream out, RunnerJobIdentity value) throws IOException {

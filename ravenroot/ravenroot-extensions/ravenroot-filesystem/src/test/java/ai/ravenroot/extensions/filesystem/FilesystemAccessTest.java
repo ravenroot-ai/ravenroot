@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -215,16 +216,25 @@ class FilesystemAccessTest {
         Path target = root.resolve("ambiguous.txt");
         Files.writeString(target, "old");
         CountDownLatch moving = new CountDownLatch(1);
+        CountDownLatch releaseMove = new CountDownLatch(1);
+        AtomicReference<Runnable> deadline = new AtomicReference<>();
+        AtomicBoolean deadlineCancelled = new AtomicBoolean();
         FilesystemAccess delayed = new FilesystemAccess(new FilesystemAccess.Hooks() {
             @Override public void afterMoveBegan(FilesystemPaths.Parsed ignored) {
                 moving.countDown();
-                try { Thread.sleep(5_000); }
+                // Only timeout interruption (or test cleanup) releases the owned move.
+                // Elapsed wall time must never allow success before the deadline runs.
+                try { releaseMove.await(); }
                 catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
             }
         });
         FilesystemRuntime runtime = new FilesystemRuntime(
                 (tenant, name) -> java.util.Optional.of(profile(64)), delayed,
-                deadlineAfter(moving));
+                (action, delay) -> {
+                    assertEquals(Duration.ofMillis(25), delay);
+                    deadline.set(action);
+                    return () -> deadlineCancelled.set(true);
+                });
         FilesystemAccess.InvocationState state = new FilesystemAccess.InvocationState();
         CountDownLatch workerFinished = new CountDownLatch(1);
         CompletableFuture<ai.ravenroot.api.execution.NodeResult> result = runtime.execute("tenant", profile(64),
@@ -237,34 +247,20 @@ class FilesystemAccessTest {
                         workerFinished.countDown();
                     }
                 }, state);
-        assertTrue(moving.await(1, TimeUnit.SECONDS));
-        CompletionException failure = assertThrows(CompletionException.class, result::join);
-        assertEquals(FilesystemNodeException.Reason.AMBIGUOUS_FINAL_MOVE,
-                ((FilesystemNodeException) failure.getCause()).reason());
-        assertTrue(workerFinished.await(1, TimeUnit.SECONDS));
+        try {
+            assertTrue(moving.await(5, TimeUnit.SECONDS));
+            assertTrue(state.moving(), "the deadline must observe final-move ownership");
+            deadline.get().run();
+            assertTrue(result.isDone(), "the deadline publishes an outcome before returning");
+            CompletionException failure = assertThrows(CompletionException.class, result::join);
+            assertEquals(FilesystemNodeException.Reason.AMBIGUOUS_FINAL_MOVE,
+                    ((FilesystemNodeException) failure.getCause()).reason());
+            assertTrue(deadlineCancelled.get());
+            assertTrue(workerFinished.await(5, TimeUnit.SECONDS), "the deadline interrupts the owned move");
+        } finally {
+            releaseMove.countDown();
+        }
         assertTrue(Files.readString(target).equals("old") || Files.readString(target).equals("new"));
-    }
-
-    /**
-     * Starts the deadline only after the write owns the final-move boundary. The production
-     * scheduler still measures the configured duration from invocation start; this deterministic
-     * test scheduler isolates the state transition under test instead of racing a 25 ms deadline
-     * against virtual-thread startup on the host runner.
-     */
-    private static FilesystemRuntime.DeadlineScheduler deadlineAfter(CountDownLatch moving) {
-        return (action, ignoredDelay) -> {
-            var cancelled = new AtomicBoolean();
-            Thread.ofPlatform().daemon().name("filesystem-test-deadline").start(() -> {
-                try {
-                    if (moving.await(5, TimeUnit.SECONDS) && !cancelled.get()) {
-                        action.run();
-                    }
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-            return () -> cancelled.set(true);
-        };
     }
 
     @Test void restartSweepDeletesOnlyExpiredTempsOwnedByTheActiveProfile() throws Exception {

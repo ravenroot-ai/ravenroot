@@ -390,6 +390,14 @@ jobs:
           ./scripts/tests/test_execution_store_platform.sh
           ./scripts/tests/test_execution_store_platform_regression.sh
           ./scripts/tests/test_human_task_platform_configuration.sh
+      - name: Verify supervised runner deployment and independent replica topology
+        run: |
+          command -v helm
+          docker compose version
+          python3 -m unittest scripts.tests.test_runner_deployment_contract scripts.tests.test_service_runner
+          ./scripts/tests/test_helm_values_contract.sh
+          ./scripts/tests/test_program_timeout_helm_contract.sh
+          ./scripts/tests/test_execution_manifest_pin_helm_contract.sh
 
   full-source-policy:
     name: full-source-policy
@@ -767,8 +775,8 @@ jobs:
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress clean verify
       - name: Verify the isolated writable runner acceptance fixture
-        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance
-      - name: Run writable nine-job acceptance on ephemeral XFS project quotas
+        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint
+      - name: Run secretless hermetic model-protocol Workspace acceptance on native XFS project quotas
         timeout-minutes: 20
         run: python3 scripts/fixtures/runner_quota_acceptance.py
       - name: Verify the published extension pack from a clean staged consumer

@@ -14,6 +14,8 @@ public enum NodePropertyType {
     DECIMAL,
     /** A URI value. */
     URI,
+    /** A typed reference to a Workspace node in the same graph; never a filesystem path. */
+    WORKSPACE_REFERENCE,
 
     /**
      * An opaque name for a server-side secret. Never the secret itself.

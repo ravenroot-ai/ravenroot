@@ -68,11 +68,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "1dede1668bc6a5ab3a67b3ac8f71dec969e72a57ddbb4f39da61c862f8472895"
+    "fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da"
+    "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -193,7 +193,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
     EMBED_STARTUP_CHECK_PATH: "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
-    EMBED_MAIN_PATH: "f25cb36502373c719c4a9f8c34f9e19d2ab7ea61e42428ddfb7d51c29c3694da",
+    EMBED_MAIN_PATH: "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
     EMBED_MAIN_TEST_PATH: "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
@@ -209,7 +209,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "60a13454321273b46b39a3b06f36eba7afb5146860ccd2f48f2f48b929442811",
     "RavenrootServerMain.run":
-        "1dede1668bc6a5ab3a67b3ac8f71dec969e72a57ddbb4f39da61c862f8472895",
+        "fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -370,6 +370,7 @@ HELM_TEMPLATE_PATHS = (
     "deploy/helm/ravenroot/templates/deployment.yaml",
     "deploy/helm/ravenroot/templates/pvc.yaml",
     "deploy/helm/ravenroot/templates/service.yaml",
+    "deploy/helm/ravenroot/templates/runner-plane.yaml",
 )
 HELM_TEST_ROLES = {
     "scripts/tests/test_helm_values_contract.sh": (
@@ -378,12 +379,27 @@ HELM_TEST_ROLES = {
         "timeout-default", "timeout-nondefault", "timeout-blank", "timeout-refusal"),
     "scripts/tests/test_execution_manifest_pin_helm_contract.sh": (
         "unsupported-setting-refusal",),
+    "scripts/tests/test_runner_deployment_contract.py": (
+        "independent-runner-replicas", "runner-capacity-render", "duplicate-pool-refusal", "graph-replica-refusal"),
 }
 
 # This is the complete chart-owned operator surface. Blank Java-default carriers are intentionally
 # absent: their typed authorities remain in Java and this Helm proof only verifies their transport.
 # Entries are value path, setting, exact serialized default, schema rule, projection rule.
 HELM_OPERATOR_VALUE_CONTRACTS = (
+    ("runnerPlane.enabled", "deployment.runner-plane.enabled", "false", "boolean", "runner-plane"),
+    ("runnerPlane.configMap", "deployment.runner-plane.config-map", '""', "string", "runner-plane"),
+    ("runnerPlane.sharedEnvironmentSecret", "deployment.runner-plane.shared-environment-secret", '""', "string", "runner-plane"),
+    ("runnerPlane.artifactClaim", "deployment.runner-plane.artifact-claim", '""', "string", "runner-plane"),
+    ("runnerPlane.coordinatorReplicas", "deployment.runner-plane.coordinator-replicas", "2", "positive-count", "runner-plane"),
+    ("runnerPlane.coordinatorPort", "deployment.runner-plane.coordinator-port", "8080", "service-port", "runner-plane"),
+    ("runnerPlane.coordinatorHttpThreads", "deployment.runner-plane.coordinator-http-threads", "16", "positive-count", "runner-plane"),
+    ("runnerPlane.coordinatorHttpQueue", "deployment.runner-plane.coordinator-http-queue", "64", "positive-count", "runner-plane"),
+    ("runnerPlane.coordinatorResources.requests.cpu", "deployment.runner-plane.coordinator-resources.requests.cpu", "100m", "quantity", "runner-plane"),
+    ("runnerPlane.coordinatorResources.requests.memory", "deployment.runner-plane.coordinator-resources.requests.memory", "256Mi", "quantity", "runner-plane"),
+    ("runnerPlane.coordinatorResources.limits.cpu", "deployment.runner-plane.coordinator-resources.limits.cpu", '"1"', "quantity", "runner-plane"),
+    ("runnerPlane.coordinatorResources.limits.memory", "deployment.runner-plane.coordinator-resources.limits.memory", "1Gi", "quantity", "runner-plane"),
+    ("runnerPlane.workerPools", "deployment.runner-plane.worker-pools", "[]", "worker-pools", "runner-plane"),
     ("image.repository", "deployment.image.repository", "ravenroot", "nonempty-string", "image-helper"),
     ("image.tag", "deployment.image.tag", "local", "string", "image-helper"),
     ("image.digest", "deployment.image.digest", '""', "image-digest", "image-helper"),
@@ -2198,6 +2214,7 @@ def helm_schema_rule_matches(schema: object, value_path: str, rule: str) -> bool
         "program-timeout": {"x-ravenroot-environment": "RAVENROOT_PROGRAM_TIMEOUT_MS",
                             "oneOf": [{"type": "integer", "minimum": 100, "maximum": 300000}, graph_blank]},
         "boolean": {"type": "boolean"},
+        "positive-count": {"type": "integer", "minimum": 1},
         "positive-id": {"type": "integer", "minimum": 1, "maximum": 2147483647},
         "fs-group-policy": {"type": "string", "enum": ["Always", "OnRootMismatch"]},
         "probe-initial": {"type": "integer", "minimum": 0, "maximum": 2147483647},
@@ -2205,6 +2222,21 @@ def helm_schema_rule_matches(schema: object, value_path: str, rule: str) -> bool
         "positive-quantity": {"type": "string", "pattern": "^\\+?(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*|\\.[0-9]*[1-9][0-9]*)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"},
         "quantity": {"type": "string", "pattern": "^\\+?(?:(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"},
     }
+    if rule == "worker-pools":
+        fields = {
+            "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "replicas": {"type": "integer", "minimum": 0},
+            "image": {"type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$"},
+            "configMap": {"type": "string", "minLength": 1},
+            "identitySecret": {"type": "string", "minLength": 1},
+            "modelSecret": {"type": "string", "minLength": 1},
+            "socketHostPath": {"type": "string", "pattern": "^/"},
+            "nodeSelector": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+            "stateSize": {"type": "string", "minLength": 1},
+            "storageClass": {"type": "string"}, "resources": {"$ref": "#/properties/resources"},
+        }
+        return node == {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                                                    "required": list(fields), "properties": fields}}
     graph_blank_contract = {
         "type": "string",
         "pattern": "^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000]*$",
@@ -2318,6 +2350,18 @@ def helm_projection_matches(root: Path, value_path: str, projection: str) -> boo
         service = executable(HELM_TEMPLATE_PATHS[3])
     except (FileNotFoundError, UnicodeDecodeError):
         return False
+    if projection == "runner-plane":
+        try:
+            runner = executable("deploy/helm/ravenroot/templates/runner-plane.yaml")
+        except (FileNotFoundError, UnicodeDecodeError):
+            return False
+        carrier = "runnerPlane.coordinatorResources" if value_path.startswith("runnerPlane.coordinatorResources.") else value_path
+        return re.search(r"\.Values\." + re.escape(carrier) + r"\b", runner) is not None \
+            and "ai.ravenroot.server.RunnerCoordinatorMain" in runner \
+            and "replicas: {{ .Values.runnerPlane.coordinatorReplicas }}" in runner \
+            and "replicas: {{ .replicas }}" in runner \
+            and 'hasKey $names .name' in runner \
+            and '.Values.replicaCount' not in runner
     direct = {
         "image-pull-policy": (deployment, r"imagePullPolicy:\s*{{\s*\.Values\.image\.pullPolicy\s*}}"),
         "service-type": (service, r"type:\s*{{\s*\.Values\.service\.type\s*}}"),
@@ -2375,6 +2419,15 @@ def helm_test_evidence_errors(root: Path) -> list[str]:
         if re.search(pattern, source, re.MULTILINE) is None:
             errors.append(f"Helm authority test evidence lacks executable {label}")
     for value_path, _setting, _default, _schema_rule, _projection in HELM_OPERATOR_VALUE_CONTRACTS:
+        if value_path.startswith("runnerPlane."):
+            runner = sources.get("scripts/tests/test_runner_deployment_contract.py", "")
+            carrier = value_path.split(".")[1]
+            evidence = ('"runnerPlane": {', '"' + carrier + '":', '"helm", "template"',
+                        '(("development", 2), ("analysis", 7))', '"coordinatorReplicas": 3',
+                        'render("--set", "replicaCount=2")', 'render("--set", "runnerPlane.workerPools[1].name=development")')
+            if any(item not in runner for item in evidence):
+                errors.append(f"Helm authority test evidence does not exercise {value_path}")
+            continue
         source = timeout if value_path == "programTimeoutMs" else values
         if value_path not in source:
             errors.append(f"Helm authority test evidence does not exercise {value_path}")
@@ -3807,6 +3860,17 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["reconciliationRequired"] = True
     refreshed["entries"] = merged
     remap_declared_candidate_references(refreshed, replacements)
+    # The plan validator has already anchored each approved beforeMetadata to the committed
+    # source. Apply that exact replacement, not just its history record; the history validator
+    # independently rejects an unapproved or differently rendered semantic change.
+    semantic_replacements = {review["candidateId"]: review["afterMetadata"]
+                             for review in plan.get("semanticReviews", [])}
+    for entry in merged:
+        if entry["id"] in semantic_replacements:
+            source_fields = {key: entry[key] for key in SOURCE_METADATA_FIELDS}
+            entry.clear()
+            entry.update(source_fields)
+            entry.update(copy.deepcopy(semantic_replacements[entry["id"]]))
     refreshed["routeTableAuthorities"] = {
         ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
     }
@@ -6076,7 +6140,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "1dede1668bc6a5ab3a67b3ac8f71dec969e72a57ddbb4f39da61c862f8472895"),
+         "fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7274,7 +7338,7 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "nodeExternalIoCapacitiesFor",
          "e3285ab11843b4fae3085058d7cb5a5d5f0c0a2bfa2593da3b0fc73fe0bbb9da"),
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "requiresExternalIoCapacity",
-         "26ad07dec14f887ff245e7e306cf1d7444fa878292528f0f252d77ca14b69f39"),
+         "618cd306f52f3e18198fb93a9db5bd0bfc8c0273d23b05b4c435f88d9394a823"),
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
          "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
@@ -7706,7 +7770,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '1dede1668bc6a5ab3a67b3ac8f71dec969e72a57ddbb4f39da61c862f8472895',
+  'fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -7779,19 +7843,19 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '866c8c950817cd8ac82990907b33cca86c1c4eb79ff5bb8ddc92618d7bb6b22a',
+  'd919672d72496196a4e0a04b64e6ce8af0c989b8730af3c763f6b3c6bfb1c840',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  'd851be43f0e17d0a8cb857ccdd6a19de716c77b5ccda7e44e89dcaa25840030f',
+  '00eee6b0c6807d52db4c88aed2d3eda1c9d5d24eb3ae093a301bdd8981f21f0f',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  'a36bd353f0e241f4f0796739ce8ab49aaf5cb8a40eb75eb355f2ab4eff74a27a',
+  'dd9e65203f421cf0b81ae2ccc000e20bbe2824907a3be13b663db7b0d9261635',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
@@ -8049,7 +8113,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '08c995bc21629148e88a876800539d72e98571ef6cdf16d1c9994dad008f126d',
+  '18af9c01a1277420693f48d4af19c440f84b797a48ae6b86c33c55b5a2011e59',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -8283,7 +8347,14 @@ PROGRAM_GITHUB_SHARED_METHODS = {'core': ['DefaultRavenrootApplication',
  'api': ['RavenrootApplication', ['programAuthoringLimits']],
  'ui': ['', ['currentProgramAuthoringLimits', 'ensureProgramGraphReady']]}
 
-PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-00dc7c6b323744d9427e',
+# The four exact local-worker guard atoms belong to #423's trusted-local startup contract,
+# not the program/GitHub settings family. The reviewed run-method digest still seals their body;
+# new or changed atoms cannot inherit these exclusions. Their inventory classifications remain mandatory.
+PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
+ 'oc-1450a0deaf3d5a2d2865',
+ 'oc-83cd267a603bc543e1de',
+ 'oc-7472c211aa6980103e4b',
+ 'oc-00dc7c6b323744d9427e',
  'oc-107e73202ff972e53169',
  'oc-20f796f0e15a1c389586',
  'oc-23f50ddca7ea65fc2aec',
@@ -12524,15 +12595,15 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
- 'scripts/publish_environment_reference.py': 'd3a72c798179521b92c444690c295d52b5c9a19a810a4b433ea682043fb216ce',
- 'scripts/tests/test_publish_environment_reference.py': '135e497abc1202d12264bba621dfb75d29854df4f59e90b5a1a994108b46bb49',
+ 'scripts/publish_environment_reference.py': '5a3d4442f99cdb134759f8f54c1abd89873aceba16015478563906eb07b95465',
+ 'scripts/tests/test_publish_environment_reference.py': '9a12916abb3b5deac58d548d0c51262efb56d0475d52986f35a0b3acf5b2906a',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
   'RavenrootServerMain',
   'run',
-  '1dede1668bc6a5ab3a67b3ac8f71dec969e72a57ddbb4f39da61c862f8472895'),
+  'fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -13476,6 +13547,77 @@ def dual_source_binding_authority_errors(root: Path, setting: str, contract: dic
     return errors
 
 
+RUNNER_COORDINATOR_BINDING_KIND = "java-runner-coordinator-environment-v1"
+RUNNER_COORDINATOR_CONFIGURATION_PATH = "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorConfiguration.java"
+RUNNER_COORDINATOR_BINDINGS = {
+    "runner.coordinator.port": ("port", "8080", "RAVENROOT_PORT"),
+    "runner.coordinator.httpThreads": ("httpThreads", "16", "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS"),
+    "runner.coordinator.httpQueue": ("httpQueue", "64", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE"),
+}
+# Closed, reviewed source: all three record slots, strict parsing/range validation,
+# the actual HTTP consumer, and executable alternate-capacity/refusal assertions.
+# Updating an inventory cannot approve a change to any of these source contracts.
+RUNNER_COORDINATOR_SOURCE_PROOFS = {
+    RUNNER_COORDINATOR_CONFIGURATION_PATH: "0205aa5cc0141c2a3a7f68b45fe5d8e6216e9a7a4e39783762fc5e802e21c6b4",
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerCoordinatorMain.java":
+        "d55a1a2f04c4ac51280b140801039fb658369294a345a7e9c877a20c59ee0f85",
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RunnerCoordinatorConfigurationTest.java":
+        "7201a3941aca3d432995010f945efe20783d55a9ac1f2e2cde2fc67c27fac4a8",
+}
+
+
+def runner_coordinator_binding_authority(root: Path, setting: str,
+                                         discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    specification = RUNNER_COORDINATOR_BINDINGS.get(setting)
+    if specification is None:
+        return None
+    for path, expected in RUNNER_COORDINATOR_SOURCE_PROOFS.items():
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if hashlib.sha256(normalized(strip_c_comments(source)).encode("utf-8")).hexdigest() != expected:
+            return None
+    field, default, environment = specification
+    candidates = [candidate for candidate in discovered.values()
+                  if candidate.path == RUNNER_COORDINATOR_CONFIGURATION_PATH]
+    defaults = sorted(candidate.id for candidate in candidates
+                      if candidate.kind == "fixed-declaration" and candidate.role == "DEFAULTS"
+                      and candidate.expression == default)
+    bindings = sorted(candidate.id for candidate in candidates
+                      if candidate.kind == "environment-binding" and candidate.expression == environment)
+    if len(candidates) != 6 or len(defaults) != 1 or len(bindings) != 1:
+        return None
+    return {"kind": RUNNER_COORDINATOR_BINDING_KIND, "field": field,
+            "environment": environment, "default": default,
+            "defaultCandidateIds": defaults, "environmentCandidateIds": bindings,
+            "sourceProofs": dict(RUNNER_COORDINATOR_SOURCE_PROOFS)}
+
+
+def runner_coordinator_binding_errors(root: Path, setting: str, contract: dict[str, object],
+                                      setting_entries: list[dict[str, object]],
+                                      entries: dict[str, dict[str, object]],
+                                      discovered: dict[str, Candidate]) -> list[str]:
+    expected = runner_coordinator_binding_authority(root, setting, discovered)
+    if expected is None:
+        return [f"{setting}: unsupported or drifted closed runner coordinator authority"]
+    errors: list[str] = []
+    if contract.get("bindingAuthority") != expected:
+        errors.append(f"{setting}: runner coordinator binding authority has drifted")
+    if contract.get("owner") != RUNNER_COORDINATOR_CONFIGURATION_PATH + "#RunnerCoordinatorConfiguration" \
+            or contract.get("field") != expected["field"] \
+            or contract.get("bindings") != [expected["environment"]] \
+            or contract.get("default") != expected["default"] \
+            or contract.get("defaultEvidence") != expected["defaultCandidateIds"] \
+            or contract.get("defaultAuthority") is not None:
+        errors.append(f"{setting}: runner coordinator owner, binding, or default has drifted")
+    identifiers = sorted(expected["defaultCandidateIds"] + expected["environmentCandidateIds"])
+    if sorted(str(entry["id"]) for entry in setting_entries) != identifiers \
+            or any(entries.get(identifier, {}).get("setting") != setting for identifier in identifiers):
+        errors.append(f"{setting}: runner coordinator candidate partition has drifted")
+    return errors
+
+
 def binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
                              setting_entries: list[dict[str, object]],
                              entries: dict[str, dict[str, object]],
@@ -13486,6 +13628,10 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
         entry for entry in setting_entries if entry.get("kind") == "environment-binding"
     ]
     authority = contract.get("bindingAuthority")
+    if setting in RUNNER_COORDINATOR_BINDINGS or (isinstance(authority, dict)
+            and authority.get("kind") == RUNNER_COORDINATOR_BINDING_KIND):
+        return runner_coordinator_binding_errors(
+            root, setting, contract, setting_entries, entries, discovered)
     if isinstance(authority, dict) \
             and authority.get("kind") == "java-shared-manifest-pin-attempts-v1":
         return manifest_pin_attempt_authority_errors(
@@ -13838,22 +13984,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-c969f4ec1bcbbd499fec": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-44d874806393bda6d8a5":
+    "oc-9e1fa0ee4ba1e4ef81b8": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-63b37cb83fa82435993e":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-b5a198a75d865b9aa15f": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-b51655a5efc13344564a": (
+    "oc-6bfa41b6580b866a7563": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-d5ef10ccebd0f7f6222a": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-981013e25cf547386a46": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-560d4490c5fa486b9b13": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-c969f4ec1bcbbd499fec": "/v1/events",
-    "oc-44d874806393bda6d8a5": "/v1/events",
-    "oc-b5a198a75d865b9aa15f": "/v1/events",
-    "oc-b51655a5efc13344564a": "/v1/events/recent",
-    "oc-981013e25cf547386a46": "/v1/events/recent",
+    "oc-9e1fa0ee4ba1e4ef81b8": "/v1/events",
+    "oc-63b37cb83fa82435993e": "/v1/events",
+    "oc-6bfa41b6580b866a7563": "/v1/events",
+    "oc-d5ef10ccebd0f7f6222a": "/v1/events/recent",
+    "oc-560d4490c5fa486b9b13": "/v1/events/recent",
 }
 
 
@@ -14659,9 +14805,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 87, "path": 79, "summary": 389, "successStatuses": 80}
-    if len(details) != 79 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 79/635 positional shape")
+    expected_counts = {"methods": 94, "path": 85, "summary": 395, "successStatuses": 86}
+    if len(details) != 85 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 85/660 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

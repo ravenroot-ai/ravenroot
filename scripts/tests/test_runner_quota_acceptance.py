@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
 
 PATH = Path(__file__).resolve().parents[1] / "fixtures/runner_quota_acceptance.py"
@@ -165,6 +165,104 @@ class DaemonReadinessTest(unittest.TestCase):
         self.assertEqual(self.diagnostic()["daemonLogTail"], "daemon log unavailable: FileNotFoundError")
 
 
+class FixtureCleanupTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.parent = Path(temporary.name).resolve()
+        self.directory = self.parent / "ravenroot-runner-quota-fixture"
+        self.directory.mkdir()
+        self.daemon = Mock()
+        self.daemon.poll.return_value = 0
+        self.command = Mock()
+        self.read_mounts = fixture.mounted_paths
+        self.mounts = self.enterContext(patch.object(fixture, "mounted_paths", return_value=set()))
+
+    def cleanup(self):
+        fixture.cleanup(self.parent, self.directory, self.daemon, self.command)
+
+    def test_mountinfo_decodes_escaped_paths(self):
+        content = "1 2 0:1 / /var/tmp/a\\040b/exec/netns/default rw - nsfs nsfs rw\n"
+        with patch.object(Path, "read_text", return_value=content):
+            self.assertEqual(self.read_mounts(), {Path("/var/tmp/a b/exec/netns/default")})
+
+    def test_unmounts_only_owned_children_deepest_first_then_backing_filesystem(self):
+        root = self.directory
+        self.mounts.side_effect = [{Path("/"), Path("/var/lib/docker"),
+                                   root / "xfs", root / "xfs/docker/overlay2/layer/merged",
+                                   root / "exec/netns/default"}, {Path("/"), Path("/var/lib/docker")}]
+        self.cleanup()
+        commands = [call.args[0] for call in self.command.call_args_list]
+        self.assertEqual(commands, [
+            ["sudo", "-n", "umount", "--", str(root / "xfs/docker/overlay2/layer/merged")],
+            ["sudo", "-n", "umount", "--", str(root / "exec/netns/default")],
+            ["sudo", "-n", "umount", "--", str(root / "xfs")],
+            ["sudo", "-n", "rm", "-rf", "--one-file-system", "--", str(root)]])
+        self.daemon.wait.assert_called_once_with(timeout=30)
+
+    def test_unmount_failure_or_remaining_mount_prevents_deletion(self):
+        self.mounts.return_value = {self.directory / "exec/netns/default"}
+        self.command.side_effect = fixture.subprocess.CalledProcessError(1, "umount")
+        with self.assertRaises(fixture.subprocess.CalledProcessError):
+            self.cleanup()
+        self.assertEqual(self.command.call_count, 1)
+        self.command.reset_mock(side_effect=True)
+        with self.assertRaisesRegex(RuntimeError, "mounts remain"):
+            self.cleanup()
+        self.assertEqual(self.command.call_count, 1)
+        self.assertEqual(self.command.call_args.args[0][2], "umount")
+
+    def test_unexpected_mount_or_wrong_directory_prevents_all_effects(self):
+        self.mounts.return_value = {self.directory / "unexpected"}
+        with self.assertRaisesRegex(RuntimeError, "unexpected mount"):
+            self.cleanup()
+        with self.assertRaisesRegex(RuntimeError, "exact fixture directory"):
+            fixture.cleanup(self.parent, self.parent, self.daemon, self.command)
+        self.command.assert_not_called()
+
+    def test_live_daemon_without_identity_retains_fixture_without_unmount(self):
+        self.daemon.poll.return_value = None
+        with self.assertRaisesRegex(RuntimeError, "identity is unavailable"):
+            self.cleanup()
+        self.command.assert_not_called()
+        self.mounts.assert_not_called()
+
+    def test_foreign_pid_cannot_be_signalled_or_trigger_deletion(self):
+        (self.directory / "daemon.pid").write_text("123456")
+        with patch.object(Path, "read_bytes", return_value=b"dockerd\0--data-root=/var/lib/docker\0"):
+            with self.assertRaisesRegex(RuntimeError, "outside this fixture"):
+                self.cleanup()
+        self.command.assert_not_called()
+        self.mounts.assert_not_called()
+
+    def test_verified_daemon_stops_before_mounts_and_unconfirmed_stop_retains_state(self):
+        (self.directory / "daemon.pid").write_text("123456")
+        arguments = fixture.daemon_arguments(self.directory)[2:]
+        real_exists = Path.exists
+        for alive in (True, False):
+            with self.subTest(alive=alive):
+                self.command.reset_mock()
+                self.daemon.wait.reset_mock()
+                self.mounts.reset_mock()
+                def exists(path):
+                    return alive if str(path) == "/proc/123456/cmdline" else real_exists(path)
+                def mounts():
+                    self.assertEqual(self.command.call_args_list[0].args[0], ["sudo", "-n", "kill", "-TERM", "123456"])
+                    self.daemon.wait.assert_called_with(timeout=30)
+                    return set()
+                self.mounts.side_effect = mounts
+                with patch.object(Path, "read_bytes", return_value=b"\0".join(value.encode() for value in arguments)), \
+                        patch.object(Path, "exists", exists):
+                    if alive:
+                        with self.assertRaisesRegex(RuntimeError, "shutdown is unconfirmed"):
+                            self.cleanup()
+                        self.mounts.assert_not_called()
+                        self.assertEqual(self.command.call_count, 1)
+                    else:
+                        self.cleanup()
+                        self.assertEqual(self.command.call_count, 2)
+
+
 class RunnerQuotaAcceptanceTest(unittest.TestCase):
     def test_startup_failure_is_diagnosed_before_cleanup_without_image_or_test_execution(self):
         with tempfile.TemporaryDirectory() as parent:
@@ -187,13 +285,80 @@ class RunnerQuotaAcceptanceTest(unittest.TestCase):
                     patch.object(fixture.tempfile, "mkdtemp", return_value=str(directory)), \
                     patch.object(fixture.subprocess, "run", side_effect=command), \
                     patch.object(fixture.subprocess, "Popen", return_value=daemon), \
+                    patch.object(fixture, "mounted_paths", side_effect=[{directory / "xfs", directory / "exec/netns/default"}, set()]), \
                     redirect_stderr(stderr):
                 with self.assertRaisesRegex(RuntimeError, "exited before readiness"):
                     fixture.run()
-            self.assertIn(["sudo", "-n", "umount", str(directory / "xfs")], calls)
-            self.assertEqual(calls[-1], ["sudo", "-n", "rm", "-rf", "--", str(directory)])
+            self.assertEqual(calls[-3:], [
+                ["sudo", "-n", "umount", "--", str(directory / "exec/netns/default")],
+                ["sudo", "-n", "umount", "--", str(directory / "xfs")],
+                ["sudo", "-n", "rm", "-rf", "--one-file-system", "--", str(directory)]])
             self.assertFalse(any(command[0] in ("mvn", "docker") for command in calls))
             daemon.terminate.assert_not_called()
+
+    def test_cleanup_failure_preserves_primary_native_or_startup_exception(self):
+        with tempfile.TemporaryDirectory() as parent:
+            parent = Path(parent).resolve()
+            directory = parent / "ravenroot-runner-quota-fixture"
+            directory.mkdir()
+            original = RuntimeError("original native acceptance failure")
+            stderr = io.StringIO()
+            with patch.object(fixture, "prerequisites", return_value=parent), \
+                    patch.object(fixture.tempfile, "mkdtemp", return_value=str(directory)), \
+                    patch.object(fixture.subprocess, "run", return_value=fixture.subprocess.CompletedProcess([], 0,
+                        json.dumps({"filesystems": [{"fstype": "xfs", "options": "prjquota"}]}))), \
+                    patch.object(fixture.subprocess, "Popen"), \
+                    patch.object(fixture, "wait_for_daemon", side_effect=original), \
+                    patch.object(fixture, "cleanup", side_effect=RuntimeError("namespace busy")), \
+                    redirect_stderr(stderr):
+                with self.assertRaises(RuntimeError) as caught:
+                    fixture.run()
+            self.assertIs(caught.exception, original)
+            self.assertIn('"error": "namespace busy"', stderr.getvalue())
+            self.assertIn('"primary": "RuntimeError"', stderr.getvalue())
+
+    def test_native_failure_remains_primary_and_cleanup_alone_fails_a_green_body(self):
+        for original in (fixture.subprocess.CalledProcessError(1, "mvn"), None):
+            with self.subTest(primary=original), tempfile.TemporaryDirectory() as parent:
+                parent = Path(parent).resolve()
+                directory = parent / "ravenroot-runner-quota-fixture"
+                directory.mkdir()
+                cleanup_error = RuntimeError("namespace remains mounted")
+                stderr = io.StringIO()
+                model = Mock(requests=1)
+                model.configuration.return_value = {}
+                endpoint = Mock()
+                endpoint.__enter__ = Mock(return_value=model)
+                endpoint.__exit__ = Mock(return_value=False)
+
+                def command(arguments, **kwargs):
+                    output = ""
+                    if arguments[0] == "findmnt":
+                        output = json.dumps({"filesystems": [{"fstype": "xfs", "options": "prjquota"}]})
+                    elif arguments[:3] == ["docker", "image", "inspect"]:
+                        output = "sha256:" + "a" * 64
+                    elif arguments[:2] == ["docker", "run"]:
+                        output = "RUNNER_NATIVE_READ_ONLY_CONFINEMENT=passed"
+                    elif arguments[0] == "mvn" and original:
+                        raise original
+                    return fixture.subprocess.CompletedProcess(arguments, 0, output)
+
+                with patch.object(fixture, "prerequisites", return_value=parent), \
+                        patch.object(fixture.tempfile, "mkdtemp", return_value=str(directory)), \
+                        patch.object(fixture.subprocess, "run", side_effect=command), \
+                        patch.object(fixture.subprocess, "Popen"), \
+                        patch.object(fixture, "wait_for_daemon", return_value={"Driver": "overlay2", "ServerVersion": "28"}), \
+                        patch.object(fixture, "ROOT", directory), \
+                        patch.object(fixture.shutil, "which", return_value="/usr/bin/true"), \
+                        patch.object(fixture, "ModelProtocolEndpoint", return_value=endpoint), \
+                        patch.object(fixture, "verify_report") as verify, \
+                        patch.object(fixture, "cleanup", side_effect=cleanup_error), \
+                        redirect_stderr(stderr), redirect_stdout(io.StringIO()):
+                    with self.assertRaises(Exception) as caught:
+                        fixture.run()
+                self.assertIs(caught.exception, original if original else cleanup_error)
+                self.assertEqual(verify.call_count, 0 if original else 1)
+                self.assertIn("RUNNER_QUOTA_CLEANUP_FAILURE=", stderr.getvalue())
 
     def test_local_and_self_hosted_environments_are_refused_before_commands(self):
         with patch.object(fixture.platform, "system", return_value="Linux"), patch.object(fixture.platform, "machine", return_value="x86_64"):
@@ -215,7 +380,18 @@ class RunnerQuotaAcceptanceTest(unittest.TestCase):
             self.assertIn("/tmp/ravenroot-runner-quota-fixture/", value)
         self.assertRegex(fixture.BASE_IMAGE, r"^python@sha256:[0-9a-f]{64}$")
 
-    def test_only_one_executed_green_nine_job_case_is_acceptance(self):
+    def test_secretless_configuration_is_mandatory_and_ambient_live_profile_is_refused(self):
+        with patch.object(fixture.platform, "system", return_value="Linux"), \
+                patch.object(fixture.platform, "machine", return_value="x86_64"), \
+                patch.object(fixture.shutil, "which", return_value="/operator/tool"), \
+                patch.object(fixture.subprocess, "run") as command, tempfile.TemporaryDirectory() as directory:
+            environment = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_TEMP": directory}
+            self.assertEqual(fixture.prerequisites(environment), Path(directory).resolve())
+            with self.assertRaisesRegex(RuntimeError, "external model configuration is forbidden"):
+                fixture.prerequisites(dict(environment, RAVENROOT_RUNNER_ACCEPTANCE_CONFIG="/unused/live.json"))
+            command.assert_not_called()
+
+    def test_only_one_executed_green_model_backed_case_is_acceptance(self):
         # Surefire 3.5.6 / JUnit Jupiter XML shape observed for the @TempDir Path
         # method; omit only environment properties and captured application logs.
         green = '''<?xml version="1.0" encoding="UTF-8"?>

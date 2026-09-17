@@ -939,10 +939,10 @@ public final class GraphRunner implements AutoCloseable {
         var residents = new LinkedHashMap<String, NodeRef>();
         graph.nodes().forEach(node -> {
             NodeRuntimeNature nature = NodeRuntimeNatureProperty.effectiveNature(
-                    node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node.behavior()).orElse(null) : null,
+                    node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node).orElse(null) : null,
                     node.properties());
             NodeTypeDescriptor descriptor = node.kind() == NodeKind.BEHAVIOR
-                    ? behaviors.descriptor(node.behavior()).orElse(null) : null;
+                    ? behaviors.descriptor(node).orElse(null) : null;
             int maxConcurrency = NodeRuntimeMaxConcurrencyProperty.effectiveValue(descriptor, node.properties());
             RavenNode runtime = runtimeNode(node);
             // Read once, here, from the same pinned definition every other precomputation reads, and
@@ -1012,7 +1012,7 @@ public final class GraphRunner implements AutoCloseable {
             if (node.kind() != NodeKind.BEHAVIOR || node.behavior() == null) {
                 return;
             }
-            behaviors.descriptor(node.behavior())
+            behaviors.descriptor(node)
                     .ifPresent(descriptor -> keys.put(node.id(), descriptor.behavior()));
         });
         return Map.copyOf(keys);
@@ -2791,7 +2791,7 @@ public final class GraphRunner implements AutoCloseable {
         NodeMessage delivered = new NodeMessage(identity.security(), identity.processInstanceId(),
                 identity.traversalId(), invocationId, attemptId, parentInvocationIds, node.id(), payload, attributes,
                 command);
-        if ("workspace-agent".equals(node.behavior()) && behaviors.runnerJobs() != null) {
+        if (("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null) {
             behaviors.runnerJobs().bindLive(attemptId, state.recorder, this, startedEventId);
         }
         // ADR 0024 §3's dispatch sequence, and the one place demand-driven workers change each message:
@@ -3658,7 +3658,7 @@ public final class GraphRunner implements AutoCloseable {
                 // payload -- which is right, because a bypass does not change the payload and so
                 // cannot invalidate a claim made about it upstream.
                 && !authoredBypassNodes.contains(node.id())
-                ? behaviors.descriptor(node.behavior())
+                ? behaviors.descriptor(node)
                 : Optional.empty();
         Optional<Map<String, Object>> marker = descriptor
                 .flatMap(entry -> SyntheticProvenance.mint(node.id(), entry, result.payload()))
@@ -4305,9 +4305,9 @@ public final class GraphRunner implements AutoCloseable {
                             message.attributes()));
                 }
                 if (message.command().directive() == NodeDirective.APPLICATION) {
-                    boolean admitted = "workspace-agent".equals(node.behavior()) && behaviors.runnerJobs() != null
+                    boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
                             ? behaviors.runnerJobs().declaresCommand(message.security().tenantId(), node, message.command().name())
-                            : behaviors.descriptor(node.behavior())
+                            : behaviors.descriptor(node)
                             .map(descriptor -> descriptor.commands().contains(message.command().name()))
                             .orElse(false);
                     if (!admitted) {
@@ -4422,9 +4422,9 @@ public final class GraphRunner implements AutoCloseable {
             GraphNode node = graph.node(current.nodeId());
             if (node.kind() == NodeKind.BEHAVIOR
                     && current.command().directive() == NodeDirective.APPLICATION) {
-                boolean admitted = "workspace-agent".equals(node.behavior()) && behaviors.runnerJobs() != null
+                boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
                         ? behaviors.runnerJobs().declaresCommand(null, node, current.command().name())
-                        : behaviors.descriptor(node.behavior())
+                        : behaviors.descriptor(node)
                         .map(descriptor -> descriptor.commands().contains(current.command().name()))
                         .orElse(false);
                 if (!admitted) {

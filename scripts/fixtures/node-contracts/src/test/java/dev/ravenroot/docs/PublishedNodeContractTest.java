@@ -87,6 +87,33 @@ final class PublishedNodeContractTest {
     }
 
     @Test
+    void governedWorkspaceDescriptorVariantMatchesPublishedContract() throws Exception {
+        Path storeFile = Files.createTempFile("ravenroot-doc-runner-catalog-", ".db");
+        storeFile.toFile().deleteOnExit();
+        try (var store = new SqliteExecutionStore(storeFile, Clock.systemUTC())) {
+            var registry = registry().withRunnerJobs(new ai.ravenroot.core.runner.RunnerJobService(
+                    store, Clock.systemUTC(), List.of(), List.of(), Map.of()));
+            var descriptors = List.of(registry.descriptor("workspace").orElseThrow(),
+                    registry.descriptor("agent").orElseThrow());
+            assertTrue(registry.descriptor("workspace-agent").isEmpty());
+            var reference = descriptors.get(1).properties().stream()
+                    .filter(property -> property.name().equals("workspaceRef")).findFirst().orElseThrow();
+            assertEquals(NodePropertyType.WORKSPACE_REFERENCE, reference.type());
+            Path target = REPOSITORY.resolve("docs/reference/governed-node-descriptor-contracts.tsv");
+            String actual = snapshot(descriptors);
+            update(target, actual);
+            assertEquals(Files.readString(target), actual,
+                    "governed descriptor contract drifted; regenerate deliberately with -D" + UPDATE_PROPERTY + "=true");
+            for (String example : List.of("three-agents.graphml", "development-cycle.graphml")) {
+                try (var input = Files.newInputStream(REPOSITORY.resolve("docs/examples/governed-runner").resolve(example));
+                     var graph = GraphManager.readGraphMl(input)) {
+                    new BehaviorPropertySchema(registry).validate(graph.definition());
+                }
+            }
+        }
+    }
+
+    @Test
     void everyPublishedExampleIsParsedAndSchemaCheckedAgainstItsRuntimeDescriptor() throws Exception {
         BehaviorRegistry registry = registry();
         Set<String> expected = registry.descriptors().stream().map(NodeTypeDescriptor::behavior)
@@ -602,6 +629,7 @@ final class PublishedNodeContractTest {
             case URI -> "https://example.com/resource";
             case CEL_EXPRESSION -> "true";
             case SECRET_REFERENCE -> "example-credential";
+            case WORKSPACE_REFERENCE -> "workspace";
             case TEXT, STRING -> property.name().equals("template") ? "Hello, {{payload}}" : "example-value";
         };
     }

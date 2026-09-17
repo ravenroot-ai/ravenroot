@@ -17,7 +17,7 @@ SPEC.loader.exec_module(PUBLISHER)
 class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_runtime_snapshot_covers_every_node_and_sensitive_variant(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(59, rendered.count("## `"))
+        self.assertEqual(59, sum(line.startswith("## `") for line in rendered.splitlines()))
         for behavior in (
             "matrix.send",
             "matrix.sync",
@@ -37,7 +37,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_render_publishes_the_full_catalog_metadata_shape(self) -> None:
         rendered = PUBLISHER.render()
         lines = rendered.splitlines()
-        self.assertEqual(59, rendered.count("| Catalog field | Runtime descriptor value |"))
+        self.assertEqual(61, rendered.count("| Catalog field | Runtime descriptor value |"))
         for label in (
             "Display name",
             "Category",
@@ -51,9 +51,9 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
             "Runtime concurrency",
             "Outcomes",
         ):
-            self.assertEqual(59, sum(line.startswith(f"| {label} |") for line in lines), label)
+            self.assertEqual(61, sum(line.startswith(f"| {label} |") for line in lines), label)
         self.assertEqual(
-            59,
+            61,
             rendered.count("| Property | Display label | Editor help | Type | Required |"),
         )
         self.assertIn(
@@ -69,6 +69,18 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_each_node_links_a_complete_graph(self) -> None:
         rendered = PUBLISHER.render()
         self.assertEqual(59, rendered.count("Complete GraphML example"))
+
+    def test_governed_variant_keeps_workspace_references_typed_and_legacy_separate(self) -> None:
+        rendered = PUBLISHER.render()
+        governed = rendered.split("## Governed Workspace and named Agent variant", 1)[1]
+        self.assertIn("### `workspace` (governed plane)", governed)
+        self.assertIn("### `agent` (governed plane)", governed)
+        self.assertIn("`WORKSPACE_REFERENCE`", governed)
+        for field in ("agentDefinition", "workspaceRef", "workspaceScope", "runtimeLifecycle", "runnerPool", "runtimeProfile"):
+            self.assertIn("`" + field + "`", governed)
+        self.assertIn("three-agents.graphml", governed)
+        self.assertIn("development-cycle.graphml", governed)
+        self.assertIn("without a Workspace", governed)
 
     def test_regeneration_uses_the_isolated_non_reactor_fixture(self) -> None:
         rendered = PUBLISHER.render()

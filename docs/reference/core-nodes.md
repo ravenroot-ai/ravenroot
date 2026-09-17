@@ -4,6 +4,17 @@ These 11 node types are registered by the standard core catalog at the documente
 baseline. The running `GET /v1/node-types` response remains authoritative for a particular
 deployment. Optional bundle nodes are in the [bundle reference](bundles/).
 
+Enabling the governed runner plane additionally registers the visible `workspace` lifecycle node.
+Its [compiled descriptor variant](node-contracts.md#governed-workspace-and-named-agent-variant)
+publishes all fields. `workspaceProfile` and `workspaceVersion` select an approved immutable profile;
+optional `workspaceScope`, `runtimeLifecycle`, `runnerPool` and `runtimeProfile` must agree with it.
+Commands `open`, `inspect`, `checkpoint`, `close` and `abort` produce `ready`, `inspected`,
+`checkpointed`, `closed`, `aborted` or `blocked`. Operations suspend durably rather than occupying
+an engine worker. Lost execution effects require fenced reconciliation, not blind graph retry.
+See the [operator guide](../operator-guide/governed-runners.md) for authority, placement, capacity
+and sticky process/Workspace cancellation, and the
+[minimal team](../examples/governed-runner/three-agents.graphml) for complete command routing.
+
 All nodes accept Ravenroot's bounded canonical payload and attribute map. Unless a row says
 otherwise, attributes pass through unchanged. Test mode bypasses behavior execution and records the
 node in `bypassedNodes`; expected results below describe Run mode. Failures produce no normal node

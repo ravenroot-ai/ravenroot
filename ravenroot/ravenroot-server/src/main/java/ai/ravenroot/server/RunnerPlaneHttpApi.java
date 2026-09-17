@@ -20,6 +20,7 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
     }
 
     void bindLifecycle(ai.ravenroot.core.process.ProcessLifecycleService lifecycle) {
+        if (continuations == null) throw new IllegalStateException("runner coordinator does not own graph execution");
         continuations.bindLifecycle(lifecycle);
     }
 
@@ -35,7 +36,9 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
                 error(exchange, context, 404, "RUNNER_RESOURCE_NOT_FOUND");
             } else if (failed.getCause() instanceof ai.ravenroot.api.persistence.ExecutionStoreException storeFailure
                     && storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.InvalidRequest) {
-                error(exchange, context, 400, "INVALID_RUNNER_REQUEST");
+                // Request shape has already been checked above the port. The transactional fold
+                // refuses a now-ineligible claim/capacity/stop revision; this is a state conflict.
+                error(exchange, context, 409, "RUNNER_STATE_CONFLICT");
             } else error(exchange, context, 409, "RUNNER_STORE_CONFLICT");
         }
     }
@@ -44,6 +47,17 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
         var actor = context.applicationContext();
         String path = exchange.getRequestURI().getPath().substring("/v1/runner-plane".length());
         String method = exchange.getRequestMethod();
+        if (path.equals("/availability")) {
+            if (method.equals("POST")) {
+                var value = RunnerJson.read(body(exchange, 65536));
+                var profiles = RunnerJson.strings(value.get("runtimeProfiles"));
+                var accepted = control.availability(actor, UUID.fromString(RunnerJson.text(value, "sessionId")),
+                        Math.toIntExact(RunnerJson.number(value, "capacity")), Math.toIntExact(RunnerJson.number(value, "activeJobs")), profiles,
+                        java.time.Duration.parse(RunnerJson.text(value, "ttl")));
+                json(exchange, 200, availability(accepted)); return;
+            }
+            if (method.equals("GET")) { json(exchange, 200, Map.of("items", control.availability(actor).stream().map(RunnerPlaneHttpApi::availability).toList())); return; }
+        }
         if ((path.equals("/health") || path.equals("/audit")) && method.equals("GET")) {
             String raw = exchange.getRequestURI().getRawQuery();
             String name = path.equals("/health") ? "cursor" : "afterOffset";
@@ -86,6 +100,30 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
         String[] pieces = path.split("/");
         if (pieces.length < 3 || !pieces[1].equals("workspaces")) { error(exchange, context, 404, "RUNNER_RESOURCE_NOT_FOUND"); return; }
         UUID process = UUID.fromString(pieces[2]);
+        if (pieces.length == 4 && pieces[3].equals("worker-revision") && method.equals("GET")) {
+            json(exchange, 200, Map.of("revision", control.workerRevision(actor, process))); return;
+        }
+        if (pieces.length == 6 && pieces[3].equals("resources") && method.equals("POST")) {
+            if (pieces[5].equals("release")) {
+                var release = control.releaseWorkspace(actor, process, pieces[4]);
+                var response = new LinkedHashMap<String, Object>(Map.of("protocolVersion", 1, "tenantId", release.execution().tenantId(),
+                        "processInstanceId", process.toString(), "workspaceId", release.workspaceId().toString(),
+                        "runnerId", release.runnerId(), "jobIds", release.jobIds().stream().map(UUID::toString).toList(),
+                        "notBefore", release.notBefore().toString()));
+                response.put("workspaceScope", release.workspaceScope().name()); response.put("ownershipGeneration", release.generation());
+                response.put("physicalCleanup", release.physicalCleanup()); json(exchange, 200, response); return;
+            }
+            var value = RunnerJson.read(body(exchange, 4096));
+            long revision = switch (pieces[5]) {
+                case "abort" -> control.stopWorkspace(actor, process, pieces[4], RunnerJson.number(value, "expectedRevision"));
+                case "stopped" -> control.workspaceStopped(actor, process, pieces[4], UUID.fromString(RunnerJson.text(value, "workspaceId")),
+                        RunnerJson.number(value, "expectedRevision"));
+                case "released" -> control.workspaceReleased(actor, process, pieces[4], UUID.fromString(RunnerJson.text(value, "workspaceId")),
+                        RunnerJson.number(value, "expectedRevision"));
+                default -> throw new NoSuchElementException("unknown Workspace operation");
+            };
+            json(exchange, 200, Map.of("revision", revision)); return;
+        }
         if (pieces.length == 4 && pieces[3].equals("release") && method.equals("POST")) {
             var release = control.release(actor, process);
             json(exchange, 200, Map.of("protocolVersion", 1, "tenantId", release.execution().tenantId(),
@@ -97,7 +135,7 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
             var view = control.view(actor, process); var workspace = view.workspace();
             json(exchange, 200, Map.of("workspaceId", workspace.workspaceId().toString(), "runnerId", workspace.runnerId(),
                     "processInstanceId", process.toString(), "revision", view.revision(), "jobs", workspace.jobs().values().stream()
-                            .map(RunnerJson::entry).toList())); return;
+                            .map(RunnerJson::entry).toList(), "workspaces", workspace.workspaces().values().stream().map(RunnerJson::workspace).toList())); return;
         }
         if (pieces.length < 5 || !pieces[3].equals("jobs")) throw new NoSuchElementException("unknown runner route");
         UUID jobId = UUID.fromString(pieces[4]);
@@ -121,6 +159,9 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
         if (pieces.length != 6 || !method.equals("POST")) throw new NoSuchElementException("unknown runner operation route");
         String operation = pieces[5];
         if (operation.equals("resolve-continuation")) {
+            if (continuations == null) {
+                error(exchange, context, 409, "RUNNER_GRAPH_AUTHORITY_REQUIRED"); return;
+            }
             requireContentType(exchange, "application/json");
             var value = RunnerJson.read(body(exchange, 4096));
             if (!value.keySet().equals(Set.of("expectedRevision", "resolution"))) throw new IllegalArgumentException("invalid continuation resolution");
@@ -150,21 +191,29 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
             var value = RunnerJson.read(body(exchange, 4096));
             Duration ttl = Duration.ofSeconds(RunnerJson.number(value, "ttlSeconds"));
             mutation = switch (operation) {
-                case "claim" -> new RunnerJobOperation.Claim(jobId, actor.subject(), ttl);
-                case "heartbeat" -> new RunnerJobOperation.Heartbeat(jobId, actor.subject(), RunnerJson.number(value, "fence"), ttl);
+                case "claim" -> new RunnerJobOperation.Claim(jobId, actor.subject(), ttl,
+                        value.containsKey("workerSession") ? UUID.fromString(RunnerJson.text(value, "workerSession")) : null);
+                case "heartbeat" -> new RunnerJobOperation.Heartbeat(jobId, actor.subject(), RunnerJson.number(value, "fence"), ttl,
+                        value.containsKey("workerSession") ? UUID.fromString(RunnerJson.text(value, "workerSession")) : null);
                 case "reconcile-report" -> new RunnerJobOperation.ReconcileReport(jobId, actor.subject(), ttl);
                 default -> throw new IllegalArgumentException("unknown runner operation");
             };
         }
         var assignment = control.operate(actor, process, mutation);
         // Durability precedes delivery. A retry/sweep can resume even if this HTTP response is lost.
-        if (assignment.job().state().terminal()) continuations.resume(assignment.job().identity().execution(), jobId);
+        if (assignment.job().state().terminal() && continuations != null)
+            continuations.resume(assignment.job().identity().execution(), jobId);
         if (mutation instanceof RunnerJobOperation.Cancel || mutation instanceof RunnerJobOperation.Reconcile) {
             json(exchange, 200, RunnerJson.job(assignment.job())); return;
         }
         binary(exchange, 200, "application/vnd.ravenroot.runner-assignment.v1", RunnerCodec.assignment(assignment));
     }
 
+    private static Map<String, Object> availability(RunnerAvailability value) {
+        return Map.of("runnerId", value.runnerId(), "sessionId", value.sessionId().toString(), "capacity", value.capacity(),
+                "activeJobs", value.activeJobs(), "availableJobs", value.capacity() - value.activeJobs(), "runtimeProfiles", value.runtimeProfiles(),
+                "observedAt", value.observedAt().toString(), "leaseUntil", value.leaseUntil().toString());
+    }
     private static String requiredHeader(HttpExchange exchange, String name) {
         var values = exchange.getRequestHeaders().get(name);
         if (values == null || values.size() != 1 || values.getFirst().isBlank()) {

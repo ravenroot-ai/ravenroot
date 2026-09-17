@@ -513,6 +513,30 @@ public abstract class ExecutionStoreContract {
         long revision = await(store().load(key)).revision();
         await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(revision)).runner(operation).build()));
     }
+    @Test final void runnerWorkerIncarnationIsTenantExactStoreClockFencedAndDurable() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var key = newKey();
+        var now = clock().instant();
+        UUID session = UUID.randomUUID();
+        var proposed = new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "worker", session, 7, 2,
+                Set.of("runtime"), now.minusSeconds(100), now.minusSeconds(50));
+        var accepted = await(store().renewRunnerAvailability(proposed, TTL));
+        assertEquals(now, accepted.observedAt());
+        assertEquals(now.plus(TTL), accepted.leaseUntil());
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(List.of(accepted), await(store().runnerAvailability(key.tenantId())));
+        assertTrue(await(store().runnerAvailability("other-tenant")).isEmpty());
+        var competing = new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "worker", UUID.randomUUID(), 2, 0,
+                Set.of("runtime"), now, now.plusSeconds(1));
+        assertThrows(RuntimeException.class, () -> await(store().renewRunnerAvailability(competing, TTL)));
+        assertEquals(List.of(accepted), await(store().runnerAvailability(key.tenantId())));
+        clock().advance(TTL.plusSeconds(1));
+        var replacement = await(store().renewRunnerAvailability(competing, TTL));
+        assertEquals(competing.sessionId(), replacement.sessionId());
+        assertEquals(2, replacement.capacity());
+        assertThrows(RuntimeException.class, () -> await(store().renewRunnerAvailability(proposed, TTL)));
+        assertEquals(List.of(replacement), await(store().runnerAvailability(key.tenantId())));
+    }
 
     private ai.ravenroot.api.runner.RunnerJobOperation.Submit runnerSubmission(ExecutionKey key) {
         var policy = new ai.ravenroot.api.runner.RunnerPolicy(
@@ -533,11 +557,91 @@ public abstract class ExecutionStoreContract {
                 UUID.randomUUID(), OpaquePayload.empty("application/vnd.ravenroot.runner-continuation.v1"));
     }
 
+    @Test final void explicitWorkspacesStopIndependentlyAndRetainUnknownOwnershipPastProcessRetention() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        var key = newKey();
+        UUID session = UUID.randomUUID();
+        await(store().renewRunnerAvailability(new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "runner", session,
+                7, 0, Set.of("reference"), clock().instant(), clock().instant().plus(TTL)), TTL));
+        var first = explicitRunnerSubmission(key, "repository-a", null, "open");
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(first), new GraphVersionPin("runner-graph-v1")))
+                .runner(first).build()));
+        var second = explicitRunnerSubmission(key, "repository-b", null, "open");
+        appendRunnerTraversal(second);
+        for (var opening : List.of(first, second)) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(opening.jobId(), "runner", TTL, session));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(opening.jobId(), "runner", 1,
+                    new ai.ravenroot.api.runner.RunnerResult("ready", opening.input(), List.of(), UUID.randomUUID(),
+                            new ai.ravenroot.api.runner.RunnerResult.WorkspaceObservation(opening.workspaceId(), "runtime-" + opening.workspace().nodeId(), null))));
+        }
+        var a = explicitRunnerSubmission(key, "repository-a", first.workspace(), "implement");
+        var b = explicitRunnerSubmission(key, "repository-b", second.workspace(), "implement");
+        appendRunnerTraversal(a); appendRunnerTraversal(b);
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(a.jobId(), "runner", TTL, session));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceStop(a.jobId(), "repository-a"));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(b.jobId(), "runner", TTL, session));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var resources = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        assertTrue(resources.workspaces().get("repository-a").stopRequested());
+        assertFalse(resources.workspaces().get("repository-b").stopRequested());
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CANCELLING, resources.jobs().get(a.jobId()).job().state());
+        assertEquals(ai.ravenroot.api.runner.RunnerJob.State.CLAIMED, resources.jobs().get(b.jobId()).job().state());
+        assertNotEquals(resources.workspaces().get("repository-a").workspaceId(), resources.workspaces().get("repository-b").workspaceId());
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED)).build()));
+        clock().advance(store().terminalRetention().plusDays(8));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(a.jobId()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Reconcile(b.jobId()));
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())));
+        assertTrue(await(store().loadRunnerWorkspace(key)).isPresent(), "uncertain physical ownership must outlive ordinary process TTL");
+        for (var work : List.of(a, b)) {
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.ReconcileReport(work.jobId(), "runner", TTL));
+            long fence = await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(work.jobId()).job().fence();
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(work.jobId(), "runner", fence,
+                    new ai.ravenroot.api.runner.RunnerResult("completed", work.input(), List.of(), UUID.randomUUID(),
+                            new ai.ravenroot.api.runner.RunnerResult.WorkspaceObservation(work.workspaceId(), "runtime-" + work.workspace().nodeId(), null))));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceStopped(work.jobId(), work.workspace().nodeId(), work.workspaceId(), "runner"));
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceRelease(work.jobId(), work.workspace().nodeId(), work.workspaceId(), "runner"));
+            assertEquals(0L, await(store().purgeExpiredProcessInstances(key.tenantId())), "cleanup reservation alone must not free ownership");
+            runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceReleased(work.jobId(), work.workspace().nodeId(), work.workspaceId(), "runner"));
+        }
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(key.tenantId())));
+    }
+
+    private void appendRunnerTraversal(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit) {
+        var key = submit.identity().execution();
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))
+                .apply(new ExecutionTransition.TraversalAdded(runnerInitial(submit).traversals().get(submit.identity().traversalId())))
+                .runner(submit).build()));
+    }
+    private ai.ravenroot.api.runner.RunnerJobOperation.Submit explicitRunnerSubmission(ExecutionKey key, String node,
+            ai.ravenroot.api.runner.WorkspaceResource existing, String command) {
+        var base = runnerSubmission(key);
+        var policy = base.deployment();
+        var profile = new ai.ravenroot.api.runner.WorkspaceProfile(new ai.ravenroot.api.runner.AgentDefinition.Reference(key.tenantId(), "profile", 1),
+                ai.ravenroot.api.runner.WorkspaceProfile.Scope.PROCESS_INSTANCE,
+                ai.ravenroot.api.runner.WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE, "development", "reference", policy,
+                new ai.ravenroot.api.runner.WorkspaceProfile.Capacity(1, 7, 16, 16_000_000, 64, 1024,
+                        ai.ravenroot.api.runner.WorkspaceProfile.Admission.QUEUE), Duration.ZERO,
+                ai.ravenroot.api.runner.WorkspaceProfile.CompletionPolicy.ABORT, Set.of("developer"));
+        var resource = existing == null ? new ai.ravenroot.api.runner.WorkspaceResource(node, UUID.randomUUID(), profile, "runner",
+                ai.ravenroot.api.runner.WorkspaceResource.State.UNMATERIALIZED, null, null, false, clock().instant()) : existing;
+        var definition = command.equals("open") ? new ai.ravenroot.api.runner.AgentDefinition(base.definition().reference(),
+                "Conformance lifecycle operation", "reference", "reference", Map.of("open", new ai.ravenroot.api.runner.AgentCommand(
+                "open", false, policy, Set.of("ready"))), Set.of(), Set.of(), policy, Duration.ZERO, "object") : base.definition();
+        return new ai.ravenroot.api.runner.RunnerJobOperation.Submit(base.identity(), definition, command, policy, base.runner(), base.input(),
+                base.deadline(), resource.workspaceId(), base.continuation(), resource, command.equals("open") ? "open" : null);
+    }
+
     private static ProcessInstance runnerInitial(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit) {
         var identity = submit.identity();
         var invocation = new NodeInvocation(identity.invocationId(), "agent", Set.of(), NodeInvocationStatus.WAITING,
                 List.of(new NodeAttempt(identity.attemptId(), 1, NodeAttemptStatus.WAITING)),
-                ai.ravenroot.api.execution.NodeCommand.application("implement"));
+                ai.ravenroot.api.execution.NodeCommand.application(submit.command()));
         var traversal = new Traversal(identity.traversalId(), "agent", TraversalStatus.WAITING,
                 Map.of(identity.invocationId(), invocation));
         return new ProcessInstance(identity.execution().processInstanceId(), ProcessInstanceStatus.WAITING,

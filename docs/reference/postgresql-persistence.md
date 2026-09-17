@@ -58,8 +58,10 @@ an execution manifest.
 one refuses startup instead of being ignored: the two name different stores, and a deployment that set
 both has not decided which it wants.
 
-The current Helm chart deploys the SQLite store only and does not expose this PostgreSQL-only bound.
-Set it directly in a PostgreSQL deployment that also supplies the supported store selector and
+The default Helm topology deploys the SQLite store only and does not expose this PostgreSQL-only bound.
+The opt-in `runnerPlane` topology uses an operator-owned shared environment Secret for PostgreSQL
+and independent runner coordinator replicas; it still keeps the graph/authoring server single replica.
+Set the bound in that Secret or directly in a PostgreSQL deployment with the store selector and
 connection configuration; the server rejects a nonblank value for every other store selection before
 it starts work.
 

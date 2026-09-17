@@ -84,6 +84,8 @@ public final class RavenrootServerMain {
         EgressAddressGuard.configure(ReservedNetworkPolicy.fromCommaSeparatedExceptions(
                 System.getenv("RAVENROOT_EGRESS_RESERVED_EXCEPTIONS")));
         var authentication = AuthenticationConfiguration.fromEnvironment(System.getenv(), port);
+        if (!System.getenv().getOrDefault("RAVENROOT_LOCAL_RUNNER_CONFIG", "").isBlank())
+            LocalRunnerSupervisor.validateExposure(System.getenv(), authentication, java.nio.file.Files.exists(Path.of("/.dockerenv")));
         var httpSecurity = HttpSecurityConfiguration.fromEnvironment(System.getenv(), port);
         var interactionWebSockets = ai.ravenroot.server.interaction.InteractionWebSocketConfiguration.from(
                 System.getProperties(), System.getenv());
@@ -451,6 +453,8 @@ public final class RavenrootServerMain {
         var runnerControl = runnerJobs == null ? null : new ai.ravenroot.core.runner.AuthorizedRunnerControl(
                 runnerJobs, authorization, runnerConfiguration.issuer(),
                 runnerConfiguration.artifacts(), java.time.Clock.systemUTC());
+        var localRunner = LocalRunnerSupervisor.fromEnvironment(System.getenv(), authentication,
+                runnerConfiguration, runnerJobs, runnerControl);
         // The durable operator authority the packaged process was missing under the relevant contract. It is a
         // local SQLite file opened here and nowhere else, and provision/revoke reach it only through
         // the operator CLI's reference monitor -- there is no HTTP administration route. Default-off:
@@ -599,6 +603,10 @@ public final class RavenrootServerMain {
                 if (approvalRecovery != null) approvalRecovery.close();
                 if (runnerRecovery != null) runnerRecovery.close();
                 if (recoveryDiscovery != null) recoveryDiscovery.close();
+                if (localRunner != null) try { localRunner.close(); }
+                catch (RuntimeException unconfirmed) {
+                    System.err.println("Local Workspace shutdown is unconfirmed; inspect durable stop/recovery state before restarting.");
+                }
                 try {
                     registered.activation().close();
                 } finally {
@@ -649,6 +657,7 @@ public final class RavenrootServerMain {
             }
         }));
         try {
+            if (localRunner != null) localRunner.start();
             startupHandle.start();
             // Discovery starts before the sweep loop: the sweep claims and dispatches, and a process
             // should know what it inherited before it begins acting on it.
@@ -656,6 +665,8 @@ public final class RavenrootServerMain {
             if (approvalRecovery != null) approvalRecovery.start();
             if (runnerRecovery != null) runnerRecovery.start();
         } catch (RuntimeException | Error startFailure) {
+            if (localRunner != null) try { localRunner.close(); }
+            catch (RuntimeException cleanupFailure) { startFailure.addSuppressed(cleanupFailure); }
             if (recoveryDiscovery != null) recoveryDiscovery.close();
             if (approvalRecovery != null) approvalRecovery.close();
             if (runnerRecovery != null) runnerRecovery.close();

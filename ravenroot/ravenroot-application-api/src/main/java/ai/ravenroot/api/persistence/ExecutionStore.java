@@ -65,6 +65,26 @@ import java.util.concurrent.CompletionStage;
  */
 public interface ExecutionStore extends AutoCloseable {
     /**
+     * Store-clock fenced worker incarnation renewal; must serialize with fleet admission.
+     * @param proposed authenticated advertisement; client timestamps are replaced by store time
+     * @param ttl positive operator-configured liveness duration
+     * @return persisted advertisement, or a conflict while another incarnation remains live
+     */
+    default CompletionStage<ai.ravenroot.api.runner.RunnerAvailability> renewRunnerAvailability(
+            ai.ravenroot.api.runner.RunnerAvailability proposed, java.time.Duration ttl) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.RUNNER_JOBS)));
+    }
+    /**
+     * Tenant-exact worker availability, including expired leases for operator diagnostics.
+     * @param tenantId authenticated tenant whose workers may be observed
+     * @return immutable advertisement snapshot, never an approval decision
+     */
+    default CompletionStage<List<ai.ravenroot.api.runner.RunnerAvailability>> runnerAvailability(String tenantId) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.RUNNER_JOBS)));
+    }
+    /**
      * Reads the bounded tenant catalog, including draft and retired profiles for operator inspection.
      * @param tenantId exact authenticated tenant scope
      * @return immutable catalog snapshot, or a capability-not-supported failure

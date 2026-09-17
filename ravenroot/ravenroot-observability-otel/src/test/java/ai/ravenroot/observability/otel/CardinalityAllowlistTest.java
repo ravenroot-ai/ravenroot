@@ -250,25 +250,36 @@ class CardinalityAllowlistTest {
     }
 
     @Test
-    void runnerMetricsRegisterAndEmitOnlyFourFixedSeriesAndOneUnlabelledGauge() {
+    void runnerMetricsUseOnlyFixedEnumsAndUnlabelledConfiguredCapacityAndPageGauges() {
         var relay = new ai.ravenroot.core.runner.RunnerTelemetry.Relay();
         relay.install(bridge);
         for (int i = 0; i < DISTINCT_VALUES; i++) {
             for (var counter : ai.ravenroot.core.runner.RunnerTelemetry.Counter.values()) relay.increment(counter);
         }
-        relay.activeJobs(4);
+        relay.activeJobs(17);
         var counts = onlyMetric("ravenroot.runner.observations").getLongSumData().getPoints();
-        assertEquals(4, counts.size());
+        assertEquals(ai.ravenroot.core.runner.RunnerTelemetry.Counter.values().length, counts.size());
         assertTrue(counts.stream().allMatch(point -> point.getValue() == DISTINCT_VALUES
                 && point.getAttributes().size() == 1
                 && point.getAttributes().get(TelemetryBridge.METRIC_ATTR_RUNNER_COUNTER) != null));
         var active = onlyMetric("ravenroot.runner.worker.active").getLongGaugeData().getPoints();
         assertEquals(1, active.size());
-        assertEquals(4, active.iterator().next().getValue());
+        assertEquals(17, active.iterator().next().getValue());
         assertTrue(active.iterator().next().getAttributes().isEmpty());
         relay.activeJobs(0);
         assertEquals(0, onlyMetric("ravenroot.runner.worker.active").getLongGaugeData().getPoints().iterator().next().getValue());
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> relay.activeJobs(5));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> relay.activeJobs(-1));
+        for (int configured : new int[]{2, 37}) {
+            relay.workerCapacity(configured, configured - 1);
+            assertEquals(configured, onlyMetric("ravenroot.runner.worker.capacity").getLongGaugeData().getPoints().iterator().next().getValue());
+            assertEquals(configured - 1, onlyMetric("ravenroot.runner.worker.available").getLongGaugeData().getPoints().iterator().next().getValue());
+        }
+        for (var gauge : ai.ravenroot.core.runner.RunnerTelemetry.PageGauge.values()) {
+            relay.recoveryPage(java.util.Map.of(gauge, 19L));
+            var point = onlyMetric("ravenroot.runner.recovery_page." + gauge.name().toLowerCase(java.util.Locale.ROOT))
+                    .getLongGaugeData().getPoints().iterator().next();
+            assertEquals(19, point.getValue()); assertTrue(point.getAttributes().isEmpty());
+        }
     }
 
     @Test

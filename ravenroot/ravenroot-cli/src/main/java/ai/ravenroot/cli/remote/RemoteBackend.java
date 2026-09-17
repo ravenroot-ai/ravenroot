@@ -485,6 +485,18 @@ public final class RemoteBackend implements CliBackend {
     private String get(String path) throws IOException {
         return send(baseRequest(path).GET().build());
     }
+    /** Restricted runner-plane integration; the CLI validates every operator operation. */
+    public String runnerOperation(String method, String path, Map<String, Object> body) throws IOException {
+        if (path.startsWith("/") || path.contains("..") || path.contains("?") || path.contains("#"))
+            throw new IllegalArgumentException("relative runner resource required");
+        var request = baseRequest("/v1/runner-plane/" + path).header("Accept", "application/json");
+        return send(switch (method) {
+            case "GET" -> request.GET().build();
+            case "POST" -> request.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(MinimalJson.write(body))).build();
+            case "PUT" -> request.header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(MinimalJson.write(body))).build();
+            default -> throw new IllegalArgumentException("unsupported runner operator method");
+        });
+    }
 
     private String post(String path, byte[] body, String contentType) throws IOException {
         return send(baseRequest(path).header("Content-Type", contentType)

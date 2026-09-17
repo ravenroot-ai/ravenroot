@@ -244,9 +244,10 @@ class RunnerJobTest {
     @Test
     void invalidLeasesAndBackwardsStoreTimeCannotReviveWork() {
         var job = job();
-        for (var invalid : List.of(Duration.ZERO, Duration.ofSeconds(-1), Duration.ofMinutes(6))) {
+        for (var invalid : List.of(Duration.ZERO, Duration.ofSeconds(-1), job.authority().limits().wallTime().plusSeconds(1))) {
             assertThrows(IllegalArgumentException.class, () -> job.claim(RUNNER, NOW, invalid));
         }
+        assertEquals(NOW.plusSeconds(360), job.claim(RUNNER, NOW, Duration.ofMinutes(6)).leaseUntil());
         assertThrows(IllegalArgumentException.class, () -> job.claim(RUNNER, NOW.minusSeconds(1), TTL));
         var claimed = job.claim(RUNNER, NOW, TTL);
         assertThrows(IllegalArgumentException.class,

@@ -1131,7 +1131,13 @@ final class SqliteSchema {
                               WHERE w.tenant_id = process_instance.tenant_id), 1) <= 1
                               THEN 'RUNNING' ELSE 'RECOVERY_REQUIRED' END)
                           END
-                        """)));
+                        """)),
+                new SchemaMigration(30, "explicit Workspace fleet admission fence", List.of(
+                        "CREATE TABLE runner_fleet_guard (singleton INTEGER PRIMARY KEY CHECK (singleton = 1))",
+                        "INSERT INTO runner_fleet_guard (singleton) VALUES (1)",
+                        "CREATE TABLE runner_retention_guard (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
+                        "INSERT INTO runner_retention_guard (tenant_id, process_instance_id) SELECT tenant_id, process_instance_id FROM runner_workspace",
+                        "CREATE TABLE runner_availability (tenant_id TEXT NOT NULL, runner_id TEXT NOT NULL, document BLOB NOT NULL, PRIMARY KEY (tenant_id, runner_id))")));
     }
 
     static int currentVersion() {

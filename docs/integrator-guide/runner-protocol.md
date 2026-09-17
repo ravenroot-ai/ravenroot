@@ -9,9 +9,14 @@ The identity chain is:
 
 `processInstanceId → traversalId → invocationId → attemptId → runnerJobId`
 
-One process owns one pinned workspace. A new traversal of that process uses that workspace, while
-an independent process receives a different workspace. Sequential agents share the workspace only
-after the prior runner process tree is known quiescent. There is no independent agent-session lease.
+One process can own multiple graph-declared Workspaces, each identified by its Workspace node,
+resource UUID and ownership generation. With `PROCESS_INSTANCE`, later traversals reuse that
+resource while another process is isolated. `PER_WORKSPACE` retains one pinned runtime container;
+`PER_INVOCATION` replaces the runtime while preserving filesystem state without recloning. Each
+invocation retains its own durable job/fence and physical observation. Sequential Agents share the
+Workspace only after the prior invocation is known quiescent. There is no second Agent-to-Agent lease.
+Named Agent session identity is tenant/process/definition-version scoped, independent of traversal
+and Workspace identity. See [ADR 0042](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0042-explicit-workspaces-and-runner-coordinators.md).
 
 ## HTTP surface
 
@@ -26,9 +31,16 @@ The prefix itself has no GET, PUT or POST operation; unknown paths return struct
 | PUT `/catalog` | Immutable body or revisioned approval; explicit `expectedRevision` |
 | POST `/register` | Workload advertisement; draft only |
 | GET `/assignments?cursor=…` | Bounded page for the authenticated runner, including eligible cleanup |
+| GET `/availability` | Tenant-scoped live worker incarnations, installed runtimes, capacity and availability |
+| POST `/availability` | Approved workload renews its store-clock incarnation lease; never grants approval |
 | GET `/health?cursor=…` | Operator-readable tenant health page and explicitly page-scoped gauges |
 | GET `/audit?afterOffset=…` | Bounded tenant runner-journal history; offset advances across other events |
 | GET `/workspaces/{processId}` | Operator workspace, job metadata and exact current process `revision` |
+| GET `/workspaces/{processId}/worker-revision` | Pinned workload reads the revision needed for fenced stop reports |
+| POST `/workspaces/{processId}/resources/{nodeId}/abort` | Operator requests one sticky Workspace stop at `expectedRevision` |
+| POST `/workspaces/{processId}/resources/{nodeId}/stopped` | Pinned workload reports that exact stopped Workspace quiescent |
+| POST `/workspaces/{processId}/resources/{nodeId}/release` | Pinned workload reserves terminal, retention-checked physical cleanup |
+| POST `/workspaces/{processId}/resources/{nodeId}/released` | Revision-fenced acknowledgement releases that Workspace's reserved capacity |
 | GET `/workspaces/{processId}/jobs/{jobId}` | Designated-runner binary assignment |
 | POST job `/claim` | `{"ttlSeconds":30}`; QUEUED execution permission only |
 | POST job `/heartbeat` | `{"ttlSeconds":30,"fence":1}` |
@@ -44,6 +56,15 @@ The binary format is the explicit length-bounded `RunnerCodec` envelope with ver
 SHA-256 corruption detection. It is not Java serialization. Digests detect corruption, not malicious
 issuers; transport authentication and runner fencing remain mandatory. Unknown protocol versions,
 oversized envelopes, undeclared outcomes and mismatched identities are refused.
+
+The existing binary envelope versions have a 16 MiB complete-document bound and a 1 MiB
+payload/catalog-document field bound (`RunnerCodec.MAX_BYTES` and `MAX_PAYLOAD_BYTES`). They preserve
+compatibility with existing bounded readers, not a universal job-count or worker-capacity limit.
+Widening those wire bounds requires an explicit versioned reader migration, not a larger worker
+advertisement. Operator payload budgets may independently select any positive size within the field
+bound; admission enforces the effective intersection. Boundary tests round-trip the maximum payload,
+reject its successor and reject an oversized encoded envelope. Metadata identifier/collection bounds
+likewise belong to the versioned grammar, not concurrent work admission.
 
 Artifact uploads require `Content-Type: application/octet-stream`, a live `X-Runner-Fence` and an
 explicit `X-Runner-Artifact-Kind` enum. Missing or invalid kind/header/body is a structured 400;
@@ -62,11 +83,22 @@ unless the operator first establishes the complete graph state. The transaction 
 process-fenced and revision-CAS protected, and emits one audit event. Repeated/stale calls return 409.
 It cannot replay, reclaim or modify a terminal runner job.
 
-The reference runtime image receives one bounded JSON document on stdin: protocol version, job and
+The deterministic conformance runtime image receives one bounded JSON document on stdin: protocol version, job and
 workspace IDs, fence, frozen definition, effective authority, command and input. It returns exactly
 `{"outcome":"…","payload":{…}}` on stdout. Diagnostics belong on bounded stderr. It must not log
 credentials or echo arbitrary unbounded input. The driver proves container termination before
 publishing a result and retains a no-redispatch marker before invoking it.
+
+The real `agent_runtime.py` instead speaks a bounded line-delimited model/tool protocol to its trusted
+supervisor. It consumes the resolved definition, command, effective authority, skills and budgets;
+only the supervisor resolves an approved model profile and credential reference. The container has
+no model credential or network. Model responses must include token usage; tool and model boundaries
+check cancellation and finite budgets. The final structured outcome/payload becomes the direct
+execution result. The deterministic reference runtime is not Agent acceptance evidence. Secretless
+native CI instead connects this unchanged runtime and production gateway to a controlled loopback
+model-protocol endpoint: it proposes tools, while the real runtime performs their native effects.
+This proves protocol/lifecycle behavior, not trained-model inference; live inference is owner-only
+manual local smoke and is never a CI/release prerequisite.
 
 ## Commands and graph routing
 

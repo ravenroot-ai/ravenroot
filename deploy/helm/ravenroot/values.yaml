@@ -2,6 +2,30 @@
 # solely for Minikube after `minikube image load ravenroot:local`.
 replicaCount: 1
 
+# General authoring-server replication remains guarded. Runner coordinators and stable worker
+# pools are separate workloads; their replica counts never derive from replicaCount.
+runnerPlane:
+  enabled: false
+  configMap: ""
+  sharedEnvironmentSecret: ""
+  artifactClaim: ""
+  coordinatorReplicas: 2
+  coordinatorPort: 8080
+  coordinatorHttpThreads: 16
+  coordinatorHttpQueue: 64
+  coordinatorResources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  workerPools: []
+# Each pool: name, replicas, image (immutable digest), configMap, identitySecret, modelSecret,
+# socketHostPath, nodeSelector (dedicated quota-attested Docker hosts), stateSize, storageClass,
+# resources. worker.json uses registration.runnerId="{instance}" and
+# tokenFile="/run/identities/{instance}". Secret keys and approved worker IDs equal pod names.
+
 image:
   repository: ravenroot
   tag: local

@@ -7,8 +7,8 @@ Open them in the Ravenroot editor to inspect or change every operation, or valid
 | File | Expected observation |
 |---|---|
 | `counter-decjz.graphml` | exercises both DECJZ branches and halts with `counter="0"` |
-| `addition.graphml` | `sum="111111111011111111100"` |
-| `multiplication.graphml` | `product="121932631112635269"` |
+| `addition.graphml` | visible DECJZ-style unit-increment loop computes `37 + 23`, leaving `sum="60"` |
+| `multiplication.graphml` | visible repeated-addition loop computes `12345 × 7`, leaving `product="86415"` |
 | `gcd.graphml` | Euclid’s loop halts with `a="21"` |
 | `beyond-long.graphml` | `wide="922337203685477580812345678901234567891"` survives GraphML, execution, payload JSON, and durable SQLite result storage as text |
 | `observation.graphml` | the only log is `counter=41`; arithmetic nodes emit no output |

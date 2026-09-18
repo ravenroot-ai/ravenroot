@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -290,6 +291,86 @@ class GraphMlValidateCommandTest {
         assertTrue(lines(output).contains("register-machine-verdict=invalid"));
         assertTrue(lines(output).stream().anyMatch(line -> line.startsWith(
                 "register-machine-error code=NODE_OUTSIDE_PROFILE location=hidden")));
+    }
+
+    @Test
+    void registerMachineCliRejectsMalformedLiteralAndImpossibleOutcome() throws IOException {
+        var operation = new GraphNode("operation", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                "operation", "copy", "left", "literal:not-a-number", "target", "r"));
+        Path file = writeGraph("malformed-register-machine.graphml", new GraphDefinition(
+                List.of(GraphNode.start("start"), operation, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "operation"), new GraphEdge("operation", "end", "never"))));
+
+        List<String> output = registerMachineOutput(file, 1);
+
+        assertTrue(output.stream().anyMatch(line -> line.contains("code=MALFORMED_BIGINT_OPERATION")),
+                output.toString());
+        assertTrue(output.stream().anyMatch(line -> line.contains("code=IMPOSSIBLE_OUTCOME")),
+                output.toString());
+    }
+
+    @Test
+    void registerMachineCliBoundsDiagnosticCountAndRenderedText() throws IOException {
+        var nodes = new java.util.ArrayList<GraphNode>();
+        nodes.add(GraphNode.start("start"));
+        nodes.add(GraphNode.end("end"));
+        for (int index = 0; index < 300; index++) nodes.add(GraphNode.behavior("outside-" + index, "program"));
+        List<String> countOutput = registerMachineOutput(writeGraph("many-diagnostics.graphml",
+                new GraphDefinition(nodes, List.of(GraphEdge.to("start", "end")))), 1);
+        assertEquals(256, countOutput.stream().filter(line -> line.startsWith("register-machine-error ")).count());
+        assertTrue(countOutput.contains("register-machine-diagnostics-truncated=true"));
+
+        String outcome = "authored-" + "x".repeat(2_000);
+        var operation = new GraphNode("operation", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                "operation", "copy", "left", "literal:1", "target", "r"));
+        List<String> lengthOutput = registerMachineOutput(writeGraph("long-diagnostic.graphml", new GraphDefinition(
+                List.of(GraphNode.start("start"), operation, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "operation"), new GraphEdge("operation", "end", outcome)))), 1);
+        String diagnostic = lengthOutput.stream().filter(line -> line.contains("code=IMPOSSIBLE_OUTCOME"))
+                .findFirst().orElseThrow();
+        assertTrue(diagnostic.length() < 700, diagnostic);
+    }
+
+    @Test
+    void registerMachineCliHandlesANearLimitDeepPath() throws IOException {
+        int bodyNodes = 9_997;
+        var nodes = new java.util.ArrayList<GraphNode>(bodyNodes + 2);
+        var edges = new java.util.ArrayList<GraphEdge>(bodyNodes + 1);
+        nodes.add(GraphNode.start("00000-start"));
+        String previous = "00000-start";
+        for (int index = 0; index < bodyNodes; index++) {
+            String id = "node-" + String.format(java.util.Locale.ROOT, "%05d", index);
+            nodes.add(new GraphNode(id, ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                    "operation", "copy", "left", "literal:0", "target", "r")));
+            edges.add(GraphEdge.to(previous, id));
+            previous = id;
+        }
+        nodes.add(GraphNode.end("zzzzz-end"));
+        edges.add(GraphEdge.to(previous, "zzzzz-end"));
+        assertEquals(19_997, nodes.size() + edges.size());
+
+        List<String> output = registerMachineOutput(writeGraph("deep-register-machine.graphml",
+                new GraphDefinition(nodes, edges)), 0);
+
+        assertTrue(output.contains("register-machine-verdict=accepted"), output.toString());
+        assertTrue(output.contains("register-machine-diagnostics-truncated=false"), output.toString());
+    }
+
+    private List<String> registerMachineOutput(Path file, int expectedExit) {
+        var output = new ByteArrayOutputStream();
+        var errors = new ByteArrayOutputStream();
+        int exit = GraphMlValidateCommand.run(new String[]{"validate", "--register-machine", file.toString()},
+                stream(output), stream(errors));
+        assertEquals(expectedExit, exit, errors.toString(StandardCharsets.UTF_8));
+        return lines(output);
+    }
+
+    private Path writeGraph(String name, GraphDefinition graph) throws IOException {
+        Path file = directory.resolve(name);
+        try (var manager = GraphManager.from(graph); var sink = Files.newOutputStream(file)) {
+            manager.writeGraphMl(sink);
+        }
+        return file;
     }
 
     private Path write(String name, String content) throws IOException {

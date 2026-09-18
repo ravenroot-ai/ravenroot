@@ -55,13 +55,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @EnabledIfSystemProperty(named = "ravenroot.bigint.measurement", matches = "true")
 class BigIntProgramOverheadMeasurementTest {
     private static final int BIGINT_ITERATIONS = 10_000;
-    private static final int PROGRAM_ITERATIONS = 2;
     private static final SecurityContext IDENTITY = new SecurityContext(
             "bigint-measurement", "tenant-a", "alice", PrincipalType.USER, "urn:ravenroot:test");
 
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
-    void contrastsRepeatedInProcessArithmeticWithRepeatedProgramWorkerStarts() throws Exception {
+    void contrastsInProcessArithmeticWithColdProgramAndProvesWarmWorkerReuseIsUnavailable() throws Exception {
         var node = new GraphNode("increment", NodeKind.BEHAVIOR, "bigint-op", Map.of(
                 "operation", "add", "left", "field:counter", "right", "literal:1", "target", "counter"));
         var handler = BehaviorRegistry.standard().create(node).orElseThrow();
@@ -83,18 +82,22 @@ class BigIntProgramOverheadMeasurementTest {
         var runtime = new GraalVmProgramRuntime(
                 new PythonProgramNodeLiveExecutionTest.LiveGraalVmWorkerSupervisor(workerStarts),
                 PythonProgramNodeLiveExecutionTest.policy());
-        long programStarted = System.nanoTime();
-        for (int index = 0; index < PROGRAM_ITERATIONS; index++) {
-            assertEquals("1", runtime.execute(new FixedAdmission(artifact), request).toCompletableFuture().get());
-        }
-        long programNanos = System.nanoTime() - programStarted;
-        assertEquals(PROGRAM_ITERATIONS, workerStarts.get(), "each isolated program invocation starts a worker");
+        long coldProgramStarted = System.nanoTime();
+        assertEquals("1", runtime.execute(new FixedAdmission(artifact), request).toCompletableFuture().get());
+        long coldProgramNanos = System.nanoTime() - coldProgramStarted;
+        assertEquals(1, workerStarts.get(), "the cold governed invocation starts one isolated worker");
+
+        long reuseProbeStarted = System.nanoTime();
+        assertEquals("1", runtime.execute(new FixedAdmission(artifact), request).toCompletableFuture().get());
+        long reuseProbeNanos = System.nanoTime() - reuseProbeStarted;
+        assertEquals(2, workerStarts.get(), "the same runtime and artifact still start a fresh isolated worker");
 
         System.out.printf(java.util.Locale.ROOT,
                 "bigint-op measurement: %,d in-process operations, 0 worker starts, %.0f ns/op; "
-                        + "program measurement: %,d invocations, %,d real worker starts, %.0f ns/invocation%n",
+                        + "governed program coldNanos=%d coldWorkerStarts=1; "
+                        + "same-runtime reuseProbeNanos=%d reuseProbeWorkerStarts=1 warmReuseAvailable=false%n",
                 BIGINT_ITERATIONS, (double) bigintNanos / BIGINT_ITERATIONS,
-                PROGRAM_ITERATIONS, workerStarts.get(), (double) programNanos / PROGRAM_ITERATIONS);
+                coldProgramNanos, reuseProbeNanos);
     }
 
     @Test

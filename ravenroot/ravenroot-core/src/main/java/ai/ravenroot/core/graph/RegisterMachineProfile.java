@@ -1,5 +1,7 @@
 package ai.ravenroot.core.graph;
 
+import ai.ravenroot.api.payload.PayloadLimits;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,6 +19,7 @@ import java.util.regex.Pattern;
 public final class RegisterMachineProfile {
     public static final String VERSION = "1";
     public static final int MAX_DIAGNOSTICS = 256;
+    public static final int MAX_DIAGNOSTIC_TEXT_LENGTH = 512;
     public static final int MAX_INSPECTED_ELEMENTS = 20_000;
 
     private static final Set<String> OPERATIONS = Set.of(
@@ -24,6 +27,8 @@ public final class RegisterMachineProfile {
     private static final Set<String> COMPARISONS = Set.of("equal", "less-than");
     private static final Pattern FIELD_EXPRESSION = Pattern.compile("payload\\.([A-Za-z_][A-Za-z0-9_]*)");
     private static final Pattern DECIMAL = Pattern.compile("0|-?[1-9][0-9]*");
+    private static final Pattern EXECUTABLE_DECIMAL = Pattern.compile("[+-]?[0-9]+");
+    private static final int MAX_DECIMAL_DIGITS = 4_096;
 
     private RegisterMachineProfile() {
     }
@@ -70,6 +75,7 @@ public final class RegisterMachineProfile {
                             comparisonTargets, consumedBooleans, findings);
                     if ("bigint-op".equals(node.behavior()) || "log".equals(node.behavior())) {
                         requireOutgoing(node, outgoing, 1, findings);
+                        requireContinueOutcome(node, outgoing, findings);
                     }
                 }
             }
@@ -162,6 +168,16 @@ public final class RegisterMachineProfile {
                 "Profile node requires " + expected + " outgoing edge(s); found " + actual));
     }
 
+    private static void requireContinueOutcome(GraphNode node, Map<String, List<GraphEdge>> outgoing,
+                                               List<Diagnostic> findings) {
+        List<GraphEdge> edges = outgoing.getOrDefault(node.id(), List.of());
+        if (edges.size() == 1 && !GraphEdge.DEFAULT_OUTCOME.equals(edges.get(0).outcome())) {
+            findings.add(error("IMPOSSIBLE_OUTCOME", node.id(), "Behavior '" + node.behavior()
+                    + "' emits only the '" + GraphEdge.DEFAULT_OUTCOME + "' outcome; found edge outcome '"
+                    + edges.get(0).outcome() + "'"));
+        }
+    }
+
     private static void inspectReadsBeforeInitialization(Map<String, GraphNode> nodes,
                                                           Map<String, List<GraphEdge>> incoming,
                                                           List<Diagnostic> findings) {
@@ -242,41 +258,65 @@ public final class RegisterMachineProfile {
                                       List<Diagnostic> findings) {
         // One warning per cyclic component. Logging is the profile's explicit observable boundary;
         // runtime cancellation still remains between every two nodes, including unlogged cycles.
-        var index = new HashMap<String, Integer>();
-        var low = new HashMap<String, Integer>();
-        var stack = new ArrayDeque<String>();
-        var onStack = new HashSet<String>();
-        int[] next = {0};
-        for (String id : nodes.keySet()) if (!index.containsKey(id)) {
-            strongConnect(id, nodes, outgoing, index, low, stack, onStack, next, findings);
+        // Both passes are iterative: a valid graph just below the public 20,000-element ceiling
+        // must not be able to consume the host Java stack merely by forming one deep path.
+        var adjacency = new LinkedHashMap<String, List<String>>();
+        var reverse = new LinkedHashMap<String, List<String>>();
+        nodes.keySet().forEach(id -> {
+            adjacency.put(id, new ArrayList<>());
+            reverse.put(id, new ArrayList<>());
+        });
+        for (var entry : outgoing.entrySet()) {
+            if (!nodes.containsKey(entry.getKey())) continue;
+            for (GraphEdge edge : entry.getValue()) if (nodes.containsKey(edge.target())) {
+                adjacency.get(entry.getKey()).add(edge.target());
+                reverse.get(edge.target()).add(entry.getKey());
+            }
         }
-    }
+        adjacency.values().forEach(targets -> targets.sort(String::compareTo));
+        reverse.values().forEach(sources -> sources.sort(String::compareTo));
 
-    private static void strongConnect(String id, Map<String, GraphNode> nodes,
-                                      Map<String, List<GraphEdge>> outgoing, Map<String, Integer> index,
-                                      Map<String, Integer> low, ArrayDeque<String> stack, Set<String> onStack,
-                                      int[] next, List<Diagnostic> findings) {
-        index.put(id, next[0]); low.put(id, next[0]++); stack.push(id); onStack.add(id);
-        for (GraphEdge edge : outgoing.getOrDefault(id, List.of())) {
-            String target = edge.target();
-            if (!nodes.containsKey(target)) continue;
-            if (!index.containsKey(target)) {
-                strongConnect(target, nodes, outgoing, index, low, stack, onStack, next, findings);
-                low.put(id, Math.min(low.get(id), low.get(target)));
-            } else if (onStack.contains(target)) low.put(id, Math.min(low.get(id), index.get(target)));
+        var visited = new HashSet<String>();
+        var finished = new ArrayList<String>(nodes.size());
+        for (String root : nodes.keySet()) {
+            if (!visited.add(root)) continue;
+            var frames = new ArrayDeque<TraversalFrame>();
+            frames.push(new TraversalFrame(root, 0));
+            while (!frames.isEmpty()) {
+                TraversalFrame frame = frames.pop();
+                List<String> targets = adjacency.get(frame.node());
+                if (frame.nextTarget() < targets.size()) {
+                    frames.push(new TraversalFrame(frame.node(), frame.nextTarget() + 1));
+                    String target = targets.get(frame.nextTarget());
+                    if (visited.add(target)) frames.push(new TraversalFrame(target, 0));
+                } else {
+                    finished.add(frame.node());
+                }
+            }
         }
-        if (!low.get(id).equals(index.get(id))) return;
-        var component = new ArrayList<String>();
-        String member;
-        do { member = stack.pop(); onStack.remove(member); component.add(member); } while (!member.equals(id));
-        boolean selfLoop = outgoing.getOrDefault(id, List.of()).stream().anyMatch(edge -> edge.target().equals(id));
-        if ((component.size() > 1 || selfLoop) && component.stream().noneMatch(memberId ->
-                "log".equals(nodes.get(memberId).behavior()))) {
+
+        visited.clear();
+        for (int index = finished.size() - 1; index >= 0; index--) {
+            String root = finished.get(index);
+            if (!visited.add(root)) continue;
+            var component = new ArrayList<String>();
+            var pending = new ArrayDeque<String>();
+            pending.push(root);
+            while (!pending.isEmpty()) {
+                String member = pending.pop();
+                component.add(member);
+                for (String source : reverse.get(member)) if (visited.add(source)) pending.push(source);
+            }
+            boolean selfLoop = adjacency.get(root).contains(root);
+            if ((component.size() <= 1 && !selfLoop) || component.stream().anyMatch(memberId ->
+                    "log".equals(nodes.get(memberId).behavior()))) continue;
             component.sort(String::compareTo);
             findings.add(warning("UNOBSERVABLE_CYCLE", component.get(0),
                     "Cycle has no explicit log observation point; cancellation remains available between nodes"));
         }
     }
+
+    private record TraversalFrame(String node, int nextTarget) { }
 
     private static String booleanField(GraphNode decision) {
         var matcher = FIELD_EXPRESSION.matcher(text(decision, "expression"));
@@ -288,8 +328,16 @@ public final class RegisterMachineProfile {
     }
 
     private static boolean operand(String value) {
-        return value.startsWith("field:") && value.length() > 6
-                || value.startsWith("literal:") && value.length() > 8;
+        if (value.startsWith("field:")) {
+            String field = value.substring("field:".length());
+            return !field.isBlank() && field.length() <= PayloadLimits.DEFAULTS.maxKeyLength()
+                    && field.chars().noneMatch(Character::isISOControl);
+        }
+        if (!value.startsWith("literal:")) return false;
+        String decimal = value.substring("literal:".length());
+        int sign = decimal.startsWith("+") || decimal.startsWith("-") ? 1 : 0;
+        int digits = decimal.length() - sign;
+        return digits >= 1 && digits <= MAX_DECIMAL_DIGITS && EXECUTABLE_DECIMAL.matcher(decimal).matches();
     }
 
     private static void warnNonCanonicalLiteral(GraphNode node, String property, String reference,
@@ -340,15 +388,20 @@ public final class RegisterMachineProfile {
     }
 
     private static Diagnostic error(String code, String location, String message) {
-        return new Diagnostic(Severity.ERROR, code, safe(location), message);
+        return new Diagnostic(Severity.ERROR, code, bounded(safe(location)), bounded(message));
     }
 
     private static Diagnostic warning(String code, String location, String message) {
-        return new Diagnostic(Severity.WARNING, code, safe(location), message);
+        return new Diagnostic(Severity.WARNING, code, bounded(safe(location)), bounded(message));
     }
 
     private static String safe(String location) {
         return location == null || location.isBlank() ? "graph" : location;
+    }
+
+    private static String bounded(String value) {
+        if (value.length() <= MAX_DIAGNOSTIC_TEXT_LENGTH) return value;
+        return value.substring(0, MAX_DIAGNOSTIC_TEXT_LENGTH - 3) + "...";
     }
 
     public enum Severity { ERROR, WARNING }

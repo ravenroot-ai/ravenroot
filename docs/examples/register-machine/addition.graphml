@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="g-join" for="graph" attr.name="join.semantics" attr.type="string"/>
   <key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
   <key id="operation" for="node" attr.name="operation" attr.type="string"/><key id="left" for="node" attr.name="left" attr.type="string"/>
   <key id="right" for="node" attr.name="right" attr.type="string"/><key id="target" for="node" attr.name="target" attr.type="string"/>
-  <graph id="register-addition" edgedefault="directed">
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/><key id="trueOutcome" for="node" attr.name="trueOutcome" attr.type="string"/>
+  <key id="falseOutcome" for="node" attr.name="falseOutcome" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="iterative-register-addition" edgedefault="directed"><data key="g-join">declared</data>
     <node id="start"><data key="kind">START</data></node>
-    <node id="set-left"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:12345678901234567890</data><data key="target">left</data></node>
-    <node id="set-right"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:98765432109876543210</data><data key="target">right</data></node>
-    <node id="add"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">add</data><data key="left">field:left</data><data key="right">field:right</data><data key="target">sum</data></node>
+    <node id="set-sum"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:37</data><data key="target">sum</data></node>
+    <node id="set-addend"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:23</data><data key="target">remaining</data></node>
+    <node id="zero-test"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">equal</data><data key="left">field:remaining</data><data key="right">literal:0</data><data key="target">isZero</data></node>
+    <node id="branch"><data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data><data key="expression">payload.isZero</data><data key="trueOutcome">zero</data><data key="falseOutcome">nonzero</data></node>
+    <node id="increment-sum"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">add</data><data key="left">field:sum</data><data key="right">literal:1</data><data key="target">sum</data></node>
+    <node id="decrement-addend"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">subtract</data><data key="left">field:remaining</data><data key="right">literal:1</data><data key="target">remaining</data></node>
     <node id="end"><data key="kind">END</data></node>
-    <edge id="e0" source="start" target="set-left"/><edge id="e1" source="set-left" target="set-right"/><edge id="e2" source="set-right" target="add"/><edge id="e3" source="add" target="end"/>
+    <edge id="e0" source="start" target="set-sum"/><edge id="e1" source="set-sum" target="set-addend"/>
+    <edge id="e2" source="set-addend" target="zero-test"/><edge id="e3" source="zero-test" target="branch"/>
+    <edge id="e4" source="branch" target="end"><data key="outcome">zero</data></edge><edge id="e5" source="branch" target="increment-sum"><data key="outcome">nonzero</data></edge>
+    <edge id="e6" source="increment-sum" target="decrement-addend"/><edge id="e7" source="decrement-addend" target="zero-test"/>
   </graph>
 </graphml>

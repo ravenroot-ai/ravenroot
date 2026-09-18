@@ -17,16 +17,57 @@ function graph() {
 }
 
 describe('register machine authoring presets', () => {
-  it('keeps a 4096-digit decimal exact through ordinary GraphML serialization and parsing', () => {
+  it('round-trips every preset as ordinary nodes and edges with exact properties and no macro metadata', () => {
     const value = `9${'0'.repeat(4095)}`;
-    const authored = graph();
-    const inserted = insertRegisterMachinePreset(authored, 'register-set', { register: 'counter', decimal: value });
-    const xml = serializeGraphML(authored);
     installDom();
-    const reloaded = parseGraphML(xml);
-    expect(reloaded.nodeMap[inserted.primary.id].properties.left).toBe(`literal:${value}`);
-    expect(reloaded.nodeMap[inserted.primary.id].propertyTypes.left).toBe('string');
-    expect(xml).not.toContain('9e+');
+    const cases = [
+      ['register-set', { register: 'counter', decimal: value }, [
+        { operation: 'copy', left: `literal:${value}`, target: 'counter' },
+      ]],
+      ['register-increment', { register: 'counter' }, [
+        { operation: 'add', left: 'field:counter', right: 'literal:1', target: 'counter' },
+      ]],
+      ['register-zero-test', { register: 'counter', boolean: 'isZero' }, [
+        { operation: 'equal', left: 'field:counter', right: 'literal:0', target: 'isZero' },
+      ]],
+      ['register-decjz', {
+        register: 'counter', boolean: 'isZero', zeroTarget: 'end', nonzeroTarget: 'start',
+      }, [
+        { operation: 'equal', left: 'field:counter', right: 'literal:0', target: 'isZero' },
+        { expression: 'payload.isZero', trueOutcome: 'zero', falseOutcome: 'nonzero' },
+        { operation: 'subtract', left: 'field:counter', right: 'literal:1', target: 'counter' },
+      ]],
+    ];
+
+    for (const [presetId, configuration, expectedProperties] of cases) {
+      const authored = graph();
+      const inserted = insertRegisterMachinePreset(authored, presetId, configuration);
+      const xml = serializeGraphML(authored);
+      const reloaded = parseGraphML(xml);
+      for (const [index, node] of inserted.nodes.entries()) {
+        for (const [key, value] of Object.entries(expectedProperties[index])) {
+          expect(reloaded.nodeMap[node.id].properties[key]).toBe(value);
+          expect(reloaded.nodeMap[node.id].propertyTypes[key]).toBe('string');
+        }
+      }
+      expect(reloaded.graphProperties).not.toHaveProperty('registerMachineMacro');
+      expect(xml).not.toContain('registerMachineMacro');
+      expect(xml).not.toContain('presetId');
+      expect(xml).not.toContain('9e+');
+
+      if (presetId === 'register-decjz') {
+        const [test, decision, decrement] = inserted.nodes;
+        expect(inserted.edges.map(edge => {
+          const roundTripped = reloaded.edges.find(candidate => candidate.id === edge.id);
+          return [roundTripped.source, roundTripped.target, roundTripped.outcome];
+        })).toEqual([
+          [test.id, decision.id, 'continue'],
+          [decision.id, 'end', 'zero'],
+          [decision.id, decrement.id, 'nonzero'],
+          [decrement.id, 'start', 'continue'],
+        ]);
+      }
+    }
   });
 
   it('inserts DECJZ as one atomic command containing three editable nodes and four edges', () => {

@@ -35,8 +35,8 @@ class RegisterMachineExampleLibraryTest {
     void finiteLibraryExamplesAreExecutableAndPublishTheirExpectedExactValues() throws Exception {
         var expectations = List.of(
                 new Expected("counter-decjz.graphml", "counter", "0"),
-                new Expected("addition.graphml", "sum", "111111111011111111100"),
-                new Expected("multiplication.graphml", "product", "121932631112635269"),
+                new Expected("addition.graphml", "sum", "60"),
+                new Expected("multiplication.graphml", "product", "86415"),
                 new Expected("gcd.graphml", "a", "21"),
                 new Expected("beyond-long.graphml", "wide", "922337203685477580812345678901234567891"),
                 new Expected("observation.graphml", "counter", "41"),
@@ -57,8 +57,9 @@ class RegisterMachineExampleLibraryTest {
             try (var input = Files.newInputStream(EXAMPLES.resolve(expected.file()));
                  var manager = GraphManager.readGraphMl(input);
                  var engine = new PekkoExecutionEngine("register-library-" + UUID.randomUUID());
-                 var runner = new GraphRunner(manager, engine, BehaviorRegistry.standard(), monitor)) {
+             var runner = new GraphRunner(manager, engine, BehaviorRegistry.standard(), monitor)) {
                 assertTrue(RegisterMachineProfile.validate(manager.definition()).conforms(), expected.file());
+                assertVisibleLoopExample(expected.file(), manager);
                 var result = runner.execute(IDENTITY, Map.of()).toCompletableFuture().get(10, TimeUnit.SECONDS);
                 assertEquals(expected.value(), ((Map<?, ?>) result.payload()).get(expected.field()), expected.file());
                 long logs = monitor.eventsAfter(0).stream().filter(event -> event.authorOutput() != null).count();
@@ -106,7 +107,18 @@ class RegisterMachineExampleLibraryTest {
             application.startGraphMl(IDENTITY, traversalId, graph, Map.of());
             assertTrue(await(() -> increments.get() >= 25, Duration.ofSeconds(20)));
             assertTrue(application.cancelTraversal(traversalId));
-            assertTrue(awaitQuiescence(increments, Duration.ofSeconds(10)));
+            assertTrue(await(() -> monitor.eventsAfter(0).stream().anyMatch(event ->
+                    traversalId.equals(event.traversalId())
+                            && event.type() == ExecutionEventType.EXECUTION_CANCELLED), Duration.ofSeconds(10)));
+            long cancellationSequence = monitor.eventsAfter(0).stream().filter(event ->
+                            traversalId.equals(event.traversalId())
+                                    && event.type() == ExecutionEventType.EXECUTION_CANCELLED)
+                    .mapToLong(event -> event.sequence()).findFirst().orElseThrow();
+            Thread.sleep(100);
+            assertEquals(0, monitor.eventsAfter(cancellationSequence).stream().filter(event ->
+                    traversalId.equals(event.traversalId())
+                            && event.type() == ExecutionEventType.NODE_STARTED).count(),
+                    "the ordered terminal cancellation event must precede no later loop admission");
         }
     }
 
@@ -126,14 +138,30 @@ class RegisterMachineExampleLibraryTest {
         }
     }
 
+    private static void assertVisibleLoopExample(String file, GraphManager manager) {
+        if (!file.equals("addition.graphml") && !file.equals("multiplication.graphml")) return;
+        var definition = manager.definition();
+        assertTrue(definition.nodes().stream().anyMatch(node -> "cel-decision".equals(node.behavior())), file);
+        assertTrue(definition.nodes().stream().anyMatch(node -> "subtract".equals(node.properties().get("operation"))),
+                file);
+        assertTrue(definition.edges().stream().anyMatch(edge -> edge.target().equals("zero-test")
+                && edge.source().startsWith("decrement-")), file);
+        assertTrue(definition.nodes().stream().noneMatch(node -> "multiply".equals(node.properties().get("operation"))),
+                file + " must expose iteration rather than a direct multiply node");
+        if (file.equals("addition.graphml")) {
+            assertTrue(definition.nodes().stream().anyMatch(node -> node.id().equals("increment-sum")
+                    && "add".equals(node.properties().get("operation"))
+                    && "literal:1".equals(node.properties().get("right"))), file);
+        } else {
+            assertTrue(definition.nodes().stream().anyMatch(node -> node.id().equals("add-factor")
+                    && "add".equals(node.properties().get("operation"))
+                    && "field:factor".equals(node.properties().get("right"))), file);
+        }
+    }
+
     private static boolean awaitQuiescence(List<?> values, Duration bound) throws InterruptedException {
         return await(() -> { int before = values.size(); try { Thread.sleep(200); } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt(); return false; } return values.size() == before; }, bound);
-    }
-
-    private static boolean awaitQuiescence(AtomicInteger value, Duration bound) throws InterruptedException {
-        return await(() -> { int before = value.get(); try { Thread.sleep(200); } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt(); return false; } return value.get() == before; }, bound);
     }
 
     private record Expected(String file, String field, String value) { }

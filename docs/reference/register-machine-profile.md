@@ -52,12 +52,14 @@ Validate normal GraphML ingestion and this profile together:
 ```
 
 The profile pass is static: it does not evaluate CEL, invoke a node, or follow one runtime path. It is
-deterministic, inspects at most 20,000 nodes plus edges, returns at most 256 sorted diagnostics, and
-reports when that diagnostic list was truncated. Errors make the profile verdict invalid; warnings do
-not.
+deterministic, inspects at most 20,000 nodes plus edges, returns at most 256 sorted diagnostics with
+each diagnostic field bounded to 512 characters, and reports when that diagnostic list was truncated.
+Its cycle analysis uses bounded heap-backed worklists rather than recursion, so a near-limit deep path
+cannot consume the Java call stack. Errors make the profile verdict invalid; warnings do not.
 
-Errors cover malformed `bigint-op` expansions, non-profile or side-effecting nodes, ordinary nodes
-that fork or terminate the active path unexpectedly, decisions that do not read exactly one top-level
+Errors cover malformed `bigint-op` expansions (including literal text or digit counts the runtime
+cannot execute), edge outcomes an elementary node cannot emit, non-profile or side-effecting nodes,
+ordinary nodes that fork or terminate the active path unexpectedly, decisions that do not read exactly one top-level
 boolean, missing or ambiguous decision outcomes, and unresolved edge ends. Warnings conservatively
 cover reads not proven initialized, subtract-one not proven guarded by
 the nonzero branch of a zero test, comparison booleans never consumed, unreachable nodes, unlogged
@@ -88,7 +90,8 @@ do not simulate a stronger mid-instruction recovery contract.
 ## Conformance and example library
 
 [`docs/examples/register-machine/`](../examples/register-machine/) contains admission-ready graphs,
-expected outputs, the DECJZ branches, a cancellable nonterminating loop, explicit observation, exact
+expected outputs, visible iterative addition and repeated-addition multiplication loops, both DECJZ
+branches, a cancellable nonterminating loop, explicit observation, exact
 beyond-`long` arithmetic, and a real graph-authored incremental Pi spigot. The Pi graph logs only a
 new digit; its arithmetic and state transition are individual `bigint-op` nodes.
 
@@ -97,23 +100,30 @@ new digit; its arithmetic and state transition are individual `bigint-op` nodes.
 Ordinary tests do not run extra worker JVMs or the measurement matrix. Run it explicitly:
 
 ```bash
-mvn -pl ravenroot-server -Dravenroot.bigint.measurement=true \
-  -Dtest=BigIntProgramOverheadMeasurementTest test
+mvn -pl ravenroot-server -am -Dravenroot.bigint.measurement=true \
+  -Dtest=BigIntProgramOverheadMeasurementTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 The measurement reports warm in-process increments at 10, 100, 1,000, and 10,000 operations; exact
 arithmetic and payload-JSON serialization at 10, 100, 1,000, and 4,096 digits; one explicit log; a
-cold handler operation; bounded 10/100-iteration real graph traversal samples; and the existing cold
-isolated-program comparison. The 1,000/10,000 traversal rows are deliberately not run: spawning an
+cold handler operation; bounded 10/100-iteration real graph traversal samples; and separately timed
+cold governed-program and same-runtime reuse-probe rows. The latter proves that warm governed worker
+reuse is unavailable today: the same runtime and artifact start a fresh isolated worker for each
+invocation, so reporting a “warm program” row would mislabel another cold start. The 1,000/10,000
+traversal rows are deliberately not run: spawning an
 actor for every elementary hop makes those opt-in samples disproportionately long, while their node
 rows still cover those counts. Output always names this as a bounded local measurement, not a host
 performance promise.
 
-On the 2026-09-18 development run, warm node execution fell from roughly 60 μs/op at 10 iterations to
-3.6 μs/op at 10,000; 10- and 100-increment graph traversal samples were roughly 2.4–3.1 ms/increment;
-4,096-digit addition was about 2.0 ms and its JSON projection about 0.6 ms. The gap is traversal and
+On the 2026-09-18 development run, warm node execution fell from roughly 12.1 μs/op at 10 iterations
+to 3.1 μs/op at 10,000; 10- and 100-increment graph traversal samples were roughly
+2.1–2.4 ms/increment; 4,096-digit addition was about 2.1 ms and its JSON projection about 0.6 ms.
+The cold governed-program row was about 685 ms and the same-runtime reuse probe about 549 ms; each
+started one worker, which is the structural result even though host timings vary. The gap is traversal and
 actor lifecycle, not `BigInteger` arithmetic or a program worker: `bigint-op` starts zero program
-workers. Profile v1 therefore does **not** add a counter instruction. A fused counter would remove the
+workers. Profile v1 therefore does **not** add a counter instruction. The separate governed rows do
+not change that decision: both are isolated worker starts rather than a reusable warm execution path,
+and neither preserves a per-elementary-step cancellation boundary. A fused counter would remove the
 very per-step cancellation and observation boundary the profile promises, while these measurements do
 not demonstrate an end-to-end workload benefit that preserves it. Revisit only with governed cold and
 warm end-to-end evidence for a separately specified node contract.

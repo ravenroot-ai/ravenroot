@@ -1,6 +1,8 @@
 package ai.ravenroot.pekko;
 
 import ai.ravenroot.api.application.ExecutionEventType;
+import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionPolicy;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.payload.PayloadJson;
@@ -10,7 +12,10 @@ import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.RegisterMachineProfile;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
+import ai.ravenroot.core.runtime.GraphExecutionLimitException;
+import ai.ravenroot.core.runtime.GraphExecutionLimits;
 import ai.ravenroot.core.runtime.GraphRunner;
+import ai.ravenroot.core.runtime.UnknownBehaviorPolicy;
 import ai.ravenroot.testkit.RegisterMachineProgram;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
@@ -82,6 +87,78 @@ class RegisterMachineDifferentialTest {
     }
 
     @Test
+    void compiledRuntimeTraversalLimitStopsAtItsConfiguredBoundaryAndMatchesInstructionAccounting()
+            throws Exception {
+        var instructions = nonterminatingProgram();
+        var compiled = RegisterMachineProgram.compile(instructions, Map.of("z", "0"));
+        var monitor = new ExecutionMonitor();
+        GraphExecutionLimits limits = withTraversalSteps(30);
+        try (var manager = read(compiled);
+             var engine = new PekkoExecutionEngine("register-machine-limit-" + UUID.randomUUID());
+             var runner = new GraphRunner(manager, engine, BehaviorRegistry.standard(), monitor,
+                     ExecutionIdentitySource.randomUuids(), UnknownBehaviorPolicy.passThrough(),
+                     ExecutionPolicy.STANDARD, limits)) {
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> runner.execute(IDENTITY, Map.of()).toCompletableFuture().get(10, TimeUnit.SECONDS));
+            GraphExecutionLimitException refused = findLimit(failure);
+            assertEquals(GraphExecutionLimitException.Reason.TRAVERSAL_STEPS, refused.reason());
+            assertEquals(30, refused.limit());
+            assertEquals(31, refused.observed());
+
+            long admittedInstructions = instructionStarts(monitor, compiled, Long.MAX_VALUE);
+            assertTrue(admittedInstructions > 0 && admittedInstructions < refused.limit());
+            var oracle = assertThrows(RegisterMachineProgram.StepLimitExceededException.class,
+                    () -> RegisterMachineProgram.interpret(instructions, Map.of("z", "0"),
+                            admittedInstructions));
+            assertEquals(admittedInstructions, oracle.limit(),
+                    "runtime elementary-node accounting must map to an independently counted source program");
+        }
+    }
+
+    @Test
+    void compiledExternalCancellationAdmitsNoElementaryNodeAfterTheAuthoritativeBoundary()
+            throws Exception {
+        var instructions = nonterminatingProgram();
+        var compiled = RegisterMachineProgram.compile(instructions, Map.of("z", "0"));
+        var monitor = new ExecutionMonitor();
+        UUID traversal = UUID.randomUUID();
+        try (var manager = read(compiled);
+             var engine = new PekkoExecutionEngine("register-machine-cancel-" + UUID.randomUUID());
+             var runner = new GraphRunner(manager, engine, BehaviorRegistry.standard(), monitor)) {
+            var execution = runner.execute(IDENTITY, UUID.randomUUID(), traversal, Map.of(), "compiled")
+                    .toCompletableFuture();
+            assertTrue(await(() -> instructionStarts(monitor, compiled, Long.MAX_VALUE) >= 25, 10));
+
+            assertTrue(runner.cancelTraversal(traversal));
+            assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> execution.get(10, TimeUnit.SECONDS));
+            long cancellationBoundary = monitor.eventsAfter(0).stream()
+                    .filter(event -> event.type() == ExecutionEventType.EXECUTION_CANCELLED)
+                    .mapToLong(event -> event.sequence()).findFirst().orElseThrow();
+            long admittedInstructions = instructionStarts(monitor, compiled, cancellationBoundary);
+            var oracle = assertThrows(RegisterMachineProgram.StepLimitExceededException.class,
+                    () -> RegisterMachineProgram.interpret(instructions, Map.of("z", "0"),
+                            admittedInstructions));
+            assertEquals(admittedInstructions, oracle.limit());
+
+            assertEquals(0, monitor.eventsAfter(cancellationBoundary).stream()
+                    .filter(event -> event.type() == ExecutionEventType.NODE_STARTED).count(),
+                    "the ordered terminal cancellation event must precede no later elementary-node admission");
+        }
+    }
+
+    @Test
+    void compiledDecjzExecutesBothZeroAndNonzeroBranchesExactly() throws Exception {
+        var instructions = List.<RegisterMachineProgram.Instruction>of(
+                new RegisterMachineProgram.DecrementOrJumpZero("r", 2, 1),
+                new RegisterMachineProgram.Increment("marker"),
+                new RegisterMachineProgram.Halt());
+
+        assertCompiledEqualsOracle(instructions, Map.of("r", "0", "marker", "0"));
+        assertCompiledEqualsOracle(instructions, Map.of("r", "1", "marker", "0"));
+    }
+
+    @Test
     void beyondLongRegisterSurvivesGraphMlExecutionAndCanonicalPayloadJsonExactly() throws Exception {
         String initial = "922337203685477580812345678901234567890";
         String expected = "922337203685477580812345678901234567891";
@@ -107,5 +184,67 @@ class RegisterMachineDifferentialTest {
                 new RegisterMachineProgram.Increment("a"),
                 new RegisterMachineProgram.DecrementOrJumpZero("z", 0, 0),
                 new RegisterMachineProgram.Halt());
+    }
+
+    private static List<RegisterMachineProgram.Instruction> nonterminatingProgram() {
+        return List.of(new RegisterMachineProgram.DecrementOrJumpZero("z", 0, 0),
+                new RegisterMachineProgram.Halt());
+    }
+
+    private static GraphManager read(RegisterMachineProgram.Compiled compiled) {
+        return GraphManager.readGraphMl(new ByteArrayInputStream(
+                compiled.graphMl().getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static GraphExecutionLimits withTraversalSteps(long steps) {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        return new GraphExecutionLimits(defaults.graphMl(), defaults.payload(), defaults.maxFanOut(),
+                defaults.maxResidentActors(), defaults.maxLiveActorsPerTraversal(),
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(), steps,
+                defaults.maxAmplifiedDeliveries(), defaults.maxCumulativePayloadBytes(),
+                defaults.maxRecoveryDeliveriesPerAttempt());
+    }
+
+    private static long instructionStarts(ExecutionMonitor monitor,
+                                          RegisterMachineProgram.Compiled compiled, long throughSequence) {
+        return monitor.eventsAfter(0).stream()
+                .filter(event -> event.sequence() <= throughSequence)
+                .filter(event -> event.type() == ExecutionEventType.NODE_STARTED)
+                .filter(event -> compiled.instructionEntries().contains(event.nodeId())).count();
+    }
+
+    private static boolean await(java.util.function.BooleanSupplier condition, int seconds)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) return true;
+            Thread.sleep(10);
+        }
+        return condition.getAsBoolean();
+    }
+
+    private static GraphExecutionLimitException findLimit(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof GraphExecutionLimitException limit) return limit;
+            current = current.getCause();
+        }
+        throw new AssertionError("No graph execution limit failure", failure);
+    }
+
+    private static void assertCompiledEqualsOracle(List<RegisterMachineProgram.Instruction> instructions,
+                                                    Map<String, String> initial) throws Exception {
+        var expected = RegisterMachineProgram.interpret(instructions, initial, 20);
+        var compiled = RegisterMachineProgram.compile(instructions, initial);
+        var monitor = new ExecutionMonitor();
+        try (var manager = read(compiled);
+             var engine = new PekkoExecutionEngine("register-machine-decjz-" + UUID.randomUUID());
+             var runner = new GraphRunner(manager, engine, BehaviorRegistry.standard(), monitor)) {
+            var result = runner.execute(IDENTITY, Map.of()).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var payload = (Map<?, ?>) result.payload();
+            for (var entry : expected.registers().entrySet()) assertEquals(entry.getValue(), payload.get(entry.getKey()));
+            assertEquals(expected.steps(), instructionStarts(monitor, compiled, Long.MAX_VALUE));
+            assertTrue(result.visitedNodes().contains(compiled.instructionEntries().get(expected.haltInstruction())));
+        }
     }
 }

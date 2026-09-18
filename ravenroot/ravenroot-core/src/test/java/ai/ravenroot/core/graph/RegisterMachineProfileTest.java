@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -90,6 +91,76 @@ class RegisterMachineProfileTest {
         var report = RegisterMachineProfile.validate(graph);
 
         assertEquals(List.of("CONTROL_PATH_ARITY"), codes(report.errors()));
+    }
+
+    @Test
+    void rejectsLiteralFormsThatTheRuntimeCannotExecuteButOnlyWarnsForExecutableNoncanonicalForms() {
+        for (String malformed : List.of("literal:not-a-number", "literal:+", "literal:-",
+                "literal:1 0", "literal:" + "9".repeat(4_097))) {
+            var report = RegisterMachineProfile.validate(linear(bigint(
+                    "set", "copy", malformed, null, "r"), GraphEdge.DEFAULT_OUTCOME));
+            assertEquals(List.of("MALFORMED_BIGINT_OPERATION"), codes(report.errors()), malformed);
+            assertFalse(codes(report.warnings()).contains("NONCANONICAL_DECIMAL"), malformed);
+        }
+
+        for (String executable : List.of("literal:+0", "literal:00", "literal:-0")) {
+            var report = RegisterMachineProfile.validate(linear(bigint(
+                    "set", "copy", executable, null, "r"), GraphEdge.DEFAULT_OUTCOME));
+            assertTrue(report.conforms(), executable + ": " + report.errors());
+            assertEquals(List.of("NONCANONICAL_DECIMAL"), codes(report.warnings()), executable);
+        }
+    }
+
+    @Test
+    void rejectsOutcomesThatBigintAndLogCanNeverEmit() {
+        for (GraphNode node : List.of(
+                bigint("operation", "copy", "literal:1", null, "r"),
+                GraphNode.behavior("operation", "log"))) {
+            var report = RegisterMachineProfile.validate(linear(node, "impossible"));
+            assertEquals(List.of("IMPOSSIBLE_OUTCOME"), codes(report.errors()), node.behavior());
+        }
+    }
+
+    @Test
+    void boundsDiagnosticCountAndTextFromAuthoredValues() {
+        String authored = "authored-" + "x".repeat(2_000);
+        var report = RegisterMachineProfile.validate(linear(
+                bigint("operation", "copy", "literal:1", null, "r"), authored));
+        assertEquals(1, report.errors().size());
+        assertTrue(report.errors().get(0).message().length()
+                <= RegisterMachineProfile.MAX_DIAGNOSTIC_TEXT_LENGTH);
+        assertTrue(report.errors().get(0).location().length()
+                <= RegisterMachineProfile.MAX_DIAGNOSTIC_TEXT_LENGTH);
+    }
+
+    @Test
+    void validatesANearElementLimitDeepPathWithoutUsingTheJavaCallStack() {
+        int bodyNodes = 9_997;
+        var nodes = new ArrayList<GraphNode>(bodyNodes + 2);
+        var edges = new ArrayList<GraphEdge>(bodyNodes + 1);
+        nodes.add(GraphNode.start("00000-start"));
+        String previous = "00000-start";
+        for (int index = 0; index < bodyNodes; index++) {
+            String id = "node-" + String.format(java.util.Locale.ROOT, "%05d", index);
+            nodes.add(bigint(id, "copy", "literal:0", null, "r"));
+            edges.add(GraphEdge.to(previous, id));
+            previous = id;
+        }
+        nodes.add(GraphNode.end("zzzzz-end"));
+        edges.add(GraphEdge.to(previous, "zzzzz-end"));
+        assertEquals(19_997, nodes.size() + edges.size());
+
+        var report = assertDoesNotThrow(() -> RegisterMachineProfile.validate(
+                new GraphDefinition(nodes, edges)));
+
+        assertTrue(report.conforms(), report.errors().toString());
+        assertFalse(report.truncated());
+    }
+
+    private static GraphDefinition linear(GraphNode operation, String outcome) {
+        return new GraphDefinition(List.of(GraphNode.start("start"), operation, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", operation.id()),
+                        new GraphEdge(operation.id(), "end", outcome)));
     }
 
     private static List<String> codes(List<RegisterMachineProfile.Diagnostic> diagnostics) {

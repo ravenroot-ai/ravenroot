@@ -371,6 +371,7 @@ HELM_TEMPLATE_PATHS = (
     "deploy/helm/ravenroot/templates/pvc.yaml",
     "deploy/helm/ravenroot/templates/service.yaml",
     "deploy/helm/ravenroot/templates/runner-plane.yaml",
+    "deploy/helm/ravenroot/templates/kubernetes-runner.yaml",
 )
 HELM_TEST_ROLES = {
     "scripts/tests/test_helm_values_contract.sh": (
@@ -2225,18 +2226,36 @@ def helm_schema_rule_matches(schema: object, value_path: str, rule: str) -> bool
     if rule == "worker-pools":
         fields = {
             "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+            "driver": {"type": "string", "enum": ["docker", "kubernetes"]},
             "replicas": {"type": "integer", "minimum": 0},
             "image": {"type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$"},
             "configMap": {"type": "string", "minLength": 1},
             "identitySecret": {"type": "string", "minLength": 1},
             "modelSecret": {"type": "string", "minLength": 1},
             "socketHostPath": {"type": "string", "pattern": "^/"},
-            "nodeSelector": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+            "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+            "kubernetes": {"type": "object", "additionalProperties": False,
+                "required": ["namespace", "agentServiceAccount", "runtimeImages", "runtimeClassName", "maxPods", "maxClaims", "storageQuota"],
+                "properties": {
+                    "namespace": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,61}[a-z0-9]$"},
+                    "agentServiceAccount": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,61}[a-z0-9]$"},
+                    "runtimeClassName": {"type": "string", "pattern": "^$|^[a-z][a-z0-9-]{0,61}[a-z0-9]$"},
+                    "runtimeImages": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": True,
+                                      "items": {"type": "string", "pattern": "^.+@sha256:[a-f0-9]{64}$"}},
+                    "maxPods": {"type": "integer", "minimum": 1},
+                    "maxClaims": {"type": "integer", "minimum": 1},
+                    "storageQuota": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi|Ti)$"}}},
             "stateSize": {"type": "string", "minLength": 1},
             "storageClass": {"type": "string"}, "resources": {"$ref": "#/properties/resources"},
         }
         return node == {"type": "array", "items": {"type": "object", "additionalProperties": False,
-                                                    "required": list(fields), "properties": fields}}
+            "required": [name for name in fields if name not in {"socketHostPath", "kubernetes"}],
+            "allOf": [
+                {"if": {"properties": {"driver": {"const": "docker"}}},
+                 "then": {"required": ["socketHostPath"], "not": {"required": ["kubernetes"]}}},
+                {"if": {"properties": {"driver": {"const": "kubernetes"}}},
+                 "then": {"required": ["kubernetes"], "not": {"required": ["socketHostPath"]}}}],
+            "properties": fields}}
     graph_blank_contract = {
         "type": "string",
         "pattern": "^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000]*$",
@@ -7849,13 +7868,13 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '00eee6b0c6807d52db4c88aed2d3eda1c9d5d24eb3ae093a301bdd8981f21f0f',
+  '8fab9af55f5925a0e9fa61844816cde901ca0849efbf57a31946facd7d977b68',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  'dd9e65203f421cf0b81ae2ccc000e20bbe2824907a3be13b663db7b0d9261635',
+  'dae6457e8b419d2457ce93b24e12b069b7f571251f845d951eca814d9363f736',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
@@ -12595,8 +12614,8 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
- 'scripts/publish_environment_reference.py': '5a3d4442f99cdb134759f8f54c1abd89873aceba16015478563906eb07b95465',
- 'scripts/tests/test_publish_environment_reference.py': '9a12916abb3b5deac58d548d0c51262efb56d0475d52986f35a0b3acf5b2906a',
+ 'scripts/publish_environment_reference.py': '205ce879d0b12403796b3f127734268b99fa47741c73a9632460d4854af15573',
+ 'scripts/tests/test_publish_environment_reference.py': '214afdefb159e7419e39b39b59c7d014f2f106ed077df0fcd6c7a31c4010a175',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 

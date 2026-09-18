@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 22699 |
+| Atomic operational candidates discovered | 22702 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 22699 |
+| Reviewed | 22702 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 311 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1844 |
-| Retained protocol or format invariants | 9485 |
+| Retained security ceilings or defaults | 1846 |
+| Retained protocol or format invariants | 9486 |
 | Retained published contract descriptions | 490 |
 | Retained presentation text | 579 |
 | Retained derived values | 1053 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 64.
+Checked source reconciliations: 65.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 22699 candidates.
+zero-count or unclassified rows as needed and sums to 22702 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 22699 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 21048 |
+| retained | 21051 |
 
 ### Classification counts
 
@@ -86,9 +86,9 @@ zero-count or unclassified rows as needed and sums to 22699 candidates.
 | derived | 1053 |
 | operator-configurable | 1651 |
 | presentation-text | 579 |
-| protocol-or-format-invariant | 9485 |
+| protocol-or-format-invariant | 9486 |
 | published-contract-description | 490 |
-| security-ceiling-or-default | 1844 |
+| security-ceiling-or-default | 1846 |
 | test-fixture | 7597 |
 | unclassified | 0 |
 
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 22699 candidates.
 |---|---:|
 | deployment | 2735 |
 | deployment-example | 20 |
-| java | 7009 |
+| java | 7012 |
 | script | 2199 |
 | test-fixture | 7597 |
 | ui | 3139 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1469 |
 | #321 | 8567 |
-| Retained; no remediation required | 12114 |
+| Retained; no remediation required | 12117 |
 
 ## Latest reconciliation
 
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 22699 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 22699 |
+| Semantically classified additions | 3 |
+| Current candidates | 22702 |
 
 ## Final semantic review
 
@@ -5081,31 +5081,34 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-ead8a36a9cd1deb47d91` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/JoinSemantics.java:117` `JoinSemantics` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-fdff6cba68389a5ac745` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/JoinSemantics.java:120` `JoinSemantics` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-5a1082c2ac478c49da4c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/JoinSemantics.java:123` `JoinSemantics` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-fe79a13c4ec25fff34bc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:18` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-0234879c58bd1e98b6a2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:19` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
-| `oc-1d5f1f51748793732a74` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:20` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
-| `oc-1606a4771d7287567720` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-8213783b491b6b933de8` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-909288868cce2f5e8538` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-c71fc6d3ccc5c72d7795` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-cd5fba068008acf9b17d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-e668c771bc5d4d31fab7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-f0efaa93577bfd2ce34e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-fced6bd39d778ed5f392` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-78a8104a66732da82c9f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-d57ac6fcb1e53c14c893` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-a52bff9566ea5ae6cf20` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:25` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-33d83f110bcc58149c89` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-0f917466b7da035fcc26` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:176` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
-| `oc-7da00a34f8aaddf4379f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:207` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
-| `oc-4455a4bf2db5d9d0c087` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:229` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-c16b65a0b820c40db13c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:229` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-8f82f6433156c906b9a5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:230` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-e75e62cec76f37a12e75` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:230` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-3d4d22af0b83fca63cc2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:231` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-e6aab131dbd5eb814c0f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:231` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-88089987934f3c3296bb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:232` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-88e213ff54501d0533d4` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:233` `for` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
+| `oc-fe79a13c4ec25fff34bc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:20` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-0234879c58bd1e98b6a2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:21` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
+| `oc-19ee522122e9bef7647f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:22` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | This fixed validator ceiling bounds every authored diagnostic field independently of graph input and is not operator configurable. |
+| `oc-1d5f1f51748793732a74` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
+| `oc-1606a4771d7287567720` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-8213783b491b6b933de8` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-909288868cce2f5e8538` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-c71fc6d3ccc5c72d7795` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-cd5fba068008acf9b17d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-e668c771bc5d4d31fab7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-f0efaa93577bfd2ce34e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-fced6bd39d778ed5f392` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-78a8104a66732da82c9f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:27` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-d57ac6fcb1e53c14c893` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:27` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-a52bff9566ea5ae6cf20` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:28` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-33d83f110bcc58149c89` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:29` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-2e94d22da9d6a7ec00a5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:30` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This exact lexical grammar mirrors the executable bigint operand contract so malformed literals are rejected statically. |
+| `oc-6a59258c6475a374c67c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:31` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | This fixed runtime-aligned ceiling bounds graph-authored bigint literal parsing and is not operator configurable. |
+| `oc-0f917466b7da035fcc26` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:192` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
+| `oc-7da00a34f8aaddf4379f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:223` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
+| `oc-4455a4bf2db5d9d0c087` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:245` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-c16b65a0b820c40db13c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:245` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-8f82f6433156c906b9a5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:246` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-e75e62cec76f37a12e75` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:246` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-3d4d22af0b83fca63cc2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:247` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-e6aab131dbd5eb814c0f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:247` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-88089987934f3c3296bb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:248` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-88e213ff54501d0533d4` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:249` `for` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
 | `oc-2874fedda925b42ee456` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/ReservedGraphProperties.java:47` `ReservedGraphProperties` | java | retained | protocol-or-format-invariant | These literals are exact Java property keys; values and defaults are reviewed at their typed consumers. |
 | `oc-4bba6683c700d6057911` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/ReservedGraphProperties.java:47` `ReservedGraphProperties` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-848d9ccc2f673f42ee2f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/SecureGraphMlParser.java:32` `SecureGraphMlParser` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

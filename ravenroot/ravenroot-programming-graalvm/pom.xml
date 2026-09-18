@@ -71,6 +71,11 @@
             <artifactId>ravenroot-api-testkit</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-core</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- Fuzzing ProgramWireProtocol and SandboxSupervisorProtocol.
              Version is managed by the parent, which already declares jqwik for ravenroot-core. -->
         <dependency>

@@ -34,7 +34,7 @@ public final class BehaviorRegistry {
 
     public ai.ravenroot.core.runner.RunnerJobService runnerJobs() { return runnerJobs; }
     private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
-            "log", "delay", "human-task", "template", "json-parse", "cel-transform",
+            "log", "delay", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
             "cel-decision", "json-path", "boundary-guard");
     private final Map<String, NodeBehaviorFactory> factories = new ConcurrentHashMap<>();
     /**

@@ -1,6 +1,6 @@
 # Core node reference
 
-These 11 node types are registered by the standard core catalog at the documented development
+These 12 node types are registered by the standard core catalog at the documented development
 baseline. The running `GET /v1/node-types` response remains authoritative for a particular
 deployment. Optional bundle nodes are in the [bundle reference](bundles/).
 
@@ -28,7 +28,7 @@ Use the maintained complete GraphML file for the behavior you want to try:
 
 - [`log`](../examples/nodes/log.graphml), [`delay`](../examples/nodes/delay.graphml),
   [`template`](../examples/nodes/template.graphml), [`json-parse`](../examples/nodes/json-parse.graphml),
-  and [`json-path`](../examples/nodes/json-path.graphml)
+  [`bigint-op`](../examples/nodes/bigint-op.graphml), and [`json-path`](../examples/nodes/json-path.graphml)
 - [`cel-transform`](../examples/nodes/cel-transform.graphml) and
   [`cel-decision`](../examples/nodes/cel-decision.graphml)
 - [`human-task`](../examples/nodes/human-task.graphml),
@@ -123,6 +123,41 @@ Payload `example input` becomes `Hello, example input.`.
 ```
 
 Payload `example input` becomes the canonical map `{"message":"example input"}`.
+
+## `bigint-op`
+
+| Field | Contract |
+|---|---|
+| `operation` | Required closed choice: `copy`, `add`, `subtract`, `multiply`, `floor-divide`, `modulo`, `equal`, or `less-than` |
+| `left`, `right` | `field:<name>` reads one top-level payload field; `literal:<signed-decimal>` embeds data, never code. `right` is required for binary operations and forbidden for `copy`. |
+| `target` | Required top-level payload field. The input object is copied, unrelated fields and attributes are preserved, and this field is replaced or added. |
+| Output | Arithmetic writes a canonical base-10 string; predicates write a Boolean; outcome `continue` |
+| Effect and retry | Pure, deterministic, in-process, and immediately available without an artifact, build, sandbox, tool policy, credential, or readiness lifecycle. |
+| Failures | A non-object payload, missing field, malformed or non-integral value, zero divisor, invalid configuration, or size violation fails without a partial result. |
+
+Operands and arithmetic results are limited to 4,096 decimal digits by the runtime. The graph cannot
+raise that ceiling. Text is checked before `BigInteger` parsing, and an arithmetic result is checked
+before it is inserted into the outgoing payload. Runtime fields accept decimal strings, Java integral
+primitive wrappers, `BigInteger`, and `BigDecimal` values with a non-positive scale; floating-point
+values are never rounded into integers.
+
+`floor-divide` rounds the quotient toward negative infinity. `modulo` is its paired remainder:
+`left = right * quotient + remainder`, and a non-zero remainder has the divisor's sign. For example,
+`-7 floor-divide 3` is `-3` and `-7 modulo 3` is `2`; `7 floor-divide -3` is `-3` and
+`7 modulo -3` is `-2`.
+
+```xml
+<node id="action">
+  <data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data>
+  <data key="operation">add</data>
+  <data key="left">field:counter</data><data key="right">literal:1</data>
+  <data key="target">counter</data>
+</node>
+```
+
+With an object payload containing `{"counter":"9223372036854775808"}`, the node emits
+`{"counter":"9223372036854775809"}`. Use an existing decision node after an `equal` operation to
+route on the Boolean target; arithmetic and control flow remain separate graph steps.
 
 ## `cel-transform`
 

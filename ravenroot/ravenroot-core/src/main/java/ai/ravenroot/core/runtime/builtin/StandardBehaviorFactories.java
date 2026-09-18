@@ -73,6 +73,7 @@ public final class StandardBehaviorFactories {
                 new HumanTaskNodeBehaviorFactory(humanTasks, humanTaskPolicy),
                 new TemplateNodeBehaviorFactory(),
                 new JsonParseNodeBehaviorFactory(),
+                new BigIntOpNodeBehaviorFactory(),
                 new CelTransformNodeBehaviorFactory(),
                 new CelDecisionNodeBehaviorFactory(),
                 new JsonPathNodeBehaviorFactory(),

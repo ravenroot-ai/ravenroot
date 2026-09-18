@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "docs/reference/node-descriptor-contracts.tsv"
 GOVERNED_SOURCE = ROOT / "docs/reference/governed-node-descriptor-contracts.tsv"
 OUTPUT = ROOT / "docs/reference/node-contracts.md"
-CORE = {"log", "delay", "human-task", "template", "json-parse", "cel-transform",
+CORE = {"log", "delay", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
         "cel-decision", "json-path", "http-request", "program", "boundary-guard"}
 BUNDLES = {
     "llm-prompt": "ai", "agent": "ai", "amqp.publish": "amqp091", "amqp.consume": "amqp091",

@@ -8533,7 +8533,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "c3cd1a621b56b01620b33055c7bfdc61db8e19c656318ec158854cdab1d32a61",
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         },
         {
@@ -8829,7 +8829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "c3cd1a621b56b01620b33055c7bfdc61db8e19c656318ec158854cdab1d32a61",
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
           "assertion": "UI resolves catalog entries through stable lookup tokens. Issue #448 preserves this authority while adding transparent register-machine authoring."
         }
       ],
@@ -8987,7 +8987,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "c3cd1a621b56b01620b33055c7bfdc61db8e19c656318ec158854cdab1d32a61",
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         }
       ],
@@ -10766,7 +10766,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "c3cd1a621b56b01620b33055c7bfdc61db8e19c656318ec158854cdab1d32a61",
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         },
         {
@@ -11429,7 +11429,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "c3cd1a621b56b01620b33055c7bfdc61db8e19c656318ec158854cdab1d32a61",
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         },
         {

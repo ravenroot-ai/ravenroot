@@ -73,8 +73,8 @@ import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
 import { namedAgentPresets } from './named-agent-presets.js';
 import {
+  availableRegisterMachinePresets,
   insertRegisterMachinePreset,
-  REGISTER_MACHINE_PRESETS,
 } from './register-machine-presets.js';
 import {
   canvasInteractionState,
@@ -6736,7 +6736,7 @@ function renderNodeForm(model, creating) {
 function catalogDescriptor(behavior) {
   return nodeTypeCatalog.find(type => type.behavior === behavior)
     || namedAgentCatalog.find(type => type.presetId === behavior)
-    || REGISTER_MACHINE_PRESETS.find(type => type.presetId === behavior) || null;
+    || availableRegisterMachinePresets(nodeTypeCatalog).find(type => type.presetId === behavior) || null;
 }
 
 function programCatalogEditorDescriptor(descriptor) {
@@ -9110,7 +9110,7 @@ function renderNodeCatalog() {
   // must flip its chip in the same breath it empties this palette — the panel going DEGRADED is
   // the same fact this empty state is about, told to a different reader.
   refreshAssistantContext();
-  if (!nodeTypeCatalog.length && !REGISTER_MACHINE_PRESETS.length) {
+  if (!nodeTypeCatalog.length) {
     // "Unauthorised" and "unreachable" are different situations and must not read the same: the
     // single old message made a fully registered catalog look like a removed feature.
     const state = catalogEmptyState(nodeCatalogFailure, nodeCatalogLoaded ? [] : null, nodeCatalogPending);
@@ -9118,12 +9118,12 @@ function renderNodeCatalog() {
     container.innerHTML = `<div class="catalog-empty" data-catalog-state="${escapeAttribute(state.kind)}">${escapeHtml(state.message)}</div>`;
     return;
   }
-  renderNodeCatalogItems(container, [...nodeTypeCatalog, ...REGISTER_MACHINE_PRESETS, ...namedAgentCatalog], {
+  renderNodeCatalogItems(container, [...nodeTypeCatalog, ...availableRegisterMachinePresets(nodeTypeCatalog), ...namedAgentCatalog], {
     iconFor: type => catalogNodeIcon(type, NODE_ICONS),
     selectedBehavior: selectedCatalogBehavior,
     onActivate: selectCatalogNodeType,
     onDragStart: (event, behavior) => {
-      if (REGISTER_MACHINE_PRESETS.some(preset => preset.presetId === behavior)) {
+      if (availableRegisterMachinePresets(nodeTypeCatalog).some(preset => preset.presetId === behavior)) {
         event.preventDefault();
         return;
       }
@@ -9140,7 +9140,7 @@ function selectCatalogNodeType(behavior) {
   renderNodeCatalog();
   // Keep the established inspector-first configuration route while making the type persistent for
   // stage clicks and drag-and-drop. Authors may configure-and-submit immediately or place copies.
-  if (REGISTER_MACHINE_PRESETS.some(preset => preset.presetId === behavior)) {
+  if (availableRegisterMachinePresets(nodeTypeCatalog).some(preset => preset.presetId === behavior)) {
     showRegisterMachinePresetForm(behavior);
   } else {
     showAddCatalogNodeForm(behavior);
@@ -9518,7 +9518,7 @@ function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}
   if (!modifyEnabled) return showInspectorMessage('Turn Modify ON before inserting a register-machine preset.');
   if (graphData.format === 'graphify') return showInspectorMessage(
     'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
-  const preset = REGISTER_MACHINE_PRESETS.find(candidate => candidate.presetId === presetId);
+  const preset = availableRegisterMachinePresets(nodeTypeCatalog).find(candidate => candidate.presetId === presetId);
   if (!preset) return showInspectorMessage('Unknown register-machine preset.');
   revealInspector();
   document.getElementById('info-title').textContent = `Insert ${preset.displayName}`;

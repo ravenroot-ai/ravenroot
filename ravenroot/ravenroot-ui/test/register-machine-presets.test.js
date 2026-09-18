@@ -3,7 +3,11 @@ import { JSDOM } from 'jsdom';
 import { parseGraphML } from '../src/graph-parsers.js';
 import { createEdge, createNode, serializeGraphML } from '../src/graph-document.js';
 import { applyCommand } from '../src/graph-commands.js';
-import { insertRegisterMachinePreset, REGISTER_MACHINE_PRESETS } from '../src/register-machine-presets.js';
+import {
+  availableRegisterMachinePresets,
+  insertRegisterMachinePreset,
+  REGISTER_MACHINE_PRESETS,
+} from '../src/register-machine-presets.js';
 
 function graph() {
   const start = createNode('start', 'Start', 'START');
@@ -42,6 +46,16 @@ describe('register machine authoring presets', () => {
 
   it('publishes four transparent palette entries', () => {
     expect(REGISTER_MACHINE_PRESETS.map(item => item.presetId)).toEqual([
+      'register-set', 'register-increment', 'register-zero-test', 'register-decjz',
+    ]);
+  });
+
+  it('offers presets only when every elementary runtime behavior they expand to is advertised', () => {
+    expect(availableRegisterMachinePresets([])).toEqual([]);
+    expect(availableRegisterMachinePresets([{ behavior: 'bigint-op' }]).map(preset => preset.presetId))
+      .toEqual(['register-set', 'register-increment', 'register-zero-test']);
+    expect(availableRegisterMachinePresets([{ behavior: 'cel-decision' }, { behavior: 'bigint-op' }])
+      .map(preset => preset.presetId)).toEqual([
       'register-set', 'register-increment', 'register-zero-test', 'register-decjz',
     ]);
   });

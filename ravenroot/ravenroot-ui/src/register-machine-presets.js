@@ -106,3 +106,10 @@ function unique(prefix, ids) {
   while (ids.has(`${prefix}-${index}`)) index += 1;
   return `${prefix}-${index}`;
 }
+
+/** Presets are authoring affordances for runtime-advertised elementary operations, never substitutes for the catalog. */
+export function availableRegisterMachinePresets(catalog = []) {
+  const available = new Set(catalog.map(descriptor => descriptor?.behavior).filter(Boolean));
+  return REGISTER_MACHINE_PRESETS.filter(preset => available.has('bigint-op')
+    && (preset.presetId !== 'register-decjz' || available.has('cel-decision')));
+}

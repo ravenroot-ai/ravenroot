@@ -214,6 +214,8 @@
       url: /developer-guide/
     - title: Build, harness, and tests
       url: /developer-guide/build-test.html
+    - title: Embedded-viewer parity evidence
+      url: /developer-guide/embed-viewer-verification.html
     - title: Extensions and adapters
       url: /developer-guide/extension-development.html
     - title: API, documentation, and releases

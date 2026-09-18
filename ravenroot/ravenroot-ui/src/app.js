@@ -101,6 +101,7 @@ import { createRunnerWindow } from './runner-panel.js';
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
 // part of `RavenrootRuntimeClient`. The Deployments window owns registration and control.
 import { createDeploymentsWindow } from './deployment-panel.js';
+import { deploymentProjectionDocument } from './deployment-viewer-document.js';
 import { humanTaskContext, humanTaskServiceOrigin } from './human-task-attention.js';
 import { createHumanTaskController } from './human-task-controller.js';
 import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from './human-task-ui.js';
@@ -116,6 +117,18 @@ import {
   applyViewerUnbundledRoute,
 } from './viewer-edge-style.js';
 import { mountD3ElasticRenderer } from './viewer-elastic-renderer.js';
+import {
+  VIEWER_NODE_ICONS,
+  createViewerStylesheet,
+  viewerCardImage,
+  viewerNodeSize,
+} from './viewer-presentation.js';
+import {
+  applyDeploymentViewFrame,
+  applyDeploymentViewStateToRenderer,
+  createDeploymentViewState,
+  resetDeploymentViewRuntime,
+} from './deployment-view-state.js';
 import {
   edgeFlowSnapshot,
   FLOW_PULSE_MS,
@@ -378,19 +391,13 @@ const contextualHelp = createContextualHelp({
 });
 
 function nodeSize(n) {
-  if (n.nodeType === 'start' || n.nodeType === 'end') return [84, 84];
-  if (n.nodeType === 'error')                          return [72, 72];
-  const w = Math.max(90, Math.min(230, n.name.length * 7.8 + 52));
-  return [w, 52];
+  return viewerNodeSize(n);
 }
 
 const NODE_ICONS = {
-  start:    '▶ ', end:      '⏹ ', error:    '⚠ ',
-  terminal: '⊙ ',
-  consumer: '⩓ ', handler:  '↩ ',
-  agent:    '⬡ ', flow:     '⚙ ',
+  ...VIEWER_NODE_ICONS,
   workspace: `${COMMON_NODE_GLYPHS.workspace} `,
-  actor:    '◉ ', system:   '▪ ', trace: `${COMMON_NODE_GLYPHS.trace} `,
+  trace: `${COMMON_NODE_GLYPHS.trace} `,
   'human-task': `${COMMON_NODE_GLYPHS['human-task']} `
 };
 
@@ -2563,6 +2570,8 @@ window.ravenroot = {
   }),
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
+  // Browser parity tests drive the same paint-only transition exposed by renderer controls.
+  setVisualStyle: style => setVisualStyle(style),
   _setWorkspaceSnapshotReaderForTest: reader => {
     workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
   },
@@ -2745,6 +2754,10 @@ function syncPaneHeaders() {
     const active = document_.id === activeId;
     const name = paneDisplayName(document_);
     const dirty = paneIsDirty(document_);
+    const deployment = document_.deploymentView;
+    const deploymentStatus = deployment
+      ? `read-only deployment ${deployment.state.lifecycle.toLowerCase()}, ${deployment.state.continuity.toLowerCase()}`
+      : '';
 
     const label = header.querySelector('.doc-pane-name');
     label.textContent = name;
@@ -2777,14 +2790,24 @@ function syncPaneHeaders() {
 
     header.querySelector('.doc-pane-state').textContent =
       [active ? 'active document' : '', documentModeLabel(document_), dirty ? 'modified' : '',
-        document_.layoutBusy ? 'layout in progress' : '']
+        document_.layoutBusy ? 'layout in progress' : '', deploymentStatus]
         .filter(Boolean).join(', ');
 
     pane.classList.toggle('doc-pane--active', active);
     if (active) pane.setAttribute('aria-current', 'true');
     else pane.removeAttribute('aria-current');
     pane.setAttribute('aria-label', `${name}, ${documentModeLabel(document_)}${dirty ? ', modified' : ''}`
-      + `${document_.layoutBusy ? ', layout in progress' : ''}`);
+      + `${document_.layoutBusy ? ', layout in progress' : ''}`
+      + `${deploymentStatus ? `, ${deploymentStatus}` : ''}`);
+    if (deployment) {
+      pane.dataset.viewerSource = 'deployment';
+      pane.dataset.deploymentLifecycle = deployment.state.lifecycle;
+      pane.dataset.deploymentContinuity = deployment.state.continuity;
+    } else {
+      delete pane.dataset.viewerSource;
+      delete pane.dataset.deploymentLifecycle;
+      delete pane.dataset.deploymentContinuity;
+    }
   });
 }
 
@@ -3273,10 +3296,67 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
   return document_.id;
 }
 
+async function openDeploymentDocument(deploymentId, client = runtimeClient) {
+  if (!client) throw new Error('Connect to a Ravenroot service before opening a deployment.');
+  const envelope = await client.deploymentView(deploymentId);
+  const graph = deploymentProjectionDocument(envelope);
+  const id = openDocument({
+    name: `${deploymentId}.deployment`,
+    displayName: allocateDocumentDisplayName(`${deploymentId} (deployment)`),
+    graph,
+    mode: DOCUMENT_MODES.DEPLOYED,
+    provenance: {
+      originMode: DOCUMENT_MODES.DEPLOYED,
+      sourceGraphVersion: graph.viewerBinding.graphVersion,
+      deploymentId,
+    },
+    // The read-only viewer's Cyto mode is the established semantic node/edge presentation. Keep
+    // the editor's existing `cyto` authoring preset (an N8N-family card layout) untouched.
+    presentation: {
+      renderMode: 'design', layoutMode: 'cyto', visualStyle: 'standard', designArrangement: null,
+    },
+  });
+  const owner = workspace.find(id);
+  if (!owner) throw new Error('The deployment canvas could not be created.');
+  const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
+  const repaint = frame => {
+    const result = applyDeploymentViewFrame(state, frame);
+    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    syncPaneHeaders();
+    if (workspace.active === owner) {
+      addActivityMessage('deployment', result.reason === 'execution'
+        ? `Observed ${frame.event.type} on ${deploymentId}`
+        : `Deployment ${deploymentId}: ${state.continuity.toLowerCase()}`,
+      result.terminal ? 'failed' : 'completed');
+    }
+  };
+  const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message) => {
+    if (connectionState === 'revoked') {
+      resetDeploymentViewRuntime(state, 'DETACHED', 'AUTHORITY_CHANGED');
+    } else if (connectionState === 'error') {
+      resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+    } else {
+      state.continuity = connectionState === 'connected' ? 'LIVE'
+        : connectionState === 'reconnecting' ? 'RECONNECTING' : connectionState.toUpperCase();
+    }
+    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    syncPaneHeaders();
+    if (workspace.active === owner) addActivityMessage('deployment', message,
+      ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
+  });
+  owner.deploymentView = { envelope, state, disconnect };
+  applyDeploymentViewStateToRenderer(owner.cy, state);
+  syncPaneHeaders();
+  setModifyMode(false);
+  syncActiveDocumentChrome();
+  return id;
+}
+
 function forkActiveDocument() {
   captureActiveDocument();
   const source = workspace.active;
-  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph) return false;
+  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph
+      || source.graph.format === 'deployment') return false;
   const graph = structuredClone(source.graph);
   graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
   const fork = forkDocumentRecord(source, {
@@ -3425,6 +3505,8 @@ function teardownDocument(target) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
+  target.deploymentView?.disconnect?.();
+  target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
   destroyDocumentRenderer(target, 'closed');
@@ -3785,7 +3867,7 @@ function initCy(elements, gd, options = {}) {
     // The active document's own element, not the shared host: a second document is a second canvas.
     container: canvasContainer,
     elements,
-    style: createStylesheet(),
+    style: createViewerStylesheet(rendererPalette, 'cyto', { includeNodeSelection: false }),
     layout: { name: 'preset' },
     minZoom: 0.05, maxZoom: 5,
     wheelSensitivity: 0.25,
@@ -4242,15 +4324,7 @@ function agentBrainSvg() { return `<svg xmlns='http://www.w3.org/2000/svg' viewB
 </svg>`; }
 
 function makeN8nSVG(char, nodeType) {
-  if (nodeType === 'agent') {
-    return 'data:image/svg+xml,' + encodeURIComponent(agentBrainSvg());
-  }
-  // Transparent-bg SVG with centered icon glyph — overlaid on background-color
-  const s = `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>`
-    + `<text x='40' y='40' text-anchor='middle' dominant-baseline='central' `
-    + `font-size='32' fill='${rendererPalette.nodeText}' `
-    + `font-family='system-ui,-apple-system,sans-serif'>${char}</text></svg>`;
-  return 'data:image/svg+xml,' + encodeURIComponent(s);
+  return viewerCardImage(nodeType, rendererPalette);
 }
 
 let n8nActive = false;
@@ -4392,7 +4466,8 @@ function applyApplicationTheme(theme) {
     const target = owner.cy;
     if (!target || target.destroyed()) return;
     target.batch(() => {
-      target.style().fromJson(createStylesheet()).update();
+      target.style().fromJson(createViewerStylesheet(
+        rendererPalette, 'cyto', { includeNodeSelection: false })).update();
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(target, owner);
       else target.nodes().forEach(applyRuntimeVisual);
     });
@@ -14299,9 +14374,13 @@ function commandContext() {
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
     hasOpenDocuments: workspace.size > 0,
-    editable: Boolean(graphData && graphData.format !== 'graphify'),
+    // Preserve every existing public format's command behavior. Only the new safe deployment
+    // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
+    editable: Boolean(graphData && graphData.format !== 'graphify'
+      && graphData.format !== 'deployment'),
     documentEditable: Boolean(documentIsEditable(workspace.active)),
     documentMode: workspace.find(workspace.activeId)?.mode ?? null,
+    documentFormat: graphData?.format ?? null,
     tenantAuthority: tenantAuthorityAllows(workspace.active),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
@@ -14937,13 +15016,15 @@ credentialsWindow = createCredentialsWindow({
 deploymentsWindow = createDeploymentsWindow({
   dialog: document.getElementById('deployments-dialog'),
   currentDocument: () => {
-    if (!workspace.active || !graphData || !tenantAuthorityAllows(workspace.active)) return null;
+    if (!workspace.active || !graphData || graphData.format === 'deployment'
+        || !tenantAuthorityAllows(workspace.active)) return null;
     if (documentIsEditable(workspace.active)) syncGraphPositions();
     return { documentId: workspace.activeId, displayName: graphDisplayName,
       incarnation: activeDocumentIncarnation,
       authorityGeneration: workspaceAuthority.generation,
       graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
   },
+  onOpenDeployment: (deploymentId, client) => openDeploymentDocument(deploymentId, client),
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
     if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion

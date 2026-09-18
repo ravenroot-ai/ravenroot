@@ -82,7 +82,8 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       isEnabled: context => active(context) && context.documentMode === 'draft' },
     { id: 'file.fork', group: 'document', order: 35,
       placements: ['menu.file'], execute: actions.forkDocument,
-      isEnabled: context => active(context) && context.documentMode !== 'draft' },
+      isEnabled: context => active(context) && context.documentMode !== 'draft'
+        && context.documentFormat !== 'deployment' },
     { id: 'file.save', group: 'save', order: 40,
       placements: ['menu.file', 'toolbar.editor', 'help'], execute: actions.save,
       isEnabled: context => editable(context) && !context.layoutBusy,

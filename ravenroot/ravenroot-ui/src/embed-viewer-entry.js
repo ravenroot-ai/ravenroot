@@ -8,6 +8,12 @@ import {
 } from './viewer-renderer-adapter.js';
 import { getRendererPalette } from './theme-palette.js';
 import { requireEmbedTheme } from './theme-resolution.js';
+import { createViewerStylesheet, viewerNodeType } from './viewer-presentation.js';
+import {
+  applyDeploymentViewFrame,
+  applyDeploymentViewStateToRenderer,
+  createDeploymentViewState,
+} from './deployment-view-state.js';
 import { applyViewerSimpleRoute, applyViewerUnbundledRoute } from './viewer-edge-style.js';
 import {
   resolveViewerRoutesWithinBudget,
@@ -22,66 +28,7 @@ import {
 } from './minimap-geometry.js';
 
 export function viewerStylesheet(mode = 'cyto', theme = 'dark') {
-  const palette = getRendererPalette(requireEmbedTheme(theme));
-  const node = palette.nodeType;
-  const surface = palette.nodeSurfaceByType;
-  return [
-    { selector: 'node', style: {
-      shape: 'roundrectangle',
-      width: 'data(nw)',
-      height: 'data(nh)',
-      label: 'data(label)',
-      'text-wrap': 'wrap',
-      'text-max-width': 190,
-      'font-size': 14,
-      color: palette.nodeText,
-      'background-color': palette.nodeSurface,
-      'border-color': palette.nodeBorder,
-      'border-width': 2,
-    } },
-    { selector: 'node[nodeType="start"]', style: {
-      shape: 'ellipse', 'background-color': surface.start, 'border-color': node.start,
-    } },
-    { selector: 'node[nodeType="end"]', style: {
-      shape: 'ellipse', 'background-color': surface.end, 'border-color': node.end,
-    } },
-    { selector: 'node[nodeType="error"]', style: {
-      shape: 'diamond', 'background-color': surface.error, 'border-color': node.error,
-    } },
-    { selector: 'node[nodeType="behavior"]', style: {
-      'background-color': surface.flow, 'border-color': node.flow,
-    } },
-    { selector: 'node[nodeType="passthrough"]', style: {
-      'background-color': surface.handler, 'border-color': node.handler,
-    } },
-    { selector: 'node:selected', style: {
-      'border-color': palette.selection, 'border-width': 4,
-    } },
-    { selector: 'edge', style: {
-      width: 2,
-      'curve-style': 'bezier',
-      'line-color': palette.edgeType.default,
-      'target-arrow-color': palette.edgeType.default,
-      'target-arrow-shape': 'triangle',
-    } },
-    ...(mode === 'n8n' ? [
-      { selector: 'node', style: {
-        shape: 'roundrectangle', width: 80, height: 80,
-        'text-valign': 'bottom', 'text-margin-y': 10,
-      } },
-      { selector: 'edge', style: {
-        'curve-style': 'round-taxi', 'taxi-direction': 'auto', 'taxi-turn': '50%',
-        'taxi-radius': 28, width: 2.5,
-      } },
-    ] : []),
-    ...(mode === 'elastic' ? [
-      { selector: 'node', style: {
-        shape: 'ellipse', width: 38, height: 38,
-        'text-valign': 'bottom', 'text-margin-y': 26,
-      } },
-      { selector: 'edge', style: { 'curve-style': 'bezier', width: 1.5 } },
-    ] : []),
-  ];
+  return createViewerStylesheet(requireEmbedTheme(theme), mode);
 }
 
 export function applyResolvedRoutes(instance, mode) {
@@ -106,20 +53,14 @@ export function applyResolvedRoutes(instance, mode) {
 }
 
 function elasticElements(snapshot, palette, width, height) {
-  const colors = {
-    START: palette.nodeType.start,
-    PASSTHROUGH: palette.nodeType.handler,
-    BEHAVIOR: palette.nodeType.flow,
-    END: palette.nodeType.end,
-    ERROR: palette.nodeType.error,
-  };
   const columns = Math.max(1, Math.ceil(Math.sqrt(snapshot.nodes.length)));
   const nodes = snapshot.nodes.map((node, index) => ({
     id: node.id,
-    label: node.id,
-    r: 19,
-    color: colors[node.kind] ?? palette.selection,
-    stroke: palette.nodeText,
+    label: node.label || node.id,
+    r: 14,
+    color: palette.nodeType[viewerNodeType(node)] ?? palette.selection,
+    stroke: palette.runtimeIdle,
+    strokeWidth: 1.5,
     x: node.layout?.x ?? ((index % columns) + 1) * width / (columns + 1),
     y: node.layout?.y ?? (Math.floor(index / columns) + 1) * height
       / (Math.ceil(snapshot.nodes.length / columns) + 1),
@@ -131,8 +72,8 @@ function elasticElements(snapshot, palette, width, height) {
     target: edge.target,
     baseWidth: 1.8,
     restLen: 130,
-    color: palette.edgeType.default,
-    label: '',
+    color: palette.edgeType[edge.visualType] ?? palette.edgeType.default,
+    label: edge.label || '',
     traffic: null,
   }));
   return { nodes, links };
@@ -199,6 +140,7 @@ export function createEmbedViewer(container, { theme = 'dark' } = {}) {
   let mounted = false;
   let currentSnapshot = null;
   let elasticMount = null;
+  let deploymentState = null;
 
   const concealMinimap = () => {
     if (minimapFrame !== null) cancelAnimationFrame(minimapFrame);
@@ -325,6 +267,9 @@ export function createEmbedViewer(container, { theme = 'dark' } = {}) {
     else {
       stopElastic();
       enableMinimap();
+      // A previous Cyto route plan uses bypass styles. Clear those renderer-local overrides before
+      // changing modes so N8N's shared taxi contract is not masked by stale Bezier properties.
+      instance.elements().removeStyle();
       instance.style(viewerStylesheet(mode.value, viewerTheme));
       applyResolvedRoutes(instance, mode.value);
     }
@@ -420,8 +365,52 @@ export function createEmbedViewer(container, { theme = 'dark' } = {}) {
 
   return Object.freeze({
     get state() { return lifecycle.state; },
+    presentationSnapshot() {
+      if (mode.value === 'elastic') {
+        return {
+          renderer: 'elastic',
+          nodes: [...elasticSvg.querySelectorAll('.d3-nodes circle')].map(node => ({
+            fill: node.getAttribute('fill'), stroke: node.getAttribute('stroke'), r: node.getAttribute('r'),
+          })),
+          edges: [...elasticSvg.querySelectorAll('.d3-edges path')].map(edge => ({
+            stroke: edge.getAttribute('stroke'), width: edge.getAttribute('stroke-width'),
+          })),
+        };
+      }
+      const nodeStyle = ['shape', 'width', 'height', 'background-color', 'background-image',
+        'background-width', 'background-height', 'background-fit', 'border-color',
+        'border-width', 'border-style', 'font-size', 'font-weight', 'text-valign',
+        'text-halign', 'text-margin-y'];
+      const edgeStyle = ['width', 'line-color', 'line-style', 'target-arrow-shape',
+        'target-arrow-color', 'curve-style'];
+      return {
+        renderer: mode.value,
+        nodes: instance.nodes().map(node => ({
+          id: node.id(), label: node.style('label'), icon: node.style('background-image'),
+          type: node.data('nodeType'),
+          position: { x: node.position('x'), y: node.position('y') },
+          style: Object.fromEntries(nodeStyle.map(name => [name, node.style(name)])),
+        })),
+        edges: instance.edges().map(edge => ({
+          id: edge.id(), source: edge.source().id(), target: edge.target().id(),
+          label: edge.data('label'), type: edge.data('edgeType'),
+          style: Object.fromEntries(edgeStyle.map(name => [name, edge.style(name)])),
+        })),
+      };
+    },
     async mount(projection, { signal } = {}) {
       try {
+        const envelope = projection?.viewerSourceVersion === '1' ? projection : null;
+        if (envelope?.source?.kind === 'deployment') {
+          deploymentState = createDeploymentViewState({
+            deploymentId: envelope.source.deploymentId,
+            graphVersion: envelope.source.graphVersion,
+            incarnationId: envelope.source.incarnationId,
+            lifecycle: envelope.lifecycle,
+          });
+        } else {
+          deploymentState = null;
+        }
         const snapshot = await lifecycle.run(async signal => {
           let rendered;
           try {
@@ -463,6 +452,24 @@ export function createEmbedViewer(container, { theme = 'dark' } = {}) {
         teardown(true);
         throw failure;
       }
+    },
+    observe(frame) {
+      if (!deploymentState || destroyed) return { accepted: false, reason: 'snapshot' };
+      const result = applyDeploymentViewFrame(deploymentState, frame);
+      applyDeploymentViewStateToRenderer(instance, deploymentState);
+      container.dataset.viewerContinuity = deploymentState.continuity.toLowerCase();
+      container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
+      if (result.terminal || deploymentState.continuity !== 'LIVE') {
+        status.textContent = deploymentState.continuity === 'GAP'
+          ? 'Live observation has a gap. Reattach to reconcile the deployment.'
+          : deploymentState.continuity === 'VERSION_MISMATCH'
+            ? 'The deployment version changed. This view is no longer live.'
+            : deploymentState.gap === 'AUTHORITY_CHANGED'
+              ? 'Live observation authorization ended.'
+              : `Deployment ${deploymentState.lifecycle.toLowerCase()}.`;
+      }
+      scheduleMinimap();
+      return result;
     },
     destroy({ preserveState = false } = {}) { teardown(preserveState); },
   });

@@ -63,9 +63,9 @@ const createSession = registrationId => new Promise((resolve, reject) => {
 });
 const invalidLaunchPaths = new Set();
 
-const acknowledgeAtBackend = (hello) => new Promise((resolve, reject) => {
+const acknowledgeAtBackend = (hello, registrationId) => new Promise((resolve, reject) => {
   const body = JSON.stringify({
-    registrationId: 'browser-registration',
+    registrationId,
     acknowledgementId: hello.acknowledgementId,
     channelId: hello.channelId,
     correlationId: hello.correlationId,
@@ -91,7 +91,7 @@ const acknowledgeAtBackend = (hello) => new Promise((resolve, reject) => {
 const observations = [];
 const proxy = (request, response) => {
   const isEmbedPost = request.method === 'POST'
-    && (request.url === '/v1/embed/exchange' || request.url === '/v1/embed/projection');
+    && ['/v1/embed/exchange', '/v1/embed/projection', '/v1/embed/observation'].includes(request.url);
   if (isEmbedPost) {
     observations.push({
       path: request.url,
@@ -99,7 +99,7 @@ const proxy = (request, response) => {
       refererPresent: request.headers.referer !== undefined,
       originExact: request.headers.origin === viewerOrigin.origin,
       secFetchSite: request.headers['sec-fetch-site'] ?? null,
-      bearerPresent: request.url === '/v1/embed/projection'
+      bearerPresent: ['/v1/embed/projection', '/v1/embed/observation'].includes(request.url)
         && /^Bearer [A-Za-z0-9_-]+$/u.test(request.headers.authorization ?? ''),
     });
   }
@@ -133,7 +133,7 @@ const proxy = (request, response) => {
   request.pipe(upstream);
 };
 
-const parentHtml = (viewerLaunchUrl) => `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer"
+const parentHtml = (viewerLaunchUrl, registrationId) => `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer"
 content="no-referrer"><title>Ravenroot embed boundary fixture</title></head><body>
 <iframe id="viewer" name="viewer" width="800" height="500"
 sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"
@@ -172,7 +172,7 @@ src=${JSON.stringify(viewerLaunchUrl)}></iframe>
   window.acknowledgeBackend = async () => {
     const hello = window.embedHello;
     if (hello === null) throw new Error('HELLO unavailable');
-    const response = await fetch('/__embed-ack', {
+    const response = await fetch('/__embed-ack/${encodeURIComponent(registrationId)}', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(hello),
@@ -298,7 +298,8 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
     response.end(JSON.stringify(observations));
     return;
   }
-  if (request.url === '/__embed-ack' && request.method === 'POST') {
+  if ((request.url === '/__embed-ack' || request.url?.startsWith('/__embed-ack/'))
+      && request.method === 'POST') {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', async () => {
@@ -312,7 +313,9 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
           response.end();
           return;
         }
-        const status = await acknowledgeAtBackend(hello);
+        const registrationId = request.url === '/__embed-ack' ? 'browser-registration'
+          : decodeURIComponent(request.url.slice('/__embed-ack/'.length));
+        const status = await acknowledgeAtBackend(hello, registrationId);
         response.writeHead(status, { 'Cache-Control': 'no-store' });
         response.end();
       } catch {
@@ -340,7 +343,7 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
   const registration = new Map([
     ['/theme-light', 'theme-light'], ['/theme-dark', 'theme-dark'],
     ['/theme-auto-light', 'theme-auto-light'], ['/theme-auto-dark', 'theme-auto-dark'],
-    ['/theme-invalid', 'theme-invalid'],
+    ['/theme-invalid', 'theme-invalid'], ['/deployment', 'live-registration'],
   ]).get(request.url) ?? 'browser-registration';
   try {
     const freshLaunchUrl = await createSession(registration);
@@ -354,7 +357,7 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
       'Referrer-Policy': 'no-referrer',
       'Content-Security-Policy': `default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; frame-src ${parentOrigin.origin} ${viewerOrigin.origin} ${foreignOrigin.origin}`,
     });
-    response.end(parentHtml(freshLaunchUrl));
+    response.end(parentHtml(freshLaunchUrl, registration));
   } catch {
     response.writeHead(503, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
     response.end('fixture session unavailable');

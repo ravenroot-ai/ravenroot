@@ -28,7 +28,35 @@ function withDeploymentService(page) {
     const segments = url.pathname.split('/').filter(Boolean); // ['v1', 'deployments', id?, command?]
     const id = url.searchParams.get('id') || (segments.length >= 3 ? decodeURIComponent(segments[2]) : '');
     const command = segments.length > 3 ? segments[3] : null;
-    calls.push({ method: request.method(), id, command });
+    calls.push({ method: request.method(), id, command, headers: await request.allHeaders() });
+
+    if (request.method() === 'GET' && command === 'view' && held.has(id)) {
+      const projection = {
+        viewerContractVersion: '1.0', graphId: id, graphVersionId: 'graph-v1',
+        canonicalDigest: 'graph-v1',
+        nodes: [
+          { id: 'start', kind: 'START', label: 'Start', layout: { x: 100, y: 120, width: 84, height: 84 } },
+          { id: 'worker', kind: 'BEHAVIOR', label: 'Worker', visualType: 'actor',
+            layout: { x: 300, y: 120, width: 120, height: 52 } },
+        ],
+        edges: [{ id: 'route-1', source: 'start', target: 'worker', visualType: 'continue' }],
+      };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        viewerSourceVersion: '1',
+        source: { kind: 'deployment', deploymentId: id, graphVersion: 'graph-v1', incarnationId: 'inc-1' },
+        lifecycle: held.get(id).state, canonicalDigest: 'graph-v1', projection,
+      }) });
+      return;
+    }
+    if (request.method() === 'GET' && command === 'events' && held.has(id)) {
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body:
+        'id: cursor-1\nevent: execution\ndata: {"type":"execution","deploymentId":"orders-v3",'
+        + '"graphVersion":"graph-v1","incarnationId":"inc-1","event":{"type":"NODE_STARTED",'
+        + '"executionId":"execution-1","nodeId":"worker","activeInstances":1}}\n\n'
+        + 'id: cursor-gap\nevent: source-gap\ndata: {"type":"gap","deploymentId":"orders-v3",'
+        + '"graphVersion":"graph-v1","incarnationId":"inc-1","reason":"REPLAY_WINDOW_EXCEEDED"}\n\n' });
+      return;
+    }
 
     if (request.method() === 'POST' && !command) {
       const entry = { deploymentId: id, state: 'REGISTERED', sourceCount: 0,
@@ -150,6 +178,49 @@ test.describe('the deployments window', () => {
 
     await expect(page.locator('#deployment-list .deployment-item')).toHaveCount(1);
   });
+
+  test('opens a registered deployment without a local file and applies its bounded live stream read-only',
+    async ({ page }) => {
+      const service = withDeploymentService(page);
+      service.held.set('orders-v3', {
+        deploymentId: 'orders-v3', state: 'READY', sourceCount: 0, graphVersion: 'graph-v1',
+        scope: 'LOCAL_PROCESS', diagnostic: null,
+      });
+      await page.route('**/v1/node-types', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: '[]',
+      }));
+      await page.route('**/v1/events?include=diagnostics', route => route.fulfill({
+        status: 200, contentType: 'text/event-stream', body: '',
+      }));
+      await page.goto('/');
+      await page.locator('#access-token').fill('deployment-view-token');
+      await page.locator('#btn-authenticate').click();
+      await openDeployments(page);
+
+      await page.locator('[data-deployment-view="orders-v3"]').click();
+      await expect(page.locator('#deployments-dialog')).not.toHaveAttribute('open', '');
+      await expect.poll(() => page.evaluate(() => {
+        const owner = window.ravenroot.activeDocument();
+        return owner && {
+          name: owner.displayName,
+          format: owner.graph.format,
+          binding: owner.graph.viewerBinding,
+          continuity: owner.deploymentView?.state.continuity,
+          worker: owner.deploymentView?.state.nodeStates.get('worker')?.runtimeState,
+        };
+      })).toEqual({
+        name: 'orders-v3 (deployment)', format: 'deployment',
+        binding: { deploymentId: 'orders-v3', graphVersion: 'graph-v1', incarnationId: 'inc-1' },
+        continuity: 'GAP', worker: undefined,
+      });
+
+      await expect(page.locator('#btn-modify')).toBeDisabled();
+      await expect(page.locator('#btn-run')).toBeDisabled();
+      const eventCall = service.calls.find(call => call.command === 'events');
+      expect(eventCall.headers.authorization).toBe('Bearer deployment-view-token');
+      expect(eventCall.headers['x-ravenroot-deployment-incarnation']).toBe('inc-1');
+      expect(service.calls.some(call => ['start', 'stop', 'restart'].includes(call.command))).toBe(false);
+    });
 
   test('stops polling on Escape, not only on the Close button', async ({ page }) => {
     // The dialog's own `cancel` handler was a no-op that never called

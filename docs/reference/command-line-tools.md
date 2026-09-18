@@ -192,14 +192,22 @@ for framing limits, legacy compatibility and control-frame semantics.
 `embed-registration show`, `embed-registration provision`, and `embed-registration revoke` operate a
 local registration store and never use `--server`. All take `--store-dir`, `--tenant`, and
 `--registration-id`. Provision and revoke also require `--audit-dir` and the compare-and-set
-`--expected-revision`; there is no force option. Provision additionally takes `--graphml`,
-`--graph-id`, `--graph-version-id`, `--snapshot-state`, `--issuer`, `--subject`, `--parent-origin`,
-`--resource-id`, `--deployment-id`, `--deployment-version`, `--policy-revision`, and every explicit
-attestation: `--gate-deployment`, `--gate-provenance`, `--gate-classification`, `--gate-retention`,
-`--gate-dsr-suppression`, `--gate-takedown`, and `--gate-eea`. Optional `--theme` is `dark` or
-`light`; optional `--operator` supplies the audit subject. Read the current revision with `show`
-before a mutation. See [Embed and extension contracts](embed-extension-contracts.md) for the exact
-registration contract.
+`--expected-revision`; there is no force option. Provision always takes `--issuer`, `--subject`, and
+`--parent-origin`, then selects exactly one source:
+
+- A live source uses `--deployment-id` and rejects snapshot-only flags.
+- A snapshot source uses `--graphml`, `--graph-id`, `--graph-version-id`, `--snapshot-state`,
+  `--resource-id`, `--deployment-id` (or its explicit `--snapshot-deployment-id` alias),
+  `--deployment-version`, `--policy-revision`, and every
+  explicit attestation: `--gate-deployment`, `--gate-provenance`, `--gate-classification`,
+  `--gate-retention`, `--gate-dsr-suppression`, `--gate-takedown`, and `--gate-eea`.
+
+Existing snapshot commands that combine `--graphml` and `--deployment-id` remain valid; the alias is
+available when an operator wants the snapshot meaning to be explicit. Omitting `--graphml` makes
+`--deployment-id` mean a live source. Supplying both deployment-coordinate spellings with different
+values is refused. Optional `--theme` is `dark` or `light`; optional `--operator` supplies the audit
+subject. Read the current revision with `show` before a mutation. See
+[Embed and extension contracts](embed-extension-contracts.md) for the exact registration contract.
 
 Application CLI help, an unknown command, and command parsers that classify argument misuse return 2.
 Two current parser paths instead return 1: a missing value for a global option is thrown before the

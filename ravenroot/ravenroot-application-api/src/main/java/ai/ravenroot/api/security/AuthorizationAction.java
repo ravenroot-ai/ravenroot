@@ -78,7 +78,10 @@ public enum AuthorizationAction {
     /** Reserved tool-invocation permission, not exposed by this API version. */
     TOOL_INVOKE("ravenroot.tool.invoke", false),
     /** Reserved administrative permission, not exposed by this API version. */
-    ADMIN("ravenroot.admin", false);
+    ADMIN("ravenroot.admin", false),
+
+    /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
+    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true);
 
     private final String requiredScope;
     private final boolean available;

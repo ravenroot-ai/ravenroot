@@ -191,12 +191,17 @@ class EmbedLaunchTicketAuthorityTest {
         String nonce = token('n');
         Instant issuedAt = clock.instant();
         byte[] signature = sign(pair, bearer, 7, nonce, "jti", "POST", "/v1/embed/projection", issuedAt);
-        var verifier = new P256EmbedProofVerifier(clock, Duration.ofSeconds(1), 1);
+        var verifier = new P256EmbedProofVerifier(clock, Duration.ofSeconds(1), 2);
 
         assertTrue(verifier.verifyAndConsume(bearer, 7, nonce, "jti", "POST",
                 "/v1/embed/projection", issuedAt, (ECPublicKey) pair.getPublic(), signature));
         assertFalse(verifier.verifyAndConsume(bearer, 7, nonce, "jti", "POST",
                 "/v1/embed/projection", issuedAt, (ECPublicKey) pair.getPublic(), signature));
+        byte[] differentJti = sign(pair, bearer, 7, nonce, "jti-second", "POST",
+                "/v1/embed/projection", issuedAt);
+        assertFalse(verifier.verifyAndConsume(bearer, 7, nonce, "jti-second", "POST",
+                        "/v1/embed/projection", issuedAt, (ECPublicKey) pair.getPublic(), differentJti),
+                "projection remains one-shot for the bearer revision and session nonce");
         assertEquals(1, verifier.retainedReplayEntries());
 
         // Each binding failure uses a fresh verifier, so replay rejection cannot mask a missing
@@ -231,6 +236,28 @@ class EmbedLaunchTicketAuthorityTest {
         assertEquals(1, verifier.retainedReplayEntries());
         assertFalse(verifier.verifyAndConsume(bearer, 7, nonce, "old", "POST",
                 "/v1/embed/projection", issuedAt, (ECPublicKey) pair.getPublic(), signature));
+    }
+
+    @Test
+    void observationProofConsumesEachExactJtiButAllowsAFreshReconnectJti() throws Exception {
+        var clock = new MutableClock(Instant.parse("2026-08-26T00:00:00Z"));
+        var pair = p256();
+        String bearer = token('b');
+        String nonce = token('n');
+        Instant issuedAt = clock.instant();
+        var verifier = new P256EmbedProofVerifier(clock, Duration.ofSeconds(30), 4);
+        byte[] first = sign(pair, bearer, 7, nonce, "observation-1", "POST",
+                "/v1/embed/observation", issuedAt);
+        byte[] second = sign(pair, bearer, 7, nonce, "observation-2", "POST",
+                "/v1/embed/observation", issuedAt);
+
+        assertTrue(verifier.verifyObservationAndConsume(bearer, 7, nonce, "observation-1", "POST",
+                "/v1/embed/observation", issuedAt, (ECPublicKey) pair.getPublic(), first));
+        assertFalse(verifier.verifyObservationAndConsume(bearer, 7, nonce, "observation-1", "POST",
+                "/v1/embed/observation", issuedAt, (ECPublicKey) pair.getPublic(), first));
+        assertTrue(verifier.verifyObservationAndConsume(bearer, 7, nonce, "observation-2", "POST",
+                "/v1/embed/observation", issuedAt, (ECPublicKey) pair.getPublic(), second));
+        assertEquals(2, verifier.retainedReplayEntries());
     }
 
     private static void assertRejected(MutableClock clock, String bearer, long revision, String nonce, String jti,

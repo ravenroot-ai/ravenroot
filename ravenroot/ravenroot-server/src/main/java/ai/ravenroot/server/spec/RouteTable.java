@@ -281,6 +281,14 @@ public final class RouteTable {
                             WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
                             WireErrorCodes.EMBED_DATA_TOO_LARGE,
                             WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/embed/observation",
+                    "Streams bounded execution observations for the exact deployment incarnation pinned "
+                            + "by an opt-in embed registration and browser proof-of-possession session.",
+                    true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
+                            WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions",
                     "Starts a transient graph traversal. Default mode=test selects TEST_PASSTHROUGH and does not "
                             + "invoke behavior adapters; mode=run selects STANDARD and executes real node effects. "
@@ -350,6 +358,19 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/view",
+                    "Returns the versioned, allowlisted viewer projection for one exact local deployment "
+                            + "incarnation. Raw GraphML, node properties, credentials and payloads are absent.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/events",
+                    "Streams only execution observations matching the authenticated tenant, deployment, "
+                            + "required incarnation header and graphVersion query. Opaque Last-Event-ID "
+                            + "replay is process-local and gaps are terminal explicit events.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/start",
                     "Starts one process-local deployment and answers when it has reached READY, or with "
                             + "the truthful FAILED status if startup failed and rolled back. Idempotent: "

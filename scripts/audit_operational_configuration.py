@@ -7746,7 +7746,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  'e59366ad8266af2196f6238fefec8ce8b9d4511e3ded97b5693ae42c9a06ff51',
+  '22e946d9a3a2dbdbca3058d4f1d13e2f64886979de3f13bc1bcbbd86e2eed461',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -8113,7 +8113,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '18af9c01a1277420693f48d4af19c440f84b797a48ae6b86c33c55b5a2011e59',
+  '88522e74f70e141f34d9b265e1d04a1457cf2446d8ca65c1418ed118ac941f58',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -13984,22 +13984,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-9e1fa0ee4ba1e4ef81b8": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-63b37cb83fa82435993e":
+    "oc-daf9eac839b20989ca04": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-a271ee471e83bf252375":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-6bfa41b6580b866a7563": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-d5ef10ccebd0f7f6222a": (
+    "oc-9c4ec93418ccf7fe9ebb": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-f5f0a5765ae0f54764bc": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-560d4490c5fa486b9b13": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-cd5b7273887ef1f1bc1d": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-9e1fa0ee4ba1e4ef81b8": "/v1/events",
-    "oc-63b37cb83fa82435993e": "/v1/events",
-    "oc-6bfa41b6580b866a7563": "/v1/events",
-    "oc-d5ef10ccebd0f7f6222a": "/v1/events/recent",
-    "oc-560d4490c5fa486b9b13": "/v1/events/recent",
+    "oc-daf9eac839b20989ca04": "/v1/events",
+    "oc-a271ee471e83bf252375": "/v1/events",
+    "oc-9c4ec93418ccf7fe9ebb": "/v1/events",
+    "oc-f5f0a5765ae0f54764bc": "/v1/events/recent",
+    "oc-cd5b7273887ef1f1bc1d": "/v1/events/recent",
 }
 
 
@@ -14805,9 +14805,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 94, "path": 85, "summary": 395, "successStatuses": 86}
-    if len(details) != 85 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 85/660 positional shape")
+    expected_counts = {"methods": 97, "path": 88, "summary": 402, "successStatuses": 89}
+    if len(details) != 88 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 88/676 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

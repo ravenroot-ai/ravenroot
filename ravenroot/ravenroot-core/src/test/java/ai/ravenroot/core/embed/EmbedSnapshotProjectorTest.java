@@ -34,6 +34,60 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmbedSnapshotProjectorTest {
 
     @Test
+    void approvedEditorVisualSemanticsAreComputedWithoutCopyingPropertyBags() {
+        var definition = new GraphDefinition(List.of(
+                new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null),
+                new GraphNode("work", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "secret.behavior",
+                        Map.of("name", "Visible label", "classification", "agent",
+                                "execution.bypass", true, "credential", "must-not-leak")),
+                GraphNode.end("end"), GraphNode.error("error")),
+                List.of(GraphEdge.to("start", "work"),
+                        new GraphEdge("work", "end", "success"), GraphEdge.to("work", "error")));
+        var projection = EmbedSnapshotProjector.projectDefinition(definition, "deployment", "version",
+                "digest", EmbedProjectionBudget.DEFAULTS);
+        var work = projection.nodes().stream().filter(node -> node.id().equals("work")).findFirst().orElseThrow();
+        assertEquals("Visible label", work.label());
+        assertEquals("agent", work.visualType());
+        assertTrue(work.bypassed());
+        var failure = projection.edges().stream().filter(edge -> edge.target().equals("error"))
+                .findFirst().orElseThrow();
+        assertTrue(failure.id() != null && !failure.id().isBlank());
+        assertEquals("continue", failure.label());
+        assertEquals("failed", failure.visualType());
+        assertEquals(EmbedGraphProjection.Routing.FAILURE, failure.routing());
+        assertTrue(!projection.toJson().contains("must-not-leak"));
+        assertTrue(!projection.toJson().contains("secret.behavior"));
+    }
+
+    @Test
+    void legacySnapshotProjectionRetainsItsExactOriginalJsonShape() {
+        var definition = new GraphDefinition(List.of(
+                new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null,
+                        Map.of("layoutX", 10, "layoutY", 20, "layoutWidth", 30, "layoutHeight", 40)),
+                new GraphNode("work", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "secret.behavior",
+                        Map.of("name", "must-not-be-added", "classification", "agent",
+                                "execution.bypass", true)),
+                GraphNode.end("end")),
+                List.of(GraphEdge.to("work", "end"), GraphEdge.to("start", "work")));
+        var snapshot = GraphVersionSnapshot.create(new GraphVersionKey("graph-a", "v1"), definition);
+        var projected = assertInstanceOf(EmbedSnapshotProjector.Result.Projected.class,
+                EmbedSnapshotProjector.project(new GraphVersionRecord(snapshot, GraphVersionState.PUBLISHED),
+                        grant("tenant-a", "resource-a", "deployment-a", 7, "graph-a", "v1",
+                                snapshot.canonicalHash(), "policy-1"),
+                        EmbedProjectionEligibility.allowed("policy-1"), EmbedProjectionBudget.DEFAULTS));
+
+        assertEquals("{\"viewerContractVersion\":\"1.0\",\"graphId\":\"graph-a\","
+                        + "\"graphVersionId\":\"v1\",\"canonicalDigest\":\"" + snapshot.canonicalHash()
+                        + "\",\"nodes\":[{\"id\":\"end\",\"kind\":\"END\",\"layout\":null},"
+                        + "{\"id\":\"start\",\"kind\":\"START\",\"layout\":{\"x\":10.0,"
+                        + "\"y\":20.0,\"width\":30.0,\"height\":40.0}},"
+                        + "{\"id\":\"work\",\"kind\":\"BEHAVIOR\",\"layout\":null}],"
+                        + "\"edges\":[{\"source\":\"start\",\"target\":\"work\"},"
+                        + "{\"source\":\"work\",\"target\":\"end\"}]}",
+                projected.projection().toJson());
+    }
+
+    @Test
     void publishedAndActiveVersionsProduceAClosedRenderOnlyProjection() {
         for (GraphVersionState state : List.of(GraphVersionState.PUBLISHED, GraphVersionState.ACTIVE)) {
             var projected = assertInstanceOf(EmbedSnapshotProjector.Result.Projected.class,

@@ -4,6 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 const parentOrigin = process.env.RR_EMBED_PARENT_ORIGIN;
 const viewerOrigin = process.env.RR_EMBED_VIEWER_ORIGIN;
 const foreignOrigin = process.env.RR_EMBED_FOREIGN_ORIGIN;
+const controlOrigin = process.env.RR_EMBED_CONTROL_ORIGIN;
 
 const rgb = value => value.match(/[\d.]+/gu).slice(0, 3).map(Number);
 const luminance = value => rgb(value).map(component => component / 255)
@@ -99,6 +100,94 @@ test('rejects a malformed bootstrap theme before HELLO, key generation, or fetch
   expect(await viewer.evaluate(() => window.__themeNetworkStarted)).toBe(false);
   expect(await page.evaluate(() => window.embedHello)).toBeNull();
 });
+
+test('observes a live deployment and ends truthfully on cross-origin registration revocation',
+  async ({ page, request }) => {
+    const consoleMessages = [];
+    const requestedUrls = [];
+    const observationRequests = [];
+    page.on('console', message => consoleMessages.push(message.text()));
+    page.on('request', async networkRequest => {
+      requestedUrls.push(networkRequest.url());
+      if (new URL(networkRequest.url()).pathname === '/v1/embed/observation') {
+        observationRequests.push({ body: networkRequest.postData(), headers: await networkRequest.allHeaders() });
+      }
+    });
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch;
+      window.__embedFetchOptions = [];
+      window.fetch = (input, options) => {
+        window.__embedFetchOptions.push({
+          path: String(input), credentials: options?.credentials, cache: options?.cache,
+          referrerPolicy: options?.referrerPolicy,
+        });
+        return originalFetch(input, options);
+      };
+    });
+
+    await page.goto('/deployment');
+    await expect.poll(() => page.frames().some(frame => frame.url().startsWith(viewerOrigin)), {
+      timeout: 10_000,
+    }).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.embedHello)).toEqual(expect.any(Object));
+    const viewer = page.frames().find(frame => frame.url().startsWith(viewerOrigin));
+    expect(viewer).toBeDefined();
+    expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+    await page.evaluate(() => window.postViewerAcknowledgement());
+    await expect.poll(() => page.evaluate(() => window.embedMessages.some(
+      message => message.type === 'READY'))).toBe(true);
+
+    const shell = viewer.locator('#ravenroot-embed-viewer');
+    await expect(shell).toHaveAttribute('data-viewer-state', 'ready');
+    await expect(shell).toHaveAttribute('data-viewer-lifecycle', 'ready');
+    await expect(shell).toHaveAttribute('data-viewer-continuity', 'live');
+    await expect(viewer.locator('[data-viewer-alternative] > li')).toHaveCount(2);
+    await expect.poll(() => observationRequests.length).toBe(1);
+
+    const observed = observationRequests[0];
+    const observedBody = JSON.parse(observed.body);
+    expect(Object.keys(observedBody).sort()).toEqual(['cursor', 'issuedAt', 'jti', 'nonce', 'signature']);
+    expect(observedBody.cursor).toBe('');
+    expect(observed.headers.authorization).toMatch(/^Bearer [A-Za-z0-9_-]+$/u);
+    const fetches = await viewer.evaluate(() => window.__embedFetchOptions);
+    expect(fetches.map(entry => entry.path)).toEqual([
+      '/v1/embed/exchange', '/v1/embed/projection', '/v1/embed/observation',
+    ]);
+    expect(fetches.every(entry => entry.credentials === 'omit' && entry.cache === 'no-store'
+      && entry.referrerPolicy === 'no-referrer')).toBe(true);
+
+    const forgedStatus = await viewer.evaluate(async ({ body, authorization }) => {
+      const forged = { ...JSON.parse(body), jti: crypto.randomUUID() };
+      return (await fetch('/v1/embed/observation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: authorization },
+        body: JSON.stringify(forged), credentials: 'omit', cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+      })).status;
+    }, { body: observed.body, authorization: observed.headers.authorization });
+    expect(forgedStatus).toBe(403);
+
+    const messagesBeforeRevocation = await page.evaluate(() => structuredClone(window.embedMessages));
+    expect(messagesBeforeRevocation.every(message => Object.keys(message).sort().join(',')
+      === 'channelId,correlationId,direction,protocolVersion,type')).toBe(true);
+    expect(JSON.stringify(messagesBeforeRevocation)).not.toContain('browser-secret-topology');
+    expect(JSON.stringify(messagesBeforeRevocation)).not.toContain('browser-secret-runtime-payload');
+    expect(await page.locator('body').innerText()).not.toContain('browser-secret-topology');
+
+    const revoked = await request.post(`${controlOrigin}/revoke`);
+    expect(revoked.ok()).toBe(true);
+    await expect(shell).toHaveAttribute('data-viewer-continuity', 'detached');
+    await expect(shell).toHaveAttribute('data-viewer-lifecycle', 'ready');
+    await expect(viewer.locator('[data-viewer-status]')).toHaveText('Live observation authorization ended.');
+    await page.waitForTimeout(100);
+    const parentMessages = JSON.stringify(await page.evaluate(() => window.embedMessages));
+    expect(parentMessages).toBe(JSON.stringify(messagesBeforeRevocation));
+    expect(parentMessages).not.toContain(observed.headers.authorization.slice('Bearer '.length));
+    expect(requestedUrls.every(url => !url.includes('browser-secret-topology')
+      && !url.includes('browser-secret-runtime-payload')
+      && !url.includes(observed.headers.authorization.slice('Bearer '.length)))).toBe(true);
+    expect(consoleMessages.every(message => !message.includes('browser-secret-topology')
+      && !message.includes('browser-secret-runtime-payload'))).toBe(true);
+  });
 
 test('isolates the real bootstrap and projection flow across three origins', async ({ page, request }) => {
   const consoleMessages = [];

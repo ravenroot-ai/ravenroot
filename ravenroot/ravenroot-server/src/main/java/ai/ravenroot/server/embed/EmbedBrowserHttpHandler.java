@@ -1,13 +1,20 @@
 package ai.ravenroot.server.embed;
 
 import ai.ravenroot.api.embed.EmbedProjectionResolution;
+import ai.ravenroot.api.embed.EmbedCapability;
 import ai.ravenroot.api.embed.EmbedRegistrationAggregate;
 import ai.ravenroot.api.embed.EmbedRegistrationResolution;
+import ai.ravenroot.api.embed.EmbedViewerSource;
+import ai.ravenroot.api.application.AuthorizedRavenrootApplication;
+import ai.ravenroot.api.application.DeploymentEventBatch;
+import ai.ravenroot.api.application.DeploymentViewerView;
+import ai.ravenroot.api.application.PublicExecutionDescription;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.server.AuthenticatedPrincipalAttribute;
 import ai.ravenroot.server.HttpRequestContext;
+import ai.ravenroot.server.DeploymentObservationCursorStore;
 import ai.ravenroot.server.audit.JsonStrings;
 import com.sun.net.httpserver.HttpExchange;
 
@@ -25,6 +32,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.io.OutputStream;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /** Complete five-route server adapter for the distinct-origin, static embedded projection. */
 public final class EmbedBrowserHttpHandler {
@@ -33,6 +43,7 @@ public final class EmbedBrowserHttpHandler {
     public static final String LAUNCH_PATH = "/v1/embed/launch";
     public static final String EXCHANGE_PATH = "/v1/embed/exchange";
     public static final String PROJECTION_PATH = "/v1/embed/projection";
+    public static final String OBSERVATION_PATH = "/v1/embed/observation";
     public static final String BOOTSTRAP_SCRIPT_PATH = "/embed-bootstrap.js";
     private static final int MAX_BODY_BYTES = 8 * 1024;
 
@@ -40,8 +51,16 @@ public final class EmbedBrowserHttpHandler {
     private final EmbedLaunchTicketAuthority tickets;
     private final EmbedBrowserSessionAuthority sessions;
     private final P256EmbedProofVerifier proofs;
+    private final AuthorizedRavenrootApplication deployments;
+    private final DeploymentObservationCursorStore cursors;
 
     public EmbedBrowserHttpHandler(EmbedBrowserConfiguration configuration) {
+        this(configuration, null, new DeploymentObservationCursorStore(configuration.clock()));
+    }
+
+    public EmbedBrowserHttpHandler(EmbedBrowserConfiguration configuration,
+                                   AuthorizedRavenrootApplication deployments,
+                                   DeploymentObservationCursorStore cursors) {
         this.configuration = Objects.requireNonNull(configuration, "configuration");
         if (!configuration.active()) throw new IllegalArgumentException("embed browser is disabled");
         this.tickets = new EmbedLaunchTicketAuthority(configuration.clock(), configuration.ticketTtl(),
@@ -50,6 +69,8 @@ public final class EmbedBrowserHttpHandler {
                 configuration.bearerTtl(), configuration.sessionCapacity());
         this.proofs = new P256EmbedProofVerifier(configuration.clock(), configuration.proofTtl(),
                 configuration.replayCapacity());
+        this.deployments = deployments;
+        this.cursors = Objects.requireNonNull(cursors, "cursors");
     }
 
     public void createSession(HttpExchange exchange) throws IOException {
@@ -327,6 +348,22 @@ public final class EmbedBrowserHttpHandler {
             RequestContext context = new RequestContext(requestId.get(),
                     grant.workloadSubject(), PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(),
                     Set.of(Role.VIEWER), Set.of("ravenroot.embed.graph.read"));
+            if (registration.source() instanceof EmbedViewerSource.Deployment deployment) {
+                if (deployments == null
+                        || !grant.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)) {
+                    unavailable(exchange, false);
+                    return;
+                }
+                var view = deployments.localDeploymentView(deploymentContext(requestId.get(), registration),
+                        deployment.deploymentId());
+                if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
+                    unavailable(exchange, false);
+                    return;
+                }
+                audit(requestId.get(), registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
+                json(exchange, 200, view.orElseThrow().toJson());
+                return;
+            }
             EmbedProjectionResolution resolution = configuration.projections().read(context, registration);
             if (resolution instanceof EmbedProjectionResolution.Available available) {
                 audit(context.requestId(), registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
@@ -343,6 +380,265 @@ public final class EmbedBrowserHttpHandler {
         } catch (RuntimeException failure) {
             temporary(exchange);
         }
+    }
+
+    /** Signed, credentialed-fetch observation stream for an opt-in deployment registration. */
+    public void observation(HttpExchange exchange) throws IOException {
+        observation(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void observation(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        observation(exchange, requestContext::requestId);
+    }
+
+    private void observation(HttpExchange exchange, Supplier<String> requestId) throws IOException {
+        if (!requireExactPath(exchange, OBSERVATION_PATH)) return;
+        privateResponse(exchange);
+        if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
+        String bearer = bearer(exchange);
+        if (bearer == null) { unavailable(exchange, false); return; }
+        Map<String, String> body = body(exchange, Set.of("nonce", "jti", "issuedAt", "signature", "cursor"));
+        if (body == null) return;
+        var session = sessions.resolve(bearer, configuration.registrations());
+        if (session == null || !session.challenge().equals(body.get("nonce"))) {
+            unavailable(exchange, false); return;
+        }
+        var registration = session.registration();
+        if (!(registration.source() instanceof EmbedViewerSource.Deployment source)
+                || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)
+                || deployments == null) {
+            unavailable(exchange, false); return;
+        }
+        try {
+            validatedParentOrigin(registration);
+            Instant issuedAt = Instant.parse(body.get("issuedAt"));
+            byte[] signature = decode(body.get("signature"), 64);
+            if (!proofs.verifyObservationAndConsume(bearer, registration.revision(), body.get("nonce"),
+                    body.get("jti"), "POST", OBSERVATION_PATH, issuedAt, session.key(), signature)) {
+                unavailable(exchange, false); return;
+            }
+            RequestContext context = deploymentContext(requestId.get(), registration);
+            var view = deployments.localDeploymentView(context, source.deploymentId());
+            if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
+                unavailable(exchange, false); return;
+            }
+            var bound = view.orElseThrow();
+            var binding = new DeploymentObservationCursorStore.Binding(
+                    "embed:" + registration.registrationId() + ":" + registration.revision() + ":"
+                            + EmbedLaunchTicketAuthority.digest(bearer), source.deploymentId(),
+                    bound.source().incarnationId(), bound.source().graphVersion());
+            long sequence;
+            String supplied = body.get("cursor");
+            if (supplied.isBlank()) sequence = 0;
+            else {
+                var resolved = cursors.resolve(supplied, binding);
+                if (resolved == null) {
+                    beginObservation(exchange);
+                    try (var output = exchange.getResponseBody()) {
+                        writeTerminal(output, "source-gap", binding, "CURSOR_UNAVAILABLE");
+                    }
+                    return;
+                }
+                sequence = resolved.sequence();
+            }
+            audit(requestId.get(), registration, EmbedSecurityAuditSink.Phase.OBSERVATION_READ);
+            streamObservation(exchange, bearer, session, context, binding, sequence, supplied.isBlank());
+        } catch (IllegalArgumentException invalid) {
+            invalid(exchange);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            unavailable(exchange, false);
+        } catch (RuntimeException failure) {
+            temporary(exchange);
+        }
+    }
+
+    private void streamObservation(HttpExchange exchange, String bearer,
+                                   EmbedBrowserSessionAuthority.ActiveSession session,
+                                   RequestContext context,
+                                   DeploymentObservationCursorStore.Binding binding,
+                                   long sequence, boolean firstAttachment) throws IOException {
+        var wakeup = new ObservationWakeup();
+        AutoCloseable subscription = deployments.subscribeToLocalDeploymentEvents(context,
+                binding.deploymentId(), binding.incarnationId(), binding.graphVersion(), wakeup::signal);
+        try {
+            DeploymentEventBatch initial = deployments.localDeploymentEventsAfter(context, binding.deploymentId(),
+                    binding.incarnationId(), binding.graphVersion(), sequence);
+            if (initial.status() == DeploymentEventBatch.Status.UNAVAILABLE
+                    || initial.status() == DeploymentEventBatch.Status.SOURCE_CHANGED) {
+                unavailable(exchange, false); return;
+            }
+            beginObservation(exchange);
+            try (OutputStream output = exchange.getResponseBody()) {
+                if (initial.status() == DeploymentEventBatch.Status.GAP) {
+                    writeTerminal(output, "source-gap", binding, "REPLAY_WINDOW_EXCEEDED"); return;
+                }
+                var resolved = resolveEmbedView(bearer, session, context, binding);
+                if (resolved.view() == null) {
+                    writeTerminal(output, "source-invalidated", binding, resolved.reason()); return;
+                }
+                var current = resolved.view();
+                var lifecycle = current.lifecycle();
+                writeLifecycle(output, binding, lifecycle);
+                long sent = firstAttachment ? initial.latestSequence()
+                        : writeObservationBatch(output, bearer, session, context, binding, initial, sequence);
+                if (sent < 0) return;
+                while (!Thread.currentThread().isInterrupted()) {
+                    wakeup.await(1_000);
+                    resolved = resolveEmbedView(bearer, session, context, binding);
+                    if (resolved.view() == null) {
+                        writeTerminal(output, "source-invalidated", binding, resolved.reason()); return;
+                    }
+                    current = resolved.view();
+                    if (current.lifecycle() != lifecycle) {
+                        lifecycle = current.lifecycle();
+                        writeLifecycle(output, binding, lifecycle);
+                    }
+                    DeploymentEventBatch batch = deployments.localDeploymentEventsAfter(context,
+                            binding.deploymentId(), binding.incarnationId(), binding.graphVersion(), sent);
+                    if (batch.status() == DeploymentEventBatch.Status.GAP) {
+                        writeTerminal(output, "source-gap", binding, "REPLAY_WINDOW_EXCEEDED"); return;
+                    }
+                    if (batch.status() != DeploymentEventBatch.Status.AVAILABLE) {
+                        resolved = resolveEmbedView(bearer, session, context, binding);
+                        writeTerminal(output, "source-invalidated", binding,
+                                resolved.view() == null ? resolved.reason() : "VERSION_MISMATCH");
+                        return;
+                    }
+                    long before = sent;
+                    sent = writeObservationBatch(output, bearer, session, context, binding, batch, sent);
+                    if (sent < 0) return;
+                    if (before == sent) {
+                        output.write(": keepalive\n\n".getBytes(StandardCharsets.UTF_8)); output.flush();
+                    }
+                }
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException revoked) {
+            // The next credentialed fetch must establish current authority again.
+        } finally {
+            try { subscription.close(); } catch (Exception ignored) { }
+            exchange.close();
+        }
+    }
+
+    /** One pending observation hint; event batches, not hint counts, are the delivery authority. */
+    static final class ObservationWakeup {
+        private static final Object SIGNAL = new Object();
+        private final ArrayBlockingQueue<Object> pending = new ArrayBlockingQueue<>(1);
+
+        void signal(ai.ravenroot.api.application.ExecutionEvent ignored) {
+            pending.offer(SIGNAL);
+        }
+
+        boolean await(long timeoutMillis) throws InterruptedException {
+            return pending.poll(timeoutMillis, TimeUnit.MILLISECONDS) != null;
+        }
+    }
+
+    private long writeObservationBatch(OutputStream output, String bearer,
+                                       EmbedBrowserSessionAuthority.ActiveSession session,
+                                       RequestContext context,
+                                       DeploymentObservationCursorStore.Binding binding,
+                                       DeploymentEventBatch batch, long sequence) throws IOException {
+        long sent = sequence;
+        for (var event : batch.events()) {
+            var resolved = resolveEmbedView(bearer, session, context, binding);
+            if (resolved.view() == null) {
+                writeTerminal(output, "source-invalidated", binding, resolved.reason());
+                return -1;
+            }
+            String cursor = cursors.issue(binding, event.sequence());
+            String body = executionJson(binding, event);
+            output.write(("id: " + cursor + "\nevent: execution\ndata: " + body + "\n\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            output.flush();
+            sent = event.sequence();
+        }
+        return Math.max(sent, batch.latestSequence());
+    }
+
+    private EmbedViewResolution resolveEmbedView(String bearer,
+                                                  EmbedBrowserSessionAuthority.ActiveSession expected,
+                                                  RequestContext context,
+                                                  DeploymentObservationCursorStore.Binding binding) {
+        var currentSession = sessions.resolve(bearer, configuration.registrations());
+        if (currentSession != expected) return new EmbedViewResolution(null, "AUTHORITY_CHANGED");
+        var view = deployments.localDeploymentView(context, binding.deploymentId());
+        if (view.isEmpty()) return new EmbedViewResolution(null, "UNDEPLOYED");
+        var current = view.orElseThrow();
+        if (!current.source().incarnationId().equals(binding.incarnationId())
+                || !current.source().graphVersion().equals(binding.graphVersion())
+                || !sessions.bind(expected, current)) {
+            return new EmbedViewResolution(null, "VERSION_MISMATCH");
+        }
+        return new EmbedViewResolution(current, null);
+    }
+
+    private record EmbedViewResolution(DeploymentViewerView view, String reason) { }
+
+    private static RequestContext deploymentContext(String requestId,
+                                                     EmbedRegistrationAggregate registration) {
+        var grant = registration.sessionGrant();
+        return new RequestContext(requestId, grant.workloadSubject(),
+                PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(), Set.of(Role.VIEWER),
+                Set.of("ravenroot.embed.graph.read", "ravenroot.deployment.observe"));
+    }
+
+    private static void beginObservation(HttpExchange exchange) throws IOException {
+        privateResponse(exchange);
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
+        exchange.getResponseHeaders().set("Cache-Control", "private, no-store, no-transform");
+        exchange.getResponseHeaders().set("Connection", "keep-alive");
+        exchange.getResponseHeaders().set("X-Ravenroot-Event-Source", "DEPLOYMENT_RING");
+        exchange.getResponseHeaders().set("X-Ravenroot-Event-Continuity", "PROCESS_LOCAL");
+        exchange.sendResponseHeaders(200, 0);
+    }
+
+    private static String executionJson(DeploymentObservationCursorStore.Binding binding,
+                                        ai.ravenroot.api.application.ExecutionEvent event) {
+        String description = PublicExecutionDescription.forType(event.type(), event.publicReason());
+        return "{\"type\":\"execution\",\"deploymentId\":\"" + JsonStrings.escape(binding.deploymentId())
+                + "\",\"incarnationId\":\"" + JsonStrings.escape(binding.incarnationId())
+                + "\",\"graphVersion\":\"" + JsonStrings.escape(binding.graphVersion())
+                + "\",\"event\":{\"occurredAt\":\"" + event.occurredAt() + "\",\"type\":\""
+                + event.type() + "\",\"nodeId\":" + nullable(event.nodeId())
+                + ",\"edgeId\":" + nullable(event.edgeId())
+                + ",\"activeInstances\":" + event.activeInstances()
+                + ",\"inFlightArrivals\":" + event.inFlightArrivals()
+                + ",\"fallback\":" + event.fallback()
+                + ",\"executionId\":\"" + event.executionId() + "\",\"traversalId\":\""
+                + event.traversalId() + "\",\"publicReason\":" + nullable(event.publicReason())
+                + ",\"description\":\"" + JsonStrings.escape(description) + "\"}}";
+    }
+
+    private static String nullable(String value) {
+        return value == null ? "null" : "\"" + JsonStrings.escape(value) + "\"";
+    }
+
+    private static void writeTerminal(OutputStream output, String type,
+                                      DeploymentObservationCursorStore.Binding binding,
+                                      String reason) throws IOException {
+        String body = "{\"type\":\"" + type + "\",\"deploymentId\":\""
+                + JsonStrings.escape(binding.deploymentId()) + "\",\"incarnationId\":\""
+                + JsonStrings.escape(binding.incarnationId()) + "\",\"graphVersion\":\""
+                + JsonStrings.escape(binding.graphVersion()) + "\",\"reason\":\""
+                + JsonStrings.escape(reason) + "\"}";
+        output.write(("event: " + type + "\ndata: " + body + "\n\n").getBytes(StandardCharsets.UTF_8));
+        output.flush();
+    }
+
+    private static void writeLifecycle(OutputStream output,
+                                       DeploymentObservationCursorStore.Binding binding,
+                                       ai.ravenroot.api.application.LocalDeploymentState lifecycle)
+            throws IOException {
+        String body = "{\"type\":\"lifecycle\",\"deploymentId\":\""
+                + JsonStrings.escape(binding.deploymentId()) + "\",\"incarnationId\":\""
+                + JsonStrings.escape(binding.incarnationId()) + "\",\"graphVersion\":\""
+                + JsonStrings.escape(binding.graphVersion()) + "\",\"lifecycle\":\""
+                + lifecycle + "\"}";
+        output.write(("event: lifecycle\ndata: " + body + "\n\n").getBytes(StandardCharsets.UTF_8));
+        output.flush();
     }
 
     private void audit(String requestId, EmbedRegistrationAggregate registration,

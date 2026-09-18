@@ -2646,7 +2646,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         long latest = retained.isEmpty() ? sequence : retained.getLast().sequence();
         List<ExecutionEvent> filtered = retained.stream()
                 .filter(event -> tenantId.equals(event.tenantId()))
-                .filter(event -> record.engineId().value().equals(event.deploymentId()))
+                .filter(event -> record.lifecycleId().value().equals(event.deploymentId()))
                 .filter(event -> graphVersion.equals(event.graphVersion()))
                 .toList();
         return new DeploymentEventBatch(DeploymentEventBatch.Status.AVAILABLE, filtered,
@@ -2674,7 +2674,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     && record.deployment().incarnationId().equals(incarnationId)
                     && record.deployment().graphVersion().equals(graphVersion)
                     && tenantId.equals(event.tenantId())
-                    && record.engineId().value().equals(event.deploymentId())
+                    && record.lifecycleId().value().equals(event.deploymentId())
                     && graphVersion.equals(event.graphVersion())) {
                 listener.accept(event);
             }

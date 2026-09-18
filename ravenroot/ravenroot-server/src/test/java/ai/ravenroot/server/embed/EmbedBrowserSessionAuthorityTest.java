@@ -70,9 +70,34 @@ class EmbedBrowserSessionAuthorityTest {
                 ai.ravenroot.api.application.DeploymentViewerView.Source.deployment(
                         "deployment", "incarnation-b", "version"),
                 ai.ravenroot.api.application.LocalDeploymentState.READY, "same-digest", projection);
-        assertTrue(active.bind(first));
-        assertFalse(active.bind(replacement),
+        assertTrue(sessions.bind(active, first));
+        assertEquals(first, sessions.resolveBinding(active));
+        assertFalse(sessions.bind(active, replacement),
                 "an identical-byte undeploy/re-register must not move an existing bearer to the replacement");
+        assertEquals(first, sessions.resolveBinding(active));
+    }
+
+    @Test
+    void activeSessionRetainsItsPublicRecordValueContractWhileBindingsRemainAuthorityInternal() throws Exception {
+        var registration = EmbedSessionFixtures.registration(1);
+        var generator = KeyPairGenerator.getInstance("EC");
+        generator.initialize(new ECGenParameterSpec("secp256r1"));
+        var key = (java.security.interfaces.ECPublicKey) generator.generateKeyPair().getPublic();
+        var first = new EmbedBrowserSessionAuthority.ActiveSession(
+                registration, "challenge", key, EmbedSessionFixtures.AT.plusSeconds(30));
+        var equal = new EmbedBrowserSessionAuthority.ActiveSession(
+                registration, "challenge", key, EmbedSessionFixtures.AT.plusSeconds(30));
+
+        assertTrue(EmbedBrowserSessionAuthority.ActiveSession.class.isRecord());
+        assertEquals(first, equal);
+        assertEquals(first.hashCode(), equal.hashCode());
+        assertEquals("ActiveSession[registration=" + registration + ", challenge=challenge, key=" + key
+                + ", expiresAt=" + EmbedSessionFixtures.AT.plusSeconds(30) + "]", first.toString());
+
+        var sessions = new EmbedBrowserSessionAuthority(new MutableClock(EmbedSessionFixtures.AT),
+                Duration.ofSeconds(30), Duration.ofSeconds(30), 4, tokens());
+        assertNull(sessions.resolveBinding(first),
+                "deployment binding state must remain internal and unavailable for non-issued record values");
     }
 
     /**

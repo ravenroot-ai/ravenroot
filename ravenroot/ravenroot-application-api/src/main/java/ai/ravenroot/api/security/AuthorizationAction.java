@@ -36,8 +36,6 @@ public enum AuthorizationAction {
     EMBED_GRAPH_READ("ravenroot.embed.graph.read", true),
     /** Create a browser embed session. */
     EMBED_SESSION_CREATE("ravenroot.embed.session.create", true),
-    /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
-    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true),
 
     /**
      * Provisioning and revoking an embed registration.
@@ -80,7 +78,10 @@ public enum AuthorizationAction {
     /** Reserved tool-invocation permission, not exposed by this API version. */
     TOOL_INVOKE("ravenroot.tool.invoke", false),
     /** Reserved administrative permission, not exposed by this API version. */
-    ADMIN("ravenroot.admin", false);
+    ADMIN("ravenroot.admin", false),
+
+    /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
+    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true);
 
     private final String requiredScope;
     private final boolean available;

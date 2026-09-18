@@ -43,7 +43,15 @@ public final class P256EmbedProofVerifier {
                                     String method, String uri, Instant issuedAt,
                                     ECPublicKey key, byte[] signature) {
         return verifyAndConsume(bearer, revision, nonce, jti, method, uri, issuedAt,
-                key, signature, payload(bearer, revision, nonce, jti, method, uri, issuedAt));
+                key, signature, payload(bearer, revision, nonce, jti, method, uri, issuedAt), false);
+    }
+
+    /** Verifies one observation request while allowing a fresh signed JTI to reconnect. */
+    public boolean verifyObservationAndConsume(String bearer, long revision, String nonce, String jti,
+                                               String method, String uri, Instant issuedAt,
+                                               ECPublicKey key, byte[] signature) {
+        return verifyAndConsume(bearer, revision, nonce, jti, method, uri, issuedAt,
+                key, signature, payload(bearer, revision, nonce, jti, method, uri, issuedAt), true);
     }
 
     public boolean verifyExchangeAndConsume(String exchangeId, long revision, String nonce,
@@ -53,12 +61,13 @@ public final class P256EmbedProofVerifier {
         if (blank(channelId) || blank(acknowledgementCorrelationId)) return false;
         return verifyAndConsume(exchangeId, revision, nonce, jti, method, uri, issuedAt, key, signature,
                 exchangePayload(exchangeId, revision, nonce, channelId,
-                        acknowledgementCorrelationId, jti, method, uri, issuedAt));
+                        acknowledgementCorrelationId, jti, method, uri, issuedAt), false);
     }
 
     private boolean verifyAndConsume(String bearer, long revision, String nonce, String jti,
                                      String method, String uri, Instant issuedAt,
-                                     ECPublicKey key, byte[] signature, byte[] payload) {
+                                     ECPublicKey key, byte[] signature, byte[] payload,
+                                     boolean requestScopedReplay) {
         if (blank(bearer) || revision < 1 || blank(nonce) || blank(jti) || jti.length() > 256
                 || !"POST".equals(method) || blank(uri) || issuedAt == null || key == null
                 || signature == null || signature.length != 64 || !isP256(key)) {
@@ -74,12 +83,9 @@ public final class P256EmbedProofVerifier {
         } catch (GeneralSecurityException invalid) {
             return false;
         }
-        // A session challenge authenticates a sequence of credentialed fetches. The one-use value
-        // is the signed jti for one exact method/path, not the session nonce itself; consuming only
-        // the nonce made a successful projection permanently prevent the observation request that
-        // follows it in the same short-lived browser session.
-        String replayKey = sha256((EmbedLaunchTicketAuthority.digest(bearer) + ":" + revision + ":" + nonce
-                + ":" + jti + ":" + method + ":" + uri).getBytes(StandardCharsets.UTF_8));
+        String replayMaterial = EmbedLaunchTicketAuthority.digest(bearer) + ":" + revision + ":" + nonce;
+        if (requestScopedReplay) replayMaterial += ":" + jti + ":" + method + ":" + uri;
+        String replayKey = sha256(replayMaterial.getBytes(StandardCharsets.UTF_8));
         synchronized (replay) {
             cleanup(now);
             if (replay.size() >= capacity || replay.containsKey(replayKey)) return false;

@@ -102,8 +102,29 @@ public final class EmbedSnapshotProjector {
 
     private static EmbedGraphProjection render(GraphVersionRecord version, VerifiedEmbedGraphGrant grant,
                                                EmbedProjectionBudget budget) {
-        return projectDefinition(version.snapshot().definition(), grant.graphId(), grant.graphVersionId(),
-                grant.canonicalDigest(), budget);
+        var definition = version.snapshot().definition();
+        requireIdentifier(grant.graphId(), budget);
+        requireIdentifier(grant.graphVersionId(), budget);
+        requireIdentifier(grant.canonicalDigest(), budget);
+        if (definition.nodes().size() > budget.maxNodes() || definition.edges().size() > budget.maxEdges()) {
+            throw new ProjectionTooLarge();
+        }
+        var nodes = definition.nodes().stream()
+                .sorted(Comparator.comparing(GraphNode::id))
+                .map(node -> projectSnapshotNode(node, budget))
+                .toList();
+        var edges = definition.edges().stream()
+                .sorted(Comparator.comparing(GraphEdge::source).thenComparing(GraphEdge::target))
+                .map(edge -> {
+                    requireIdentifier(edge.source(), budget);
+                    requireIdentifier(edge.target(), budget);
+                    return new EmbedGraphProjection.Edge(edge.source(), edge.target());
+                })
+                .toList();
+        var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
+                grant.graphId(), grant.graphVersionId(), grant.canonicalDigest(), nodes, edges);
+        if (projection.jsonBytes() > budget.maxJsonBytes()) throw new ProjectionTooLarge();
+        return projection;
     }
 
     /**
@@ -123,7 +144,7 @@ public final class EmbedSnapshotProjector {
         }
         var nodes = definition.nodes().stream()
                 .sorted(Comparator.comparing(GraphNode::id))
-                .map(node -> projectNode(node, budget))
+                .map(node -> projectDeploymentNode(node, budget))
                 .toList();
         var edges = definition.edges().stream()
                 .sorted(Comparator.comparing(GraphEdge::source).thenComparing(GraphEdge::target)
@@ -146,7 +167,12 @@ public final class EmbedSnapshotProjector {
         return projection;
     }
 
-    private static EmbedGraphProjection.Node projectNode(GraphNode node, EmbedProjectionBudget budget) {
+    private static EmbedGraphProjection.Node projectSnapshotNode(GraphNode node, EmbedProjectionBudget budget) {
+        requireIdentifier(node.id(), budget);
+        return new EmbedGraphProjection.Node(node.id(), node.kind().name(), layout(node, budget));
+    }
+
+    private static EmbedGraphProjection.Node projectDeploymentNode(GraphNode node, EmbedProjectionBudget budget) {
         requireIdentifier(node.id(), budget);
         String label = optionalString(node.properties().get("name"));
         String visualType = optionalString(node.properties().get("classification"));

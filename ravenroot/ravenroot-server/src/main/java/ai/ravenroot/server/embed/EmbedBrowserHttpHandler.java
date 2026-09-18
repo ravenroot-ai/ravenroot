@@ -356,7 +356,7 @@ public final class EmbedBrowserHttpHandler {
                 }
                 var view = deployments.localDeploymentView(deploymentContext(requestId.get(), registration),
                         deployment.deploymentId());
-                if (view.isEmpty() || !session.bind(view.orElseThrow())) {
+                if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                     unavailable(exchange, false);
                     return;
                 }
@@ -413,13 +413,13 @@ public final class EmbedBrowserHttpHandler {
             validatedParentOrigin(registration);
             Instant issuedAt = Instant.parse(body.get("issuedAt"));
             byte[] signature = decode(body.get("signature"), 64);
-            if (!proofs.verifyAndConsume(bearer, registration.revision(), body.get("nonce"), body.get("jti"),
-                    "POST", OBSERVATION_PATH, issuedAt, session.key(), signature)) {
+            if (!proofs.verifyObservationAndConsume(bearer, registration.revision(), body.get("nonce"),
+                    body.get("jti"), "POST", OBSERVATION_PATH, issuedAt, session.key(), signature)) {
                 unavailable(exchange, false); return;
             }
             RequestContext context = deploymentContext(requestId.get(), registration);
             var view = deployments.localDeploymentView(context, source.deploymentId());
-            if (view.isEmpty() || !session.bind(view.orElseThrow())) {
+            if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                 unavailable(exchange, false); return;
             }
             var bound = view.orElseThrow();
@@ -555,7 +555,7 @@ public final class EmbedBrowserHttpHandler {
         var current = view.orElseThrow();
         if (!current.source().incarnationId().equals(binding.incarnationId())
                 || !current.source().graphVersion().equals(binding.graphVersion())
-                || !expected.bind(current)) {
+                || !sessions.bind(expected, current)) {
             return new EmbedViewResolution(null, "VERSION_MISMATCH");
         }
         return new EmbedViewResolution(current, null);

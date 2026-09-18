@@ -207,9 +207,21 @@ class EmbedBrowserHttpIntegrationTest {
                 assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
                         VIEWER, forged).header("Authorization", "Bearer " + bearer)).statusCode());
 
-                var request = viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH, VIEWER, observation)
+                var firstRequest = viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH, VIEWER, observation)
                         .header("Authorization", "Bearer " + bearer).build();
-                var stream = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                var firstStream = client.send(firstRequest, HttpResponse.BodyHandlers.ofInputStream());
+                assertEquals(200, firstStream.statusCode());
+                firstStream.body().close();
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        VIEWER, observation).header("Authorization", "Bearer " + bearer)).statusCode(),
+                        "the same observation jti must remain one-use");
+
+                Instant reconnectTime = Instant.now();
+                String reconnect = proofBody(pair, bearer, nonce, "live-observation-reconnect",
+                        EmbedBrowserHttpHandler.OBSERVATION_PATH, reconnectTime, true);
+                var reconnectRequest = viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        VIEWER, reconnect).header("Authorization", "Bearer " + bearer).build();
+                var stream = client.send(reconnectRequest, HttpResponse.BodyHandlers.ofInputStream());
                 assertEquals(200, stream.statusCode());
                 try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
                     assertEquals("event: lifecycle", reader.readLine());
@@ -420,6 +432,17 @@ class EmbedBrowserHttpIntegrationTest {
             var replay = send(client, viewerPost(base + EmbedBrowserHttpHandler.PROJECTION_PATH,
                     VIEWER, projectionBody).header("Authorization", "Bearer " + bearer));
             assertEquals(403, replay.statusCode());
+
+            Instant secondProjectionTime = Instant.now();
+            String secondProjectionBody = "{\"nonce\":\"" + projectionNonce
+                    + "\",\"jti\":\"projection-jti-second\",\"issuedAt\":\"" + secondProjectionTime
+                    + "\",\"signature\":\"" + signature(pair, bearer, 1, projectionNonce,
+                    "projection-jti-second", EmbedBrowserHttpHandler.PROJECTION_PATH,
+                    secondProjectionTime) + "\"}";
+            var secondProjection = send(client, viewerPost(base + EmbedBrowserHttpHandler.PROJECTION_PATH,
+                    VIEWER, secondProjectionBody).header("Authorization", "Bearer " + bearer));
+            assertEquals(403, secondProjection.statusCode(),
+                    "projection remains one-shot even when a fresh signed jti is supplied");
 
             var general = send(client, request(base + "/health").GET());
             assertEquals("DENY", general.headers().firstValue("X-Frame-Options").orElseThrow());

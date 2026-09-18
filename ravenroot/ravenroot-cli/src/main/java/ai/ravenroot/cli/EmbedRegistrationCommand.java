@@ -190,10 +190,6 @@ final class EmbedRegistrationCommand {
 
     private int provision(Map<String, String> options) {
         EmbedProvisionCommand command;
-        if (options.containsKey("graphml") && options.containsKey("deployment-id")) {
-            throw new IllegalArgumentException("--graphml snapshot source cannot be combined with live "
-                    + "--deployment-id; migrate the snapshot coordinate to --snapshot-deployment-id");
-        }
         if (!options.containsKey("graphml")) {
             var snapshotOnly = new java.util.LinkedHashSet<>(List.of("graph-id", "graph-version-id",
                     "snapshot-state", "resource-id", "snapshot-deployment-id", "deployment-version",
@@ -229,7 +225,7 @@ final class EmbedRegistrationCommand {
             // who could pass one could pin a registration to a digest the payload does not have, which is
             // precisely the incoherent pairing the aggregate exists to make impossible.
             var graphGrant = new VerifiedEmbedGraphGrant(required(options, "tenant"),
-                    required(options, "resource-id"), required(options, "snapshot-deployment-id"),
+                    required(options, "resource-id"), snapshotDeploymentId(options),
                     positiveLong(options, "deployment-version"), key.graphId(), key.versionId(),
                     snapshot.canonicalHash(), required(options, "policy-revision"));
             var eligibility = eligibility(options);
@@ -496,6 +492,17 @@ final class EmbedRegistrationCommand {
         return value.trim();
     }
 
+    private static String snapshotDeploymentId(Map<String, String> options) {
+        String legacy = options.get("deployment-id");
+        String explicit = options.get("snapshot-deployment-id");
+        if (legacy != null && explicit != null) {
+            throw new IllegalArgumentException("snapshot provision accepts either --deployment-id or "
+                    + "--snapshot-deployment-id, not both");
+        }
+        return legacy != null ? required(options, "deployment-id")
+                : required(options, "snapshot-deployment-id");
+    }
+
     private static long positiveLong(Map<String, String> options, String name) {
         long value = nonNegativeLong(options, name);
         if (value < 1) throw new IllegalArgumentException("--" + name + " must be positive");
@@ -519,7 +526,8 @@ final class EmbedRegistrationCommand {
                 + "--audit-dir <dir> --tenant <id> --registration-id <id> --expected-revision <n> "
                 + "--graphml <file> --graph-id <id> --graph-version-id <id> --snapshot-state "
                 + "<published|active> --issuer <id> --subject <id> --parent-origin <https-origin> "
-                + "--resource-id <id> --snapshot-deployment-id <id> --deployment-version <n> "
+                + "--resource-id <id> (--deployment-id|--snapshot-deployment-id) <id> "
+                + "--deployment-version <n> "
                 + "--policy-revision <id> --gate-deployment <true|false> "
                 + "--gate-provenance <true|false> --gate-classification <true|false> "
                 + "--gate-retention <true|false> --gate-dsr-suppression <true|false> "
@@ -530,8 +538,8 @@ final class EmbedRegistrationCommand {
                 + "[--operator <subject>]");
         errors.println("       live deployment source: omit --graphml and snapshot-only flags; supply "
                 + "--deployment-id with the common store/audit/identity/origin flags above.");
-        errors.println("       migration: snapshot commands that formerly used --deployment-id must use "
-                + "--snapshot-deployment-id; --graphml and --deployment-id are always refused together.");
+        errors.println("       snapshot source: with --graphml, --deployment-id remains supported; "
+                + "--snapshot-deployment-id is an explicit alias. Supply exactly one of them.");
         errors.println("       --expected-revision is a compare-and-set: 0 for a registration that "
                 + "must not exist yet, otherwise the revision 'show' printed. There is no 'force'.");
         errors.println("       the canonical digest is computed from --graphml and can never be "

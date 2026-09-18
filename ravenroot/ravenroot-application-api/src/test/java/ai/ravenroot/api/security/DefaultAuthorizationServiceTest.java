@@ -12,6 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultAuthorizationServiceTest {
     @Test
+    void deploymentObservationIsAppendedWithoutRenumberingExistingActions() {
+        assertEquals(28, AuthorizationAction.ADMIN.ordinal(),
+                "the final origin/dev action must retain its published ordinal");
+        assertEquals(29, AuthorizationAction.DEPLOYMENT_OBSERVE.ordinal(),
+                "new actions are appended so existing ordinals remain stable");
+    }
+
+    @Test
     void enforcesTheCompleteRoleAndScopeMatrix() {
         var events = new ArrayList<AuthorizationAuditEvent>();
         var service = new DefaultAuthorizationService(events::add);

@@ -75,12 +75,24 @@ class EmbedRegistrationCliTest {
     }
 
     @Test
-    void graphMlAndLiveDeploymentIdAreRejectedAsMixedSources() throws Exception {
+    void legacyDeploymentIdRemainsAcceptedAsTheSnapshotCoordinateWithGraphMl() throws Exception {
+        Path graph = writeGraph();
+        var provisioned = run(renamed(provisionArgs(graph, 0),
+                "--snapshot-deployment-id", "--deployment-id"));
+
+        assertEquals(0, provisioned.status(), provisioned.err());
+        assertTrue(provisioned.out().contains("source=snapshot"), provisioned.out());
+        assertTrue(provisioned.out().contains("graph-id=graph-a"), provisioned.out());
+    }
+
+    @Test
+    void snapshotDeploymentCoordinateAliasesCannotBothBeSupplied() throws Exception {
         Path graph = writeGraph();
         var mixed = run(Stream.concat(Stream.of(provisionArgs(graph, 0)),
-                Stream.of("--deployment-id", "live-orders")).toArray(String[]::new));
+                Stream.of("--deployment-id", "deployment-a")).toArray(String[]::new));
         assertEquals(2, mixed.status());
-        assertTrue(mixed.err().contains("cannot be combined with live --deployment-id"), mixed.err());
+        assertTrue(mixed.err().contains("not both"), mixed.err());
+        assertTrue(mixed.err().contains("--deployment-id"), mixed.err());
         assertTrue(mixed.err().contains("--snapshot-deployment-id"), mixed.err());
     }
 
@@ -306,6 +318,14 @@ class EmbedRegistrationCliTest {
             kept.add(args[index]);
         }
         return kept.toArray(String[]::new);
+    }
+
+    private static String[] renamed(String[] args, String from, String to) {
+        String[] renamed = args.clone();
+        for (int index = 0; index < renamed.length; index++) {
+            if (renamed[index].equals(from)) renamed[index] = to;
+        }
+        return renamed;
     }
 
     private static String[] replace(String[] args, String flag, String value) {

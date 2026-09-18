@@ -37,11 +37,14 @@ For a finite instruction list whose positions are numbered from zero:
 
 The test-support compiler in `ravenroot-engine-testkit` implements this construction as
 `RegisterMachineProgram.compile`. It accepts initial registers separately and materializes them as
-visible SET nodes. It emits explicit independent-arrival semantics where a cycle gives an instruction
-more than one predecessor. Its independent instruction-level interpreter uses a caller-supplied step
-ceiling and reports final registers, the halt instruction, and abstract instruction count. Differential
-tests compare all three facts with execution of the serialized GraphML; initializer nodes are not
-abstract instructions, and DECJZ counts once when its zero-test entry node starts.
+visible SET nodes. SET literals and initial values must be canonical non-negative decimals of at most
+4,096 digits; the compiler and independent interpreter reject the same out-of-domain values. The
+compiler also validates its completed graph against Profile v1 before returning it. It emits explicit
+independent-arrival semantics where a cycle gives an instruction more than one predecessor. Its
+independent instruction-level interpreter uses a caller-supplied step ceiling and reports final
+registers, the halt instruction, and abstract instruction count. Differential tests compare all three
+facts with execution of the serialized GraphML; initializer nodes are not abstract instructions, and
+DECJZ counts once when its zero-test entry node starts.
 
 ## Static validation
 
@@ -58,7 +61,8 @@ Its cycle analysis uses bounded heap-backed worklists rather than recursion, so 
 cannot consume the Java call stack. Errors make the profile verdict invalid; warnings do not.
 
 Errors cover malformed `bigint-op` expansions (including literal text or digit counts the runtime
-cannot execute), edge outcomes an elementary node cannot emit, non-profile or side-effecting nodes,
+cannot execute, invalid target field names, and targets in the reserved `ravenroot.security.*`
+namespace), edge outcomes an elementary node cannot emit, non-profile or side-effecting nodes,
 ordinary nodes that fork or terminate the active path unexpectedly, decisions that do not read exactly one top-level
 boolean, missing or ambiguous decision outcomes, and unresolved edge ends. Warnings conservatively
 cover reads not proven initialized, subtract-one not proven guarded by

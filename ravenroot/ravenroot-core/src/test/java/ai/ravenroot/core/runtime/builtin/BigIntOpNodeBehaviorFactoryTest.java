@@ -2,8 +2,10 @@ package ai.ravenroot.core.runtime.builtin;
 
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.core.graph.BigIntOpContract;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import net.jqwik.api.Arbitraries;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -74,17 +77,17 @@ class BigIntOpNodeBehaviorFactoryTest {
 
     @Test
     void enforcesOperandAndResultCeilingsAtTheirBoundaries() throws Exception {
-        String maximum = "9".repeat(BigIntOpNodeBehaviorFactory.MAX_DECIMAL_DIGITS);
+        String maximum = "9".repeat(BigIntOpContract.MAX_DECIMAL_DIGITS);
         assertEquals(maximum, literalResult("copy", maximum, null));
         assertEquals("-" + maximum, literalResult("copy", "-" + maximum, null));
 
         var tooLong = node("copy", "literal:" + "9".repeat(
-                BigIntOpNodeBehaviorFactory.MAX_DECIMAL_DIGITS + 1), null, "answer");
+                BigIntOpContract.MAX_DECIMAL_DIGITS + 1), null, "answer");
         IllegalArgumentException operand = assertThrows(IllegalArgumentException.class,
                 () -> new BigIntOpNodeBehaviorFactory().validate(tooLong));
         assertTrue(operand.getMessage().contains("4096"));
 
-        String half = "9".repeat(BigIntOpNodeBehaviorFactory.MAX_DECIMAL_DIGITS / 2 + 1);
+        String half = "9".repeat(BigIntOpContract.MAX_DECIMAL_DIGITS / 2 + 1);
         ExecutionException result = assertThrows(ExecutionException.class,
                 () -> execute("multiply", "literal:" + half, "literal:" + half,
                         "answer", Map.of()).payload());
@@ -93,11 +96,24 @@ class BigIntOpNodeBehaviorFactoryTest {
     }
 
     @Test
+    void targetValidationUsesTheSharedFieldAndReservedNamespaceContract() {
+        int maximum = PayloadLimits.DEFAULTS.maxKeyLength();
+        var factory = new BigIntOpNodeBehaviorFactory();
+        factory.validate(node("copy", "literal:1", null, "r".repeat(maximum)));
+
+        for (String invalid : List.of(
+                "ravenroot.security.subject", "r".repeat(maximum + 1), "counter\tshadow")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> factory.validate(node("copy", "literal:1", null, invalid)), invalid);
+        }
+    }
+
+    @Test
     void failuresAreActionableAndNeverEchoUnboundedValues() {
         assertBoundedFailure("copy", "field:absent", null, "answer", Map.of(), "field 'absent' is missing");
         assertBoundedFailure("floor-divide", "literal:1", "literal:0", "answer", Map.of(), "resolved to zero");
         assertBoundedFailure("copy", "field:value", null, "answer",
-                Map.of("value", "x".repeat(BigIntOpNodeBehaviorFactory.MAX_DECIMAL_DIGITS)),
+                Map.of("value", "x".repeat(BigIntOpContract.MAX_DECIMAL_DIGITS)),
                 "does not contain a signed base-10 integer");
 
         ExecutionException wrongPayload = assertThrows(ExecutionException.class,

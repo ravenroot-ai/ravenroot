@@ -1,5 +1,6 @@
 package ai.ravenroot.core.graph;
 
+import ai.ravenroot.api.payload.PayloadLimits;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -119,6 +120,22 @@ class RegisterMachineProfileTest {
             var report = RegisterMachineProfile.validate(linear(node, "impossible"));
             assertEquals(List.of("IMPOSSIBLE_OUTCOME"), codes(report.errors()), node.behavior());
         }
+    }
+
+    @Test
+    void targetValidationMatchesTheRuntimeFieldAndReservedNamespaceContract() {
+        int maximum = PayloadLimits.DEFAULTS.maxKeyLength();
+        for (String invalid : List.of(
+                "ravenroot.security.subject", "r".repeat(maximum + 1), "counter\tshadow")) {
+            var report = RegisterMachineProfile.validate(linear(
+                    bigint("set", "copy", "literal:1", null, invalid), GraphEdge.DEFAULT_OUTCOME));
+            assertEquals(List.of("MALFORMED_BIGINT_OPERATION"), codes(report.errors()), invalid);
+        }
+
+        String exactBoundary = "r".repeat(maximum);
+        var report = RegisterMachineProfile.validate(linear(
+                bigint("set", "copy", "literal:1", null, exactBoundary), GraphEdge.DEFAULT_OUTCOME));
+        assertTrue(report.conforms(), report.errors().toString());
     }
 
     @Test

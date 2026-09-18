@@ -1,7 +1,5 @@
 package ai.ravenroot.core.graph;
 
-import ai.ravenroot.api.payload.PayloadLimits;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -27,8 +25,6 @@ public final class RegisterMachineProfile {
     private static final Set<String> COMPARISONS = Set.of("equal", "less-than");
     private static final Pattern FIELD_EXPRESSION = Pattern.compile("payload\\.([A-Za-z_][A-Za-z0-9_]*)");
     private static final Pattern DECIMAL = Pattern.compile("0|-?[1-9][0-9]*");
-    private static final Pattern EXECUTABLE_DECIMAL = Pattern.compile("[+-]?[0-9]+");
-    private static final int MAX_DECIMAL_DIGITS = 4_096;
 
     private RegisterMachineProfile() {
     }
@@ -142,7 +138,7 @@ public final class RegisterMachineProfile {
         String operation = text(node, "operation");
         String left = text(node, "left");
         String target = text(node, "target");
-        if (!OPERATIONS.contains(operation) || !operand(left) || target.isBlank()
+        if (!OPERATIONS.contains(operation) || !operand(left) || !BigIntOpContract.isWritableTarget(target)
                 || (!"copy".equals(operation) && !operand(text(node, "right")))) {
             findings.add(error("MALFORMED_BIGINT_OPERATION", node.id(),
                     "bigint-op must declare a supported operation, field/literal operands, and a target"));
@@ -330,14 +326,11 @@ public final class RegisterMachineProfile {
     private static boolean operand(String value) {
         if (value.startsWith("field:")) {
             String field = value.substring("field:".length());
-            return !field.isBlank() && field.length() <= PayloadLimits.DEFAULTS.maxKeyLength()
-                    && field.chars().noneMatch(Character::isISOControl);
+            return BigIntOpContract.isFieldName(field);
         }
         if (!value.startsWith("literal:")) return false;
         String decimal = value.substring("literal:".length());
-        int sign = decimal.startsWith("+") || decimal.startsWith("-") ? 1 : 0;
-        int digits = decimal.length() - sign;
-        return digits >= 1 && digits <= MAX_DECIMAL_DIGITS && EXECUTABLE_DECIMAL.matcher(decimal).matches();
+        return BigIntOpContract.isExecutableDecimal(decimal);
     }
 
     private static void warnNonCanonicalLiteral(GraphNode node, String property, String reference,

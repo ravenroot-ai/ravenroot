@@ -1,10 +1,12 @@
 package ai.ravenroot.testkit;
 
+import ai.ravenroot.core.graph.BigIntOpContract;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
+import ai.ravenroot.core.graph.RegisterMachineProfile;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
@@ -56,16 +58,7 @@ public final class RegisterMachineProgram {
                                    Map<String, String> initialRegisters) {
         Objects.requireNonNull(instructions, "instructions");
         Objects.requireNonNull(initialRegisters, "initialRegisters");
-        if (instructions.isEmpty()) throw new IllegalArgumentException("A program must contain instructions");
-        long halts = instructions.stream().filter(Halt.class::isInstance).count();
-        if (halts != 1) throw new IllegalArgumentException("A program must contain exactly one HALT");
-        for (int index = 0; index < instructions.size(); index++) {
-            Instruction instruction = instructions.get(index);
-            validateInstruction(instruction, instructions.size());
-            if (!(instruction instanceof Halt) && index + 1 >= instructions.size()) {
-                throw new IllegalArgumentException("A sequential instruction cannot be the last instruction");
-            }
-        }
+        validateProgram(instructions);
 
         var nodes = new ArrayList<GraphNode>();
         var edges = new ArrayList<GraphEdge>();
@@ -114,15 +107,22 @@ public final class RegisterMachineProgram {
                 nodes.add(new GraphNode(entry, NodeKind.END, null, Map.of("joinPolicy", "each")));
             }
         }
-        return new Compiled(new GraphDefinition(nodes, edges, Map.of("join.semantics", "declared")),
-                entries, initializers);
+        var graph = new GraphDefinition(nodes, edges, Map.of("join.semantics", "declared"));
+        var profile = RegisterMachineProfile.validate(graph);
+        if (!profile.conforms()) {
+            throw new IllegalStateException("Register machine compiler produced a nonconforming graph: "
+                    + profile.errors());
+        }
+        return new Compiled(graph, entries, initializers);
     }
 
     /** Independent instruction-level oracle. The bound makes nontermination an explicit result. */
     public static Result interpret(List<? extends Instruction> instructions,
                                    Map<String, String> initialRegisters, long maxSteps) {
         Objects.requireNonNull(instructions, "instructions");
+        Objects.requireNonNull(initialRegisters, "initialRegisters");
         if (maxSteps < 1) throw new IllegalArgumentException("maxSteps must be positive");
+        validateProgram(instructions);
         var registers = new LinkedHashMap<String, BigInteger>();
         new java.util.TreeMap<>(initialRegisters).forEach((name, value) -> {
             requireRegister(name); requireNatural(value); registers.put(name, new BigInteger(value));
@@ -164,6 +164,19 @@ public final class RegisterMachineProgram {
         }
     }
 
+    private static void validateProgram(List<? extends Instruction> instructions) {
+        if (instructions.isEmpty()) throw new IllegalArgumentException("A program must contain instructions");
+        long halts = instructions.stream().filter(Halt.class::isInstance).count();
+        if (halts != 1) throw new IllegalArgumentException("A program must contain exactly one HALT");
+        for (int index = 0; index < instructions.size(); index++) {
+            Instruction instruction = instructions.get(index);
+            validateInstruction(instruction, instructions.size());
+            if (!(instruction instanceof Halt) && index + 1 >= instructions.size()) {
+                throw new IllegalArgumentException("A sequential instruction cannot be the last instruction");
+            }
+        }
+    }
+
     private static GraphNode bigint(String id, String operation, String left, String right, String target) {
         var properties = new LinkedHashMap<String, Object>();
         properties.put("operation", operation); properties.put("left", left);
@@ -185,8 +198,9 @@ public final class RegisterMachineProgram {
     }
 
     private static void requireNatural(String decimal) {
-        if (decimal == null || !decimal.matches("0|[1-9][0-9]*")) {
-            throw new IllegalArgumentException("Register values must be canonical non-negative decimals");
+        if (!BigIntOpContract.isCanonicalNatural(decimal)) {
+            throw new IllegalArgumentException("Register values must be canonical non-negative decimals of at most "
+                    + BigIntOpContract.MAX_DECIMAL_DIGITS + " digits");
         }
     }
 

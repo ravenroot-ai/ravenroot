@@ -1,5 +1,6 @@
 package ai.ravenroot.cli;
 
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphManager;
@@ -310,6 +311,23 @@ class GraphMlValidateCommandTest {
     }
 
     @Test
+    void registerMachineCliMatchesRuntimeTargetBoundaries() throws IOException {
+        int maximum = PayloadLimits.DEFAULTS.maxKeyLength();
+        List<String> invalidTargets = List.of(
+                "ravenroot.security.subject", "r".repeat(maximum + 1), "counter\tshadow");
+        for (int index = 0; index < invalidTargets.size(); index++) {
+            List<String> output = registerMachineOutput(writeGraph("invalid-target-" + index + ".graphml",
+                    targetGraph(invalidTargets.get(index))), 1);
+            assertTrue(output.stream().anyMatch(line -> line.contains("code=MALFORMED_BIGINT_OPERATION")),
+                    output.toString());
+        }
+
+        List<String> boundary = registerMachineOutput(writeGraph("boundary-target.graphml",
+                targetGraph("r".repeat(maximum))), 0);
+        assertTrue(boundary.contains("register-machine-verdict=accepted"), boundary.toString());
+    }
+
+    @Test
     void registerMachineCliBoundsDiagnosticCountAndRenderedText() throws IOException {
         var nodes = new java.util.ArrayList<GraphNode>();
         nodes.add(GraphNode.start("start"));
@@ -363,6 +381,13 @@ class GraphMlValidateCommandTest {
                 stream(output), stream(errors));
         assertEquals(expectedExit, exit, errors.toString(StandardCharsets.UTF_8));
         return lines(output);
+    }
+
+    private static GraphDefinition targetGraph(String target) {
+        var operation = new GraphNode("operation", ai.ravenroot.core.graph.NodeKind.BEHAVIOR,
+                "bigint-op", Map.of("operation", "copy", "left", "literal:1", "target", target));
+        return new GraphDefinition(List.of(GraphNode.start("start"), operation, GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "operation"), GraphEdge.to("operation", "end")));
     }
 
     private Path writeGraph(String name, GraphDefinition graph) throws IOException {

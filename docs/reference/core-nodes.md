@@ -163,7 +163,7 @@ The focused process-overhead measurement is opt-in so ordinary test runs never s
 worker JVMs. From the `ravenroot/` Maven reactor directory, run it exactly with:
 
 ```sh
-mvn -pl ravenroot-programming-graalvm -am \
+mvn -pl ravenroot-server -am \
   -Dtest=BigIntProgramOverheadMeasurementTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dravenroot.bigint.measurement=true test

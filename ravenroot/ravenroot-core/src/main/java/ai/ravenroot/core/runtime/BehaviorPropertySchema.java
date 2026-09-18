@@ -318,8 +318,11 @@ public final class BehaviorPropertySchema {
         }
 
         requireType(node, property, value);
-        requireAllowedValue(node, property, value);
+        // Apply the declared text budget before an allowed-value failure includes the authored
+        // value. Otherwise a closed choice with a tiny vocabulary can reflect an entire untrusted
+        // GraphML document into one diagnostic before its own size bound gets a chance to run.
         requireBounds(node, property, value);
+        requireAllowedValue(node, property, value);
     }
 
     /**

@@ -31,6 +31,7 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -63,6 +64,56 @@ class SqliteEmbedRegistrationStoreTest {
             assertInstanceOf(EmbedProjectionResolution.Unavailable.class,
                     reopened.resolveProjection(loaded, EmbedProjectionBudget.DEFAULTS),
                     "a live source must never fall through to the persisted snapshot placeholder");
+        }
+    }
+
+    @Test
+    void populatedV1DatabaseUpgradesAtomicallyAndConcurrentOpenersObserveOneSnapshotMigration()
+            throws Exception {
+        var expected = EmbedRegistrationFixtures.command(0, "sha256:v1", "start", "next")
+                .aggregateAt(CLOCK.instant());
+        createPopulatedV1Database(expected);
+
+        var barrier = new CyclicBarrier(2);
+        List<Callable<EmbedRegistrationAggregate>> openers = List.of(
+                () -> openMigratedAggregate(barrier),
+                () -> openMigratedAggregate(barrier));
+        List<Future<EmbedRegistrationAggregate>> migrated;
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            migrated = pool.invokeAll(openers);
+        }
+        for (Future<EmbedRegistrationAggregate> opened : migrated) {
+            assertEquals(expected, opened.get(),
+                    "both openers must see the one complete v2 migration, never a half-upgraded row");
+            assertInstanceOf(EmbedViewerSource.Snapshot.class, opened.get().source());
+        }
+
+        Path database = directory.resolve(SqliteEmbedRegistrationStore.FILE_NAME);
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            try (var rows = statement.executeQuery("PRAGMA user_version")) {
+                assertTrue(rows.next());
+                assertEquals(2, rows.getInt(1));
+            }
+            try (var rows = statement.executeQuery("SELECT source_version, source_kind, "
+                    + "source_deployment_id FROM embed_registration")) {
+                assertTrue(rows.next());
+                assertEquals("1", rows.getString("source_version"));
+                assertEquals("snapshot", rows.getString("source_kind"));
+                assertNull(rows.getString("source_deployment_id"));
+                assertFalse(rows.next());
+            }
+        }
+
+        // A later retry/reopen is a no-op at schema v2 and still reconstructs the exact legacy
+        // aggregate and projection, including layout and edge ordering.
+        try (var reopened = open()) {
+            var loaded = reopened.currentForOperator(EmbedRegistrationFixtures.TENANT,
+                    EmbedRegistrationFixtures.REGISTRATION).orElseThrow();
+            assertEquals(expected, loaded);
+            var projection = assertInstanceOf(EmbedProjectionResolution.Available.class,
+                    reopened.resolveProjection(loaded, EmbedProjectionBudget.DEFAULTS)).projection();
+            assertEquals(expected.projection(), projection);
         }
     }
 
@@ -312,6 +363,81 @@ class SqliteEmbedRegistrationStoreTest {
 
     private SqliteEmbedRegistrationStore open() {
         return SqliteEmbedRegistrationStore.openUnder(directory, CLOCK, EmbedProjectionBudget.DEFAULTS);
+    }
+
+    private EmbedRegistrationAggregate openMigratedAggregate(CyclicBarrier barrier) throws Exception {
+        barrier.await();
+        try (var store = open()) {
+            return store.currentForOperator(EmbedRegistrationFixtures.TENANT,
+                    EmbedRegistrationFixtures.REGISTRATION).orElseThrow();
+        }
+    }
+
+    /** Builds the exact table shipped as schema v1, including one real legacy snapshot row. */
+    private void createPopulatedV1Database(EmbedRegistrationAggregate aggregate) throws Exception {
+        Path database = directory.resolve(SqliteEmbedRegistrationStore.FILE_NAME);
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            statement.execute("PRAGMA journal_mode=WAL");
+            statement.execute("""
+                    CREATE TABLE embed_registration (
+                        registration_id    TEXT    NOT NULL PRIMARY KEY,
+                        revision           INTEGER NOT NULL,
+                        state              TEXT    NOT NULL,
+                        tenant_id          TEXT    NOT NULL,
+                        workload_issuer    TEXT    NOT NULL,
+                        workload_subject   TEXT    NOT NULL,
+                        parent_origin      TEXT    NOT NULL,
+                        capabilities       TEXT    NOT NULL,
+                        theme_override     TEXT,
+                        resource_id        TEXT    NOT NULL,
+                        deployment_id      TEXT    NOT NULL,
+                        deployment_version INTEGER NOT NULL,
+                        graph_id           TEXT    NOT NULL,
+                        graph_version_id   TEXT    NOT NULL,
+                        canonical_digest   TEXT    NOT NULL,
+                        policy_revision    TEXT    NOT NULL,
+                        snapshot_lifecycle TEXT    NOT NULL,
+                        eligibility_gates  TEXT    NOT NULL,
+                        projection_json    TEXT    NOT NULL,
+                        provisioned_at     TEXT    NOT NULL
+                    ) WITHOUT ROWID
+                    """);
+            statement.execute("CREATE INDEX embed_registration_tenant "
+                    + "ON embed_registration (tenant_id, registration_id)");
+            statement.execute("PRAGMA user_version = 1");
+            var grant = aggregate.sessionGrant();
+            var graph = aggregate.graphGrant();
+            try (var insert = connection.prepareStatement("INSERT INTO embed_registration "
+                    + "(registration_id, revision, state, tenant_id, workload_issuer, workload_subject, "
+                    + "parent_origin, capabilities, theme_override, resource_id, deployment_id, "
+                    + "deployment_version, graph_id, graph_version_id, canonical_digest, policy_revision, "
+                    + "snapshot_lifecycle, eligibility_gates, projection_json, provisioned_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                insert.setString(1, aggregate.registrationId());
+                insert.setLong(2, aggregate.revision());
+                insert.setString(3, aggregate.state().name());
+                insert.setString(4, grant.tenantId());
+                insert.setString(5, grant.workloadIssuer());
+                insert.setString(6, grant.workloadSubject());
+                insert.setString(7, grant.parentOrigin());
+                insert.setString(8, grant.capabilities().stream().map(Enum::name).sorted()
+                        .collect(java.util.stream.Collectors.joining(",")));
+                insert.setString(9, grant.themeOverride().map(EmbedTheme::wireValue).orElse(null));
+                insert.setString(10, graph.resourceId());
+                insert.setString(11, graph.deploymentId());
+                insert.setLong(12, graph.deploymentVersion());
+                insert.setString(13, graph.graphId());
+                insert.setString(14, graph.graphVersionId());
+                insert.setString(15, graph.canonicalDigest());
+                insert.setString(16, graph.projectionPolicyRevision());
+                insert.setString(17, aggregate.snapshotLifecycle().name());
+                insert.setString(18, "1111111");
+                insert.setString(19, aggregate.projection().toJson());
+                insert.setString(20, aggregate.provisionedAt().toString());
+                assertEquals(1, insert.executeUpdate());
+            }
+        }
     }
 
     private static EmbedRegistrationAggregate provisioned(SqliteEmbedRegistrationStore store,

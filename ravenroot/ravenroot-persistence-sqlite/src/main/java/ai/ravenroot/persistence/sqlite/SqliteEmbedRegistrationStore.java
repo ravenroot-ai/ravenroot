@@ -213,24 +213,44 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
             // operational one, so the fsync is not negotiable here even though it costs.
             statement.execute("PRAGMA synchronous=FULL");
             connectionPolicy.apply(opened);
-            int version;
-            try (ResultSet rows = statement.executeQuery("PRAGMA user_version")) {
-                version = rows.next() ? rows.getInt(1) : 0;
+            // The version read belongs under the same writer reservation as every DDL statement.
+            // Otherwise two processes can both observe v1, the first commit its ALTERs, and the
+            // second then retry the same non-idempotent ALTER against the already-upgraded table.
+            statement.execute("BEGIN IMMEDIATE");
+            try {
+                int version;
+                try (ResultSet rows = statement.executeQuery("PRAGMA user_version")) {
+                    version = rows.next() ? rows.getInt(1) : 0;
+                }
+                if (version > SCHEMA_VERSION) {
+                    throw new IllegalStateException("the embed registration store was written by a newer "
+                            + "Ravenroot (schema " + version + " > " + SCHEMA_VERSION + ") and is not opened");
+                }
+                statement.execute(CREATE_TABLE);
+                statement.execute(CREATE_INDEX);
+                if (version == 1) {
+                    statement.execute("ALTER TABLE embed_registration ADD COLUMN source_version "
+                            + "TEXT NOT NULL DEFAULT '1'");
+                    statement.execute("ALTER TABLE embed_registration ADD COLUMN source_kind "
+                            + "TEXT NOT NULL DEFAULT 'snapshot'");
+                    statement.execute("ALTER TABLE embed_registration ADD COLUMN source_deployment_id TEXT");
+                }
+                // SQLite journals this file-header value with the schema DDL. A reader therefore
+                // observes either the complete old schema/version or the complete new pair.
+                if (version < SCHEMA_VERSION) statement.execute("PRAGMA user_version = " + SCHEMA_VERSION);
+                statement.execute("COMMIT");
+            } catch (SQLException | RuntimeException | Error failed) {
+                rollbackMigration(statement, failed);
+                throw failed;
             }
-            if (version > SCHEMA_VERSION) {
-                throw new IllegalStateException("the embed registration store was written by a newer "
-                        + "Ravenroot (schema " + version + " > " + SCHEMA_VERSION + ") and is not opened");
-            }
-            statement.execute(CREATE_TABLE);
-            statement.execute(CREATE_INDEX);
-            if (version == 1) {
-                statement.execute("ALTER TABLE embed_registration ADD COLUMN source_version "
-                        + "TEXT NOT NULL DEFAULT '1'");
-                statement.execute("ALTER TABLE embed_registration ADD COLUMN source_kind "
-                        + "TEXT NOT NULL DEFAULT 'snapshot'");
-                statement.execute("ALTER TABLE embed_registration ADD COLUMN source_deployment_id TEXT");
-            }
-            if (version < SCHEMA_VERSION) statement.execute("PRAGMA user_version = " + SCHEMA_VERSION);
+        }
+    }
+
+    private static void rollbackMigration(Statement statement, Throwable failed) {
+        try {
+            statement.execute("ROLLBACK");
+        } catch (SQLException rollbackFailure) {
+            failed.addSuppressed(rollbackFailure);
         }
     }
 

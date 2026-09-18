@@ -53,11 +53,50 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
 
     def test_required_suite_counts_every_native_case_without_skips(self):
         self.assertEqual(5, sum(fixture.CLASSES.values()))
-        self.assertEqual("v1.35.4", fixture.KUBERNETES)
+        self.assertEqual("v1.35.1", fixture.KUBERNETES)
+        self.assertEqual("v1.38.1", fixture.MINIKUBE)
+        workflow = (fixture.ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("releases/download/" + fixture.MINIKUBE + "/minikube-linux-amd64", workflow)
+        self.assertIn("release/" + fixture.KUBERNETES + "/bin/linux/amd64/kubectl", workflow)
+        self.assertIn("36e2f4ac66259232341dd7866952d64a958846470f6a9a6a813b9117bd965207", workflow)
         source = Path(fixture.__file__).read_text()
         for required in ('"skipped": "0"', 'FELIX_IPTABLESBACKEND=NFT', 'native acceptance left'):
             self.assertIn(required, source)
         self.assertNotIn("continue-on-error", source)
+
+    def test_wrong_tool_version_or_broken_host_bridge_prevents_cluster_creation(self):
+        for version in (b"v1.37.0", fixture.MINIKUBE.encode()):
+            def command(args, **kwargs):
+                if args[:2] == ["docker", "info"]:
+                    return b'{"OSType":"linux"}'
+                if args[:2] == ["minikube", "version"]:
+                    return version
+                self.assertEqual(["docker", "run", "--rm", "--network=bridge", "--entrypoint=/bin/true", fixture.CLUSTER_IMAGE], args)
+                raise RuntimeError("bridge attachment refused")
+            with patch.object(fixture.shutil, "which", return_value="/tool"), \
+                    patch.dict(fixture.os.environ, {}, clear=True), patch.object(fixture, "command", side_effect=command) as run:
+                with self.assertRaisesRegex(RuntimeError, "repository-pinned|bridge attachment"):
+                    fixture.run()
+                self.assertEqual(2 if version != fixture.MINIKUBE.encode() else 3, run.call_count)
+
+    def test_supported_version_and_digest_are_used_by_real_cluster_start_without_fallback(self):
+        def command(args, **kwargs):
+            if args[:2] == ["docker", "info"]:
+                return b'{"OSType":"linux"}'
+            if args[:2] == ["minikube", "version"]:
+                return fixture.MINIKUBE.encode()
+            if args[:2] == ["minikube", "start"]:
+                for option in ("--kubernetes-version=" + fixture.KUBERNETES,
+                               "--base-image=" + fixture.CLUSTER_IMAGE, "--driver=docker", "--container-runtime=containerd"):
+                    self.assertIn(option, args)
+                raise RuntimeError("cluster start refused")
+            return b""
+        with patch.object(fixture.shutil, "which", return_value="/tool"), \
+                patch.dict(fixture.os.environ, {}, clear=True), patch.object(fixture, "command", side_effect=command) as run:
+            with self.assertRaisesRegex(RuntimeError, "cluster start refused"):
+                fixture.run()
+            self.assertEqual(1, sum(call.args[0][:2] == ["minikube", "start"] for call in run.call_args_list))
+            self.assertEqual(["minikube", "delete"], run.call_args.args[0][:2])
 
 
 if __name__ == "__main__":

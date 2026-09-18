@@ -21,7 +21,9 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE_IMAGE = "python@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5"
-KUBERNETES = "v1.35.4"
+MINIKUBE = "v1.38.1"
+KUBERNETES = "v1.35.1"
+CLUSTER_IMAGE = "gcr.io/k8s-minikube/kicbase:v0.0.50@sha256:eb4fec00e8ad70adf8e6436f195cc429825ffb85f95afcdb5d8d9deb576f3e93"
 NAMESPACE = "ravenroot-446"
 CLASSES = {"ai.ravenroot.core.runner.KubernetesPodRunnerNativeTest": 1,
            "ai.ravenroot.core.runtime.KubernetesWorkspaceGraphNativeTest": 4}
@@ -110,6 +112,11 @@ def run():
         raise RuntimeError("native CI acceptance is secretless; provider configuration is forbidden")
     if not json.loads(command(["docker", "info", "--format", "{{json .}}"]))["OSType"] == "linux":
         raise RuntimeError("native Kubernetes acceptance requires a Linux container host")
+    if command(["minikube", "version", "--short"]).decode().strip() != MINIKUBE:
+        raise RuntimeError("native acceptance requires the repository-pinned Minikube " + MINIKUBE)
+    # Exercise the actual default-bridge attachment used by Minikube's helper containers,
+    # not just Docker's stale network metadata. Never repair/restart the host daemon here.
+    command(["docker", "run", "--rm", "--network=bridge", "--entrypoint=/bin/true", CLUSTER_IMAGE])
     profile = "rr-native-" + uuid.uuid4().hex[:12]
     image_tag = "ravenroot-native:" + profile
     with tempfile.TemporaryDirectory(prefix="ravenroot-kubernetes-") as temporary:
@@ -117,7 +124,8 @@ def run():
         try:
             print("Native Kubernetes preflight: creating isolated containerd/Calico cluster", flush=True)
             command(["minikube", "start", "--profile=" + profile, "--driver=docker", "--container-runtime=containerd",
-                     "--kubernetes-version=" + KUBERNETES, "--cni=calico", "--cpus=2", "--memory=2048",
+                     "--kubernetes-version=" + KUBERNETES, "--base-image=" + CLUSTER_IMAGE,
+                     "--cni=calico", "--cpus=2", "--memory=2048",
                      "--extra-config=kubelet.pod-max-pids=256", "--keep-context", "--embed-certs", "--install-addons=false"], timeout=600)
             kubectl = ["kubectl", "--context=" + profile]
             # Pin one policy backend. Calico Auto can change its choice during initial kube-proxy

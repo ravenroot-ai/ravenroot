@@ -338,7 +338,9 @@ Full-tier GitHub CI also invokes `scripts/fixtures/runner_quota_acceptance.py` o
 Ubuntu x86_64 host. The fixture requires preinstalled XFS tools and passwordless sudo; it never
 installs packages or changes the default Docker daemon. It creates a bounded 4 GiB regular file,
 formats only that file as XFS with project quotas, and starts a separate classic-overlay2 daemon
-with isolated data/state/socket/PID paths, no bridge and no firewall management. It builds the
+with isolated data/state/socket/PID paths, an exclusively created private bridge and no firewall
+or IP-forwarding management. Agent containers still use `network=none`. The fixture never uses
+`--bridge=none`, which would remove the host's default Docker bridge. It builds the
 example from an immutable official Python image manifest, runs the production quota probe and
 the exact model-backed Workspace test, and rejects missing, skipped or failed test evidence.
 The fixture starts its own bounded 127.0.0.1 chat-completions endpoint, generates a secretless profile,
@@ -350,11 +352,12 @@ tests, results and remediation inside native containers. The endpoint has no Wor
 This is protocol/lifecycle evidence, not trained-model inference. The test also starts the same Agent
 for independent processes, compares later-traversal session/container identities, and checks
 uncommitted filesystem sentinels and isolation. Teardown verifies and stops only its identified
-daemon, unmounts surviving namespace and overlay mounts deepest-first before the backing XFS
+daemon, verifies and deletes only its owned bridge, unmounts surviving namespace and overlay mounts deepest-first before the backing XFS
 filesystem, then removes its own temporary directory. Unconfirmed shutdown, unexpected mounts or
 failed unmounts retain the fixture instead of forcing deletion. A cleanup failure is reported
 separately without replacing the original acceptance exception; failed cleanup also fails an
-otherwise successful run. No host-wide prune, lazy unmount or default-daemon operation is used.
+otherwise successful run. Existing bridge identities must remain unchanged after cleanup. No
+host-wide prune, lazy unmount or default-daemon operation is used.
 Unsupported tooling, kernel, filesystem or quota behavior fails the job; it does not fall back to
 an unbounded writable substrate. This fixture refuses local and self-hosted environments.
 Only a successful host-backed job is writable acceptance evidence; a passing fixture unit test

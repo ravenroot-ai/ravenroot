@@ -263,7 +263,76 @@ class FixtureCleanupTest(unittest.TestCase):
                         self.assertEqual(self.command.call_count, 2)
 
 
+class BridgeIsolationTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = Path("/tmp/ravenroot-runner-quota-fixture")
+        self.name = fixture.bridge_name(self.directory)
+        self.identity = {"ifindex": 42, "ifalias": self.directory.name, "address": "02:00:00:00:00:01"}
+
+    def test_bridge_is_exclusively_created_and_bounded_to_linux_name_limit(self):
+        command = Mock(return_value=json.dumps([dict(self.identity, ifname=self.name)]))
+        self.assertEqual(self.identity, fixture.create_bridge(self.directory, command))
+        self.assertRegex(self.name, r"^rrq[0-9a-f]{12}$")
+        self.assertEqual(command.call_args_list[0].args[0], ["sudo", "-n", "ip", "link", "add",
+            "name", self.name, "type", "bridge"])
+        self.assertEqual(command.call_args_list[1].args[0], ["sudo", "-n", "ip", "link", "set",
+            "dev", self.name, "alias", self.directory.name])
+        self.assertNotEqual(self.name, fixture.bridge_name(self.directory.with_name("ravenroot-runner-quota-other")))
+        command.side_effect = fixture.subprocess.CalledProcessError(2, "ip link add")
+        with self.assertRaises(fixture.subprocess.CalledProcessError):
+            fixture.create_bridge(self.directory, command)
+
+    def test_cleanup_deletes_only_verified_owned_bridge_and_confirms_removal(self):
+        command = Mock(side_effect=[json.dumps([dict(self.identity, ifname=self.name)]), "", "[]"])
+        fixture.remove_bridge(self.directory, command, self.identity)
+        self.assertEqual(command.call_args_list[1].args[0],
+            ["sudo", "-n", "ip", "link", "delete", "dev", self.name, "type", "bridge"])
+
+    def test_missing_foreign_replaced_or_remaining_bridge_fails_closed(self):
+        for identity in (None, dict(self.identity, ifalias="foreign"), dict(self.identity, ifindex=43)):
+            command = Mock(return_value=json.dumps([] if identity is None else [dict(identity, ifname=self.name)]))
+            with self.assertRaisesRegex(RuntimeError, "ownership is unconfirmed"):
+                fixture.remove_bridge(self.directory, command, self.identity)
+            self.assertEqual(1, command.call_count)
+        command = Mock(return_value=json.dumps([dict(self.identity, ifname=self.name)]))
+        with self.assertRaisesRegex(RuntimeError, "bridge remains"):
+            fixture.remove_bridge(self.directory, command, self.identity)
+
+    def test_host_bridge_deletion_recreation_or_mutation_is_not_preservation(self):
+        before = {"docker0": dict(self.identity, ifalias=None)}
+        for after in ({}, {"docker0": dict(before["docker0"], ifindex=43)},
+                      {"docker0": dict(before["docker0"], address="changed")}):
+            with patch.object(fixture, "bridges", return_value=after), self.assertRaisesRegex(RuntimeError, "host bridge changed"):
+                fixture.verify_bridges(before, Mock())
+        with patch.object(fixture, "bridges", return_value=before):
+            fixture.verify_bridges(before, Mock())
+
+    def test_cleanup_waits_for_private_daemon_before_bridge_removal(self):
+        with tempfile.TemporaryDirectory() as parent:
+            directory = Path(parent).resolve() / "ravenroot-runner-quota-fixture"
+            directory.mkdir()
+            daemon = Mock()
+            daemon.poll.return_value = 0
+            command = Mock()
+            def removed(*args):
+                daemon.wait.assert_called_once_with(timeout=30)
+                command.assert_not_called()
+            with patch.object(fixture, "remove_bridge", side_effect=removed) as remove, \
+                    patch.object(fixture, "mounted_paths", return_value=set()):
+                fixture.cleanup(directory.parent, directory, daemon, command, self.identity)
+                remove.assert_called_once_with(directory, command, self.identity)
+            command.reset_mock()
+            with self.assertRaisesRegex(RuntimeError, "creation is unconfirmed"):
+                fixture.cleanup(directory.parent, directory, None, command, None, True)
+            command.assert_not_called()
+
+
 class RunnerQuotaAcceptanceTest(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(fixture, "bridges", return_value={}))
+        self.enterContext(patch.object(fixture, "create_bridge", return_value={"ifindex": 42}))
+        self.enterContext(patch.object(fixture, "remove_bridge"))
+
     def test_startup_failure_is_diagnosed_before_cleanup_without_image_or_test_execution(self):
         with tempfile.TemporaryDirectory() as parent:
             parent = Path(parent).resolve()
@@ -373,8 +442,10 @@ class RunnerQuotaAcceptanceTest(unittest.TestCase):
 
     def test_daemon_isolated_from_default_storage_socket_network_and_snapshotter(self):
         args = fixture.daemon_arguments(Path("/tmp/ravenroot-runner-quota-fixture"))
-        for argument in ("--storage-driver=overlay2", "--feature=containerd-snapshotter=false", "--bridge=none", "--iptables=false", "--ip6tables=false", "--ip-masq=false"):
+        for argument in ("--storage-driver=overlay2", "--feature=containerd-snapshotter=false", "--iptables=false", "--ip6tables=false", "--ip-masq=false", "--ip-forward=false"):
             self.assertIn(argument, args)
+        self.assertIn("--bridge=" + fixture.bridge_name(Path("/tmp/ravenroot-runner-quota-fixture")), args)
+        self.assertNotIn("--bridge=none", args)
         for prefix in ("--data-root=", "--exec-root=", "--pidfile=", "--host=", "--config-file="):
             value = next(value for value in args if value.startswith(prefix))
             self.assertIn("/tmp/ravenroot-runner-quota-fixture/", value)

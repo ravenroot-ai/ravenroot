@@ -8,6 +8,7 @@ quotas and a separate classic-overlay2 daemon are prerequisites, never inferred 
 from __future__ import annotations
 
 import grp
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE_IMAGE = "python@sha256:46ee549c88617e9bc8acb843a326f1a5c0fa5608d7f9703509efe6d53b55f318"
 TEST = "writableContainerDevelopmentCycleUsesRealWorkspaceAcrossEveryRestart"
 TEST_CLASS = "ai.ravenroot.core.runtime.WorkspaceAgentRuntimeTest"
-TOOLS = ("sudo", "dockerd", "docker", "mkfs.xfs", "mount", "umount", "findmnt", "mvn")
+TOOLS = ("sudo", "dockerd", "docker", "ip", "mkfs.xfs", "mount", "umount", "findmnt", "mvn")
 DAEMON_READY_SECONDS = 60
 DAEMON_PROBE_SECONDS = 5
 DIAGNOSTIC_BYTES = 16 * 1024
@@ -53,13 +54,52 @@ def prerequisites(environment: dict[str, str]) -> Path:
     return parent
 
 
+def bridge_name(directory: Path) -> str:
+    return "rrq" + hashlib.sha256(str(directory).encode()).hexdigest()[:12]
+
+
+def bridges(command) -> dict:
+    return {link["ifname"]: {key: link.get(key) for key in ("ifindex", "address", "ifalias")}
+            for link in json.loads(command(["ip", "-json", "-details", "link", "show", "type", "bridge"]))}
+
+
+def create_bridge(directory: Path, command) -> dict:
+    # --bridge=none is NOT isolated: Moby removes the host docker0 interface. An
+    # exclusively created user-managed bridge avoids that branch. Docker IPAM chooses
+    # an unused subnet; Agent containers continue to use network=none, never this bridge.
+    name = bridge_name(directory)
+    command(["sudo", "-n", "ip", "link", "add", "name", name, "type", "bridge"])
+    command(["sudo", "-n", "ip", "link", "set", "dev", name, "alias", directory.name])
+    identity = bridges(command).get(name)
+    if identity is None or identity["ifalias"] != directory.name:
+        raise RuntimeError("private bridge creation is unconfirmed; retaining fixture")
+    return identity
+
+
+def remove_bridge(directory: Path, command, identity: dict) -> None:
+    name = bridge_name(directory)
+    current = bridges(command).get(name)
+    if (current is None or current["ifalias"] != directory.name
+            or current["ifindex"] != identity["ifindex"]):
+        raise RuntimeError("private bridge ownership is unconfirmed; retaining fixture")
+    command(["sudo", "-n", "ip", "link", "delete", "dev", name, "type", "bridge"])
+    if name in bridges(command):
+        raise RuntimeError("private bridge remains; retaining fixture")
+
+
+def verify_bridges(before: dict, command) -> None:
+    after = bridges(command)
+    if any(after.get(name) != identity for name, identity in before.items()):
+        raise RuntimeError("a pre-existing host bridge changed during quota acceptance")
+
+
 def daemon_arguments(directory: Path) -> list[str]:
     return ["sudo", "-n", "dockerd", "--config-file=" + str(directory / "daemon.json"),
             "--data-root=" + str(directory / "xfs" / "docker"), "--exec-root=" + str(directory / "exec"),
             "--pidfile=" + str(directory / "daemon.pid"), "--host=unix://" + str(directory / "docker.sock"),
             "--group=" + grp.getgrgid(os.getgid()).gr_name, "--storage-driver=overlay2",
-            "--feature=containerd-snapshotter=false", "--bridge=none", "--iptables=false",
-            "--ip6tables=false", "--ip-masq=false"]
+            "--feature=containerd-snapshotter=false", "--bridge=" + bridge_name(directory), "--iptables=false",
+            "--ip6tables=false", "--ip-masq=false", "--ip-forward=false"]
 
 
 def wait_for_daemon(daemon: subprocess.Popen, directory: Path, environment: dict[str, str]) -> dict:
@@ -155,7 +195,8 @@ def mounted_paths() -> set[Path]:
             for line in Path("/proc/self/mountinfo").read_text().splitlines()}
 
 
-def cleanup(parent: Path, directory: Path, daemon: subprocess.Popen | None, command) -> None:
+def cleanup(parent: Path, directory: Path, daemon: subprocess.Popen | None, command,
+            bridge_identity=None, bridge_attempted=False) -> None:
     """Stop the exact private daemon, then unmount its children before deleting owned files.
 
     A failed ownership/quiescence/unmount check retains the directory for diagnosis. Neither
@@ -164,6 +205,8 @@ def cleanup(parent: Path, directory: Path, daemon: subprocess.Popen | None, comm
     if (directory.parent != parent or not directory.name.startswith("ravenroot-runner-quota-")
             or directory.resolve(strict=True) != directory):
         raise RuntimeError("refusing cleanup outside the exact fixture directory")
+    if bridge_attempted and bridge_identity is None:
+        raise RuntimeError("private bridge creation is unconfirmed; retaining fixture")
     if daemon is not None:
         pid_file = directory / "daemon.pid"
         if pid_file.exists():
@@ -188,6 +231,8 @@ def cleanup(parent: Path, directory: Path, daemon: subprocess.Popen | None, comm
         elif daemon.poll() is None:
             raise RuntimeError("private daemon identity is unavailable; retaining fixture")
         daemon.wait(timeout=30)
+    if bridge_identity is not None:
+        remove_bridge(directory, command, bridge_identity)
     owned = {path for path in mounted_paths() if path == directory or directory in path.parents}
     roots = (directory / "exec", directory / "xfs")
     if any(not any(path == root or root in path.parents for root in roots) for path in owned):
@@ -208,6 +253,8 @@ def run() -> None:
     image_file = directory / "quota.img"
     mountpoint = directory / "xfs"
     daemon = None
+    bridge_identity = None
+    bridge_attempted = False
     environment = dict(os.environ)
     # Do not permit an ambient Docker context/TLS configuration to redirect the fixture or test.
     for key in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"):
@@ -218,6 +265,7 @@ def run() -> None:
         return subprocess.run(arguments, check=True, timeout=timeout, env=environment,
                               text=True, stdout=subprocess.PIPE).stdout.strip()
 
+    before_bridges = bridges(command)
     try:
         with image_file.open("xb") as image:
             image.truncate(4 * 1024 * 1024 * 1024)
@@ -228,6 +276,8 @@ def run() -> None:
         filesystem = json.loads(command(["findmnt", "--json", "--mountpoint", str(mountpoint), "-o", "FSTYPE,OPTIONS"]))["filesystems"][0]
         if filesystem["fstype"] != "xfs" or not {"prjquota", "pquota"}.intersection(filesystem["options"].split(",")):
             raise RuntimeError("the fixture filesystem does not enforce XFS project quotas")
+        bridge_attempted = True
+        bridge_identity = create_bridge(directory, command)
         with (directory / "daemon.log").open("wb") as log:
             daemon = subprocess.Popen(daemon_arguments(directory), stdout=log, stderr=subprocess.STDOUT, env=environment)
         info = wait_for_daemon(daemon, directory, environment)
@@ -272,7 +322,9 @@ def run() -> None:
     finally:
         primary = sys.exc_info()[1]
         try:
-            cleanup(parent, directory, daemon, command)
+            cleanup(parent, directory, daemon, command, bridge_identity, bridge_attempted)
+            verify_bridges(before_bridges, command)
+            print("RUNNER_QUOTA_HOST_BRIDGES=preserved", flush=True)
         except Exception as failure:
             # Keep Maven/native enforcement failures primary. A green body with failed
             # cleanup still fails the gate; no error is silently swallowed.

@@ -39,7 +39,7 @@ supervisor path. The Kubernetes manager uses the standalone worker entry point a
 
 | Component | Supported/verified boundary |
 |---|---|
-| Kubernetes | Native acceptance target 1.35.4; ValidatingAdmissionPolicy v1 and restricted Pod Security Admission required |
+| Kubernetes | Native acceptance target 1.35.1 (supported by pinned Minikube 1.38.1); ValidatingAdmissionPolicy v1 and restricted Pod Security Admission required |
 | Runtime | Linux containerd, cgroup v2, seccomp RuntimeDefault, Landlock ABI 3 or newer |
 | Network | Enforcing Calico NetworkPolicy; positive reachable/blocked control required |
 | Storage | Operator-preprovisioned fixed-size ext4 local PV, RWO, `Retain`, `WaitForFirstConsumer`, no expansion |
@@ -62,7 +62,7 @@ fails the positive fork boundary. Reference profiles use 500 millicores and 128 
    digest-pinned Python/Alpine base. Publish its immutable registry digest. Build
    [KubernetesManager.Dockerfile](../examples/governed-runner/KubernetesManager.Dockerfile) using
    digest-pinned Ravenroot and compatible kubectl images. The manager needs Java and kubectl, not a
-   Docker CLI. Native CI pins kubectl 1.35.4; follow Kubernetes client/server version-skew rules.
+   Docker CLI. Native CI pins kubectl 1.35.1; follow Kubernetes client/server version-skew rules.
 3. Adapt [kubernetes-values.yaml](../examples/governed-runner/kubernetes-values.yaml). Every pool
    declares `driver`; native pools forbid `socketHostPath`. Replace placeholder digests, ConfigMaps,
    manager/control-plane identity Secrets, shared artifact PVC and manager state StorageClass.
@@ -223,3 +223,11 @@ endpoint. It verifies exact zero-skip test counts, model traffic and cleanup, th
 own unpredictable cluster profile. Missing Kubernetes/storage/security capability fails the full
 CI tier. Fake API tests supplement this path; they do not substitute for native evidence. Real-provider
 smoke remains explicit, protected and non-release-blocking.
+
+The fixture requires Minikube 1.38.1, Kubernetes 1.35.1 and the digest-pinned kicbase 0.0.50
+image; CI verifies downloaded tool checksums. The Docker driver hosts the disposable cluster,
+while containerd executes all Agent Pods. A real default-bridge container attachment is required
+before cluster creation. A missing `docker0` is a failed host precondition, never permission to
+restart Docker or recreate a shared bridge. The preceding XFS fixture uses its own exclusively
+created bridge and verifies preservation of existing bridges. Its private daemon must not use
+`--bridge=none`: that option removes the host default bridge even with a separate data root.

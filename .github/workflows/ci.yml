@@ -786,8 +786,8 @@ jobs:
           fixture_tools="$RUNNER_TEMP/ravenroot-kubernetes-tools"
           mkdir -p "$fixture_tools"
           curl --fail --silent --show-error --location https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-linux-amd64 -o "$fixture_tools/minikube"
-          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.35.4/bin/linux/amd64/kubectl -o "$fixture_tools/kubectl"
-          printf '099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e  %s/minikube\nb529430df69a688fd61b64ad2299edb5fd71cb58be2a4779dba624c7d3510efd  %s/kubectl\n' "$fixture_tools" "$fixture_tools" | sha256sum --check --strict
+          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.35.1/bin/linux/amd64/kubectl -o "$fixture_tools/kubectl"
+          printf '099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e  %s/minikube\n36e2f4ac66259232341dd7866952d64a958846470f6a9a6a813b9117bd965207  %s/kubectl\n' "$fixture_tools" "$fixture_tools" | sha256sum --check --strict
           chmod 755 "$fixture_tools/minikube" "$fixture_tools/kubectl"
           echo "$fixture_tools" >> "$GITHUB_PATH"
       - name: Run native Kubernetes governed executor acceptance without capability skips

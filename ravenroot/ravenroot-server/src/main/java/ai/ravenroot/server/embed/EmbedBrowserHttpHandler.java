@@ -33,7 +33,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.io.OutputStream;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /** Complete five-route server adapter for the distinct-origin, static embedded projection. */
@@ -457,9 +457,9 @@ public final class EmbedBrowserHttpHandler {
                                    RequestContext context,
                                    DeploymentObservationCursorStore.Binding binding,
                                    long sequence, boolean firstAttachment) throws IOException {
-        var wakeup = new Semaphore(0);
+        var wakeup = new ObservationWakeup();
         AutoCloseable subscription = deployments.subscribeToLocalDeploymentEvents(context,
-                binding.deploymentId(), binding.incarnationId(), binding.graphVersion(), event -> wakeup.release());
+                binding.deploymentId(), binding.incarnationId(), binding.graphVersion(), wakeup::signal);
         try {
             DeploymentEventBatch initial = deployments.localDeploymentEventsAfter(context, binding.deploymentId(),
                     binding.incarnationId(), binding.graphVersion(), sequence);
@@ -483,7 +483,7 @@ public final class EmbedBrowserHttpHandler {
                         : writeObservationBatch(output, bearer, session, context, binding, initial, sequence);
                 if (sent < 0) return;
                 while (!Thread.currentThread().isInterrupted()) {
-                    wakeup.tryAcquire(1, TimeUnit.SECONDS);
+                    wakeup.await(1_000);
                     resolved = resolveEmbedView(bearer, session, context, binding);
                     if (resolved.view() == null) {
                         writeTerminal(output, "source-invalidated", binding, resolved.reason()); return;
@@ -519,6 +519,20 @@ public final class EmbedBrowserHttpHandler {
         } finally {
             try { subscription.close(); } catch (Exception ignored) { }
             exchange.close();
+        }
+    }
+
+    /** One pending observation hint; event batches, not hint counts, are the delivery authority. */
+    static final class ObservationWakeup {
+        private static final Object SIGNAL = new Object();
+        private final ArrayBlockingQueue<Object> pending = new ArrayBlockingQueue<>(1);
+
+        void signal(ai.ravenroot.api.application.ExecutionEvent ignored) {
+            pending.offer(SIGNAL);
+        }
+
+        boolean await(long timeoutMillis) throws InterruptedException {
+            return pending.poll(timeoutMillis, TimeUnit.MILLISECONDS) != null;
         }
     }
 

@@ -1,6 +1,7 @@
 package ai.ravenroot.server;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.RavenrootApplication;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.deployment.InboundSource;
@@ -38,6 +39,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -46,7 +49,9 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -186,6 +191,38 @@ class DeploymentLifecycleHttpTest {
                     field(fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a").body(),
                             "incarnationId"), "identical graph bytes still create a new incarnation");
             replacedReader.close();
+        }
+    }
+
+    @Test
+    void undeployBetweenLeaseCheckAndSourceRefreshStillEmitsATerminalFrame() throws Exception {
+        var race = new DeploymentViewRace();
+        try (var fixture = new Fixture(race)) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=racing",
+                    NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/racing/start", "", "tenant-a"), "READY");
+            var view = fixture.request("GET", "/v1/deployments/racing/view", "", "tenant-a");
+            String incarnation = field(view.body(), "incarnationId");
+            String version = field(view.body(), "graphVersion");
+            var stream = fixture.stream("/v1/deployments/racing/events?graphVersion=" + version,
+                    "tenant-a", incarnation);
+            var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()));
+            assertEquals("event: lifecycle", reader.readLine());
+            reader.readLine();
+            reader.readLine();
+
+            race.arm();
+            assertTrue(race.lookupReturned.await(10, TimeUnit.SECONDS),
+                    "the stream must reach the post-lease source lookup");
+            assertEquals(200, fixture.request("DELETE", "/v1/deployments/racing", "", "tenant-a")
+                    .statusCode());
+            race.continueLookup.countDown();
+
+            String terminal = terminalData(reader);
+            assertTrue(terminal.contains("\"reason\":\"UNDEPLOYED\""), terminal);
+            reader.close();
+        } finally {
+            race.continueLookup.countDown();
         }
     }
 
@@ -486,10 +523,18 @@ class DeploymentLifecycleHttpTest {
         private final RavenrootServer server;
 
         Fixture() throws Exception {
-            this(false);
+            this(false, null);
         }
 
         Fixture(boolean durable) throws Exception {
+            this(durable, null);
+        }
+
+        Fixture(DeploymentViewRace race) throws Exception {
+            this(false, race);
+        }
+
+        private Fixture(boolean durable, DeploymentViewRace race) throws Exception {
             var behavior = new SourceBehavior();
             NodePackage nodePackage = new NodePackage() {
                 @Override public String id() { return "test.deployment.http.package"; }
@@ -502,10 +547,11 @@ class DeploymentLifecycleHttpTest {
             application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), null, 8, UnknownBehaviorPolicy.passThrough());
+            RavenrootApplication servedApplication = race == null ? application : race.wrap(application);
             var httpSecurity = new HttpSecurityConfiguration(
                     new BrowserOriginPolicy(Set.of("https://editor.example")),
                     new SecurityHeadersPolicy(false), java.time.Duration.ofSeconds(30));
-            server = new RavenrootServer(application,
+            server = new RavenrootServer(servedApplication,
                     new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, true,
                     new HeaderTenantAuthenticator(), httpSecurity);
             if (durable) {
@@ -560,6 +606,44 @@ class DeploymentLifecycleHttpTest {
         public void close() {
             server.close();
             engine.close();
+        }
+    }
+
+    /** Pauses one already-successful source lookup so undeploy can win before the caller refreshes it. */
+    private static final class DeploymentViewRace {
+        private final AtomicBoolean armed = new AtomicBoolean();
+        private final CountDownLatch lookupReturned = new CountDownLatch(1);
+        private final CountDownLatch continueLookup = new CountDownLatch(1);
+
+        private void arm() {
+            armed.set(true);
+        }
+
+        private RavenrootApplication wrap(RavenrootApplication delegate) {
+            return (RavenrootApplication) Proxy.newProxyInstance(
+                    RavenrootApplication.class.getClassLoader(),
+                    new Class<?>[] { RavenrootApplication.class },
+                    (proxy, method, arguments) -> {
+                        Object result;
+                        try {
+                            result = method.invoke(delegate, arguments);
+                        } catch (InvocationTargetException reflected) {
+                            throw reflected.getCause();
+                        }
+                        if ("localDeploymentView".equals(method.getName())
+                                && armed.compareAndSet(true, false)) {
+                            lookupReturned.countDown();
+                            try {
+                                if (!continueLookup.await(20, TimeUnit.SECONDS)) {
+                                    throw new IllegalStateException("timed out waiting to finish the source lookup");
+                                }
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException("source lookup interrupted", interrupted);
+                            }
+                        }
+                        return result;
+                    });
         }
     }
 

@@ -3586,9 +3586,14 @@ public final class RavenrootServer implements AutoCloseable {
                     long waitMillis = Math.max(1, Math.min(1_000,
                             Duration.between(clock.instant(), revalidateAt).toMillis()));
                     wakeup.await(waitMillis);
+                    ai.ravenroot.api.application.DeploymentViewerView refreshed;
                     try {
                         revalidateAt = revalidateDeploymentStreamLease(
                                 exchange, httpContext, principal, binding);
+                        // Keep source refresh in the same terminal-conversion boundary as lease
+                        // revalidation. Undeploy may win after the helper's source check; a second
+                        // lookup must still emit source-invalidated rather than escape as EOF.
+                        refreshed = currentDeploymentView(httpContext.applicationContext(), binding);
                     } catch (AuthenticationException | ai.ravenroot.api.security.AuthorizationDeniedException ended) {
                         writeSourceInvalidated(output, binding, "AUTHORITY_CHANGED");
                         break;
@@ -3596,7 +3601,6 @@ public final class RavenrootServer implements AutoCloseable {
                         writeSourceInvalidated(output, binding, changed.reason());
                         break;
                     }
-                    var refreshed = currentDeploymentView(httpContext.applicationContext(), binding);
                     if (refreshed.lifecycle() != lifecycle) {
                         lifecycle = refreshed.lifecycle();
                         writeLifecycle(output, binding, lifecycle);

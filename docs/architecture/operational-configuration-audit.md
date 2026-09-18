@@ -36,17 +36,17 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 22702 |
+| Atomic operational candidates discovered | 22701 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 22702 |
+| Reviewed | 22701 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 311 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1846 |
+| Retained security ceilings or defaults | 1845 |
 | Retained protocol or format invariants | 9486 |
 | Retained published contract descriptions | 490 |
 | Retained presentation text | 579 |
@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 7597 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1914.
+Retired source candidates preserved in inventory history: 1918.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 65.
+Checked source reconciliations: 66.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 22702 candidates.
+zero-count or unclassified rows as needed and sums to 22701 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 22702 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 21051 |
+| retained | 21050 |
 
 ### Classification counts
 
@@ -88,7 +88,7 @@ zero-count or unclassified rows as needed and sums to 22702 candidates.
 | presentation-text | 579 |
 | protocol-or-format-invariant | 9486 |
 | published-contract-description | 490 |
-| security-ceiling-or-default | 1846 |
+| security-ceiling-or-default | 1845 |
 | test-fixture | 7597 |
 | unclassified | 0 |
 
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 22702 candidates.
 |---|---:|
 | deployment | 2735 |
 | deployment-example | 20 |
-| java | 7012 |
+| java | 7011 |
 | script | 2199 |
 | test-fixture | 7597 |
 | ui | 3139 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1469 |
 | #321 | 8567 |
-| Retained; no remediation required | 12117 |
+| Retained; no remediation required | 12116 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 22699 |
-| Unchanged identities | 22699 |
-| Approved identity migrations | 0 |
-| Approved retirements | 0 |
+| Source inventory candidates | 22702 |
+| Unchanged identities | 22696 |
+| Approved identity migrations | 2 |
+| Approved retirements | 4 |
 | Semantically classified additions | 3 |
-| Current candidates | 22702 |
+| Current candidates | 22701 |
 
 ## Final semantic review
 
@@ -5011,6 +5011,9 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-cdf9b661ffa6a6efb362` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/embed/EmbedSnapshotProjector.java:40` `EmbedSnapshotProjector` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-9e53c8ff0c4ac7f17c5d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/embed/EmbedSnapshotProjector.java:41` `EmbedSnapshotProjector` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-125eb54220d41cb517c3` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/embed/EmbedSnapshotProjector.java:42` `EmbedSnapshotProjector` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-777e9ae8c403536f2756` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/BigIntOpContract.java:10` `BigIntOpContract` | java | retained | security-ceiling-or-default | This shared finite digit ceiling bounds compiler, oracle, profile validation, and runtime bigint processing. |
+| `oc-20126f7f83a074ecf191` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/BigIntOpContract.java:12` `BigIntOpContract` | java | retained | protocol-or-format-invariant | This shared lexical grammar defines signed bigint operands identically for static validation and runtime admission. |
+| `oc-4695cb0ca68fe778867d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/BigIntOpContract.java:13` `BigIntOpContract` | java | retained | protocol-or-format-invariant | This canonical natural-number grammar defines compiler and independent-oracle register values. |
 | `oc-b8d5374411fbe7ad53e6` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/FailureRouteEdgeProperty.java:55` `FailureRouteEdgeProperty` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-f5db20b37e3eeaa9cfd1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/FailureRouteEdgeProperty.java:58` `FailureRouteEdgeProperty` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-9b15e3c4637b380298a7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphCanonicalForm.java:25` `GraphCanonicalForm` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -5081,34 +5084,32 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-ead8a36a9cd1deb47d91` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/JoinSemantics.java:117` `JoinSemantics` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-fdff6cba68389a5ac745` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/JoinSemantics.java:120` `JoinSemantics` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-5a1082c2ac478c49da4c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/JoinSemantics.java:123` `JoinSemantics` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-fe79a13c4ec25fff34bc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:20` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-0234879c58bd1e98b6a2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:21` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
-| `oc-19ee522122e9bef7647f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:22` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | This fixed validator ceiling bounds every authored diagnostic field independently of graph input and is not operator configurable. |
-| `oc-1d5f1f51748793732a74` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:23` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
-| `oc-1606a4771d7287567720` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-8213783b491b6b933de8` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-909288868cce2f5e8538` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-c71fc6d3ccc5c72d7795` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-cd5fba068008acf9b17d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-e668c771bc5d4d31fab7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-f0efaa93577bfd2ce34e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-fced6bd39d778ed5f392` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-78a8104a66732da82c9f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:27` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-d57ac6fcb1e53c14c893` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:27` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-a52bff9566ea5ae6cf20` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:28` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-33d83f110bcc58149c89` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:29` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-2e94d22da9d6a7ec00a5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:30` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This exact lexical grammar mirrors the executable bigint operand contract so malformed literals are rejected statically. |
-| `oc-6a59258c6475a374c67c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:31` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | This fixed runtime-aligned ceiling bounds graph-authored bigint literal parsing and is not operator configurable. |
-| `oc-0f917466b7da035fcc26` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:192` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
-| `oc-7da00a34f8aaddf4379f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:223` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
-| `oc-4455a4bf2db5d9d0c087` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:245` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-c16b65a0b820c40db13c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:245` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-8f82f6433156c906b9a5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:246` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-e75e62cec76f37a12e75` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:246` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-3d4d22af0b83fca63cc2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:247` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-e6aab131dbd5eb814c0f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:247` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-88089987934f3c3296bb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:248` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
-| `oc-88e213ff54501d0533d4` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:249` `for` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
+| `oc-fe79a13c4ec25fff34bc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:18` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-0234879c58bd1e98b6a2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:19` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
+| `oc-19ee522122e9bef7647f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:20` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | This fixed validator ceiling bounds every authored diagnostic field independently of graph input and is not operator configurable. |
+| `oc-1d5f1f51748793732a74` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:21` `RegisterMachineProfile` | java | retained | security-ceiling-or-default | These fixed validator ceilings bound Profile v1 inspection and returned diagnostics independently of graph-authored values. |
+| `oc-1606a4771d7287567720` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-8213783b491b6b933de8` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-909288868cce2f5e8538` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-c71fc6d3ccc5c72d7795` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-cd5fba068008acf9b17d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-e668c771bc5d4d31fab7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-f0efaa93577bfd2ce34e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-fced6bd39d778ed5f392` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:24` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-78a8104a66732da82c9f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:25` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-d57ac6fcb1e53c14c893` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:25` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-a52bff9566ea5ae6cf20` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:26` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-33d83f110bcc58149c89` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:27` `RegisterMachineProfile` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-0f917466b7da035fcc26` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:188` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
+| `oc-7da00a34f8aaddf4379f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:219` `if` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
+| `oc-4455a4bf2db5d9d0c087` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:241` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-c16b65a0b820c40db13c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:241` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-8f82f6433156c906b9a5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:242` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-e75e62cec76f37a12e75` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:242` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-3d4d22af0b83fca63cc2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:243` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-e6aab131dbd5eb814c0f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:243` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-88089987934f3c3296bb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:244` `for` | java | retained | protocol-or-format-invariant | This atom is Profile v1 or GraphML editor vocabulary whose exact value defines portable validation, authoring, or execution semantics. |
+| `oc-88e213ff54501d0533d4` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/RegisterMachineProfile.java:245` `for` | java | retained | derived | This numeric value is an internal collection index or exact arity derived by the bounded static Profile v1 analysis. |
 | `oc-2874fedda925b42ee456` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/ReservedGraphProperties.java:47` `ReservedGraphProperties` | java | retained | protocol-or-format-invariant | These literals are exact Java property keys; values and defaults are reviewed at their typed consumers. |
 | `oc-4bba6683c700d6057911` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/ReservedGraphProperties.java:47` `ReservedGraphProperties` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-848d9ccc2f673f42ee2f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/SecureGraphMlParser.java:32` `SecureGraphMlParser` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -5546,27 +5547,25 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-9d8464305037554acf7d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/WorkerIdentity.java:96` `WorkerIdentity` | java | retained | derived | This local fallback value is derived from process identity generation rather than selected by an operator. |
 | `oc-700606b0d397cec2aa82` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/WorkerInstanceRegistry.java:103` `WorkerInstanceRegistry` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-ba89291947567e322bfe` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/WorkerInstanceRegistry.java:306` `liveCount` | java | retained | derived | These numeric atoms initialize counters, offsets, masks, or indexes whose meaning is derived from surrounding representation logic. |
-| `oc-e9ee23bd9294f6b8695f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:27` `BigIntOpNodeBehaviorFactory` | java | retained | security-ceiling-or-default | This fixed runtime-owned ceiling bounds bigint parsing, arithmetic publication, or graph-authored property text and cannot be loosened by a graph. |
-| `oc-478ef65b0b71063d0189` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:28` `BigIntOpNodeBehaviorFactory` | java | retained | derived | This value is mechanically derived from the fixed operand prefix, optional sign, and runtime-owned decimal digit ceiling. |
-| `oc-5275ba86877d9f494fcc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:28` `BigIntOpNodeBehaviorFactory` | java | retained | derived | This value is mechanically derived from the fixed operand prefix, optional sign, and runtime-owned decimal digit ceiling. |
-| `oc-5c52f9397786a2f99b1a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:29` `BigIntOpNodeBehaviorFactory` | java | retained | security-ceiling-or-default | This fixed runtime-owned ceiling bounds bigint parsing, arithmetic publication, or graph-authored property text and cannot be loosened by a graph. |
-| `oc-3bc203edb44ae84c711e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:31` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-5fdb539cab77e984c8b7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-63231a02c822f7b8c542` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-93b3beae96c2587939a0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-9d3b920c844151da98a9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-9db1e9cd42f6fdab622d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-eec7f8dc3feaafd35d8b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-f18b00d46af29e256b39` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-fe169891cb22d69d4185` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-63510cb3875102f1bf2d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-198d4285bfa91431821c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-3df2ea4fc5263493a040` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-672119bfc4a420e6562f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-681d91e8f6f62a5cb16a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-7af89f874ea62374ba55` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-b17186512460aea660c9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
-| `oc-ecbb66328ad15d02fd25` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-b11dd380fdf898258c4e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:27` `BigIntOpNodeBehaviorFactory` | java | retained | derived | This value is mechanically derived from the fixed operand prefix, optional sign, and runtime-owned decimal digit ceiling. |
+| `oc-de4463609ba6ab845ce5` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:27` `BigIntOpNodeBehaviorFactory` | java | retained | derived | This value is mechanically derived from the fixed operand prefix, optional sign, and runtime-owned decimal digit ceiling. |
+| `oc-5c52f9397786a2f99b1a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:28` `BigIntOpNodeBehaviorFactory` | java | retained | security-ceiling-or-default | This fixed runtime-owned ceiling bounds bigint parsing, arithmetic publication, or graph-authored property text and cannot be loosened by a graph. |
+| `oc-5fdb539cab77e984c8b7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-63231a02c822f7b8c542` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-93b3beae96c2587939a0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-9d3b920c844151da98a9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-9db1e9cd42f6fdab622d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-eec7f8dc3feaafd35d8b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-f18b00d46af29e256b39` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-fe169891cb22d69d4185` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:33` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-63510cb3875102f1bf2d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-198d4285bfa91431821c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-3df2ea4fc5263493a040` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-672119bfc4a420e6562f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-681d91e8f6f62a5cb16a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-7af89f874ea62374ba55` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-b17186512460aea660c9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-ecbb66328ad15d02fd25` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
 | `oc-ce082d0bab9a86986c23` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:27` `BoundaryGuardNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-aa0d9107ac8f72873f2d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:28` `BoundaryGuardNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-35917f179c967ad6bd75` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:29` `BoundaryGuardNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

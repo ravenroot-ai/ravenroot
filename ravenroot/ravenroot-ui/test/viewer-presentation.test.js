@@ -51,6 +51,11 @@ describe('shared viewer presentation', () => {
       width: 'data(nw)', height: 'data(nh)', label: 'data(label)',
     });
     expect(cyto.some(entry => entry.style?.['background-image'])).toBe(false);
+    expect(cyto.find(entry => entry.selector === 'node[nodeType="consumer"]').style)
+      .toMatchObject({ 'border-width': 2.5 });
+    expect(createViewerStylesheet('dark', 'cyto', { includeNodeSelection: false })
+      .some(entry => entry.selector === 'node:selected')).toBe(false);
+    expect(cyto.some(entry => entry.selector === 'node:selected')).toBe(true);
 
     const n8n = createViewerStylesheet('dark', 'n8n');
     expect(n8n.some(entry => entry.selector === 'node'

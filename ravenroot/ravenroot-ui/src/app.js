@@ -3355,7 +3355,8 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
 function forkActiveDocument() {
   captureActiveDocument();
   const source = workspace.active;
-  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph) return false;
+  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph
+      || source.graph.format === 'deployment') return false;
   const graph = structuredClone(source.graph);
   graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
   const fork = forkDocumentRecord(source, {
@@ -3866,7 +3867,7 @@ function initCy(elements, gd, options = {}) {
     // The active document's own element, not the shared host: a second document is a second canvas.
     container: canvasContainer,
     elements,
-    style: createViewerStylesheet(rendererPalette),
+    style: createViewerStylesheet(rendererPalette, 'cyto', { includeNodeSelection: false }),
     layout: { name: 'preset' },
     minZoom: 0.05, maxZoom: 5,
     wheelSensitivity: 0.25,
@@ -4465,7 +4466,8 @@ function applyApplicationTheme(theme) {
     const target = owner.cy;
     if (!target || target.destroyed()) return;
     target.batch(() => {
-      target.style().fromJson(createViewerStylesheet(rendererPalette)).update();
+      target.style().fromJson(createViewerStylesheet(
+        rendererPalette, 'cyto', { includeNodeSelection: false })).update();
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(target, owner);
       else target.nodes().forEach(applyRuntimeVisual);
     });
@@ -14378,6 +14380,7 @@ function commandContext() {
       && graphData.format !== 'deployment'),
     documentEditable: Boolean(documentIsEditable(workspace.active)),
     documentMode: workspace.find(workspace.activeId)?.mode ?? null,
+    documentFormat: graphData?.format ?? null,
     tenantAuthority: tenantAuthorityAllows(workspace.active),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,

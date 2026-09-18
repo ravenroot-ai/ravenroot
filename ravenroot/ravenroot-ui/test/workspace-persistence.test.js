@@ -36,6 +36,26 @@ describe('tenant workspace snapshot', () => {
     expect(snapshot.documents[0].graph).not.toHaveProperty('nodeMap');
   });
 
+  it('keeps live deployment attachments session-only without changing existing document persistence', () => {
+    const scope = workspaceScope('https://runtime.example', 'tenant-a');
+    const draft = document_('draft');
+    const graphify = document_('graphify');
+    graphify.graph = { format: 'graphify', sourceJson: '{}', nodes: [{ id: 'file' }], edges: [],
+      nodeMap: { file: { id: 'file' } } };
+    const deployment = { ...document_('live'), mode: 'deployed',
+      graph: { format: 'deployment', nodes: [{ id: 'start' }], edges: [],
+        nodeMap: { start: { id: 'start' } } } };
+
+    const snapshot = workspaceSnapshot(scope, [draft, deployment, graphify], 'live');
+
+    expect(snapshot.documents.map(item => item.documentId)).toEqual(['draft', 'graphify']);
+    expect(snapshot.activeDocumentId).toBe('graphify');
+    expect(() => persistedDocument(deployment)).toThrow(/session-only/);
+    expect(() => validateWorkspaceSnapshot({ ...snapshot,
+      documents: [...snapshot.documents, { ...snapshot.documents[0], documentId: 'stale-live',
+        mode: 'deployed', graph: deployment.graph }] }, scope)).toThrow(/session-only/);
+  });
+
   it('resets runtime projections while preserving arbitrary authored property names and artifact identity', () => {
     const source = document_('runtime');
     Object.assign(source.graph.nodes[0], { instances: 7, arrivals: 4, runtimeState: 'failed',

@@ -63,7 +63,8 @@ export function viewerCardImage(nodeType, palette) {
  * Shell-only affordances are classes added by the editor; node/edge identity and runtime state live
  * here so an embedded graph cannot drift into a second visual language.
  */
-export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto') {
+export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
+                                       { includeNodeSelection = true } = {}) {
   const palette = typeof themeOrPalette === 'string'
     ? getRendererPalette(themeOrPalette)
     : themeOrPalette;
@@ -104,7 +105,8 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto') {
         ...(type === 'system' ? { shape: 'rectangle' } : {}),
         'background-color': surface[type], 'border-color': node[type],
         'border-width': type === 'system' ? 1.5
-          : (type === 'workspace' ? 3 : (type === 'human-task' ? 2.5 : 2)),
+          : (type === 'workspace' ? 3
+            : (type === 'human-task' || type === 'consumer' ? 2.5 : 2)),
       },
     })),
     { selector: 'node[humanTaskPending > 0]', style: {
@@ -173,9 +175,9 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto') {
       'line-color': palette.focus, 'target-arrow-color': palette.focus,
       'underlay-color': palette.focus, 'underlay-opacity': 0.16, 'underlay-padding': 4,
     } },
-    { selector: 'node:selected', style: {
+    ...(includeNodeSelection ? [{ selector: 'node:selected', style: {
       'border-color': palette.selection, 'border-width': 4,
-    } },
+    } }] : []),
     { selector: 'edge:selected', style: {
       'underlay-color': palette.selection, 'underlay-opacity': 0.38,
       'underlay-padding': 5, 'z-index': 10,

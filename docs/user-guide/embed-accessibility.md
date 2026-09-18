@@ -8,7 +8,8 @@ Consume a pre-authorized read-only projection and navigate Ravenroot without dep
 2. The projection supports viewing and navigation; it exposes no Modify, execution, credential, adapter, or operator control.
 3. In the full workspace, open **Deployments**, choose **Open read-only view**, then use the Cyto,
    N8N, or Elastic selector. Opening the view attaches observation only; closing it detaches and never
-   stops, restarts, or undeploys the deployment.
+   stops, restarts, or undeploys the deployment. The attachment is session-only and is not restored
+   as a live document after reloading the workspace.
 4. Use focus order, keyboard canvas controls, alternative graph contents, Inspector labels, and status
    announcements to understand selection, lifecycle, continuity, and execution changes.
 5. Treat `GAP`, `VERSION_MISMATCH`, and `DETACHED` as terminal read-only states. They clear runtime

@@ -51,7 +51,7 @@ describe('embed viewer import boundary', () => {
       readFile(resolve(ROOT, 'app.js'), 'utf8'),
     ]);
     expect(embed).toContain('createViewerStylesheet(requireEmbedTheme(theme), mode)');
-    expect(app).toContain('style: createViewerStylesheet(rendererPalette)');
+    expect(app).toContain("style: createViewerStylesheet(rendererPalette, 'cyto', { includeNodeSelection: false })");
   });
 
   it('keeps theme selection out of viewer storage and the closed parent protocol', async () => {

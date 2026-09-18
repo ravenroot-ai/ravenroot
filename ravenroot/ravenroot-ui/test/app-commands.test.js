@@ -30,7 +30,7 @@ describe('application command catalog', () => {
     const context = {
       hasDocument: true, editable: true, documentEditable: true, tenantAuthority: true,
       canModify: true, modifyEnabled: true,
-      documentMode: 'draft',
+      documentMode: 'draft', documentFormat: 'graphml',
       layoutBusy: false,
       connectArmed: true, hasSelection: true, layoutMode: 'cyto', renderMode: 'design', running: false,
       canUndo: true, canRedo: false, hasToken: true, leftCollapsed: false, rightCollapsed: true,
@@ -44,6 +44,8 @@ describe('application command catalog', () => {
       .toBe(true);
     expect(byId['file.fork'].isEnabled(context)).toBe(false);
     expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false, documentMode: 'test' })).toBe(true);
+    expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false,
+      documentMode: 'deployed', documentFormat: 'deployment' })).toBe(false);
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: true, documentMode: 'test' }))
       .toBe(false);
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false, documentMode: 'deployed' }))

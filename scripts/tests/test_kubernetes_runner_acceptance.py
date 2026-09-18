@@ -1,8 +1,10 @@
 """The required native fixture must stay isolated, secretless, quota-backed and zero-skip."""
+import ast
 import json
 import importlib.util
 import itertools
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +12,107 @@ from scripts.fixtures import kubernetes_runner_acceptance as fixture
 
 
 class KubernetesAcceptanceFixtureTest(unittest.TestCase):
+    def support_sources(self):
+        return {name: (fixture.ROOT / path).read_text() for name, path in {
+            "adr": "adr/0043-kubernetes-native-governed-runner.md",
+            "guide": "docs/operator-guide/kubernetes-runners.md",
+            "docker-guide": "docs/operator-guide/governed-runners.md",
+            "workflow": ".github/workflows/ci.yml",
+            "fixture": "scripts/fixtures/kubernetes_runner_acceptance.py",
+        }.items()}
+
+    def assert_support_contract(self, sources):
+        # Reviewed immutable acceptance substrate, not an independently selectable target.
+        # Updating it requires renewed native evidence and all public claims to move together.
+        pins = {
+            "MINIKUBE": "v1.38.1", "KUBERNETES": "v1.35.1",
+            "CLUSTER_IMAGE": "gcr.io/k8s-minikube/kicbase:v0.0.50@sha256:eb4fec00e8ad70adf8e6436f195cc429825ffb85f95afcdb5d8d9deb576f3e93",
+            "BASE_IMAGE": "python@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5",
+        }
+        tree = ast.parse(sources["fixture"])
+        assignments = [(target.id, ast.literal_eval(node.value)) for node in tree.body
+            if isinstance(node, ast.Assign) for target in node.targets
+            if isinstance(target, ast.Name) and target.id in pins]
+        self.assertCountEqual(list(pins.items()), assignments)
+        version = pins["KUBERNETES"].removeprefix("v")
+        supported = {"Kubernetes": version, "kubectl": version,
+                     "Minikube": pins["MINIKUBE"].removeprefix("v"),
+                     "kicbase": pins["CLUSTER_IMAGE"].split(":v", 1)[1].split("@", 1)[0]}
+        for name in ("adr", "guide", "docker-guide"):
+            # Check every relevant claim, including contradictory duplicates; finding one
+            # correct sentence must not hide a stale support matrix or later evidence note.
+            for tool, observed in re.findall(r"\b(Kubernetes|kubectl|Minikube|kicbase)\s+v?(\d+\.\d+\.\d+)\b", sources[name]):
+                self.assertEqual(supported[tool], observed, name + ": " + tool)
+        self.assertEqual([version], re.findall(r"Kubernetes\s+(\d+\.\d+\.\d+)\s+is the native CI target", sources["adr"]))
+        self.assertEqual([version], re.findall(r"Native acceptance target\s+(\d+\.\d+\.\d+)", sources["guide"]))
+        self.assertEqual([version], re.findall(r"Native CI pins kubectl\s+(\d+\.\d+\.\d+)", sources["guide"]))
+        self.assertEqual([(supported["Minikube"], version, supported["kicbase"])], re.findall(
+            r"fixture requires Minikube\s+(\d+\.\d+\.\d+), Kubernetes\s+(\d+\.\d+\.\d+)"
+            r"\s+and the digest-pinned kicbase\s+(\d+\.\d+\.\d+)", sources["guide"]))
+
+        jobs = re.findall(r"(?ms)^  full-backend-tests:\n(.*?)(?=^  [\w-]+:|\Z)", sources["workflow"])
+        self.assertEqual(1, len(jobs))
+        steps = re.findall(r"(?ms)^      - name: Install pinned native Kubernetes acceptance tools\n(.*?)(?=^      - name:|\Z)", jobs[0])
+        self.assertEqual(1, len(steps))
+        active = "\n".join(line for line in steps[0].splitlines() if not line.lstrip().startswith("#"))
+        self.assertEqual([
+            "https://github.com/kubernetes/minikube/releases/download/" + pins["MINIKUBE"] + "/minikube-linux-amd64",
+            "https://dl.k8s.io/release/" + pins["KUBERNETES"] + "/bin/linux/amd64/kubectl",
+        ], re.findall(r"(?m)^\s*curl\s+[^\n]*?(https://\S+)", active))
+        self.assertEqual([
+            ("099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e", "minikube"),
+            ("36e2f4ac66259232341dd7866952d64a958846470f6a9a6a813b9117bd965207", "kubectl"),
+        ], re.findall(r"([a-f0-9]{64})  %s/(minikube|kubectl)", active))
+        self.assertIn("| sha256sum --check --strict", active)
+        self.assertRegex(jobs[0], r"(?m)^        run: python3 scripts/fixtures/kubernetes_runner_acceptance\.py$")
+
+        # The emitted evidence must use the same pin as the actual startup (exercised
+        # below), not an unrelated literal that could falsely report a supported target.
+        evidence = [node.args[0].right for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print"
+            and node.args and isinstance(node.args[0], ast.BinOp) and isinstance(node.args[0].op, ast.Add)
+            and isinstance(node.args[0].left, ast.Constant) and node.args[0].left.value == "KUBERNETES_RUNNER_ACCEPTANCE="]
+        self.assertEqual(1, len(evidence))
+        self.assertEqual("json.dumps", ast.unparse(evidence[0].func))
+        payload = evidence[0].args[0]
+        self.assertIsInstance(payload, ast.Dict)
+        reported = [value for key, value in zip(payload.keys, payload.values)
+                    if isinstance(key, ast.Constant) and key.value == "kubernetes"]
+        self.assertEqual(["KUBERNETES"], [ast.unparse(value) for value in reported])
+
+    def test_public_support_claims_ci_tools_images_and_reported_evidence_share_reviewed_pins(self):
+        self.assert_support_contract(self.support_sources())
+
+    def test_support_contract_rejects_independent_drift_and_contradictory_claims(self):
+        sources = self.support_sources()
+        mutations = [
+            ("adr", "1.35.1", "1.35.4"),
+            ("guide", "Native acceptance target 1.35.1", "Native acceptance target 1.35.4"),
+            ("guide", "kubectl 1.35.1", "kubectl 1.35.4"),
+            ("guide", "Minikube 1.38.1", "Minikube 1.39.0"),
+            ("guide", "kicbase 0.0.50", "kicbase 0.0.51"),
+            ("fixture", 'KUBERNETES = "v1.35.1"', 'KUBERNETES = "v1.35.4"'),
+            ("fixture", 'MINIKUBE = "v1.38.1"', 'MINIKUBE = "v1.39.0"'),
+            ("fixture", "eb4fec00", "ab4fec00"),
+            ("fixture", "e81548ac", "a81548ac"),
+            ("fixture", '"kubernetes": KUBERNETES', '"kubernetes": "v1.35.4"'),
+            ("workflow", "releases/download/v1.38.1", "releases/download/v1.39.0"),
+            ("workflow", "release/v1.35.1", "release/v1.35.4"),
+            ("workflow", "099477ea", "199477ea"),
+            ("workflow", "36e2f4ac", "46e2f4ac"),
+            ("workflow", "| sha256sum --check --strict", "| cat"),
+            ("workflow", "run: python3 scripts/fixtures/kubernetes_runner_acceptance.py", "run: true"),
+        ]
+        for name, before, after in mutations:
+            with self.subTest(surface=name, mutation=before):
+                self.assertIn(before, sources[name])
+                changed = dict(sources, **{name: sources[name].replace(before, after)})
+                with self.assertRaises(AssertionError):
+                    self.assert_support_contract(changed)
+        for name in ("adr", "guide", "docker-guide"):
+            with self.subTest(contradictory_claim=name), self.assertRaises(AssertionError):
+                self.assert_support_contract(dict(sources, **{name: sources[name] + "\nKubernetes 1.35.4 is supported.\n"}))
+
     def test_cpu_attestation_waits_for_positive_kernel_evidence_and_refuses_its_absence(self):
         spec = importlib.util.spec_from_file_location("native_attestation", fixture.ROOT / "docs/examples/governed-runner/kubernetes_attestation.py")
         attester = importlib.util.module_from_spec(spec)
@@ -53,12 +156,6 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
 
     def test_required_suite_counts_every_native_case_without_skips(self):
         self.assertEqual(5, sum(fixture.CLASSES.values()))
-        self.assertEqual("v1.35.1", fixture.KUBERNETES)
-        self.assertEqual("v1.38.1", fixture.MINIKUBE)
-        workflow = (fixture.ROOT / ".github/workflows/ci.yml").read_text()
-        self.assertIn("releases/download/" + fixture.MINIKUBE + "/minikube-linux-amd64", workflow)
-        self.assertIn("release/" + fixture.KUBERNETES + "/bin/linux/amd64/kubectl", workflow)
-        self.assertIn("36e2f4ac66259232341dd7866952d64a958846470f6a9a6a813b9117bd965207", workflow)
         source = Path(fixture.__file__).read_text()
         for required in ('"skipped": "0"', 'FELIX_IPTABLESBACKEND=NFT', 'native acceptance left'):
             self.assertIn(required, source)

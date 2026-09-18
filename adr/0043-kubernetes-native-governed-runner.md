@@ -71,7 +71,7 @@ accepting authority. Admission prevents restoring the bootstrap label.
 
 The initial verified backend is a pre-provisioned, fixed-size ext4 local PV, RWO, no online expansion,
 with `Retain` reclamation. The Agent mounts a PVC, never hostPath. Linux nodes/containerd, cgroup v2,
-Landlock and enforcing Calico policy are required. Kubernetes 1.35.4 is the native CI target.
+Landlock and enforcing Calico policy are required. Kubernetes 1.35.1 is the native CI target.
 No CSI driver, snapshot API, generic dynamic provisioner, hostPath provisioner or `emptyDir` is
 implicitly approved. Checkpoint/restore and cross-driver migration are explicitly unsupported for
 this backend. A future backend needs an equally positive proof and atomic checkpoint contract.

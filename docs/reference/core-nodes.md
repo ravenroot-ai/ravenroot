@@ -159,6 +159,10 @@ With an object payload containing `{"counter":"9223372036854775808"}`, the node 
 `{"counter":"9223372036854775809"}`. Use an existing decision node after an `equal` operation to
 route on the Boolean target; arithmetic and control flow remain separate graph steps.
 
+[Register Machine Profile v1](register-machine-profile.md) standardizes transparent SET, INC,
+DECJZ, and HALT expansions over this node and provides executable arithmetic, cancellation,
+observation, persistence, and incremental-Pi examples.
+
 The focused process-overhead measurement is opt-in so ordinary test runs never start its additional
 worker JVMs. From the `ravenroot/` Maven reactor directory, run it exactly with:
 
@@ -169,8 +173,9 @@ mvn -pl ravenroot-server -am \
   -Dravenroot.bigint.measurement=true test
 ```
 
-It reports normalized durations and the structural worker-start counts without enforcing a
-machine-dependent timing ratio.
+It reports the profile's increment/operand matrix, traversal and payload-serialization samples,
+cold/warm observations, and structural worker-start counts without enforcing a machine-dependent
+timing ratio. The measured optimization decision is recorded in the profile reference.
 
 ## `cel-transform`
 

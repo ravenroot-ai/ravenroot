@@ -113,6 +113,8 @@
       url: /reference/
     - title: GraphML profile
       url: /reference/graphml.html
+    - title: Register Machine Profile v1
+      url: /reference/register-machine-profile.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
     - title: Core node reference

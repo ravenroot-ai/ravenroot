@@ -1,5 +1,9 @@
 package ai.ravenroot.cli;
 
+import ai.ravenroot.core.graph.GraphDefinition;
+import ai.ravenroot.core.graph.GraphEdge;
+import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -263,6 +267,29 @@ class GraphMlValidateCommandTest {
         assertEquals(2, GraphMlValidateCommand.run(
                 directory.resolve("absent.graphml"), stream(missingOutput), stream(missingErrors)));
         assertTrue(missingErrors.toString(StandardCharsets.UTF_8).contains("cannot read"));
+    }
+
+    @Test
+    void optionalRegisterMachineModePublishesSeparateErrorsAndWarnings() throws IOException {
+        Path file = directory.resolve("register-machine.graphml");
+        var graph = new GraphDefinition(List.of(
+                GraphNode.start("start"), GraphNode.behavior("hidden", "program"), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "hidden"), GraphEdge.to("hidden", "end")));
+        try (var manager = GraphManager.from(graph); var sink = Files.newOutputStream(file)) {
+            manager.writeGraphMl(sink);
+        }
+        var output = new ByteArrayOutputStream();
+        var errors = new ByteArrayOutputStream();
+
+        int exitCode = GraphMlValidateCommand.run(new String[]{"validate", "--register-machine", file.toString()},
+                stream(output), stream(errors));
+
+        assertEquals(1, exitCode, errors.toString(StandardCharsets.UTF_8));
+        assertTrue(lines(output).contains("verdict=accepted"));
+        assertTrue(lines(output).contains("register-machine-profile=1"));
+        assertTrue(lines(output).contains("register-machine-verdict=invalid"));
+        assertTrue(lines(output).stream().anyMatch(line -> line.startsWith(
+                "register-machine-error code=NODE_OUTSIDE_PROFILE location=hidden")));
     }
 
     private Path write(String name, String content) throws IOException {

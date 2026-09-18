@@ -8,8 +8,17 @@ import ai.ravenroot.api.programming.ProgramRequest;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.graph.GraphDefinition;
+import ai.ravenroot.core.graph.GraphEdge;
+import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.ExecutionMonitor;
+import ai.ravenroot.core.runtime.GraphRunner;
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.pekko.PekkoExecutionEngine;
 import ai.ravenroot.programming.graalvm.GraalVmProgramRuntime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -20,6 +29,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -85,6 +95,108 @@ class BigIntProgramOverheadMeasurementTest {
                         + "program measurement: %,d invocations, %,d real worker starts, %.0f ns/invocation%n",
                 BIGINT_ITERATIONS, (double) bigintNanos / BIGINT_ITERATIONS,
                 PROGRAM_ITERATIONS, workerStarts.get(), (double) programNanos / PROGRAM_ITERATIONS);
+    }
+
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void reportsRegisterMachineNodeTraversalSerializationAndObservationMatrix() throws Exception {
+        int[] increments = {10, 100, 1_000, 10_000};
+        int[] digits = {10, 100, 1_000, 4_096};
+        var increment = new GraphNode("increment", NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                "operation", "add", "left", "field:counter", "right", "literal:1", "target", "counter"));
+
+        long coldStarted = System.nanoTime();
+        Object cold = BehaviorRegistry.standard().create(increment).orElseThrow()
+                .handle(new ai.ravenroot.api.execution.NodeMessage(IDENTITY, UUID.randomUUID(), UUID.randomUUID(),
+                        increment.id(), Map.of("counter", "0"), Map.of()))
+                .toCompletableFuture().get().payload();
+        long coldNanos = System.nanoTime() - coldStarted;
+        assertEquals("1", ((Map<?, ?>) cold).get("counter"));
+
+        var handler = BehaviorRegistry.standard().create(increment).orElseThrow();
+        for (int count : increments) {
+            Object payload = Map.of("counter", "0");
+            long started = System.nanoTime();
+            for (int index = 0; index < count; index++) {
+                payload = handler.handle(new ai.ravenroot.api.execution.NodeMessage(
+                                IDENTITY, UUID.randomUUID(), UUID.randomUUID(), increment.id(), payload, Map.of()))
+                        .toCompletableFuture().get().payload();
+            }
+            long nanos = System.nanoTime() - started;
+            assertEquals(Integer.toString(count), ((Map<?, ?>) payload).get("counter"));
+            System.out.printf(java.util.Locale.ROOT,
+                    "register-machine matrix node increments=%d totalNanos=%d nanosPerIncrement=%.0f workers=0%n",
+                    count, nanos, (double) nanos / count);
+        }
+
+        for (int size : digits) {
+            String operand = "1" + "0".repeat(size - 1);
+            var add = new GraphNode("wide-add", NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                    "operation", "add", "left", "field:value", "right", "literal:1", "target", "value"));
+            var wideHandler = BehaviorRegistry.standard().create(add).orElseThrow();
+            long arithmeticStarted = System.nanoTime();
+            Object result = wideHandler.handle(new ai.ravenroot.api.execution.NodeMessage(
+                            IDENTITY, UUID.randomUUID(), UUID.randomUUID(), add.id(), Map.of("value", operand), Map.of()))
+                    .toCompletableFuture().get().payload();
+            long arithmeticNanos = System.nanoTime() - arithmeticStarted;
+            long serializationStarted = System.nanoTime();
+            String json = PayloadJson.write(PayloadValue.fromJava(result, PayloadLimits.DEFAULTS));
+            long serializationNanos = System.nanoTime() - serializationStarted;
+            assertEquals(size, ((String) ((Map<?, ?>) result).get("value")).length());
+            System.out.printf(java.util.Locale.ROOT,
+                    "register-machine matrix digits=%d arithmeticNanos=%d payloadJsonNanos=%d jsonBytes=%d workers=0%n",
+                    size, arithmeticNanos, serializationNanos, json.getBytes(StandardCharsets.UTF_8).length);
+        }
+
+        var log = new GraphNode("observe", NodeKind.BEHAVIOR, "log", Map.of("message", "counter={{payload.counter}}"));
+        long logStarted = System.nanoTime();
+        BehaviorRegistry.standard().create(log).orElseThrow().handle(new ai.ravenroot.api.execution.NodeMessage(
+                IDENTITY, UUID.randomUUID(), UUID.randomUUID(), log.id(), Map.of("counter", "1"), Map.of()))
+                .toCompletableFuture().get();
+        long logNanos = System.nanoTime() - logStarted;
+
+        var graph = counterGraph();
+        try (var manager = GraphManager.from(graph);
+             var engine = new PekkoExecutionEngine("register-machine-measurement-" + UUID.randomUUID());
+             var runner = new GraphRunner(manager, engine, BehaviorRegistry.standard(), new ExecutionMonitor())) {
+            long traversalColdStarted = System.nanoTime();
+            runner.execute(IDENTITY, Map.of("counter", "1")).toCompletableFuture().get();
+            long traversalColdNanos = System.nanoTime() - traversalColdStarted;
+            for (int count : increments) {
+                if (count > 100) {
+                    System.out.printf(java.util.Locale.ROOT,
+                            "register-machine matrix traversal increments=%d not-run=bounded-sample; "
+                                    + "node-only-row-above-covers-this-size workers=0%n", count);
+                    continue;
+                }
+                long started = System.nanoTime();
+                var result = runner.execute(IDENTITY, Map.of("counter", Integer.toString(count)))
+                        .toCompletableFuture().get();
+                long nanos = System.nanoTime() - started;
+                assertEquals("0", ((Map<?, ?>) result.payload()).get("counter"));
+                System.out.printf(java.util.Locale.ROOT,
+                        "register-machine matrix traversal increments=%d totalNanos=%d nanosPerIncrement=%.0f workers=0%n",
+                        count, nanos, (double) nanos / count);
+            }
+            System.out.printf(java.util.Locale.ROOT,
+                    "register-machine matrix coldNodeNanos=%d coldTraversalNanos=%d oneLogNanos=%d workers=0%n",
+                    coldNanos, traversalColdNanos, logNanos);
+        }
+    }
+
+    private static GraphDefinition counterGraph() {
+        return new GraphDefinition(List.of(
+                GraphNode.start("start"),
+                new GraphNode("zero", NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                        "operation", "equal", "left", "field:counter", "right", "literal:0", "target", "isZero")),
+                new GraphNode("branch", NodeKind.BEHAVIOR, "cel-decision", Map.of(
+                        "expression", "payload.isZero", "trueOutcome", "done", "falseOutcome", "again")),
+                new GraphNode("decrement", NodeKind.BEHAVIOR, "bigint-op", Map.of(
+                        "operation", "subtract", "left", "field:counter", "right", "literal:1", "target", "counter")),
+                GraphNode.end("end")), List.of(
+                GraphEdge.to("start", "zero"), GraphEdge.to("zero", "branch"),
+                new GraphEdge("branch", "end", "done"), new GraphEdge("branch", "decrement", "again"),
+                GraphEdge.to("decrement", "zero")), Map.of("join.semantics", "declared"));
     }
 
     private static GeneratedArtifact artifact(String source) throws Exception {

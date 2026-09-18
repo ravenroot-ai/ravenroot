@@ -96,4 +96,8 @@ repair command. The runtime treats the property as scalar graph metadata.
 
 `ravenroot validate graph.graphml` exits 0 for acceptance, 1 for a refused or invalid document, and 2 for CLI misuse. The HTTP inspection surface is `POST /v1/graphs/inspect`.
 
+`ravenroot validate --register-machine graph.graphml` performs the same ingest first, then applies
+the explicit [Register Machine Profile v1](register-machine-profile.md) static validator. Profile
+warnings do not change exit 0; profile errors return exit 1. No profile marker is added to GraphML.
+
 See [Graph semantics](../architecture/graph-semantics.md) for lifecycle invariants and [Graph validation](../troubleshooting/graph-execution.md) for recovery.

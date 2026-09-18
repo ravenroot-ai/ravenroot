@@ -5,6 +5,7 @@ Look up exact GraphML, node, execution, API, configuration, embed, extension, an
 ## Reading path
 
 - [GraphML profile](graphml.md) — Find accepted XML structure, keys, kinds, preservation rules, and refusal conditions.
+- [Register Machine Profile v1](register-machine-profile.md) — Author, validate, execute, observe, and measure transparent exact-integer computations.
 - [Node catalog, payloads, and limits](nodes-payload-limits.md) — Look up default and optional behaviors, properties, defaults, value domains, and payload budgets.
 - [Core node reference](core-nodes.md) — Use every default node with exact properties, payloads, outcomes, side effects, retry/cancellation applicability, and examples.
 - [Node descriptor contracts](node-contracts.md) — Inspect every compiled field, condition, descriptor limit, declared outcome, and complete GraphML example for all 59 supported nodes.

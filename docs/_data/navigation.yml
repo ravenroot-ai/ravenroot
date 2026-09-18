@@ -27,6 +27,8 @@
       url: /operator-guide/governed-runners.html
     - title: Disposable Agent example repository
       url: /examples/governed-runner/disposable-repository/
+    - title: Register Machine example library
+      url: /examples/register-machine/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility

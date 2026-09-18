@@ -159,6 +159,19 @@ With an object payload containing `{"counter":"9223372036854775808"}`, the node 
 `{"counter":"9223372036854775809"}`. Use an existing decision node after an `equal` operation to
 route on the Boolean target; arithmetic and control flow remain separate graph steps.
 
+The focused process-overhead measurement is opt-in so ordinary test runs never start its additional
+worker JVMs. From the `ravenroot/` Maven reactor directory, run it exactly with:
+
+```sh
+mvn -pl ravenroot-programming-graalvm -am \
+  -Dtest=BigIntProgramOverheadMeasurementTest \
+  -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dravenroot.bigint.measurement=true test
+```
+
+It reports normalized durations and the structural worker-start counts without enforcing a
+machine-dependent timing ratio.
+
 ## `cel-transform`
 
 | Field | Contract |

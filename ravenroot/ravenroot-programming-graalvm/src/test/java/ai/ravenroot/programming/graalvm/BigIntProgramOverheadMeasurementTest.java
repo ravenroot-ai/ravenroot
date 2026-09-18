@@ -11,6 +11,7 @@ import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -29,7 +30,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * host. It reports both normalized durations and the structural count that does not depend on the
  * scheduler: repeated {@code bigint-op} calls start zero worker processes, while every isolated
  * {@code program} invocation below starts one real worker JVM.</p>
+ *
+ * <p>The measurement is deliberately excluded from ordinary test runs because it starts additional
+ * real worker JVMs. Run it explicitly with {@code -Dravenroot.bigint.measurement=true}; the complete
+ * Maven command is published in the core node reference.</p>
  */
+@EnabledIfSystemProperty(named = "ravenroot.bigint.measurement", matches = "true")
 class BigIntProgramOverheadMeasurementTest {
     private static final int BIGINT_ITERATIONS = 10_000;
     private static final int PROGRAM_ITERATIONS = 2;

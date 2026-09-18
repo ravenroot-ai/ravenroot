@@ -60,7 +60,8 @@ public final class LocalRunnerClient implements RunnerControlClient {
     }
     @Override public RunnerAssignment heartbeat(RunnerAssignment assignment) throws IOException {
         return control.operate(actor, process(assignment), new RunnerJobOperation.Heartbeat(assignment.job().identity().runnerJobId(),
-                actor.subject(), assignment.job().fence(), configuration.leaseTtl(), session));
+                actor.subject(), assignment.job().fence(), configuration.leaseTtl(), session,
+                assignment.workspace() == null ? null : assignment.workspace().kubernetes()));
     }
     @Override public RunnerAssignment complete(RunnerAssignment assignment, RunnerResult result) throws IOException {
         return control.operate(actor, process(assignment), new RunnerJobOperation.Complete(assignment.job().identity().runnerJobId(),

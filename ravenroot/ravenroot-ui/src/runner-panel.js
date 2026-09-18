@@ -64,7 +64,8 @@ export function createRunnerWindow({ dialog }) {
         section.append(element('h4', resource.nodeId + ' · ' + resource.state),
           element('pre', JSON.stringify({ workspaceId: resource.workspaceId, runtimeId: resource.runtimeId,
             workspaceScope: resource.profile?.workspaceScope, runtimeLifecycle: resource.profile?.runtimeLifecycle,
-            runnerPool: resource.profile?.runnerPool, runnerId: resource.runnerId,
+            runnerPool: resource.profile?.runnerPool, runnerId: resource.runnerId, driver: resource.driver,
+            kubernetes: resource.kubernetes,
             ownershipGeneration: resource.ownershipGeneration, checkpoint: resource.checkpoint,
             capacity: resource.profile?.capacity, fleetLimits: resource.profile?.fleetLimits,
             cpuMillicores: resource.profile?.cpuMillicores, stopRequested: resource.stopRequested }, null, 2)));
@@ -80,13 +81,18 @@ export function createRunnerWindow({ dialog }) {
         const section = element('section');
         section.append(element('h4', job.command + ' · ' + job.state + ' · fence ' + job.fence),
           element('p', job.definition + ' v' + job.definitionVersion + ' · ' + (job.readOnly ? 'Read-only' : 'Governed write authority')));
+        if (job.kubernetes) section.append(element('p', 'Kubernetes · ' + job.kubernetes.cluster + ' / '
+          + job.kubernetes.namespace + ' · ' + job.kubernetes.phase + ' · ' + job.kubernetes.reason),
+          element('p', 'Pod ' + (job.kubernetes.podName || 'creating') + ' · PVC ' + job.kubernetes.claimName),
+          element('p', 'Model turns: ' + job.kubernetes.modelTurns + ' · Tool calls: ' + job.kubernetes.toolCalls
+            + ' · Observed model tokens: ' + job.kubernetes.modelTokens));
         if (job.result != null) section.append(element('h5', 'Agent result'), element('pre', JSON.stringify(job.result, null, 2)));
         const technical = element('details');
         technical.append(element('summary', 'Technical job identity and authority'),
           element('pre', JSON.stringify({ processInstanceId: id, traversalId: job.traversalId,
             invocationId: job.invocationId, attemptId: job.attemptId, runnerJobId: job.runnerJobId,
             workspaceRef: job.workspaceRef, deadline: job.deadline, leaseUntil: job.leaseUntil,
-            authority: job.authority, outcome: job.outcome }, null, 2)));
+            authority: job.authority, outcome: job.outcome, driver: job.driver, kubernetes: job.kubernetes }, null, 2)));
         section.append(technical);
         if (job.state === 'UNKNOWN') section.append(element('p',
           'Effect unknown. The workspace remains owned. Reconciliation is report-only; this action does not retry the agent.'));
@@ -144,6 +150,7 @@ export function createRunnerWindow({ dialog }) {
   });
   dialog.replaceChildren(heading, button('Close', () => dialog.close()), status,
     element('p', 'An Agent without workspaceRef remains unchanged. Named Agents reference explicit Workspaces and approved versions; graph instructions cannot grant authority.'),
+    element('p', 'The approved profile pins Docker or Kubernetes. Native metadata reports Pod/PVC identity, generation, lifecycle and budgets separately from Agent output. UNKNOWN is report-only; it never offers an effect retry or driver fallback.'),
     button('Refresh catalogue', refresh), catalog, editorLabel, editor,
     element('p', 'Changing a body requires a new version. Set approved explicitly to approve or retire; an operator scope is required.'),
     button('Save version / approval', save), processLabel, process, button('Inspect workspace', inspect), jobs, evidence,

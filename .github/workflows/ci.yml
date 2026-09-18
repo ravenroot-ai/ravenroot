@@ -775,10 +775,24 @@ jobs:
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress clean verify
       - name: Verify the isolated writable runner acceptance fixture
-        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint
+        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint scripts.tests.test_kubernetes_runner_acceptance
       - name: Run secretless hermetic model-protocol Workspace acceptance on native XFS project quotas
         timeout-minutes: 20
         run: python3 scripts/fixtures/runner_quota_acceptance.py
+      - name: Install pinned native Kubernetes acceptance tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_tools="$RUNNER_TEMP/ravenroot-kubernetes-tools"
+          mkdir -p "$fixture_tools"
+          curl --fail --silent --show-error --location https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-linux-amd64 -o "$fixture_tools/minikube"
+          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.35.4/bin/linux/amd64/kubectl -o "$fixture_tools/kubectl"
+          printf '099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e  %s/minikube\nb529430df69a688fd61b64ad2299edb5fd71cb58be2a4779dba624c7d3510efd  %s/kubectl\n' "$fixture_tools" "$fixture_tools" | sha256sum --check --strict
+          chmod 755 "$fixture_tools/minikube" "$fixture_tools/kubectl"
+          echo "$fixture_tools" >> "$GITHUB_PATH"
+      - name: Run native Kubernetes governed executor acceptance without capability skips
+        timeout-minutes: 20
+        run: python3 scripts/fixtures/kubernetes_runner_acceptance.py
       - name: Verify the published extension pack from a clean staged consumer
         run: ./scripts/verify-extension-pack-consumer.sh
 

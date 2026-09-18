@@ -26,6 +26,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -144,8 +145,14 @@ public final class RunnerJobService {
             }
             long reportFence = operation instanceof RunnerJobOperation.Claim || operation instanceof RunnerJobOperation.ReconcileReport
                     ? Math.incrementExact(entry.job().fence()) : entry.job().fence();
+            var physical = operation instanceof RunnerJobOperation.Heartbeat heartbeat ? heartbeat.kubernetes()
+                    : operation instanceof RunnerJobOperation.Complete completed && completed.result().workspace() != null
+                        ? completed.result().workspace().kubernetes() : entry.kubernetes();
+            var technical = new LinkedHashMap<String, Object>();
+            technical.put("driver", entry.job().runner().trustProfile().equals("kubernetes-pod-v1") ? "KUBERNETES" : "DOCKER");
+            technical.put("workspaceRef", entry.workspaceNodeId()); technical.put("kubernetes", RunnerJson.kubernetes(physical));
             recorder.applyRunner(operation, event(entry.job().identity(), actor, eventType(operation),
-                    reportFence, stored.graphVersionPin().reference(), null));
+                    reportFence, stored.graphVersionPin().reference(), null, technical));
             var result = store.loadRunnerWorkspace(key).toCompletableFuture().join().orElseThrow();
             var accepted = result.jobs().get(operation.jobId()).job();
             if (!entry.job().state().terminal() && accepted.state().terminal()) telemetry.increment(switch (accepted.state()) {
@@ -212,8 +219,13 @@ public final class RunnerJobService {
     }
 
     private EventEnvelope event(RunnerJobIdentity id, SecurityContext actor, String type, long fence, String graph, UUID cause) {
-        byte[] bytes = PayloadJson.write(PayloadValue.fromJava(Map.of("runnerJobId", id.runnerJobId().toString(),
-                "actor", actor.qualifiedIdentity(), "fence", fence), PayloadLimits.DEFAULTS)).getBytes(StandardCharsets.UTF_8);
+        return event(id, actor, type, fence, graph, cause, Map.of());
+    }
+    private EventEnvelope event(RunnerJobIdentity id, SecurityContext actor, String type, long fence, String graph, UUID cause,
+                                Map<String, Object> technical) {
+        var document = new LinkedHashMap<String, Object>(technical);
+        document.put("runnerJobId", id.runnerJobId().toString()); document.put("actor", actor.qualifiedIdentity()); document.put("fence", fence);
+        byte[] bytes = PayloadJson.write(PayloadValue.fromJava(document, PayloadLimits.DEFAULTS)).getBytes(StandardCharsets.UTF_8);
         UUID eventId = type.equals("RUNNER_JOB_TERMINAL_REPORTED")
                 ? terminalEventId(id.runnerJobId(), fence) : UUID.randomUUID();
         return EventEnvelope.of(eventId, id.execution().tenantId(), type, id.execution().processInstanceId(),
@@ -294,6 +306,8 @@ public final class RunnerJobService {
                         && value.name().equals(name) && value.version() == version)
                 .map(value -> ai.ravenroot.api.runner.RunnerCodec.workspaceProfile(value.document().bytes())).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Workspace profile is not approved"));
+        if (profile.driver() == ai.ravenroot.api.runner.WorkspaceProfile.Driver.KUBERNETES && message.command().name().equals("checkpoint"))
+            throw new UnsupportedOperationException("Kubernetes fixed-filesystem profiles do not support atomic checkpoints");
         var declared = Map.of("workspaceScope", profile.workspaceScope().name(), "runtimeLifecycle", profile.runtimeLifecycle().name(),
                 "runnerPool", profile.runnerPool(), "runtimeProfile", profile.runtimeProfile());
         declared.forEach((property, resolved) -> {
@@ -373,6 +387,8 @@ public final class RunnerJobService {
             return (double) Math.max(reserved, liveWorker.activeJobs()) / liveWorker.capacity();
         };
         return runners(profile.reference().tenantId()).stream().filter(value -> value.labels().contains(profile.runnerPool())
+                        && (profile.driver() == ai.ravenroot.api.runner.WorkspaceProfile.Driver.KUBERNETES)
+                            == value.trustProfile().equals("kubernetes-pod-v1")
                         && value.capabilities().capabilities().contains(ai.ravenroot.api.runner.RunnerPolicy.Capability.WORKSPACE_READ)
                         && availability.containsKey(value.runnerId()) && (pinned == null || value.runnerId().equals(pinned)))
                 .filter(value -> profile.capacity().admission() != ai.ravenroot.api.runner.WorkspaceProfile.Admission.REJECT || load.applyAsDouble(value) < 1)

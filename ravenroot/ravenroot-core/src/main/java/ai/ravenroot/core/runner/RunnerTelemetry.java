@@ -4,14 +4,26 @@ package ai.ravenroot.core.runner;
 public interface RunnerTelemetry {
     /** Fixed process-local observation counters, not unique durable job totals. */
     enum Counter { RECOVERY_OBSERVED, UNKNOWN_OBSERVED, RECOVERY_CONFLICT, WORKER_FAILURE,
-        JOB_COMPLETED, JOB_CANCELLED, JOB_DEADLINE_EXCEEDED, WORKSPACE_CHECKPOINTED, WORKSPACE_STOPPED, WORKSPACE_RELEASED }
+        JOB_COMPLETED, JOB_CANCELLED, JOB_DEADLINE_EXCEEDED, WORKSPACE_CHECKPOINTED, WORKSPACE_STOPPED, WORKSPACE_RELEASED,
+        KUBERNETES_CREATE, KUBERNETES_TERMINATE, KUBERNETES_UNKNOWN, KUBERNETES_FENCE_CONFLICT,
+        KUBERNETES_API_QUOTA, KUBERNETES_API_ADMISSION, KUBERNETES_API_AUTHORIZATION,
+        KUBERNETES_API_CONFLICT, KUBERNETES_API_UNAVAILABLE }
     /** Last bounded recovery page, not a fleet total; names cannot contain user-defined identities. */
     enum PageGauge { QUEUED_JOBS, ACTIVE_WORKSPACES, RETAINED_WORKSPACES, PER_INVOCATION_WORKSPACES,
-        PER_WORKSPACE_WORKSPACES, RESERVED_STORAGE_BYTES, RETAINED_ARTIFACT_BYTES, CANCELLING_JOBS }
+        PER_WORKSPACE_WORKSPACES, RESERVED_STORAGE_BYTES, RETAINED_ARTIFACT_BYTES, CANCELLING_JOBS,
+        KUBERNETES_CREATING, KUBERNETES_PENDING, KUBERNETES_RUNNING, KUBERNETES_TERMINATING,
+        KUBERNETES_SUCCEEDED, KUBERNETES_FAILED, KUBERNETES_UNKNOWN, KUBERNETES_ABSENT,
+        KUBERNETES_BACKEND_RESERVED_BYTES,
+        KUBERNETES_REASON_NONE, KUBERNETES_REASON_QUOTA, KUBERNETES_REASON_IMAGE_PULL,
+        KUBERNETES_REASON_PLACEMENT, KUBERNETES_REASON_VOLUME, KUBERNETES_REASON_ADMISSION,
+        KUBERNETES_REASON_EVICTED, KUBERNETES_REASON_OOM_KILLED, KUBERNETES_REASON_COMPLETED,
+        KUBERNETES_REASON_ERROR, KUBERNETES_REASON_NODE_LOST, KUBERNETES_REASON_UNKNOWN }
+    enum KubernetesOperation { CREATE, TERMINATE }
     void increment(Counter counter);
     void activeJobs(int count);
     default void workerCapacity(int configured, int available) { }
     default void recoveryPage(java.util.Map<PageGauge, Long> values) { }
+    default void kubernetesLatency(KubernetesOperation operation, long milliseconds) { }
 
     /** Composition relay keeps the core independent of the telemetry SDK. */
     final class Relay implements RunnerTelemetry {
@@ -35,6 +47,10 @@ public interface RunnerTelemetry {
             if (values.values().stream().anyMatch(value -> value == null || value < 0))
                 throw new IllegalArgumentException("invalid recovery page observation");
             delegate.recoveryPage(java.util.Map.copyOf(values));
+        }
+        public void kubernetesLatency(KubernetesOperation operation, long milliseconds) {
+            if (milliseconds < 0 || milliseconds > 3_600_000) throw new IllegalArgumentException("invalid bounded Kubernetes latency");
+            delegate.kubernetesLatency(java.util.Objects.requireNonNull(operation), milliseconds);
         }
     }
 }

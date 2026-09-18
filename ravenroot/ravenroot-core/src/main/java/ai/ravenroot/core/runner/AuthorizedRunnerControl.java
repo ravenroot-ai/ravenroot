@@ -30,6 +30,16 @@ public final class AuthorizedRunnerControl {
         return jobs.store().runnerResources(actor.tenantId()).toCompletableFuture().join();
     }
 
+    /** Refuses native delegation to older workers before any claim, cleanup or availability mutation. */
+    public void verifyWorkerCodecs(RequestContext actor, String capabilities) {
+        if (actor.principalType() != PrincipalType.WORKLOAD) return;
+        requireRunner(actor, actor.subject());
+        boolean nativeWorker = jobs.runners(actor.tenantId()).stream().anyMatch(runner -> runner.runnerId().equals(actor.subject())
+                && runner.trustProfile().equals("kubernetes-pod-v1"));
+        if (nativeWorker && !RunnerCodec.NATIVE_CAPABILITIES.equals(capabilities))
+            throw new IllegalStateException("native worker codec capabilities are incompatible");
+    }
+
     public GovernedRunnerResource save(RequestContext actor, GovernedRunnerResource resource, long expectedRevision) {
         authorize(actor, AuthorizationAction.RUNNER_ADMIN, "catalog");
         if (actor.principalType() != PrincipalType.USER || !actor.tenantId().equals(resource.tenantId())) {

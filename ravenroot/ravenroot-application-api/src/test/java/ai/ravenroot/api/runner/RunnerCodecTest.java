@@ -25,11 +25,22 @@ class RunnerCodecTest {
                         "application/octet-stream"), java.util.List.of(), UUID.randomUUID()));
         assertThrows(IllegalArgumentException.class, () -> RunnerCodec.result(new byte[RunnerCodec.MAX_BYTES + 1]));
     }
-    @Test void workspaceVersionThreeReadsBothLegacyVersionsWithoutInventingTerminationTime() throws Exception {
+    @Test void workspaceVersionFourReadsLegacyVersionsWithoutInventingTerminationTime() throws Exception {
         var job = job();
         var state = new RunnerWorkspaceState(job.identity().execution(), UUID.randomUUID(), RUNNER,
                 Map.of(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, EMPTY)));
         byte[] current = RunnerCodec.workspace(state);
+        // Version three has no per-job Kubernetes observation boolean. Preserve its budgeted
+        // definition and remove exactly that one field, rather than pretending v4 is v3.
+        int physicalOffset = current.length - 32 - 6;
+        var versionThreeBody = new java.io.ByteArrayOutputStream();
+        versionThreeBody.write(current, 0, physicalOffset);
+        versionThreeBody.write(current, physicalOffset + 1, current.length - physicalOffset - 1);
+        byte[] versionThree = versionThreeBody.toByteArray();
+        java.nio.ByteBuffer.wrap(versionThree).putInt(0x52524a33);
+        byte[] versionThreeDigest = java.security.MessageDigest.getInstance("SHA-256").digest(java.util.Arrays.copyOf(versionThree, versionThree.length - 32));
+        System.arraycopy(versionThreeDigest, 0, versionThree, versionThree.length - 32, 32);
+        assertArrayEquals(current, RunnerCodec.workspace(RunnerCodec.workspace(versionThree)));
         // Old definitions ended at outputSchema. Remove the new four budget scalars and empty
         // skill-body map from this exact embedded definition before constructing the old envelope.
         byte[] encodedDefinition = RunnerCodec.definition(job.definition());
@@ -47,9 +58,9 @@ class RunnerCodecTest {
         current = legacyBody.toByteArray();
         // This single legacy entry has null workspace-node/command fields (two bytes),
         // no termination time (one byte), and an empty resource map (four bytes).
-        // All seven bytes are contiguous immediately before the integrity digest.
+        // The new physical-observation boolean adds one byte to that tail (eight total).
         for (int version : new int[]{1, 2}) {
-        byte[] legacy = java.util.Arrays.copyOf(current, current.length - (version == 1 ? 7 : 6));
+        byte[] legacy = java.util.Arrays.copyOf(current, current.length - (version == 1 ? 8 : 7));
         java.nio.ByteBuffer.wrap(legacy).putInt(version == 1 ? 0x52524a31 : 0x52524a32);
         int payloadLength = legacy.length - 32;
         byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(java.util.Arrays.copyOf(legacy, payloadLength));

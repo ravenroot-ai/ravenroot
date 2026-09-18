@@ -20,7 +20,7 @@ class RunnerPlaneCommandTest {
                 assertEquals("Bearer conformance-identity", exchange.getRequestHeaders().getFirst("Authorization"));
                 seen.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
                 bodies.add(new String(exchange.getRequestBody().readAllBytes()));
-                byte[] result = "{\"result\":\"direct answer\"}".getBytes();
+                byte[] result = "{\"result\":\"direct answer\",\"driver\":\"KUBERNETES\",\"kubernetes\":{\"cluster\":\"approved\",\"podUid\":\"11111111-1111-4111-8111-111111111111\",\"phase\":\"UNKNOWN\"}}".getBytes();
                 exchange.sendResponseHeaders(200, result.length); exchange.getResponseBody().write(result);
             }
         });
@@ -41,6 +41,8 @@ class RunnerPlaneCommandTest {
             assertTrue(seen.get(4).endsWith("/resources/repository/abort")); assertTrue(bodies.get(4).contains("17"));
             assertTrue(bodies.get(7).contains("ACKNOWLEDGE")); assertTrue(seen.get(9).startsWith("PUT "));
             assertTrue(output.toString().contains("direct answer")); assertFalse(output.toString().contains("conformance-identity"));
+            assertTrue(output.toString().contains("KUBERNETES")); assertTrue(output.toString().contains("podUid"));
+            assertTrue(output.toString().contains("UNKNOWN"));
             for (var arguments : List.of(new String[]{"runner", "claim", process, job}, new String[]{"runner", "workspace", "../graphs"},
                     new String[]{"runner", "stop-workspace", process, "../repository", "17"}, new String[]{"runner", "resolve-job", process, job, "19", "RETRY"}))
                 assertEquals(1, RunnerPlaneCommand.run(arguments, backend, new PrintStream(output), new PrintStream(errors)));

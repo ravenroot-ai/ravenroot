@@ -67,7 +67,8 @@ class RunnerProtocolHttpTest {
                     </graphml>
                     """.getBytes());
             graphs.put("tenant", GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical).toCompletableFuture().join();
-            var service = new RunnerJobService(store, clock, List.of(definition), List.of(registration), Map.of("tenant", policy));
+            var nativeRegistration = new RunnerRegistration(1, "tenant", "native-manager", "kubernetes-pod-v1", Set.of(), policy);
+            var service = new RunnerJobService(store, clock, List.of(definition), List.of(registration, nativeRegistration), Map.of("tenant", policy));
             var submit = new RunnerJobOperation.Submit(identity, definition, "read", policy, registration,
                     OpaquePayload.of("{}".getBytes(), "application/json"), clock.instant().plusSeconds(300), UUID.randomUUID(),
                     OpaquePayload.empty("application/vnd.ravenroot.runner-continuation.v1"));
@@ -83,7 +84,7 @@ class RunnerProtocolHttpTest {
                              String token = headers.getFirst("Authorization");
                              if (token == null) throw new AuthenticationException("required");
                              boolean user = token.equals("Bearer operator") || token.equals("Bearer other-tenant-operator");
-                             return new AuthenticatedPrincipal(user ? "operator" : "designated",
+                             return new AuthenticatedPrincipal(user ? "operator" : token.equals("Bearer native") ? "native-manager" : "designated",
                                      user ? AuthenticatedPrincipal.Type.USER : AuthenticatedPrincipal.Type.WORKLOAD,
                                      token.equals("Bearer wrong-issuer") ? "other" : "trusted",
                                      token.startsWith("Bearer other-tenant") ? "other" : "tenant", Set.of(Role.TENANT_ADMIN),
@@ -92,6 +93,13 @@ class RunnerProtocolHttpTest {
                 server.installRunnerPlane(control, continuations); server.start();
                 URI endpoint = URI.create("http://127.0.0.1:" + server.port());
                 var http = HttpClient.newHttpClient();
+                for (String codecs : List.of("", "workspace=3,assignment=2,result=2,profile=1", RunnerCodec.NATIVE_CAPABILITIES)) {
+                    var request = HttpRequest.newBuilder(endpoint.resolve("/v1/runner-plane/assignments"))
+                            .header("Authorization", "Bearer native");
+                    if (!codecs.isEmpty()) request.header("X-Ravenroot-Runner-Codecs", codecs);
+                    var response = http.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
+                    assertEquals(codecs.equals(RunnerCodec.NATIVE_CAPABILITIES) ? 200 : 409, response.statusCode(), response.body());
+                }
                 for (String method : List.of("GET", "PUT", "POST")) {
                     assertEquals(404, http.send(HttpRequest.newBuilder(endpoint.resolve("/v1/runner-plane"))
                             .header("Authorization", "Bearer operator").method(method, HttpRequest.BodyPublishers.noBody())

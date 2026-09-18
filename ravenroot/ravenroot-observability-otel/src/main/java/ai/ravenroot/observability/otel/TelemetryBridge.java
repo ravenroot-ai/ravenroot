@@ -175,6 +175,8 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
     private final LongCounter connectorRetries;
     private final LongCounter agentBudget;
     private final LongCounter runnerObservations;
+    private final java.util.Map<ai.ravenroot.core.runner.RunnerTelemetry.KubernetesOperation, DoubleHistogram> kubernetesLatencies =
+            new java.util.EnumMap<>(ai.ravenroot.core.runner.RunnerTelemetry.KubernetesOperation.class);
     private final java.util.concurrent.atomic.AtomicLong runnerActive = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong runnerCapacity = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong runnerAvailable = new java.util.concurrent.atomic.AtomicLong();
@@ -214,6 +216,9 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         this.runnerObservations = meter.counterBuilder("ravenroot.runner.observations")
                 .setDescription("Process-local runner recovery, unknown-effect, conflict and worker failure observations; fixed counter enum only.")
                 .build();
+        for (var operation : ai.ravenroot.core.runner.RunnerTelemetry.KubernetesOperation.values())
+            kubernetesLatencies.put(operation, meter.histogramBuilder("ravenroot.runner.kubernetes." + operation.name().toLowerCase(java.util.Locale.ROOT))
+                    .setUnit("ms").setDescription("Bounded native workload lifecycle latency; no identity labels.").build());
         meter.gaugeBuilder("ravenroot.runner.worker.active").ofLongs()
                 .setDescription("Current occupied local runner worker slots under operator-configured capacity; not a fleet-wide total.")
                 .buildWithCallback(measurement -> measurement.record(runnerActive.get()));
@@ -338,6 +343,10 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
     }
     @Override public void recoveryPage(java.util.Map<ai.ravenroot.core.runner.RunnerTelemetry.PageGauge, Long> values) {
         runnerPage.forEach((key, gauge) -> gauge.set(values.getOrDefault(key, 0L)));
+    }
+    @Override public void kubernetesLatency(ai.ravenroot.core.runner.RunnerTelemetry.KubernetesOperation operation, long milliseconds) {
+        if (milliseconds < 0 || milliseconds > 3_600_000) throw new IllegalArgumentException("invalid Kubernetes latency");
+        kubernetesLatencies.get(operation).record(milliseconds);
     }
 
     @Override public void record(ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Dimension dimension,

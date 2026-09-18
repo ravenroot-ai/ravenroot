@@ -100,9 +100,23 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
      * @param continuationUncertain whether partial successor delivery prevents automatic replay
      * @param workspaceNodeId graph resource identity, null only for legacy stored jobs
      * @param lifecycleCommand resource operation, null for an Agent invocation
+     * @param kubernetes job-specific physical evidence, independent of other concurrent invocations
      */
     public record Entry(RunnerJob job, OpaquePayload continuation, boolean continuationUncertain,
-                        String workspaceNodeId, String lifecycleCommand) {
+                        String workspaceNodeId, String lifecycleCommand, KubernetesWorkload kubernetes) {
+        /**
+         * Restores an entry before physical evidence is available.
+         * @param job fenced job
+         * @param continuation trusted graph continuation
+         * @param continuationUncertain uncertain successor delivery
+         * @param workspaceNodeId graph resource reference
+         * @param lifecycleCommand lifecycle operation, or null
+         */
+        public Entry(RunnerJob job, OpaquePayload continuation, boolean continuationUncertain,
+                     String workspaceNodeId, String lifecycleCommand) {
+            this(job, continuation, continuationUncertain, workspaceNodeId, lifecycleCommand,
+                    job.result() == null || job.result().workspace() == null ? null : job.result().workspace().kubernetes());
+        }
         /**
          * Restores a legacy entry without asserting an explicit resource reference.
          * @param job accepted fenced job
@@ -119,7 +133,15 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
          * @return entry retaining its exact continuation and resource reference
          */
         public Entry withJob(RunnerJob replacement, boolean uncertain) {
-            return new Entry(replacement, continuation, uncertain, workspaceNodeId, lifecycleCommand);
+            if (kubernetes != null && replacement.result() != null && replacement.result().workspace() != null) {
+                var reported = replacement.result().workspace().kubernetes();
+                if (reported == null || !kubernetes.cluster().equals(reported.cluster()) || !kubernetes.namespace().equals(reported.namespace())
+                        || !kubernetes.claimUid().equals(reported.claimUid()) || kubernetes.generation() != reported.generation()
+                        || kubernetes.podUid() != null && !kubernetes.podUid().equals(reported.podUid()))
+                    throw new IllegalArgumentException("terminal result changed the observed Kubernetes job identity");
+            }
+            return new Entry(replacement, continuation, uncertain, workspaceNodeId, lifecycleCommand,
+                    replacement.result() == null || replacement.result().workspace() == null ? kubernetes : replacement.result().workspace().kubernetes());
         }
         /**
          * Creates a newly parked continuation without an uncertain-delivery marker.
@@ -130,6 +152,8 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
         /** Validates the bounded trusted checkpoint. */
         public Entry {
             Objects.requireNonNull(job); Objects.requireNonNull(continuation);
+            if (kubernetes != null && (workspaceNodeId == null || !job.runner().trustProfile().equals("kubernetes-pod-v1")))
+                throw new IllegalArgumentException("Kubernetes job observation does not match the pinned driver");
             if (continuation.size() > 4_194_304) throw new IllegalArgumentException("runner continuation too large");
         }
     }
@@ -154,6 +178,9 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
             RunnerJob job = item.getValue().job();
             var resource = item.getValue().workspaceNodeId() == null ? null : workspaces.get(item.getValue().workspaceNodeId());
             if (item.getValue().workspaceNodeId() != null && resource == null) throw new IllegalArgumentException("job workspace is missing");
+            var physical = item.getValue().kubernetes();
+            if (physical != null && (resource == null || resource.profile().driver() != WorkspaceProfile.Driver.KUBERNETES
+                    || physical.generation() != resource.generation())) throw new IllegalArgumentException("Kubernetes observation generation changed");
             if (!item.getKey().equals(job.identity().runnerJobId())
                     || !execution.equals(job.identity().execution())
                     || !(resource == null ? runnerId : resource.runnerId()).equals(job.runner().runnerId())
@@ -236,7 +263,7 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
             var resources = new LinkedHashMap<>(current.workspaces());
             resources.put(node, new WorkspaceResource(node, id, resource.profile(), worker,
                     acknowledged ? WorkspaceResource.State.RELEASED : WorkspaceResource.State.RELEASING,
-                    resource.runtimeId(), resource.checkpoint(), resource.stopRequested(), now, resource.generation()));
+                    resource.runtimeId(), resource.checkpoint(), resource.stopRequested(), now, resource.generation(), resource.kubernetes()));
             return new RunnerWorkspaceState(key, current.workspaceId(), current.runnerId(), current.jobs(), current.processTerminalAt(), resources);
         }
         if (operation instanceof RunnerJobOperation.Submit submit) {
@@ -378,6 +405,24 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
             case RunnerJobOperation.WorkspacePlace ignored -> throw new IllegalStateException("workspace placement already handled");
         };
         var updated = next == job ? current : current.replace(operation.jobId(), entry.withJob(next, entry.continuationUncertain()));
+        if (operation instanceof RunnerJobOperation.Heartbeat heartbeat && heartbeat.kubernetes() != null) {
+            var resource = updated.workspaces().get(entry.workspaceNodeId());
+            var workload = heartbeat.kubernetes();
+            if (resource == null || resource.profile().driver() != WorkspaceProfile.Driver.KUBERNETES
+                    || workload.generation() != resource.generation()) throw new IllegalArgumentException("physical observation driver or generation mismatch");
+            if (entry.kubernetes() != null && (!entry.kubernetes().cluster().equals(workload.cluster())
+                    || !entry.kubernetes().namespace().equals(workload.namespace()) || !entry.kubernetes().claimUid().equals(workload.claimUid())
+                    || entry.kubernetes().podUid() != null && !entry.kubernetes().podUid().equals(workload.podUid())
+                    || entry.kubernetes().modelTurns() > workload.modelTurns() || entry.kubernetes().toolCalls() > workload.toolCalls()
+                    || entry.kubernetes().modelTokens() > workload.modelTokens()))
+                throw new IllegalArgumentException("physical heartbeat changed a job identity or regressed its consumed budget");
+            updated = updated.replace(operation.jobId(), new Entry(next, entry.continuation(), entry.continuationUncertain(),
+                    entry.workspaceNodeId(), entry.lifecycleCommand(), workload));
+            var resources = new LinkedHashMap<>(updated.workspaces());
+            resources.put(resource.nodeId(), resource.observed("inspect", workload.podUid() == null ? null : workload.podUid().toString(),
+                    resource.checkpoint(), now, workload));
+            updated = new RunnerWorkspaceState(key, updated.workspaceId(), updated.runnerId(), updated.jobs(), updated.processTerminalAt(), resources);
+        }
         if (entry.workspaceNodeId() != null && next != job && next.state().terminal()) {
             var resources = new LinkedHashMap<>(updated.workspaces());
             var resource = resources.get(entry.workspaceNodeId());
@@ -387,9 +432,9 @@ public record RunnerWorkspaceState(ExecutionKey execution, UUID workspaceId, Str
                     && (expected == null || expected.equals(next.result().outcome()))) {
                 var observation = next.result().workspace();
                 resource = resource.observed(entry.lifecycleCommand() == null ? "inspect" : entry.lifecycleCommand(),
-                        observation.runtimeId(), observation.checkpoint(), now);
+                        observation.runtimeId(), observation.checkpoint(), now, observation.kubernetes());
             } else resource = new WorkspaceResource(resource.nodeId(), resource.workspaceId(), resource.profile(), resource.runnerId(),
-                    WorkspaceResource.State.RECOVERY_REQUIRED, resource.runtimeId(), resource.checkpoint(), resource.stopRequested(), now, resource.generation());
+                    WorkspaceResource.State.RECOVERY_REQUIRED, resource.runtimeId(), resource.checkpoint(), resource.stopRequested(), now, resource.generation(), resource.kubernetes());
             resources.put(entry.workspaceNodeId(), resource);
             updated = new RunnerWorkspaceState(key, updated.workspaceId(), updated.runnerId(), updated.jobs(), updated.processTerminalAt(), resources);
         }

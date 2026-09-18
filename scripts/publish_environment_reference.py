@@ -53,14 +53,22 @@ GROUPS = {
     "rate": Group("HTTP rate and representation limits", "configuration.md#http-rate-and-representation-limits"),
     "runtime": Group("Server lifecycle", "configuration.md#server-process-and-readiness"),
     "runner": Group("Governed runner coordination", "../operator-guide/governed-runners.md#graph-lifecycle-and-independent-scaling"),
+    "native-runner": Group("Native Agent attestation envelope", "../operator-guide/kubernetes-runners.md#attestation-environment"),
     "tool": Group("Tool and approval policy", "configuration.md#tool-and-approval-policy"),
 }
 
 ROW_BOUNDARIES = {
+    "RAVENROOT_POD_UID": "manager-generated Downward API Pod UID; required inside the native Agent, never an operator authority override",
+    "RAVENROOT_NETWORK_CONTROL_HOST": "manager-resolved numeric address of the secretless TCP/9443 attestation control; required inside the native Agent",
+    "RAVENROOT_WORKSPACE_LIMIT_BYTES": "manager-generated positive Workspace storage ceiling in bytes; actual filesystem enforcement must be positively attested",
+    "RAVENROOT_MEMORY_LIMIT_BYTES": "manager-generated positive memory ceiling in bytes; cgroup enforcement must not exceed it",
+    "RAVENROOT_CPU_MILLICORES": "manager-generated positive CPU ceiling in millicores; cgroup enforcement must not exceed it",
+    "RAVENROOT_PROCESS_LIMIT": "manager-generated positive process ceiling; the native PID boundary probe must fail within it",
     "RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS": "positive integer HTTP executor threads; unset defaults to `16`; coordinator startup only, independent of worker job capacity",
     "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE": "positive integer HTTP executor queue capacity; unset defaults to `64`; coordinator startup only, independent of worker queues",
     "RAVENROOT_RUNNER_SHARED_ARTIFACTS": "must equal `true` to attest one shared POSIX-locking artifact volume for the PostgreSQL runner-only coordinator topology; unset refuses that executable",
     "RAVENROOT_RUNNER_INSTANCE": "operator-supplied stable worker identity replaces `{instance}` in registration.runnerId and tokenFile; absent is valid only when neither field uses that placeholder",
+    "RAVENROOT_RUNNER_READINESS_FILE": "optional operator-owned expiring readiness file; native Helm managers use `/tmp/ravenroot-runner-ready`; positive preflight and current worker availability are required, and stale or absent files are not ready",
     "RAVENROOT_RUNNER_CONFIG": "unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart",
     "RAVENROOT_LOCAL_RUNNER_CONFIG": "unset disables the private supervised local worker; otherwise a closed operator JSON file for tenant local, approved registration, runtime images and budgets; no endpoint/token fields; requires exact 127.0.0.1 exposure, disabled local authentication and durable governed control plane",
     "RAVENROOT_MATRIX_CONFIG": (
@@ -171,8 +179,11 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name in {"RAVENROOT_POD_UID", "RAVENROOT_NETWORK_CONTROL_HOST", "RAVENROOT_WORKSPACE_LIMIT_BYTES",
+                "RAVENROOT_MEMORY_LIMIT_BYTES", "RAVENROOT_CPU_MILLICORES", "RAVENROOT_PROCESS_LIMIT"}:
+        return "native-runner"
     if name in {"RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS", "RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE",
-                "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE", "RAVENROOT_LOCAL_RUNNER_CONFIG"}:
+                "RAVENROOT_RUNNER_SHARED_ARTIFACTS", "RAVENROOT_RUNNER_INSTANCE", "RAVENROOT_RUNNER_READINESS_FILE", "RAVENROOT_LOCAL_RUNNER_CONFIG"}:
         return "runner"
     if name == "RAVENROOT_RUNNER_CONFIG":
         return "agent"

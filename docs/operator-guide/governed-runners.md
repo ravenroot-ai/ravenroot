@@ -1,5 +1,9 @@
 # Governed agents and runners
 
+The approved Workspace profile explicitly selects a driver. The Docker path below remains a Docker
+supervisor, including when deployed by Helm. For native Pod/PVC execution without a host socket,
+use [Kubernetes-native runners](kubernetes-runners.md), its positive preflight and support matrix.
+
 The runner plane is opt-in. It adds visible Workspace lifecycle nodes and named Agents with optional
 typed `workspaceRef`; ordinary Agent graphs retain the bounded AI-extension behavior. A named
 definition also works without `workspaceRef`: its approved model profile, instructions, command and

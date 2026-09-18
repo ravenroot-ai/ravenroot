@@ -18,6 +18,9 @@ final class RunnerOpenApi {
         operation.put("x-assistant-posture", route.assistantPosture().name());
         operation.put("security", List.of(Map.of("bearerAuth", List.of())));
         var parameters = new ArrayList<Map<String, Object>>();
+        parameters.add(parameter("X-Ravenroot-Runner-Codecs", "header", false, Map.of("type", "string",
+                "description", "Required for native workload identities before any delegation; incompatible or missing readers are refused",
+                "enum", List.of(ai.ravenroot.api.runner.RunnerCodec.NATIVE_CAPABILITIES))));
         var matcher = java.util.regex.Pattern.compile("\\{([^/{}]+)}").matcher(route.path());
         while (matcher.find()) parameters.add(parameter(matcher.group(1), "path", true,
                 Set.of("key", "nodeId").contains(matcher.group(1)) ? string() : Map.of("type", "string", "format", "uuid")));
@@ -53,7 +56,9 @@ final class RunnerOpenApi {
             properties.put("ttlSeconds", Map.of("type", "integer", "minimum", 1, "description", "Bounded by the immutable effective job wall-time policy"));
             properties.put("workerSession", Map.of("type", "string", "format", "uuid", "description", "Required live incarnation for explicit Workspace claims and heartbeats"));
             var required = new ArrayList<>(List.of("ttlSeconds"));
-            if (path.endsWith("/heartbeat")) { properties.put("fence", positiveLong()); required.add("fence"); }
+            if (path.endsWith("/heartbeat")) {
+                properties.put("fence", positiveLong()); properties.put("kubernetes", kubernetes()); required.add("fence");
+            }
             operation.put("requestBody", body("application/json", object(required, properties)));
         } else if (method.equals("PUT")) operation.put("requestBody", body("application/json", object(
                 List.of("kind", "name", "version", "approved", "expectedRevision", "document"), Map.of(
@@ -84,10 +89,12 @@ final class RunnerOpenApi {
                 "workspaces", Map.of("type", "array", "items", object(List.of("nodeId", "workspaceId", "state", "profile"), Map.of(
                         "nodeId", string(), "workspaceId", Map.of("type", "string", "format", "uuid"),
                         "state", Map.of("type", "string", "enum", Arrays.stream(ai.ravenroot.api.runner.WorkspaceResource.State.values()).map(Enum::name).toList()),
-                        "profile", Map.of("type", "object"), "runtimeId", Map.of("type", "string", "nullable", true),
+                        "profile", workspaceProfile(), "driver", Map.of("type", "string", "enum", List.of("DOCKER", "KUBERNETES")),
+                        "kubernetes", kubernetes(), "runtimeId", Map.of("type", "string", "nullable", true),
                         "stopRequested", Map.of("type", "boolean"), "ownershipGeneration", positiveLong()))),
                 "jobs", Map.of("type", "array", "items", Map.of("type", "object", "properties", Map.of(
-                        "workspaceRef", Map.of("type", "string", "nullable", true), "result", Map.of("description", "Direct structured Agent result; technical job metadata is separate", "nullable", true))))));
+                        "workspaceRef", Map.of("type", "string", "nullable", true), "driver", Map.of("type", "string", "enum", List.of("DOCKER", "KUBERNETES")),
+                        "kubernetes", kubernetes(), "result", Map.of("description", "Direct structured Agent result; technical job metadata is separate", "nullable", true))))));
         var content = new LinkedHashMap<String, Object>(); content.put(type, Map.of("schema", schema));
         if (path.endsWith("/{artifactId}")) {
             content.put("application/octet-stream", Map.of("schema", Map.of("type", "string", "format", "binary")));
@@ -147,6 +154,7 @@ final class RunnerOpenApi {
         fields.put("version", positiveLong()); fields.put("cpuMillicores", positiveLong()); fields.put("policy", policy());
         fields.put("workspaceScope", Map.of("type", "string", "enum", List.of("EPHEMERAL", "PROCESS_INSTANCE", "NAMED")));
         fields.put("runtimeLifecycle", Map.of("type", "string", "enum", List.of("PER_INVOCATION", "PER_WORKSPACE")));
+        fields.put("driver", Map.of("type", "string", "enum", List.of("DOCKER", "KUBERNETES"), "default", "DOCKER"));
         fields.put("completionPolicy", Map.of("type", "string", "enum", List.of("REQUIRE_CLOSED", "ABORT")));
         fields.put("allowedAgents", stringSet());
         fields.put("capacity", object(List.of("mutatingUsers", "readOnlyUsers", "materializedWorkspaces", "aggregateStorageBytes", "queuedJobs", "retainedJobs", "admission"),
@@ -159,6 +167,25 @@ final class RunnerOpenApi {
                 Map.of("GLOBAL", fleet, "POOL", fleet, "WORKER", fleet, "TENANT", fleet, "PROFILE", fleet)));
         return object(List.of("name", "version", "workspaceScope", "runtimeLifecycle", "runnerPool", "runtimeProfile", "policy",
                 "capacity", "retention", "completionPolicy", "allowedAgents"), fields);
+    }
+    private static Map<String, Object> kubernetes() {
+        var fields = new LinkedHashMap<String, Object>();
+        fields.put("protocolVersion", Map.of("type", "integer", "enum", List.of(1)));
+        for (String name : List.of("cluster", "namespace", "claimName")) fields.put(name, Map.of("type", "string", "maxLength", 253));
+        for (String name : List.of("podName", "volumeName")) fields.put(name, Map.of("type", "string", "maxLength", 253, "nullable", true));
+        fields.put("podUid", Map.of("type", "string", "format", "uuid", "nullable", true));
+        fields.put("claimUid", Map.of("type", "string", "format", "uuid"));
+        fields.put("ownershipGeneration", positiveLong()); fields.put("requestedBytes", positiveLong());
+        fields.put("enforcedBytes", Map.of("type", "integer", "format", "int64", "minimum", 0));
+        fields.put("attestationDigest", Map.of("type", "string", "pattern", "^sha256:[0-9a-f]{64}$", "nullable", true));
+        fields.put("phase", Map.of("type", "string", "enum", Arrays.stream(ai.ravenroot.api.runner.KubernetesWorkload.Phase.values()).map(Enum::name).toList()));
+        fields.put("condition", Map.of("type", "string", "enum", Arrays.stream(ai.ravenroot.api.runner.KubernetesWorkload.Condition.values()).map(Enum::name).toList()));
+        fields.put("reason", Map.of("type", "string", "enum", Arrays.stream(ai.ravenroot.api.runner.KubernetesWorkload.Reason.values()).map(Enum::name).toList()));
+        fields.put("exitCode", Map.of("type", "integer", "minimum", 0, "maximum", 255, "nullable", true));
+        for (String name : List.of("modelTurns", "toolCalls", "modelTokens"))
+            fields.put(name, Map.of("type", "integer", "format", "int64", "minimum", 0));
+        return Map.of("type", "object", "nullable", true, "additionalProperties", false,
+                "required", new ArrayList<>(fields.keySet()), "properties", fields);
     }
     private static Map<String, Object> string() { return Map.of("type", "string"); }
     private static Map<String, Object> positiveLong() { return Map.of("type", "integer", "format", "int64", "minimum", 1); }

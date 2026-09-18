@@ -34,8 +34,18 @@ public record RunnerResult(String outcome, OpaquePayload payload, List<RunnerArt
      * @param workspaceId filesystem identity assigned by the control plane
      * @param runtimeId driver-observed container or VM identity, null when none is materialized
      * @param checkpoint immutable snapshot digest, null before any checkpoint exists
+     * @param kubernetes native workload evidence, null for non-Kubernetes drivers
      */
-    public record WorkspaceObservation(UUID workspaceId, String runtimeId, String checkpoint) {
+    public record WorkspaceObservation(UUID workspaceId, String runtimeId, String checkpoint, KubernetesWorkload kubernetes) {
+        /**
+         * Reconstructs existing Docker/runtime evidence without inventing Kubernetes identity.
+         * @param workspaceId owned Workspace
+         * @param runtimeId physical runtime
+         * @param checkpoint immutable checkpoint
+         */
+        public WorkspaceObservation(UUID workspaceId, String runtimeId, String checkpoint) {
+            this(workspaceId, runtimeId, checkpoint, null);
+        }
         /** Requires a filesystem identity and syntactically bounded runtime/checkpoint evidence. */
         public WorkspaceObservation {
             Objects.requireNonNull(workspaceId);
@@ -43,6 +53,8 @@ public record RunnerResult(String outcome, OpaquePayload payload, List<RunnerArt
                 throw new IllegalArgumentException("invalid physical runtime identity");
             if (checkpoint != null && !checkpoint.matches("sha256:[0-9a-f]{64}"))
                 throw new IllegalArgumentException("immutable checkpoint identity required");
+            if (kubernetes != null && kubernetes.podUid() != null && !kubernetes.podUid().toString().equals(runtimeId))
+                throw new IllegalArgumentException("Kubernetes runtime must identify the exact Pod UID");
         }
     }
     /** Enforces protocol-wide bounds; admission applies the stricter effective policy. */

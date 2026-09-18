@@ -420,6 +420,8 @@ public final class LocalContainerRunner implements RunnerDriver {
     }
     private void validate(RunnerAssignment assignment, boolean reportOnly) {
         var job = assignment.job();
+        if (assignment.workspace() != null && assignment.workspace().profile().driver() != WorkspaceProfile.Driver.DOCKER)
+            throw new IllegalArgumentException("Workspace is pinned to another execution driver");
         if (!job.runner().equals(registration) || !runtimeImages.containsKey(job.definition().runtimeProfile())
                 || !job.authority().equals(RunnerPolicy.effective(job.authority(), job.definition().policy(),
                         job.command(), registration.capabilities()))) {

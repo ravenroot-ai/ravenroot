@@ -133,8 +133,20 @@ public sealed interface RunnerJobOperation {
      * @param fence current live fence
      * @param ttl bounded requested lease extension
      * @param workerSession exact live supervisor incarnation, null only for legacy jobs
+     * @param kubernetes bounded physical observation, or null when unavailable
      */
-    record Heartbeat(UUID jobId, String runnerId, long fence, Duration ttl, UUID workerSession) implements RunnerJobOperation {
+    record Heartbeat(UUID jobId, String runnerId, long fence, Duration ttl, UUID workerSession, KubernetesWorkload kubernetes) implements RunnerJobOperation {
+        /**
+         * Renews a claim without adding a native physical observation.
+         * @param jobId accepted job
+         * @param runnerId pinned worker
+         * @param fence live fence
+         * @param ttl lease extension
+         * @param workerSession live worker incarnation
+         */
+        public Heartbeat(UUID jobId, String runnerId, long fence, Duration ttl, UUID workerSession) {
+            this(jobId, runnerId, fence, ttl, workerSession, null);
+        }
         /**
          * Renews a legacy claim without inventing an incarnation identity.
          * @param jobId accepted legacy job

@@ -280,6 +280,13 @@ class CardinalityAllowlistTest {
                     .getLongGaugeData().getPoints().iterator().next();
             assertEquals(19, point.getValue()); assertTrue(point.getAttributes().isEmpty());
         }
+        for (var operation : ai.ravenroot.core.runner.RunnerTelemetry.KubernetesOperation.values()) {
+            relay.kubernetesLatency(operation, 17);
+            var points = onlyMetric("ravenroot.runner.kubernetes." + operation.name().toLowerCase(java.util.Locale.ROOT)).getHistogramData().getPoints();
+            assertEquals(1, points.size()); assertEquals(17, points.iterator().next().getSum());
+            assertTrue(points.iterator().next().getAttributes().isEmpty());
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> relay.kubernetesLatency(operation, -1));
+        }
     }
 
     @Test

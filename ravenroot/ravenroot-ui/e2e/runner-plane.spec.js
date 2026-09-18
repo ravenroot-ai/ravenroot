@@ -17,7 +17,10 @@ test('runner workbench exposes fenced uncertainty and renders retained evidence 
         result: { result: 'Reviewed the uncommitted change.' },
         artifacts: [{ artifactId, kind: 'STDERR', sizeBytes: 12, sha256: 'a'.repeat(64) }],
       }, { runnerJobId: '44444444-4444-4444-8444-444444444444', command: 'implement',
-        state: 'UNKNOWN', fence: 2, definition: 'developer', definitionVersion: 1, artifacts: [] }],
+        state: 'UNKNOWN', fence: 2, definition: 'developer', definitionVersion: 1, artifacts: [],
+        driver: 'KUBERNETES', kubernetes: { cluster: 'native', namespace: 'governed-agents',
+          podName: 'owned-agent', podUid: jobId, claimName: 'owned-workspace', claimUid: artifactId,
+          phase: 'FAILED', reason: 'OOM_KILLED', modelTurns: 2, toolCalls: 3, modelTokens: 40 } }],
       workspaces: [{ nodeId: 'repository', state: 'READY', workspaceId: 'workspace', runtimeId: 'runtime', runnerId: 'designated',
         profile: { workspaceScope: 'PROCESS_INSTANCE', runtimeLifecycle: 'PER_WORKSPACE', runnerPool: 'development' } }],
     };
@@ -40,6 +43,10 @@ test('runner workbench exposes fenced uncertainty and renders retained evidence 
   await dialog.getByRole('button', { name: 'Inspect workspace' }).click();
   await expect(dialog).toContainText('Successor delivery is uncertain');
   await expect(dialog).toContainText('Effect unknown');
+  await expect(dialog).toContainText('governed-agents');
+  await expect(dialog).toContainText('OOM_KILLED');
+  await expect(dialog).toContainText('owned-workspace');
+  await expect(dialog).toContainText('Observed model tokens: 40');
   await expect(dialog).toContainText('Reviewed the uncommitted change.');
   await expect(dialog.getByText('Technical job identity and authority').first()).toBeVisible();
   expect(await dialog.locator('details').first().getAttribute('open')).toBeNull();

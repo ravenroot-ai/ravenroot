@@ -45,6 +45,7 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
 
     private void route(HttpExchange exchange, HttpRequestContext context) throws IOException {
         var actor = context.applicationContext();
+        control.verifyWorkerCodecs(actor, exchange.getRequestHeaders().getFirst("X-Ravenroot-Runner-Codecs"));
         String path = exchange.getRequestURI().getPath().substring("/v1/runner-plane".length());
         String method = exchange.getRequestMethod();
         if (path.equals("/availability")) {
@@ -85,6 +86,9 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
         }
         if (path.equals("/register") && method.equals("POST")) {
             var value = RunnerJson.read(body(exchange, RunnerJson.LIMITS.maxEncodedBytes()));
+            if ("kubernetes-pod-v1".equals(value.get("trustProfile")) && !RunnerCodec.NATIVE_CAPABILITIES.equals(
+                    exchange.getRequestHeaders().getFirst("X-Ravenroot-Runner-Codecs")))
+                throw new IllegalStateException("native worker codec capabilities are incompatible");
             json(exchange, 200, RunnerJson.resource(control.register(actor, RunnerJson.registration(actor.tenantId(), value)))); return;
         }
         if (path.equals("/assignments") && method.equals("GET")) {
@@ -194,7 +198,8 @@ final class RunnerPlaneHttpApi implements HttpRequestContext.Handler {
                 case "claim" -> new RunnerJobOperation.Claim(jobId, actor.subject(), ttl,
                         value.containsKey("workerSession") ? UUID.fromString(RunnerJson.text(value, "workerSession")) : null);
                 case "heartbeat" -> new RunnerJobOperation.Heartbeat(jobId, actor.subject(), RunnerJson.number(value, "fence"), ttl,
-                        value.containsKey("workerSession") ? UUID.fromString(RunnerJson.text(value, "workerSession")) : null);
+                        value.containsKey("workerSession") ? UUID.fromString(RunnerJson.text(value, "workerSession")) : null,
+                        value.containsKey("kubernetes") ? RunnerJson.kubernetes(RunnerJson.map(value.get("kubernetes"))) : null);
                 case "reconcile-report" -> new RunnerJobOperation.ReconcileReport(jobId, actor.subject(), ttl);
                 default -> throw new IllegalArgumentException("unknown runner operation");
             };

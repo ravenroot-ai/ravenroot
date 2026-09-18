@@ -16,7 +16,13 @@ class ModelProtocolEndpointTest(unittest.TestCase):
         return {"model": fixture.MODEL, "messages": [{"role": "system", "content": "fixture"},
                 {"role": "user", "content": json.dumps({"command": command})}]
                 + [{"role": "tool", "content": json.dumps(result)} for result in results],
-                "tools": [{"function": {"name": name}} for name in ("read_file", "write_file", "test", "finish")]}
+                "tools": [{"function": {"name": name}} for name in ("read_file", "list_files", "write_file", "test", "finish")]}
+
+    def test_review_observes_missing_ephemeral_sentinel_instead_of_inventing_it(self):
+        values = ["def add(a,b): return a-b", "test", ["hello.py", "test_hello.py"]]
+        call = self.call(self.request("review", values))
+        self.assertEqual("finish", call["name"])
+        self.assertNotIn("PLAN.md", json.loads(call["arguments"])["result"])
 
     def call(self, request):
         return fixture.proposal(request)["choices"][0]["message"]["tool_calls"][0]["function"]

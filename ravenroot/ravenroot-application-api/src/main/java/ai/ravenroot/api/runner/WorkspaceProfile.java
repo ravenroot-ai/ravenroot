@@ -18,12 +18,40 @@ import java.util.Set;
  * @param allowedAgents exact eligible Agent definition names
  * @param fleetLimits atomic accounting ceilings for all placement scopes
  * @param cpuMillicores maximum runtime CPU in thousandths of one core
+ * @param driver approved physical substrate, pinned for the complete Workspace generation
  */
 public record WorkspaceProfile(AgentDefinition.Reference reference, Scope workspaceScope,
                                RuntimeLifecycle runtimeLifecycle, String runnerPool, String runtimeProfile,
                                RunnerPolicy policy, Capacity capacity, Duration retention,
                                CompletionPolicy completionPolicy, Set<String> allowedAgents,
-                               RunnerFleetLimits fleetLimits, int cpuMillicores) {
+                               RunnerFleetLimits fleetLimits, int cpuMillicores, Driver driver) {
+    /** Closed substrate vocabulary; selection never grants graph-controlled cluster access. */
+    public enum Driver {
+        /** Quota-attested Linux Docker supervisor. */ DOCKER,
+        /** Native Kubernetes Pod/PVC execution. */ KUBERNETES
+    }
+    /**
+     * Reads a pre-Kubernetes profile as an explicitly Docker-backed profile.
+     * @param reference approved version
+     * @param workspaceScope filesystem lifetime
+     * @param runtimeLifecycle runtime lifetime
+     * @param runnerPool operator pool
+     * @param runtimeProfile installed runtime
+     * @param policy authority ceiling
+     * @param capacity Workspace ceilings
+     * @param retention retained evidence lifetime
+     * @param completionPolicy open-resource completion behavior
+     * @param allowedAgents approved definitions
+     * @param fleetLimits fleet accounting ceilings
+     * @param cpuMillicores CPU ceiling
+     */
+    public WorkspaceProfile(AgentDefinition.Reference reference, Scope workspaceScope, RuntimeLifecycle runtimeLifecycle,
+                            String runnerPool, String runtimeProfile, RunnerPolicy policy, Capacity capacity,
+                            Duration retention, CompletionPolicy completionPolicy, Set<String> allowedAgents,
+                            RunnerFleetLimits fleetLimits, int cpuMillicores) {
+        this(reference, workspaceScope, runtimeLifecycle, runnerPool, runtimeProfile, policy, capacity, retention,
+                completionPolicy, allowedAgents, fleetLimits, cpuMillicores, Driver.DOCKER);
+    }
     /**
      * Selects the compatibility CPU default of one core; the canonical constructor permits other values.
      * @param reference exact approved profile version
@@ -113,6 +141,7 @@ public record WorkspaceProfile(AgentDefinition.Reference reference, Scope worksp
         Objects.requireNonNull(runtimeLifecycle); Objects.requireNonNull(policy);
         Objects.requireNonNull(capacity); Objects.requireNonNull(retention); Objects.requireNonNull(completionPolicy);
         Objects.requireNonNull(fleetLimits);
+        Objects.requireNonNull(driver);
         if (cpuMillicores < 1) throw new IllegalArgumentException("Workspace CPU ceiling must be positive");
         runnerPool = RunnerPolicy.identifier(runnerPool); runtimeProfile = RunnerPolicy.identifier(runtimeProfile);
         allowedAgents = RunnerPolicy.identifiers(allowedAgents);

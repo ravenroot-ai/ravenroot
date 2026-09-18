@@ -25,6 +25,8 @@
       url: /user-guide/human-task-confirmations.html
     - title: Governed agents and runners
       url: /operator-guide/governed-runners.html
+    - title: Kubernetes-native runners
+      url: /operator-guide/kubernetes-runners.html
     - title: Disposable Agent example repository
       url: /examples/governed-runner/disposable-repository/
     - title: Credentials, providers, and artifacts

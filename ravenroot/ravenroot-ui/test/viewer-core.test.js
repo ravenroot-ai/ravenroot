@@ -35,13 +35,27 @@ describe('shared read-only viewer core', () => {
     const snapshot = createViewerSnapshot(projection());
 
     expect(snapshot.nodes[0]).toEqual({
-      id: 'start', kind: 'START', layout: { x: 10, y: 20, width: 84, height: 84 },
+      id: 'start', kind: 'START', visualType: 'start', label: 'start', bypassed: false,
+      layout: { x: 10, y: 20, width: 84, height: 84 },
     });
     expect(snapshot.elements[0].data).toEqual({
-      id: 'start', label: '▶ start', nodeType: 'start', nw: 84, nh: 84,
+      id: 'start', label: '▶ start', cardLabel: 'start', name: 'start', nodeType: 'start', bypassed: false,
+      runtimeState: 'idle', runtimeObserved: false, nw: 84, nh: 84,
     });
     expect(JSON.stringify(snapshot)).not.toContain('must-not-cross');
     expect(Object.isFrozen(snapshot)).toBe(true);
+  });
+
+  it('accepts only the allowlisted visual semantics needed for editor parity', () => {
+    const snapshot = createViewerSnapshot(projection({
+      nodes: [{ id: 'worker', kind: 'BEHAVIOR', visualType: 'agent', label: 'Summarize',
+        bypassed: true, layout: { x: 1, y: 2, width: 140, height: 72 }, secret: 'no' }],
+      edges: [],
+    }));
+    expect(snapshot.elements[0].data).toMatchObject({
+      id: 'worker', name: 'Summarize', nodeType: 'agent', bypassed: true,
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('secret');
   });
 
   it('settles READY only after rendering and delegates read-only viewport operations', async () => {

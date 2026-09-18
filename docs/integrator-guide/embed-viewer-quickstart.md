@@ -14,7 +14,8 @@ graph contents are the whole of what it does.
 There is no embeddable editor. If you are here to put the Ravenroot authoring workspace into another
 product, stop: that surface does not exist, and nothing on this page will produce it.
 
-What crosses into your page is a projection of one registered graph version. The graph data itself
+What crosses into your page is a projection of one registered source. A registration can hold an
+immutable snapshot or attach to a live deployment; either way, the graph data itself
 never passes through your host page's JavaScript — the viewer fetches it directly, inside its own
 frame, on its own origin.
 
@@ -39,7 +40,7 @@ Read these before you write anything. Each one fails silently or confusingly if 
    session with `403 EMBED_SESSION_UNAVAILABLE`. Nothing reports the origin as the cause. If a brand
    new registration never produces a launch, compare its origin string against this rule character by
    character before you look anywhere else.
-3. **Two of the five endpoints are server-only, by construction.** `/v1/embed/sessions` and
+3. **Two of the six endpoints are server-only, by construction.** `/v1/embed/sessions` and
    `/v1/embed/acknowledgements` refuse any request that carries a `Cookie`, an `Origin` header, or
    any `Sec-Fetch-*` header. A browser always sends those, so these calls cannot be made from your
    page even if you tried. They belong to your server, which holds the workload token. The token
@@ -97,6 +98,10 @@ sequenceDiagram
     R-->>V: short-lived bearer
     V->>R: POST /v1/embed/projection
     R-->>V: read-only projection
+    opt registration source is a live deployment
+        V->>R: POST /v1/embed/observation (signed stream)
+        R-->>V: lifecycle and allowlisted execution events
+    end
     V-->>B: postMessage READY
 ```
 
@@ -110,9 +115,31 @@ the viewer ignores any message that does not.
 | `/v1/embed/acknowledgements` | POST | **Your server** | Vouches for the exact viewer channel before the exchange |
 | `/v1/embed/exchange` | POST | The viewer, by itself | Trades the bootstrap challenge for a short-lived bearer |
 | `/v1/embed/projection` | POST | The viewer, by itself | Retrieves the read-only projection |
+| `/v1/embed/observation` | POST | The viewer, by itself | Streams lifecycle and allowlisted execution state for a live-deployment source |
 
 You implement the first and third. The viewer does the rest on its own; you never call `exchange` or
-`projection`, and you never see the bearer or the projection.
+`projection` or `observation`, and you never see the bearer, projection, or observation stream.
+
+## Choose the registration source
+
+The operator chooses exactly one source when provisioning the registration:
+
+- A **snapshot source** captures a projected graph and its policy attestations at provisioning time.
+  It never follows later deployment activity.
+- A **deployment source** names one local deployment. Each viewer session resolves that deployment to
+  an immutable `(deploymentId, graphVersion, incarnationId)` binding, renders its safe projection,
+  and observes lifecycle and execution state only while that binding remains current.
+
+The two forms do not fall back to each other. A live registration never reads a GraphML snapshot if
+its deployment disappears or changes version, and a snapshot registration never starts observing a
+deployment whose identifier happens to match. This prevents a registration from silently showing a
+different source than the operator approved.
+
+For deployment sources, a transient connection loss is retried a bounded number of times with the
+last opaque cursor. A replay-window gap, replacement incarnation, graph-version change, undeploy, or
+authority change is terminal for that attachment. The viewer clears observed runtime state and shows
+the terminal condition; recovery requires a fresh host-mediated launch after the operator has
+confirmed that policy still permits access.
 
 ## Step 1 — your server mints a launch
 
@@ -409,7 +436,7 @@ side stops the viewer from running.
 |---|---|---|---|
 | `HELLO` | viewer to parent | `acknowledgementId` | The viewer is up and is waiting for your `ACK` |
 | `ACK` | parent to viewer | — | Your server has vouched for this channel |
-| `READY` | viewer to parent | — | The projection is rendered |
+| `READY` | viewer to parent | — | The initial projection is rendered; a deployment source may continue observing inside the frame |
 | `PING` | parent to viewer | — | Liveness check; accepted only after `READY` |
 | `PONG` | viewer to parent | — | Answer to your `PING` |
 | `FAILED` | viewer to parent | — | The session ended and will not recover |
@@ -430,6 +457,28 @@ changes it.** The theme is decided in one of two ways:
 If you need the viewer to match your product's theme rather than the reader's system setting, that is
 a request to your operator to pin the theme on the registration. Falling back to `dark` is what the
 viewer does when it cannot read a preference at all.
+
+The Cyto, N8N, and Elastic presentation modes share the same read-only node identity, labels,
+bypass treatment, edge meaning, theme tokens, and runtime-state vocabulary. Changing modes or themes
+changes presentation, not the source, authority, or observed deployment binding.
+
+## Live-deployment continuity
+
+A deployment-backed viewer exposes lifecycle and continuity inside its own accessible status region.
+The host still receives only `READY`, `PONG`, or the non-sensitive terminal `FAILED` signal.
+
+| Viewer state | Meaning | Recovery |
+|---|---|---|
+| `CONNECTING` | The projection is mounted and the observation request is being attached | Wait; bounded reconnect is automatic |
+| `LIVE` | Lifecycle or execution events are current for the bound graph version and incarnation | None |
+| `RECONNECTING` | The transport ended before a terminal frame | Wait for bounded retry |
+| `STOPPED` or `UNAVAILABLE` | The bound deployment lifecycle is not producing live execution activity | An operator may start or restart the deployment; the viewer remains read-only |
+| `GAP` | The opaque cursor fell outside the process-local replay window | Terminal; create a fresh viewer session |
+| `VERSION_MISMATCH` | The deployment now resolves to a different graph version or incarnation | Terminal; review the replacement, then create a new registration or session as policy requires |
+| `DETACHED` | The deployment was undeployed or viewing authority changed | Terminal; do not reuse the attachment |
+
+The cursor is opaque and scoped to the registration revision and immutable deployment binding. Do not
+persist it in the parent page or use it as a general execution-events cursor.
 
 ## The four failure states
 
@@ -477,6 +526,12 @@ For symptom-by-symptom diagnosis see
 5. **Revocation takes effect immediately.** Ask your operator to revoke the registration. New
    launches must fail with `403` without anything being restarted. Revocation is final for that
    registration id: resuming the embed means a new registration, not an un-revoke.
+6. **A live source stays bound.** For a deployment registration, stop and start the same deployment
+   and verify truthful lifecycle changes. Then replace its graph version or undeploy it: the existing
+   attachment must terminate rather than following the replacement.
+7. **A reconnect cannot hide a gap.** Interrupt the observation transport within the retained replay
+   window and verify recovery from its cursor. Force the cursor beyond that window and verify `GAP`
+   is terminal and clears stale runtime decoration.
 
 ## Related pages
 
@@ -490,3 +545,5 @@ For symptom-by-symptom diagnosis see
   cannot inherit author, runner, or administrative capability.
 - [Embed, privacy, and audit](../security/embed-privacy.md) — the privacy constraints and the audit
   evidence a registration produces.
+- [Embedded-viewer parity evidence](../developer-guide/embed-viewer-verification.md) — the public
+  visual and behavioral verification matrix for native and embedded presentation.

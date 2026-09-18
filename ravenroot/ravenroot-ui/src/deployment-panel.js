@@ -87,7 +87,7 @@ function validateDeploymentId(value) {
  * (used by tests).
  */
 export function createDeploymentsWindow({
-  dialog, client = null, currentDocument = () => null, pollMs = 2000,
+  dialog, client = null, currentDocument = () => null, onOpenDeployment = async () => {}, pollMs = 2000,
   onDeployments = () => {}, onRegistered = () => {}, onDeploymentSelected = () => {},
 } = {}) {
   if (!dialog) {
@@ -192,6 +192,13 @@ export function createDeploymentsWindow({
       const actions = deploymentRowActions(entry.state);
       const actionsRow = doc.createElement('div');
       actionsRow.className = 'deployment-item-actions';
+      const view = doc.createElement('button');
+      view.type = 'button';
+      view.className = 'btn deployment-view';
+      view.textContent = 'Open read-only view';
+      view.dataset.deploymentView = entry.deploymentId;
+      view.disabled = busy;
+      actionsRow.append(view);
       if (busy) {
         const pending = doc.createElement('small');
         pending.textContent = 'Working…';
@@ -314,6 +321,25 @@ export function createDeploymentsWindow({
     }
   }
 
+  async function openDeployment(deploymentId) {
+    if (!client || rowBusy.has(deploymentId)) return;
+    rowBusy.add(deploymentId);
+    renderList();
+    say(`Opening a read-only live view of “${deploymentId}”…`);
+    try {
+      await onOpenDeployment(deploymentId, client);
+      if (!disposed) {
+        say(`“${deploymentId}” is open in a read-only deployment canvas.`, 'ok');
+        close();
+      }
+    } catch (error) {
+      if (!disposed) say(`“${deploymentId}” could not be opened: ${error?.message || error}`, 'error');
+    } finally {
+      rowBusy.delete(deploymentId);
+      if (!disposed) renderList();
+    }
+  }
+
   function startPolling() {
     stopPolling();
     if (pollMs > 0) pollHandle = doc.defaultView?.setInterval(() => { void refresh(); }, pollMs) ?? null;
@@ -352,6 +378,11 @@ export function createDeploymentsWindow({
     void register();
   };
   const onDialogClick = event => {
+    const viewButton = event.target.closest?.('[data-deployment-view]');
+    if (viewButton) {
+      void openDeployment(viewButton.dataset.deploymentView);
+      return;
+    }
     const actionButton = event.target.closest?.('[data-deployment-action]');
     if (actionButton) {
       void runRowAction(actionButton.dataset.deploymentId, actionButton.dataset.deploymentAction);
@@ -389,6 +420,7 @@ export function createDeploymentsWindow({
     close,
     refresh,
     register,
+    openDeployment,
     listing: () => ({ loaded: listing.loaded, deployments: listing.deployments }),
     setClient(next) {
       client = next;

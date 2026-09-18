@@ -41,7 +41,17 @@ describe('embed viewer import boundary', () => {
 
     expect(graph).toContain('viewer-core.js');
     expect(graph).toContain('viewer-renderer-adapter.js');
+    expect(graph).toContain('viewer-presentation.js');
     expect(graph.filter(file => FORBIDDEN.has(file))).toEqual([]);
+  });
+
+  it('delegates graph styling to the same presentation factory as the editor', async () => {
+    const [embed, app] = await Promise.all([
+      readFile(ENTRY, 'utf8'),
+      readFile(resolve(ROOT, 'app.js'), 'utf8'),
+    ]);
+    expect(embed).toContain('createViewerStylesheet(requireEmbedTheme(theme), mode)');
+    expect(app).toContain('style: createViewerStylesheet(rendererPalette)');
   });
 
   it('keeps theme selection out of viewer storage and the closed parent protocol', async () => {
@@ -49,5 +59,21 @@ describe('embed viewer import boundary', () => {
     expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB|serviceWorker|caches\s*[.(]/);
     expect(source).not.toMatch(/THEME(?:_CHANGED)?['"]/);
     expect(source).toContain("const THEMES = Object.freeze(['dark', 'light'])");
+  });
+
+  it('keeps deployment observation inside the viewer realm and authenticates fetch by header', async () => {
+    const source = await readFile(BOOTSTRAP, 'utf8');
+    expect(source).toContain("const OBSERVATION_PATH = '/v1/embed/observation'");
+    expect(source).toContain("Accept: 'text/event-stream'");
+    expect(source).toContain('Authorization: `Bearer ${bearer}`');
+    expect(source).toContain('const MAX_OBSERVATION_RETRIES = 5');
+    expect(source).toContain('Math.min(5_000, 500 * (attempt + 1))');
+    expect(source).toContain('if (result.terminal || observation.signal.aborted) return');
+    expect(source).toContain("if (failure?.kind === 'expired' || attempt === MAX_OBSERVATION_RETRIES)");
+    expect(source).not.toContain('new EventSource');
+    expect(source).not.toMatch(/OBSERVATION_PATH\s*\+\s*['"`?]/u);
+    expect(source).toContain('viewerInstance.observe(');
+    expect(source).toContain('fallback: Boolean(payload.event?.fallback ?? payload.fallback)');
+    expect(source).not.toMatch(/sendToParent\(['"](?:EVENT|TOPOLOGY|RUNTIME|OBSERVATION)/u);
   });
 });

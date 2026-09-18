@@ -4,6 +4,9 @@
   const PROTOCOL_VERSION = 'ravenroot.embed/1';
   const EXCHANGE_PATH = '/v1/embed/exchange';
   const PROJECTION_PATH = '/v1/embed/projection';
+  const OBSERVATION_PATH = '/v1/embed/observation';
+  const MAX_STREAM_FRAME_BYTES = 64 * 1024;
+  const MAX_OBSERVATION_RETRIES = 5;
   const encoder = new TextEncoder();
   const FAILURE_COPY = Object.freeze({
     error: 'The graph could not be displayed.',
@@ -134,6 +137,94 @@
     return response.json();
   };
 
+  const postStream = async (path, body, bearer, signal) => {
+    let response;
+    try {
+      response = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream',
+          Authorization: `Bearer ${bearer}` },
+        body: JSON.stringify(body), credentials: 'omit', cache: 'no-store', redirect: 'error',
+        referrerPolicy: 'no-referrer', signal,
+      });
+    } catch {
+      throw new EmbedRequestFailure('offline');
+    }
+    if (response.status === 403) throw new EmbedRequestFailure('expired');
+    if (!response.ok || !response.body?.getReader) throw new EmbedRequestFailure('offline');
+    return response.body.getReader();
+  };
+
+  const parseFrame = raw => {
+    let type = 'message';
+    let id = '';
+    const data = [];
+    for (const line of raw.split('\n')) {
+      if (!line || line.startsWith(':')) continue;
+      const colon = line.indexOf(':');
+      const fieldName = colon < 0 ? line : line.slice(0, colon);
+      const fieldValue = (colon < 0 ? '' : line.slice(colon + 1)).replace(/^ /u, '');
+      if (fieldName === 'event') type = fieldValue;
+      else if (fieldName === 'id') id = fieldValue;
+      else if (fieldName === 'data') data.push(fieldValue);
+    }
+    return { type, id, data: data.join('\n') };
+  };
+
+  const readObservation = async (reader, viewerInstance, source, signal) => {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let cursor = '';
+    while (!signal.aborted) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
+      if (buffer.length > MAX_STREAM_FRAME_BYTES && !buffer.includes('\n\n')) {
+        await reader.cancel();
+        throw new EmbedRequestFailure('error');
+      }
+      let boundary;
+      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (raw.length > MAX_STREAM_FRAME_BYTES) throw new EmbedRequestFailure('error');
+        const parsed = parseFrame(raw);
+        if (!parsed.data) continue;
+        const payload = JSON.parse(parsed.data);
+        const type = parsed.type === 'source-gap' ? 'gap'
+          : parsed.type === 'source-invalidated' ? 'invalidated' : parsed.type;
+        viewerInstance.observe({
+          type,
+          deploymentId: payload.deploymentId ?? source.deploymentId,
+          graphVersion: payload.graphVersion ?? source.graphVersion,
+          incarnationId: payload.incarnationId ?? source.incarnationId,
+          cursor: parsed.id || payload.cursor,
+          ...(type === 'execution' ? { event: {
+            type: payload.event?.type ?? payload.type,
+            executionId: payload.event?.executionId ?? payload.event?.traversalId
+              ?? payload.executionId ?? payload.traversalId,
+            nodeId: payload.event?.nodeId ?? payload.nodeId ?? null,
+            edgeId: payload.event?.edgeId ?? payload.edgeId ?? null,
+            activeInstances: Number(payload.event?.activeInstances ?? payload.activeInstances) || 0,
+            inFlightArrivals: Number(payload.event?.inFlightArrivals ?? payload.inFlightArrivals) || 0,
+            fallback: Boolean(payload.event?.fallback ?? payload.fallback),
+            occurredAt: payload.event?.occurredAt ?? payload.occurredAt ?? null,
+            publicReason: payload.event?.publicReason ?? payload.publicReason ?? null,
+            description: payload.event?.description ?? payload.description ?? '',
+          } } : {}),
+          ...(type === 'lifecycle' ? { lifecycle: payload.lifecycle } : {}),
+          ...(['gap', 'invalidated'].includes(type) ? { reason: payload.reason } : {}),
+        });
+        cursor = parsed.id || cursor;
+        if (parsed.type === 'source-gap' || parsed.type === 'source-invalidated') {
+          await reader.cancel();
+          return { cursor, terminal: true };
+        }
+      }
+      if (done) return { cursor, terminal: false };
+    }
+    return { cursor, terminal: true };
+  };
+
   const readBootstrap = () => {
     const node = document.getElementById('ravenroot-embed-bootstrap');
     if (node === null) throw new Error('bootstrap unavailable');
@@ -178,6 +269,7 @@
   };
 
   let viewer = null;
+  let observation = null;
   const run = async () => {
     const bootstrap = readBootstrap();
     const theme = initialTheme(bootstrap.theme);
@@ -296,11 +388,44 @@
     const { createEmbedViewer } = await import('/embed-viewer.js');
     viewer = createEmbedViewer(document.getElementById('ravenroot-embed-viewer'), { theme });
     await viewer.mount(projection);
+    if (projection.viewerSourceVersion === '1' && projection.source?.kind === 'deployment') {
+      observation = new AbortController();
+      addEventListener('pagehide', () => observation?.abort(), { once: true });
+      void (async () => {
+        let cursor = '';
+        for (let attempt = 0; attempt <= MAX_OBSERVATION_RETRIES && !observation.signal.aborted; attempt += 1) {
+          try {
+            const issuedAt = new Date().toISOString();
+            const jti = correlationId();
+            const request = {
+              nonce: exchanged.challenge,
+              jti,
+              issuedAt,
+              signature: await sign(keyPair.privateKey, exchanged.bearer, bootstrap.revision,
+                exchanged.challenge, jti, OBSERVATION_PATH, issuedAt),
+              cursor,
+            };
+            const reader = await postStream(OBSERVATION_PATH, request, exchanged.bearer, observation.signal);
+            const result = await readObservation(reader, viewer, projection.source, observation.signal);
+            cursor = result.cursor;
+            if (result.terminal || observation.signal.aborted) return;
+          } catch (failure) {
+            if (observation.signal.aborted) return;
+            if (failure?.kind === 'expired' || attempt === MAX_OBSERVATION_RETRIES) throw failure;
+          }
+          await new Promise(resolve => setTimeout(resolve, Math.min(5_000, 500 * (attempt + 1))));
+        }
+        if (!observation.signal.aborted) throw new EmbedRequestFailure('offline');
+      })().catch(failure => {
+        if (!observation?.signal.aborted) showFailure(failure?.kind ?? 'error');
+      });
+    }
     protocolReady = true;
     sendToParent('READY', correlationId());
   };
 
   run().catch(async failure => {
+    observation?.abort();
     viewer?.destroy({ preserveState: true });
     // Stable, non-sensitive failure signal. There is deliberately no console output or error detail.
     showFailure(failure?.kind ?? 'error');

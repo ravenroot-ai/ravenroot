@@ -180,6 +180,9 @@ export function createDocumentRecord({
       stopRequested: false,
       observationUnavailable: false,
     },
+    // Optional read-only deployment attachment. The graph remains an allowlisted projection;
+    // closing the document detaches observation without controlling the server-side deployment.
+    deploymentView: null,
     humanTasks: {
       deploymentId: null,
       graphVersion: null,

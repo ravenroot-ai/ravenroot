@@ -821,9 +821,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             if (inFlightStart != null) {
                 return inFlightStart;
             }
-            // A new start owns a new manager. Do not let a concurrent viewer mistake a definition
-            // captured from an earlier ready incarnation for proof that this start has succeeded.
-            definition = null;
+            // A restart owns a new manager, but the immutable document and this deployment's
+            // incarnation/version have not changed. Keep the last successfully published definition
+            // visible while the replacement runtime starts; on a first start the field is still null,
+            // so an unready registration cannot expose a view it has never successfully published.
             status = DeploymentStatus.of(id, DeploymentState.STARTING);
             CompletionStage<DeploymentStatus> stage =
                     CompletableFuture.supplyAsync(() -> doStart(security), VIRTUAL_THREADS);
@@ -1514,7 +1515,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             this.ingressPermits = null;
             this.requestReplyCoordinator = null;
             this.admitted.clear();
-            this.definition = null;
+            // Preserve a definition published by an earlier READY run. A first failed start still
+            // has null here, while a failed restart remains an observable FAILED lifecycle of the
+            // same immutable source instead of looking like an undeploy/version invalidation.
             this.status = DeploymentStatus.of(id, DeploymentState.FAILED, cause);
             this.inFlightStart = null;
         } finally {

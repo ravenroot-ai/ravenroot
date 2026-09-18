@@ -251,6 +251,115 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
         }
     }
 
+    @Test
+    void viewerSourceRemainsPinnedAndObservableAcrossASlowRestart() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var behavior = new ConfigurableSourceBehavior();
+        var application = application(new SameThreadExecutionEngine(), monitor, behavior);
+        var release = new CountDownLatch(1);
+        try {
+            application.registerLocalDeployment(TENANT_A, "restarting-view", graph(SOURCE_GRAPH));
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "restarting-view")));
+            var published = application.localDeploymentView("tenant-a", "restarting-view").orElseThrow();
+            var deliveries = new AtomicInteger();
+            try (var observation = application.subscribeToLocalDeploymentEvents(
+                    "tenant-a", "restarting-view", published.source().incarnationId(),
+                    published.source().graphVersion(), ignored -> deliveries.incrementAndGet())) {
+                assertEquals(LocalDeploymentState.STOPPED,
+                        command(application.stopLocalDeployment("tenant-a", "restarting-view")));
+
+                var entered = new CountDownLatch(1);
+                behavior.beforeStart = () -> {
+                    entered.countDown();
+                    try {
+                        release.await(20, TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                };
+                CompletionStage<Optional<LocalDeploymentStatus>> starting =
+                        application.startLocalDeployment(TENANT_A, "restarting-view");
+                assertTrue(entered.await(20, TimeUnit.SECONDS), "the restart must actually be in flight");
+
+                var duringRestart = application.localDeploymentView(
+                        "tenant-a", "restarting-view").orElseThrow();
+                assertEquals(published.source(), duringRestart.source(),
+                        "restart must not mint a new source binding");
+                assertEquals(published.canonicalDigest(), duringRestart.canonicalDigest());
+                assertEquals(LocalDeploymentState.STARTING, duringRestart.lifecycle());
+                assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.AVAILABLE,
+                        application.localDeploymentEventsAfter("tenant-a", "restarting-view",
+                                published.source().incarnationId(), published.source().graphVersion(), 0).status(),
+                        "an established observation must not be terminally invalidated during restart");
+
+                release.countDown();
+                assertEquals(LocalDeploymentState.READY,
+                        starting.toCompletableFuture().get(30, TimeUnit.SECONDS).orElseThrow().state());
+                var restarted = application.localDeploymentView(
+                        "tenant-a", "restarting-view").orElseThrow();
+                assertEquals(published.source(), restarted.source());
+                assertEquals(LocalDeploymentState.READY, restarted.lifecycle());
+
+                String engineId = localEngineId("tenant-a", "restarting-view");
+                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                        restarted.source().graphVersion(), java.util.UUID.randomUUID(),
+                        java.util.UUID.randomUUID(), java.util.Map.of(), engineId, null));
+                assertEquals(1, deliveries.get(),
+                        "the pre-restart filtered subscription must remain bound after READY returns");
+
+                assertEquals(LocalDeploymentState.STOPPED,
+                        command(application.stopLocalDeployment("tenant-a", "restarting-view")));
+                behavior.beforeStart = () -> { };
+                behavior.failNextStart = true;
+                assertEquals(LocalDeploymentState.FAILED,
+                        command(application.startLocalDeployment(TENANT_A, "restarting-view")));
+                var failedRestart = application.localDeploymentView(
+                        "tenant-a", "restarting-view").orElseThrow();
+                assertEquals(published.source(), failedRestart.source());
+                assertEquals(LocalDeploymentState.FAILED, failedRestart.lifecycle(),
+                        "a failed replacement runtime is lifecycle state, not source invalidation");
+            }
+        } finally {
+            release.countDown();
+            application.close();
+        }
+    }
+
+    @Test
+    void viewerSourceIsUnavailableDuringTheFirstSlowStart() throws Exception {
+        var behavior = new ConfigurableSourceBehavior();
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(), behavior);
+        var release = new CountDownLatch(1);
+        try {
+            application.registerLocalDeployment(TENANT_A, "first-start", graph(SOURCE_GRAPH));
+            var entered = new CountDownLatch(1);
+            behavior.beforeStart = () -> {
+                entered.countDown();
+                try {
+                    release.await(20, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            };
+            CompletionStage<Optional<LocalDeploymentStatus>> starting =
+                    application.startLocalDeployment(TENANT_A, "first-start");
+            assertTrue(entered.await(20, TimeUnit.SECONDS), "the first start must actually be in flight");
+            assertEquals(LocalDeploymentState.STARTING,
+                    application.localDeployment("tenant-a", "first-start").orElseThrow().state());
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "first-start"),
+                    "STARTING alone cannot publish a definition that has never reached READY");
+
+            release.countDown();
+            assertEquals(LocalDeploymentState.READY,
+                    starting.toCompletableFuture().get(30, TimeUnit.SECONDS).orElseThrow().state());
+            assertTrue(application.localDeploymentView("tenant-a", "first-start").isPresent());
+        } finally {
+            release.countDown();
+            application.close();
+        }
+    }
+
     private static String localEngineId(String tenant, String deploymentId) throws Exception {
         byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
                 ("local-deployment\u0000" + tenant + "\u0000" + deploymentId)

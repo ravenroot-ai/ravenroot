@@ -36,6 +36,8 @@ public enum AuthorizationAction {
     EMBED_GRAPH_READ("ravenroot.embed.graph.read", true),
     /** Create a browser embed session. */
     EMBED_SESSION_CREATE("ravenroot.embed.session.create", true),
+    /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
+    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true),
 
     /**
      * Provisioning and revoking an embed registration.

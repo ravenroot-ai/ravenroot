@@ -35,6 +35,7 @@ import java.util.Objects;
  * @param eligibility       the deployment-policy decision consumed by the browser projection
  * @param projection        the render-only payload captured at provision, never re-resolved
  * @param provisionedAt     when this revision was written; audit evidence, never a validity input
+ * @param source            mutually-exclusive snapshot or live-deployment viewer source
  */
 public record EmbedRegistrationAggregate(String registrationId, long revision,
                                          EmbedRegistrationState state,
@@ -42,7 +43,30 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
                                          EmbedSnapshotLifecycle snapshotLifecycle,
                                          EmbedProjectionEligibility eligibility,
                                          EmbedGraphProjection projection,
-                                         Instant provisionedAt) {
+                                         Instant provisionedAt,
+                                         EmbedViewerSource source) {
+
+    /**
+     * Source-compatible constructor retaining the immutable snapshot contract.
+     * @param registrationId operator-chosen registration identifier
+     * @param revision strictly positive aggregate revision
+     * @param state active or terminal registration state
+     * @param sessionGrant captured session grant
+     * @param snapshotLifecycle captured graph lifecycle evidence
+     * @param eligibility projection-policy decision
+     * @param projection captured render-only graph view
+     * @param provisionedAt time this revision was written
+     */
+    public EmbedRegistrationAggregate(String registrationId, long revision,
+                                      EmbedRegistrationState state,
+                                      VerifiedEmbedSessionGrant sessionGrant,
+                                      EmbedSnapshotLifecycle snapshotLifecycle,
+                                      EmbedProjectionEligibility eligibility,
+                                      EmbedGraphProjection projection,
+                                      Instant provisionedAt) {
+        this(registrationId, revision, state, sessionGrant, snapshotLifecycle, eligibility,
+                projection, provisionedAt, EmbedViewerSource.snapshot());
+    }
 
     /** Enforces cross-component identity, revision, digest, and policy coherence. */
     public EmbedRegistrationAggregate {
@@ -54,6 +78,7 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
         Objects.requireNonNull(eligibility, "eligibility");
         Objects.requireNonNull(projection, "projection");
         Objects.requireNonNull(provisionedAt, "provisionedAt");
+        Objects.requireNonNull(source, "source");
         if (!registrationId.equals(sessionGrant.registrationId())) {
             throw new IllegalArgumentException("aggregate and session grant registration ids must match");
         }
@@ -61,14 +86,21 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
             throw new IllegalArgumentException("aggregate and session grant revisions must match");
         }
         VerifiedEmbedGraphGrant graph = sessionGrant.graphGrant();
-        if (!projection.viewerContractVersion().equals(EmbedGraphProjection.CURRENT_CONTRACT_VERSION)
+        if (source instanceof EmbedViewerSource.Snapshot
+                && (!projection.viewerContractVersion().equals(EmbedGraphProjection.CURRENT_CONTRACT_VERSION)
                 || !projection.graphId().equals(graph.graphId())
                 || !projection.graphVersionId().equals(graph.graphVersionId())
-                || !projection.canonicalDigest().equals(graph.canonicalDigest())) {
+                || !projection.canonicalDigest().equals(graph.canonicalDigest()))) {
             throw new IllegalArgumentException("captured projection identity must match the graph grant");
         }
-        if (!eligibility.policyRevision().equals(graph.projectionPolicyRevision())) {
+        if (source instanceof EmbedViewerSource.Snapshot
+                && !eligibility.policyRevision().equals(graph.projectionPolicyRevision())) {
             throw new IllegalArgumentException("eligibility and graph grant policy revisions must match");
+        }
+        if (source instanceof EmbedViewerSource.Deployment deployment
+                && (!deployment.deploymentId().equals(graph.deploymentId())
+                || !sessionGrant.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE))) {
+            throw new IllegalArgumentException("deployment source requires its matching observe capability");
         }
     }
 
@@ -106,6 +138,9 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
      */
     public EmbedProjectionResolution projectionOf(EmbedProjectionBudget budget) {
         Objects.requireNonNull(budget, "budget");
+        if (source instanceof EmbedViewerSource.Deployment) {
+            return EmbedProjectionResolution.Unavailable.INSTANCE;
+        }
         if (state != EmbedRegistrationState.ACTIVE || !eligibility.allowsProjection()) {
             return EmbedProjectionResolution.Unavailable.INSTANCE;
         }
@@ -132,7 +167,7 @@ public record EmbedRegistrationAggregate(String registrationId, long revision,
                 sessionGrant.parentOrigin(), sessionGrant.capabilities(), sessionGrant.graphGrant(),
                 sessionGrant.themeOverride());
         return new EmbedRegistrationAggregate(registrationId, nextRevision, EmbedRegistrationState.REVOKED,
-                revokedGrant, snapshotLifecycle, eligibility, projection, occurredAt);
+                revokedGrant, snapshotLifecycle, eligibility, projection, occurredAt, source);
     }
 
     /**

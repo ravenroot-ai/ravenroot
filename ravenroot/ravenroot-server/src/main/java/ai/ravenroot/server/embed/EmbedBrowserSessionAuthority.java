@@ -210,8 +210,38 @@ public final class EmbedBrowserSessionAuthority {
         }
     }
     public record IssuedBearer(String bearer, String challenge, Instant expiresAt) { }
-    public record ActiveSession(EmbedRegistrationAggregate registration, String challenge, ECPublicKey key,
-                                Instant expiresAt) { }
+    public static final class ActiveSession {
+        private final EmbedRegistrationAggregate registration;
+        private final String challenge;
+        private final ECPublicKey key;
+        private final Instant expiresAt;
+        private ai.ravenroot.api.application.DeploymentViewerView deploymentView;
+
+        private ActiveSession(EmbedRegistrationAggregate registration, String challenge, ECPublicKey key,
+                              Instant expiresAt) {
+            this.registration = registration;
+            this.challenge = challenge;
+            this.key = key;
+            this.expiresAt = expiresAt;
+        }
+
+        public EmbedRegistrationAggregate registration() { return registration; }
+        public String challenge() { return challenge; }
+        public ECPublicKey key() { return key; }
+        public Instant expiresAt() { return expiresAt; }
+
+        /** First resolution pins the immutable incarnation; later replacement is refused. */
+        public synchronized boolean bind(ai.ravenroot.api.application.DeploymentViewerView candidate) {
+            Objects.requireNonNull(candidate, "candidate");
+            if (deploymentView == null) deploymentView = candidate;
+            return deploymentView.source().equals(candidate.source())
+                    && deploymentView.canonicalDigest().equals(candidate.canonicalDigest());
+        }
+
+        public synchronized ai.ravenroot.api.application.DeploymentViewerView deploymentView() {
+            return deploymentView;
+        }
+    }
 
     public static final class CapacityExceededException extends RuntimeException {
         private CapacityExceededException() { super("embed session capacity exhausted"); }

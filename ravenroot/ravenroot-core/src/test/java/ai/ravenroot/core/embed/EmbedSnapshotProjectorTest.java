@@ -34,6 +34,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmbedSnapshotProjectorTest {
 
     @Test
+    void approvedEditorVisualSemanticsAreComputedWithoutCopyingPropertyBags() {
+        var definition = new GraphDefinition(List.of(
+                new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null),
+                new GraphNode("work", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "secret.behavior",
+                        Map.of("name", "Visible label", "classification", "agent",
+                                "execution.bypass", true, "credential", "must-not-leak")),
+                GraphNode.end("end"), GraphNode.error("error")),
+                List.of(GraphEdge.to("start", "work"),
+                        new GraphEdge("work", "end", "success"), GraphEdge.to("work", "error")));
+        var projection = EmbedSnapshotProjector.projectDefinition(definition, "deployment", "version",
+                "digest", EmbedProjectionBudget.DEFAULTS);
+        var work = projection.nodes().stream().filter(node -> node.id().equals("work")).findFirst().orElseThrow();
+        assertEquals("Visible label", work.label());
+        assertEquals("agent", work.visualType());
+        assertTrue(work.bypassed());
+        var failure = projection.edges().stream().filter(edge -> edge.target().equals("error"))
+                .findFirst().orElseThrow();
+        assertTrue(failure.id() != null && !failure.id().isBlank());
+        assertEquals("continue", failure.label());
+        assertEquals("failed", failure.visualType());
+        assertEquals(EmbedGraphProjection.Routing.FAILURE, failure.routing());
+        assertTrue(!projection.toJson().contains("must-not-leak"));
+        assertTrue(!projection.toJson().contains("secret.behavior"));
+    }
+
+    @Test
     void publishedAndActiveVersionsProduceAClosedRenderOnlyProjection() {
         for (GraphVersionState state : List.of(GraphVersionState.PUBLISHED, GraphVersionState.ACTIVE)) {
             var projected = assertInstanceOf(EmbedSnapshotProjector.Result.Projected.class,

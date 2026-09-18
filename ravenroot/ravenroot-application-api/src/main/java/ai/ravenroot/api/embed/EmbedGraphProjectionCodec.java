@@ -85,8 +85,11 @@ public final class EmbedGraphProjectionCodec {
             expect(',');
             key("layout");
             EmbedGraphProjection.Layout layout = layout();
+            String label = optionalStringMember("label");
+            String visualType = optionalStringMember("visualType");
+            boolean bypassed = optionalTrueMember("bypassed");
             expect('}');
-            parsed.add(new EmbedGraphProjection.Node(id, kind, layout));
+            parsed.add(new EmbedGraphProjection.Node(id, kind, layout, label, visualType, bypassed));
             if (peek() == ',') {
                 cursor++;
                 continue;
@@ -129,8 +132,18 @@ public final class EmbedGraphProjectionCodec {
             String source0 = member("source");
             expect(',');
             String target = member("target");
+            String id = optionalStringMember("id");
+            String label = optionalStringMember("label");
+            String visualType = optionalStringMember("visualType");
+            String routingValue = optionalStringMember("routing");
             expect('}');
-            parsed.add(new EmbedGraphProjection.Edge(source0, target));
+            EmbedGraphProjection.Routing routing;
+            try {
+                routing = routingValue == null ? null : EmbedGraphProjection.Routing.valueOf(routingValue);
+            } catch (IllegalArgumentException unknown) {
+                throw invalid("unsupported edge routing");
+            }
+            parsed.add(new EmbedGraphProjection.Edge(source0, target, id, label, visualType, routing));
             if (peek() == ',') {
                 cursor++;
                 continue;
@@ -143,6 +156,21 @@ public final class EmbedGraphProjectionCodec {
     private String member(String name) {
         key(name);
         return string();
+    }
+
+    private String optionalStringMember(String name) {
+        String prefix = ",\"" + name + "\":";
+        if (!source.startsWith(prefix, cursor)) return null;
+        cursor += prefix.length();
+        return string();
+    }
+
+    private boolean optionalTrueMember(String name) {
+        String prefix = ",\"" + name + "\":";
+        if (!source.startsWith(prefix, cursor)) return false;
+        cursor += prefix.length();
+        literal("true");
+        return true;
     }
 
     private void key(String name) {

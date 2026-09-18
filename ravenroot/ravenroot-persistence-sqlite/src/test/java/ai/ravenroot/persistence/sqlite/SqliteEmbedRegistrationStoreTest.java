@@ -10,6 +10,8 @@ import ai.ravenroot.api.embed.EmbedProjectionResolution;
 import ai.ravenroot.api.embed.EmbedRevokeCommand;
 import ai.ravenroot.api.embed.EmbedRevokeOutcome;
 import ai.ravenroot.api.embed.EmbedTheme;
+import ai.ravenroot.api.embed.EmbedProvisionCommand;
+import ai.ravenroot.api.embed.EmbedViewerSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -45,6 +47,24 @@ class SqliteEmbedRegistrationStoreTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void deploymentSourceSurvivesReopenWithoutBecomingASnapshot() {
+        var command = EmbedProvisionCommand.deployment(EmbedRegistrationFixtures.REGISTRATION, 0,
+                "issuer", "subject", EmbedRegistrationFixtures.TENANT, "https://parent.example",
+                Optional.empty(), "orders-live");
+        try (var store = open()) {
+            assertInstanceOf(EmbedProvisionOutcome.Provisioned.class, store.provision(command));
+        }
+        try (var reopened = open()) {
+            var loaded = reopened.currentForOperator(EmbedRegistrationFixtures.TENANT,
+                    EmbedRegistrationFixtures.REGISTRATION).orElseThrow();
+            assertEquals(new EmbedViewerSource.Deployment("orders-live"), loaded.source());
+            assertInstanceOf(EmbedProjectionResolution.Unavailable.class,
+                    reopened.resolveProjection(loaded, EmbedProjectionBudget.DEFAULTS),
+                    "a live source must never fall through to the persisted snapshot placeholder");
+        }
+    }
 
     @Test
     void aProvisionedRegistrationSurvivesAReopenWithEveryFieldIntact() {

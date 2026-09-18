@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -173,6 +174,88 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
         } finally {
             application.close();
         }
+    }
+
+    @Test
+    void viewerSourceIsTenantScopedFilteredBoundedAndRejectsRedeploymentAba() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var application = application(new SameThreadExecutionEngine(), monitor, new RecordingSourceBehavior());
+        try {
+            application.registerLocalDeployment(TENANT_A, "observed", graph(NO_SOURCE_GRAPH));
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "observed"),
+                    "a cold registration has no successfully opened immutable definition yet");
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "observed")));
+            var first = application.localDeploymentView("tenant-a", "observed").orElseThrow();
+            assertEquals("observed", first.source().deploymentId());
+            assertEquals(first.source().graphVersion(), first.projection().graphVersionId());
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-b", "observed"),
+                    "a sibling tenant must be indistinguishable from an unknown deployment");
+
+            String engineId = localEngineId("tenant-a", "observed");
+            var accepted = new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                    first.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), engineId, null);
+            var sibling = new ExecutionMonitor.ExecutionIdentity(TENANT_B, engineId,
+                    first.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), engineId, null);
+            var wrongVersion = new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                    "wrong-version", java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), engineId, null);
+            monitor.executionStarted(sibling);
+            monitor.executionStarted(wrongVersion);
+            monitor.executionStarted(accepted);
+
+            var page = application.localDeploymentEventsAfter("tenant-a", "observed",
+                    first.source().incarnationId(), first.source().graphVersion(), 0);
+            assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.AVAILABLE, page.status());
+            assertEquals(1, page.events().size(),
+                    "tenant and version filters must run before an adapter receives the page");
+            assertEquals(accepted.traversalId(), page.events().getFirst().traversalId());
+
+            var staleDeliveries = new AtomicInteger();
+            AutoCloseable staleSubscription = application.subscribeToLocalDeploymentEvents(
+                    "tenant-a", "observed", first.source().incarnationId(),
+                    first.source().graphVersion(), ignored -> staleDeliveries.incrementAndGet());
+            command(application.undeployLocalDeployment("tenant-a", "observed"));
+            application.registerLocalDeployment(TENANT_A, "observed", graph(NO_SOURCE_GRAPH));
+            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "observed"));
+            assertEquals(LocalDeploymentState.READY,
+                    command(application.startLocalDeployment(TENANT_A, "observed")));
+            var replacement = application.localDeploymentView("tenant-a", "observed").orElseThrow();
+            assertEquals(first.canonicalDigest(), replacement.canonicalDigest(), "the bytes are intentionally equal");
+            assertNotEquals(first.source().incarnationId(), replacement.source().incarnationId(),
+                    "an identical-byte replacement must still be a new authority incarnation");
+            assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.SOURCE_CHANGED,
+                    application.localDeploymentEventsAfter("tenant-a", "observed",
+                            first.source().incarnationId(), first.source().graphVersion(), 0).status());
+
+            monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                    replacement.source().graphVersion(), java.util.UUID.randomUUID(),
+                    java.util.UUID.randomUUID(), java.util.Map.of(), engineId, null));
+            assertEquals(0, staleDeliveries.get(),
+                    "incarnation A listener must not receive identical-byte incarnation B events");
+            staleSubscription.close();
+
+            for (int index = 0; index < 2_050; index++) {
+                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                        replacement.source().graphVersion(), java.util.UUID.randomUUID(),
+                        java.util.UUID.randomUUID(), java.util.Map.of(), engineId, null));
+            }
+            assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.GAP,
+                    application.localDeploymentEventsAfter("tenant-a", "observed",
+                            replacement.source().incarnationId(), replacement.source().graphVersion(), 1).status(),
+                    "a cursor older than the bounded ring must produce an explicit gap");
+        } finally {
+            application.close();
+        }
+    }
+
+    private static String localEngineId(String tenant, String deploymentId) throws Exception {
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
+                ("local-deployment\u0000" + tenant + "\u0000" + deploymentId)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return "local-" + java.util.HexFormat.of().formatHex(digest);
     }
 
     /**

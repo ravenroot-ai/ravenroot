@@ -633,6 +633,60 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
+     * Resolves one deployment viewer source under its distinct observation action.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped deployment identifier
+     * @return browser-safe view, or empty when unavailable to the caller tenant
+     */
+    public java.util.Optional<DeploymentViewerView> localDeploymentView(RequestContext context,
+                                                                        String deploymentId) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        return delegate.localDeploymentView(context.tenantId(), deploymentId);
+    }
+
+    /**
+     * Bounded replay for one exact captured source; no tenant-wide event page crosses this boundary.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId captured physical deployment incarnation
+     * @param graphVersion captured immutable graph version
+     * @param sequence last sequence consumed by the caller
+     * @return bounded filtered replay result
+     */
+    public DeploymentEventBatch localDeploymentEventsAfter(RequestContext context, String deploymentId,
+                                                            String incarnationId, String graphVersion,
+                                                            long sequence) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        return delegate.localDeploymentEventsAfter(context.tenantId(), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"),
+                sequence);
+    }
+
+    /**
+     * Live delivery filtered by the delegate before the adapter's queue is reached.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId captured physical deployment incarnation
+     * @param graphVersion captured immutable graph version
+     * @param listener consumer reached only by events for the captured source
+     * @return handle that closes the filtered subscription
+     */
+    public AutoCloseable subscribeToLocalDeploymentEvents(RequestContext context, String deploymentId,
+                                                           String incarnationId, String graphVersion,
+                                                           Consumer<ExecutionEvent> listener) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        return delegate.subscribeToLocalDeploymentEvents(context.tenantId(), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"),
+                Objects.requireNonNull(listener, "listener"));
+    }
+
+    /**
  * Starts one of the caller tenant's deployments under the caller's own identity.
  * @param context authenticated request context supplying the owning tenant and serving identity
  * @param deploymentId the deployment to start

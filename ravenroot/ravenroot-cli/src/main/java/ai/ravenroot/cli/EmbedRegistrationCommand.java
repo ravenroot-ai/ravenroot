@@ -112,7 +112,7 @@ final class EmbedRegistrationCommand {
         var flags = new java.util.LinkedHashSet<>(List.of("store-dir", "audit-dir", "tenant",
                 "registration-id", "expected-revision", "graphml", "graph-id", "graph-version-id",
                 "snapshot-state", "issuer", "subject", "parent-origin", "resource-id", "deployment-id",
-                "deployment-version", "policy-revision", "theme", "operator"));
+                "snapshot-deployment-id", "deployment-version", "policy-revision", "theme", "operator"));
         flags.addAll(GATE_FLAGS);
         return Set.copyOf(flags);
     }
@@ -189,43 +189,64 @@ final class EmbedRegistrationCommand {
     }
 
     private int provision(Map<String, String> options) {
-        Path graphml = Path.of(required(options, "graphml"));
-        byte[] document;
-        try {
-            document = Files.readAllBytes(graphml);
-        } catch (java.io.IOException unreadable) {
-            errors.println("Error: cannot read " + RavenrootCli.sanitizeForConsole(graphml.toString()));
-            return 2;
+        EmbedProvisionCommand command;
+        if (options.containsKey("graphml") && options.containsKey("deployment-id")) {
+            throw new IllegalArgumentException("--graphml snapshot source cannot be combined with live "
+                    + "--deployment-id; migrate the snapshot coordinate to --snapshot-deployment-id");
         }
-        var key = new GraphVersionKey(required(options, "graph-id"), required(options, "graph-version-id"));
-        GraphVersionSnapshot snapshot;
-        try (var manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(document))) {
-            snapshot = GraphVersionSnapshot.create(key, manager.definition());
-        } catch (RuntimeException rejected) {
-            RavenrootCli.reportFailure(rejected, errors);
-            return 2;
+        if (!options.containsKey("graphml")) {
+            var snapshotOnly = new java.util.LinkedHashSet<>(List.of("graph-id", "graph-version-id",
+                    "snapshot-state", "resource-id", "snapshot-deployment-id", "deployment-version",
+                    "policy-revision"));
+            snapshotOnly.addAll(GATE_FLAGS);
+            var supplied = snapshotOnly.stream().filter(options::containsKey).sorted().toList();
+            if (!supplied.isEmpty()) {
+                throw new IllegalArgumentException("--deployment-id live source cannot be combined with --"
+                        + String.join(", --", supplied));
+            }
+            command = EmbedProvisionCommand.deployment(required(options, "registration-id"),
+                    nonNegativeLong(options, "expected-revision"), required(options, "issuer"),
+                    required(options, "subject"), required(options, "tenant"),
+                    required(options, "parent-origin"), theme(options), required(options, "deployment-id"));
+        } else {
+            Path graphml = Path.of(required(options, "graphml"));
+            byte[] document;
+            try {
+                document = Files.readAllBytes(graphml);
+            } catch (java.io.IOException unreadable) {
+                errors.println("Error: cannot read " + RavenrootCli.sanitizeForConsole(graphml.toString()));
+                return 2;
+            }
+            var key = new GraphVersionKey(required(options, "graph-id"), required(options, "graph-version-id"));
+            GraphVersionSnapshot snapshot;
+            try (var manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(document))) {
+                snapshot = GraphVersionSnapshot.create(key, manager.definition());
+            } catch (RuntimeException rejected) {
+                RavenrootCli.reportFailure(rejected, errors);
+                return 2;
+            }
+            // The digest is computed from the document, never accepted from the command line. An operator
+            // who could pass one could pin a registration to a digest the payload does not have, which is
+            // precisely the incoherent pairing the aggregate exists to make impossible.
+            var graphGrant = new VerifiedEmbedGraphGrant(required(options, "tenant"),
+                    required(options, "resource-id"), required(options, "snapshot-deployment-id"),
+                    positiveLong(options, "deployment-version"), key.graphId(), key.versionId(),
+                    snapshot.canonicalHash(), required(options, "policy-revision"));
+            var eligibility = eligibility(options);
+            var projected = EmbedSnapshotProjector.project(
+                    new GraphVersionRecord(snapshot, lifecycle(options)), graphGrant, eligibility,
+                    EmbedProjectionBudget.DEFAULTS);
+            if (!(projected instanceof EmbedSnapshotProjector.Result.Projected rendered)) {
+                errors.println("Error: the snapshot cannot be projected: "
+                        + projected.getClass().getSimpleName().toUpperCase(java.util.Locale.ROOT));
+                return 2;
+            }
+            command = new EmbedProvisionCommand(required(options, "registration-id"),
+                    nonNegativeLong(options, "expected-revision"), required(options, "issuer"),
+                    required(options, "subject"), required(options, "tenant"),
+                    required(options, "parent-origin"), Set.of(EmbedCapability.GRAPH_READ), theme(options),
+                    graphGrant, rendered.lifecycle(), eligibility, rendered.projection());
         }
-        // The digest is computed from the document, never accepted from the command line. An operator
-        // who could pass one could pin a registration to a digest the payload does not have, which is
-        // precisely the incoherent pairing the aggregate exists to make impossible.
-        var graphGrant = new VerifiedEmbedGraphGrant(required(options, "tenant"),
-                required(options, "resource-id"), required(options, "deployment-id"),
-                positiveLong(options, "deployment-version"), key.graphId(), key.versionId(),
-                snapshot.canonicalHash(), required(options, "policy-revision"));
-        var eligibility = eligibility(options);
-        var projected = EmbedSnapshotProjector.project(
-                new GraphVersionRecord(snapshot, lifecycle(options)), graphGrant, eligibility,
-                EmbedProjectionBudget.DEFAULTS);
-        if (!(projected instanceof EmbedSnapshotProjector.Result.Projected rendered)) {
-            errors.println("Error: the snapshot cannot be projected: "
-                    + projected.getClass().getSimpleName().toUpperCase(java.util.Locale.ROOT));
-            return 2;
-        }
-        var command = new EmbedProvisionCommand(required(options, "registration-id"),
-                nonNegativeLong(options, "expected-revision"), required(options, "issuer"),
-                required(options, "subject"), required(options, "tenant"),
-                required(options, "parent-origin"), Set.of(EmbedCapability.GRAPH_READ), theme(options),
-                graphGrant, rendered.lifecycle(), eligibility, rendered.projection());
 
         try (var store = open(options); var trail = auditTrail(options)) {
             var administration = administration(store, trail);
@@ -327,6 +348,14 @@ final class EmbedRegistrationCommand {
         output.println("subject=" + RavenrootCli.sanitizeForConsole(aggregate.sessionGrant().workloadSubject()));
         output.println("parent-origin="
                 + RavenrootCli.sanitizeForConsole(aggregate.sessionGrant().parentOrigin()));
+        output.println("viewer-source-version=" + aggregate.source().viewerSourceVersion());
+        if (aggregate.source() instanceof ai.ravenroot.api.embed.EmbedViewerSource.Deployment deployment) {
+            output.println("source=deployment");
+            output.println("deployment-id=" + RavenrootCli.sanitizeForConsole(deployment.deploymentId()));
+            output.println("provisioned-at=" + aggregate.provisionedAt());
+            return;
+        }
+        output.println("source=snapshot");
         output.println("graph-id=" + RavenrootCli.sanitizeForConsole(aggregate.graphGrant().graphId()));
         output.println("graph-version-id="
                 + RavenrootCli.sanitizeForConsole(aggregate.graphGrant().graphVersionId()));
@@ -490,7 +519,7 @@ final class EmbedRegistrationCommand {
                 + "--audit-dir <dir> --tenant <id> --registration-id <id> --expected-revision <n> "
                 + "--graphml <file> --graph-id <id> --graph-version-id <id> --snapshot-state "
                 + "<published|active> --issuer <id> --subject <id> --parent-origin <https-origin> "
-                + "--resource-id <id> --deployment-id <id> --deployment-version <n> "
+                + "--resource-id <id> --snapshot-deployment-id <id> --deployment-version <n> "
                 + "--policy-revision <id> --gate-deployment <true|false> "
                 + "--gate-provenance <true|false> --gate-classification <true|false> "
                 + "--gate-retention <true|false> --gate-dsr-suppression <true|false> "
@@ -499,6 +528,10 @@ final class EmbedRegistrationCommand {
         errors.println("       ravenroot embed-registration revoke --store-dir <dir> "
                 + "--audit-dir <dir> --tenant <id> --registration-id <id> --expected-revision <n> "
                 + "[--operator <subject>]");
+        errors.println("       live deployment source: omit --graphml and snapshot-only flags; supply "
+                + "--deployment-id with the common store/audit/identity/origin flags above.");
+        errors.println("       migration: snapshot commands that formerly used --deployment-id must use "
+                + "--snapshot-deployment-id; --graphml and --deployment-id are always refused together.");
         errors.println("       --expected-revision is a compare-and-set: 0 for a registration that "
                 + "must not exist yet, otherwise the revision 'show' printed. There is no 'force'.");
         errors.println("       the canonical digest is computed from --graphml and can never be "

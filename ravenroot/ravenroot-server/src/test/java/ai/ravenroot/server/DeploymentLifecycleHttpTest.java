@@ -101,6 +101,135 @@ class DeploymentLifecycleHttpTest {
     }
 
     @Test
+    void deploymentViewAndStreamAreBoundToTheExactTenantIncarnationAndVersion() throws Exception {
+        try (var fixture = new Fixture()) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
+                    NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertEquals(404, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a")
+                    .statusCode(), "a cold registration has no successfully opened viewer definition");
+            assertState(fixture.request("POST", "/v1/deployments/observed/start", "", "tenant-a"), "READY");
+            var view = fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a");
+            assertEquals(200, view.statusCode(), view.body());
+            assertTrue(view.body().contains("\"viewerSourceVersion\":\"1\""), view.body());
+            assertTrue(view.body().contains("\"kind\":\"deployment\""), view.body());
+            assertTrue(view.body().contains("\"viewerContractVersion\":\"1.0\""), view.body());
+            assertFalse(view.body().toLowerCase().contains("graphml"), view.body());
+            String incarnation = field(view.body(), "incarnationId");
+            String version = field(view.body(), "graphVersion");
+
+            assertEquals(404, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-b")
+                    .statusCode());
+            assertEquals(404, fixture.request("GET", "/v1/deployments/absent/view", "", "tenant-b")
+                    .statusCode());
+            assertEquals(404, fixture.request("GET",
+                    "/v1/deployments/observed/events?graphVersion=" + version, "", "tenant-a").statusCode(),
+                    "the first attachment must supply the incarnation captured by GET view");
+
+            var stream = fixture.stream("/v1/deployments/observed/events?graphVersion=" + version,
+                    "tenant-a", incarnation);
+            assertEquals(200, stream.statusCode());
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
+                String event = reader.readLine();
+                String data = reader.readLine();
+                assertEquals("event: lifecycle", event);
+                assertTrue(data.contains("\"type\":\"lifecycle\""), data);
+                assertTrue(data.contains("\"incarnationId\":\"" + incarnation + "\""), data);
+                assertTrue(data.contains("\"graphVersion\":\"" + version + "\""), data);
+                assertTrue(data.contains("\"lifecycle\":\"READY\""), data);
+            }
+        }
+    }
+
+    @Test
+    void attachedStreamDistinguishesUndeployFromIdenticalBytesReplacement() throws Exception {
+        try (var fixture = new Fixture()) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
+                    NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/observed/start", "", "tenant-a"), "READY");
+            var firstView = fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a");
+            String firstIncarnation = field(firstView.body(), "incarnationId");
+            String firstVersion = field(firstView.body(), "graphVersion");
+            var detached = fixture.stream("/v1/deployments/observed/events?graphVersion=" + firstVersion,
+                    "tenant-a", firstIncarnation);
+            var detachedReader = new java.io.BufferedReader(new java.io.InputStreamReader(detached.body()));
+            assertEquals("event: lifecycle", detachedReader.readLine());
+            detachedReader.readLine();
+            detachedReader.readLine();
+            assertEquals(200, fixture.request("DELETE", "/v1/deployments/observed", "", "tenant-a")
+                    .statusCode());
+            String undeployed = terminalData(detachedReader);
+            assertTrue(undeployed.contains("\"reason\":\"UNDEPLOYED\""), undeployed);
+            assertTrue(undeployed.contains("\"incarnationId\":\"" + firstIncarnation + "\""), undeployed);
+            detachedReader.close();
+
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
+                    NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/observed/start", "", "tenant-a"), "READY");
+            var replacementView = fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a");
+            String replacementIncarnation = field(replacementView.body(), "incarnationId");
+            String replacementVersion = field(replacementView.body(), "graphVersion");
+            var replaced = fixture.stream("/v1/deployments/observed/events?graphVersion=" + replacementVersion,
+                    "tenant-a", replacementIncarnation);
+            var replacedReader = new java.io.BufferedReader(new java.io.InputStreamReader(replaced.body()));
+            assertEquals("event: lifecycle", replacedReader.readLine());
+            replacedReader.readLine();
+            replacedReader.readLine();
+            assertEquals(200, fixture.request("DELETE", "/v1/deployments/observed", "", "tenant-a")
+                    .statusCode());
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
+                    NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/observed/start", "", "tenant-a"), "READY");
+            String mismatch = terminalData(replacedReader);
+            assertTrue(mismatch.contains("\"reason\":\"VERSION_MISMATCH\""), mismatch);
+            assertTrue(mismatch.contains("\"incarnationId\":\"" + replacementIncarnation + "\""), mismatch);
+            assertNotEquals(replacementIncarnation,
+                    field(fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a").body(),
+                            "incarnationId"), "identical graph bytes still create a new incarnation");
+            replacedReader.close();
+        }
+    }
+
+    @Test
+    void nativeAndEmbedExecutionFramesPreserveFallback() throws Exception {
+        var binding = new DeploymentObservationCursorStore.Binding(
+                "test", "observed", "incarnation", "version");
+        var event = new ai.ravenroot.api.application.ExecutionEvent(7, java.time.Instant.EPOCH,
+                "tenant-a", "request", "engine", "version", UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(),
+                ai.ravenroot.api.application.ExecutionEventType.NODE_DEFAULTED, "worker", 1, true,
+                "configured fallback", null, null, null, "engine", null, 1, null, null, null);
+
+        String nativeJson = RavenrootServer.deploymentExecutionJson(binding, event);
+        var embedSerializer = ai.ravenroot.server.embed.EmbedBrowserHttpHandler.class
+                .getDeclaredMethod("executionJson", DeploymentObservationCursorStore.Binding.class,
+                        ai.ravenroot.api.application.ExecutionEvent.class);
+        embedSerializer.setAccessible(true);
+        String embedJson = (String) embedSerializer.invoke(null, binding, event);
+
+        assertTrue(nativeJson.contains("\"type\":\"NODE_DEFAULTED\""), nativeJson);
+        assertTrue(nativeJson.contains("\"fallback\":true"), nativeJson);
+        assertTrue(embedJson.contains("\"type\":\"NODE_DEFAULTED\""), embedJson);
+        assertTrue(embedJson.contains("\"fallback\":true"), embedJson);
+    }
+
+    private static String terminalData(java.io.BufferedReader reader) throws Exception {
+        String line;
+        boolean terminal = false;
+        for (int index = 0; index < 20 && (line = reader.readLine()) != null; index++) {
+            if (line.equals("event: source-invalidated")) terminal = true;
+            else if (terminal && line.startsWith("data: ")) return line;
+        }
+        throw new AssertionError("stream did not emit a terminal source-invalidated frame");
+    }
+
+    private static String field(String json, String name) {
+        var matcher = java.util.regex.Pattern.compile("\\\"" + name + "\\\":\\\"([^\\\"]+)\\\"")
+                .matcher(json);
+        if (!matcher.find()) throw new AssertionError("missing " + name + " in " + json);
+        return matcher.group(1);
+    }
+
+    @Test
     void aSourcelessGraphIsRegisteredStartedStoppedRestartedAndUndeployedOverHttp() throws Exception {
         try (var fixture = new Fixture()) {
             assertEquals(401, fixture.request("GET", "/v1/deployments/anything", "", "").statusCode());
@@ -416,6 +545,15 @@ class DeploymentLifecycleHttpTest {
             if (!tenant.isBlank()) request.header("X-Test-Tenant", tenant);
             return HttpClient.newHttpClient().send(request.method(method, publisher).build(),
                     HttpResponse.BodyHandlers.ofString());
+        }
+
+        HttpResponse<java.io.InputStream> stream(String path, String tenant, String incarnation)
+                throws Exception {
+            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                    .header("X-Test-Tenant", tenant)
+                    .header("X-Ravenroot-Deployment-Incarnation", incarnation)
+                    .GET().build();
+            return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
         }
 
         @Override

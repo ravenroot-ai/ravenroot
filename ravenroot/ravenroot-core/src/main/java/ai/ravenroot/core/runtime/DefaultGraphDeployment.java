@@ -27,6 +27,7 @@ import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 
@@ -156,6 +157,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final ExecutionMonitor monitor;
     private final ExecutionIdentitySource identitySource;
     private final byte[] graphMl;
+    /** Immutable definition published only after a successful start; never parsed by a viewer read. */
+    private volatile GraphDefinition definition;
+    /** Physical identity changes on every undeploy/re-register, including identical bytes. */
+    private final String incarnationId;
     /**
      * The real graph version: the same SHA-256-of-the-document convention
      * {@code DefaultRavenrootApplication.startGraphMl} already uses, computed once here because
@@ -743,6 +748,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         this.identitySource = Objects.requireNonNull(identitySource, "identitySource");
         this.graphMl = Objects.requireNonNull(graphMl, "graphMl").clone();
         this.graphVersion = sha256Hex(this.graphMl);
+        this.incarnationId = UUID.randomUUID().toString();
         if (ingressBufferCapacity <= 0) {
             throw new IllegalArgumentException(
                     "ingressBufferCapacity must be positive: " + ingressBufferCapacity);
@@ -769,6 +775,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     public DeploymentId id() {
         return id;
     }
+
+    /** Definition captured from the successfully opened runtime manager; viewer reads never reparse input. */
+    Optional<GraphDefinition> immutableDefinition() { return Optional.ofNullable(definition); }
+
+    /** Runtime event graph version stamped on every traversal hosted by this deployment. */
+    String graphVersion() { return graphVersion; }
+
+    /** Physical identity used to detect identical-bytes undeploy/re-register ABA. */
+    String incarnationId() { return incarnationId; }
 
     /** Composition-root-only installation while cold; source code receives only its attenuated view. */
     public synchronized void installManagedIngress(ManagedIngress managedIngress) {
@@ -806,6 +821,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             if (inFlightStart != null) {
                 return inFlightStart;
             }
+            // A new start owns a new manager. Do not let a concurrent viewer mistake a definition
+            // captured from an earlier ready incarnation for proof that this start has succeeded.
+            definition = null;
             status = DeploymentStatus.of(id, DeploymentState.STARTING);
             CompletionStage<DeploymentStatus> stage =
                     CompletableFuture.supplyAsync(() -> doStart(security), VIRTUAL_THREADS);
@@ -1294,6 +1312,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         ExecutionDomain openedDomain = null;
         GraphManager openedManager = null;
         GraphRunner builtRunner = null;
+        GraphDefinition openedDefinition;
         List<SourceHandle> startedSources;
         long generation;
         try {
@@ -1307,6 +1326,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             // rolls back a fully-formed runner rather than a half-built one.
             generation = nextIngressGeneration();
             startedSources = startSources(security, openedManager, generation);
+            // Capture from the manager already opened for this successful startup. This is after all
+            // readiness work, so malformed input and source-start failures preserve deferred failure
+            // semantics and never publish a viewer definition.
+            openedDefinition = openedManager.definition();
         } catch (RuntimeException | Error failure) {
             try {
                 rollback(builtRunner, openedManager, openedDomain);
@@ -1327,6 +1350,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             this.domain = openedDomain;
             this.manager = openedManager;
             this.runner = builtRunner;
+            this.definition = openedDefinition;
             this.sources = startedSources;
             this.ingressPermits = new Semaphore(ingressBufferCapacity);
             GraphRunner readyRunner = builtRunner;
@@ -1490,6 +1514,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             this.ingressPermits = null;
             this.requestReplyCoordinator = null;
             this.admitted.clear();
+            this.definition = null;
             this.status = DeploymentStatus.of(id, DeploymentState.FAILED, cause);
             this.inFlightStart = null;
         } finally {

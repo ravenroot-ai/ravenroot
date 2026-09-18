@@ -2,6 +2,8 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ApplicationStatus;
 import ai.ravenroot.api.application.DurableExecutionEvent;
+import ai.ravenroot.api.application.DeploymentEventBatch;
+import ai.ravenroot.api.application.DeploymentViewerView;
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
@@ -51,6 +53,9 @@ import ai.ravenroot.api.programming.ProgramRequest;
 import ai.ravenroot.api.programming.ProgramRuntime;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphVersionSnapshot;
+import ai.ravenroot.core.embed.EmbedSnapshotProjector;
+import ai.ravenroot.api.embed.EmbedProjectionBudget;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -2597,6 +2602,86 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            var definition = record.deployment().immutableDefinition().orElse(null);
+            if (definition == null) return java.util.Optional.empty();
+            String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
+            var projection = EmbedSnapshotProjector.projectDefinition(definition, deploymentId,
+                    record.deployment().graphVersion(), digest, EmbedProjectionBudget.DEFAULTS);
+            return java.util.Optional.of(new DeploymentViewerView(DeploymentViewerView.CURRENT_SOURCE_VERSION,
+                    DeploymentViewerView.Source.deployment(deploymentId,
+                            record.deployment().incarnationId(), record.deployment().graphVersion()),
+                    localDeploymentStatus(deploymentId, record).state(), digest, projection));
+        } catch (RuntimeException unprojectable) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    @Override
+    public DeploymentEventBatch localDeploymentEventsAfter(String tenantId, String deploymentId,
+                                                             String incarnationId, String graphVersion,
+                                                             long sequence) {
+        if (sequence < 0) throw new IllegalArgumentException("sequence must not be negative");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()) {
+            return DeploymentEventBatch.unavailable(DeploymentEventBatch.Status.UNAVAILABLE);
+        }
+        if (!record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return DeploymentEventBatch.unavailable(DeploymentEventBatch.Status.SOURCE_CHANGED);
+        }
+        var floor = monitor.oldestRetainedSequence();
+        if (sequence > 0 && floor.isPresent() && sequence < floor.getAsLong() - 1) {
+            return new DeploymentEventBatch(DeploymentEventBatch.Status.GAP, List.of(),
+                    floor.getAsLong(), floor.getAsLong());
+        }
+        List<ExecutionEvent> retained = monitor.eventsAfter(sequence);
+        long latest = retained.isEmpty() ? sequence : retained.getLast().sequence();
+        List<ExecutionEvent> filtered = retained.stream()
+                .filter(event -> tenantId.equals(event.tenantId()))
+                .filter(event -> record.engineId().value().equals(event.deploymentId()))
+                .filter(event -> graphVersion.equals(event.graphVersion()))
+                .toList();
+        return new DeploymentEventBatch(DeploymentEventBatch.Status.AVAILABLE, filtered,
+                floor.orElse(0), latest);
+    }
+
+    @Override
+    public AutoCloseable subscribeToLocalDeploymentEvents(String tenantId, String deploymentId,
+                                                           String incarnationId, String graphVersion,
+                                                           Consumer<ExecutionEvent> listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return () -> { };
+        }
+        // Every predicate executes synchronously in the runtime publisher, before listener reaches
+        // an adapter queue. This is the isolation boundary, not a browser-side convenience filter.
+        return monitor.subscribe(event -> {
+            LocalDeploymentRecord current = localDeployments.get(key);
+            if (current == record
+                    && deployments.get(record.engineId()) == record.deployment()
+                    && record.deployment().incarnationId().equals(incarnationId)
+                    && record.deployment().graphVersion().equals(graphVersion)
+                    && tenantId.equals(event.tenantId())
+                    && record.engineId().value().equals(event.deploymentId())
+                    && graphVersion.equals(event.graphVersion())) {
+                listener.accept(event);
+            }
+        });
+    }
+
+    @Override
     public CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
             SecurityContext security, String deploymentId) {
         java.util.Objects.requireNonNull(security, "security");
@@ -2731,8 +2816,10 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // behavior: its start path refuses on the *active* count, so a tenant whose sessions are all stopped
             // could always start another, and a per-record cap would have started answering 429 there.
             // A published route's limits are not something to tighten as a side effect.
-            var created = new LocalDeploymentRecord(graphHash, engineId, lifecycleId, sourceCount);
-            registerDeployment(engineId, graphBytes, lifecycleId.value());
+            var deployment = (DefaultGraphDeployment) registerDeployment(
+                    engineId, graphBytes, lifecycleId.value());
+            var created = new LocalDeploymentRecord(
+                    graphHash, engineId, lifecycleId, sourceCount, deployment);
             localDeployments.put(key, created);
             return new Registration(created, true);
         }
@@ -2999,7 +3086,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     private record LocalDeploymentRecord(String graphHash, DeploymentId engineId,
-                                         DeploymentId lifecycleId, int sourceCount) { }
+                                         DeploymentId lifecycleId, int sourceCount,
+                                         DefaultGraphDeployment deployment) { }
 
     /** A registration plus whether this call is the one that created it. */
     private record Registration(LocalDeploymentRecord record, boolean created) { }

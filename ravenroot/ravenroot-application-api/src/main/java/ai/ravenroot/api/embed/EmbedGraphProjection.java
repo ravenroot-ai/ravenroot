@@ -36,8 +36,22 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
  * @param id graph node identifier
  * @param kind allowlisted viewer node kind
  * @param layout optional finite node bounds supplied by the captured projection
+ * @param label optional author-facing label
+ * @param visualType optional allowlisted presentation classification
+ * @param bypassed whether runtime execution bypasses this node
  */
-    public record Node(String id, String kind, Layout layout) {
+    public record Node(String id, String kind, Layout layout, String label, String visualType,
+                       boolean bypassed) {
+        /**
+         * Compatibility shape used by the original static projection contract.
+         * @param id graph node identifier
+         * @param kind allowlisted viewer node kind
+         * @param layout optional finite node bounds
+         */
+        public Node(String id, String kind, Layout layout) {
+            this(id, kind, layout, null, null, false);
+        }
+
 /**
  * Rejects unknown node kinds and missing identifiers.
  */
@@ -45,6 +59,8 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
             id = requireText(id, "node.id");
             kind = requireText(kind, "node.kind");
             if (!NODE_KINDS.contains(kind)) throw new IllegalArgumentException("node.kind is not supported");
+            label = optionalText(label, "node.label");
+            visualType = optionalText(visualType, "node.visualType");
         }
     }
 
@@ -52,15 +68,40 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
  * Directed render-only edge between two projection node IDs.
  * @param source source node identifier
  * @param target target node identifier
+ * @param id optional stable edge identifier
+ * @param label optional author-facing edge label
+ * @param visualType optional allowlisted presentation classification
+ * @param routing optional computed routing classification
  */
-    public record Edge(String source, String target) {
+    public record Edge(String source, String target, String id, String label, String visualType,
+                       Routing routing) {
+        /**
+         * Compatibility shape used by the original static projection contract.
+         * @param source source node identifier
+         * @param target target node identifier
+         */
+        public Edge(String source, String target) {
+            this(source, target, null, null, null, null);
+        }
+
 /**
  * Rejects blank endpoint identifiers.
  */
         public Edge {
             source = requireText(source, "edge.source");
             target = requireText(target, "edge.target");
+            id = optionalText(id, "edge.id");
+            label = optionalText(label, "edge.label");
+            visualType = optionalText(visualType, "edge.visualType");
         }
+    }
+
+    /** Closed routing classification computed from executable graph semantics. */
+    public enum Routing {
+        /** Ordinary named or default outcome route. */
+        OUTCOME,
+        /** Failure route into an error node. */
+        FAILURE
     }
 
 /**
@@ -89,8 +130,7 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
     public String toJson() {
         String nodeJson = nodes.stream().map(EmbedGraphProjection::nodeJson)
                 .collect(java.util.stream.Collectors.joining(","));
-        String edgeJson = edges.stream().map(edge -> "{\"source\":\"" + escape(edge.source())
-                        + "\",\"target\":\"" + escape(edge.target()) + "\"}")
+        String edgeJson = edges.stream().map(EmbedGraphProjection::edgeJson)
                 .collect(java.util.stream.Collectors.joining(","));
         return "{\"viewerContractVersion\":\"" + escape(viewerContractVersion)
                 + "\",\"graphId\":\"" + escape(graphId) + "\",\"graphVersionId\":\""
@@ -111,7 +151,20 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
                 + ",\"y\":" + number(node.layout().y()) + ",\"width\":" + number(node.layout().width())
                 + ",\"height\":" + number(node.layout().height()) + "}";
         return "{\"id\":\"" + escape(node.id()) + "\",\"kind\":\"" + escape(node.kind())
-                + "\",\"layout\":" + layout + "}";
+                + "\",\"layout\":" + layout + optionalJson("label", node.label())
+                + optionalJson("visualType", node.visualType())
+                + (node.bypassed() ? ",\"bypassed\":true" : "") + "}";
+    }
+
+    private static String edgeJson(Edge edge) {
+        return "{\"source\":\"" + escape(edge.source()) + "\",\"target\":\""
+                + escape(edge.target()) + "\"" + optionalJson("id", edge.id())
+                + optionalJson("label", edge.label()) + optionalJson("visualType", edge.visualType())
+                + (edge.routing() == null ? "" : ",\"routing\":\"" + edge.routing() + "\"") + "}";
+    }
+
+    private static String optionalJson(String name, String value) {
+        return value == null ? "" : ",\"" + name + "\":\"" + escape(value) + "\"";
     }
 
     private static String number(double value) {
@@ -143,5 +196,10 @@ public record EmbedGraphProjection(String viewerContractVersion, String graphId,
         Objects.requireNonNull(value, name);
         if (value.isBlank()) throw new IllegalArgumentException(name + " must not be blank");
         return value;
+    }
+
+    private static String optionalText(String value, String name) {
+        if (value == null) return null;
+        return requireText(value, name);
     }
 }

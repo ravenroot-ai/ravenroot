@@ -29,6 +29,7 @@ import java.util.Set;
  * @param snapshotLifecycle published/active lifecycle evidence for the captured graph
  * @param eligibility deployment-policy decision for the projection
  * @param projection graph view pinned into the registration
+ * @param source mutually-exclusive snapshot or live-deployment viewer source
  */
 public record EmbedProvisionCommand(String registrationId, long expectedRevision, String workloadIssuer,
                                     String workloadSubject, String tenantId, String parentOrigin,
@@ -36,7 +37,35 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
                                     VerifiedEmbedGraphGrant graphGrant,
                                     EmbedSnapshotLifecycle snapshotLifecycle,
                                     EmbedProjectionEligibility eligibility,
-                                    EmbedGraphProjection projection) {
+                                    EmbedGraphProjection projection,
+                                    EmbedViewerSource source) {
+
+    /**
+     * Source-compatible constructor for every pre-deployment, immutable-snapshot caller.
+     * @param registrationId tenant-scoped registration identifier
+     * @param expectedRevision revision that must still be current
+     * @param workloadIssuer verified workload token issuer
+     * @param workloadSubject verified workload token subject
+     * @param tenantId tenant that owns the registration
+     * @param parentOrigin permitted embedding origin
+     * @param capabilities immutable embedded workload capabilities
+     * @param themeOverride optional operator-selected theme
+     * @param graphGrant verified graph-read grant
+     * @param snapshotLifecycle captured graph lifecycle evidence
+     * @param eligibility projection-policy decision
+     * @param projection captured render-only graph view
+     */
+    public EmbedProvisionCommand(String registrationId, long expectedRevision, String workloadIssuer,
+                                 String workloadSubject, String tenantId, String parentOrigin,
+                                 Set<EmbedCapability> capabilities, Optional<EmbedTheme> themeOverride,
+                                 VerifiedEmbedGraphGrant graphGrant,
+                                 EmbedSnapshotLifecycle snapshotLifecycle,
+                                 EmbedProjectionEligibility eligibility,
+                                 EmbedGraphProjection projection) {
+        this(registrationId, expectedRevision, workloadIssuer, workloadSubject, tenantId, parentOrigin,
+                capabilities, themeOverride, graphGrant, snapshotLifecycle, eligibility, projection,
+                EmbedViewerSource.snapshot());
+    }
 
     /** Rejects missing identity fields and mutable or incomplete grant inputs. */
     public EmbedProvisionCommand {
@@ -52,6 +81,40 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
         Objects.requireNonNull(snapshotLifecycle, "snapshotLifecycle");
         Objects.requireNonNull(eligibility, "eligibility");
         Objects.requireNonNull(projection, "projection");
+        Objects.requireNonNull(source, "source");
+    }
+
+    /**
+     * Creates a live-deployment source without accepting or reopening GraphML.
+     * @param registrationId tenant-scoped registration identifier
+     * @param expectedRevision revision that must still be current
+     * @param workloadIssuer verified workload token issuer
+     * @param workloadSubject verified workload token subject
+     * @param tenantId tenant that owns the registration
+     * @param parentOrigin permitted embedding origin
+     * @param themeOverride optional operator-selected theme
+     * @param deploymentId tenant-scoped live deployment identifier
+     * @return deployment-backed provision command
+     */
+    public static EmbedProvisionCommand deployment(String registrationId, long expectedRevision,
+                                                    String workloadIssuer, String workloadSubject,
+                                                    String tenantId, String parentOrigin,
+                                                    Optional<EmbedTheme> themeOverride,
+                                                    String deploymentId) {
+        var source = EmbedViewerSource.deployment(deploymentId);
+        // Compatibility-only inert snapshot components. They are never served, printed or treated as
+        // policy evidence for a deployment source; keeping them private to this factory preserves the
+        // established record accessors while the public source union remains mutually exclusive.
+        var grant = new VerifiedEmbedGraphGrant(tenantId, "deployment:" + deploymentId, deploymentId,
+                1, deploymentId, "deferred", "deferred", "deployment-live-v1");
+        var eligibility = new EmbedProjectionEligibility("deployment-live-v1",
+                false, false, false, false, false, false, false);
+        var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
+                deploymentId, "deferred", "deferred", java.util.List.of(), java.util.List.of());
+        return new EmbedProvisionCommand(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, Set.of(EmbedCapability.GRAPH_READ,
+                EmbedCapability.DEPLOYMENT_OBSERVE), themeOverride, grant,
+                EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);
     }
 
     /** The revision this command writes when it is accepted; monotone by construction.
@@ -77,7 +140,7 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
                 workloadSubject, tenantId, parentOrigin, capabilities, graphGrant, themeOverride);
         return new EmbedRegistrationAggregate(registrationId, nextRevision(),
                 EmbedRegistrationState.ACTIVE, sessionGrant, snapshotLifecycle, eligibility, projection,
-                Objects.requireNonNull(provisionedAt, "provisionedAt"));
+                Objects.requireNonNull(provisionedAt, "provisionedAt"), source);
     }
 
     private static String requireText(String value, String name) {

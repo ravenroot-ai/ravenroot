@@ -10,6 +10,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.security.KeyPairGenerator;
+import java.security.spec.ECGenParameterSpec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,6 +42,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * looking for "what does acknowledge promise" will look.</p>
  */
 class EmbedBrowserSessionAuthorityTest {
+
+    @Test
+    void activeSessionPinsIncarnationEvenWhenReplacementBytesHaveTheSameDigest() throws Exception {
+        var clock = new MutableClock(EmbedSessionFixtures.AT);
+        var registration = EmbedSessionFixtures.registration(1);
+        var registrations = new MutableEmbedRegistrations(registration);
+        var sessions = new EmbedBrowserSessionAuthority(clock, Duration.ofSeconds(30),
+                Duration.ofSeconds(30), 4, tokens());
+        var bootstrap = sessions.begin(registration);
+        assertTrue(sessions.acknowledge(bootstrap.acknowledgementId(), bootstrap.channelId(),
+                "correlation", registration, registrations, () -> { }));
+        var generator = KeyPairGenerator.getInstance("EC");
+        generator.initialize(new ECGenParameterSpec("secp256r1"));
+        var issued = sessions.activate(bootstrap.exchangeId(),
+                sessions.acknowledged(bootstrap.exchangeId(), registrations),
+                (java.security.interfaces.ECPublicKey) generator.generateKeyPair().getPublic(), registrations);
+        var active = sessions.resolve(issued.bearer(), registrations);
+
+        var projection = new ai.ravenroot.api.embed.EmbedGraphProjection("1.0", "deployment", "version",
+                "same-digest", List.of(), List.of());
+        var first = new ai.ravenroot.api.application.DeploymentViewerView("1",
+                ai.ravenroot.api.application.DeploymentViewerView.Source.deployment(
+                        "deployment", "incarnation-a", "version"),
+                ai.ravenroot.api.application.LocalDeploymentState.READY, "same-digest", projection);
+        var replacement = new ai.ravenroot.api.application.DeploymentViewerView("1",
+                ai.ravenroot.api.application.DeploymentViewerView.Source.deployment(
+                        "deployment", "incarnation-b", "version"),
+                ai.ravenroot.api.application.LocalDeploymentState.READY, "same-digest", projection);
+        assertTrue(active.bind(first));
+        assertFalse(active.bind(replacement),
+                "an identical-byte undeploy/re-register must not move an existing bearer to the replacement");
+    }
 
     /**
      * The registration is already gone when the acknowledgement arrives.

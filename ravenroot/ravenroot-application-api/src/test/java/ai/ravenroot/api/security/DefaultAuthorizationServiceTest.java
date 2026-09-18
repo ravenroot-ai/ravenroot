@@ -138,7 +138,7 @@ class DefaultAuthorizationServiceTest {
     private static Role permittedRole(AuthorizationAction action) {
         return switch (action) {
             case RUNNER_READ, STATUS_READ, CATALOG_READ, ARTIFACT_LIST, EMBED_GRAPH_READ,
-                    EMBED_SESSION_CREATE -> Role.VIEWER;
+                    EMBED_SESSION_CREATE, DEPLOYMENT_OBSERVE -> Role.VIEWER;
             // EMBED_REGISTRATION_ADMIN is deliberately not in the VIEWER arm above, unlike the
             // two embed actions beside it. Deciding which snapshot an embed may expose is operations.
             case RUNNER_CONTROL, RUNNER_DISPATCH, GRAPH_READ, EXECUTION_START, EXECUTION_READ, EXECUTION_CONTROL,
@@ -161,6 +161,7 @@ class DefaultAuthorizationServiceTest {
         return action == AuthorizationAction.RUNNER_READ || action == AuthorizationAction.STATUS_READ || action == AuthorizationAction.CATALOG_READ
                 || action == AuthorizationAction.ARTIFACT_LIST
                 || action == AuthorizationAction.EMBED_GRAPH_READ
-                || action == AuthorizationAction.EMBED_SESSION_CREATE;
+                || action == AuthorizationAction.EMBED_SESSION_CREATE
+                || action == AuthorizationAction.DEPLOYMENT_OBSERVE;
     }
 }

@@ -74,8 +74,12 @@ public final class P256EmbedProofVerifier {
         } catch (GeneralSecurityException invalid) {
             return false;
         }
-        String replayKey = sha256((EmbedLaunchTicketAuthority.digest(bearer) + ":" + revision + ":" + nonce)
-                .getBytes(StandardCharsets.UTF_8));
+        // A session challenge authenticates a sequence of credentialed fetches. The one-use value
+        // is the signed jti for one exact method/path, not the session nonce itself; consuming only
+        // the nonce made a successful projection permanently prevent the observation request that
+        // follows it in the same short-lived browser session.
+        String replayKey = sha256((EmbedLaunchTicketAuthority.digest(bearer) + ":" + revision + ":" + nonce
+                + ":" + jti + ":" + method + ":" + uri).getBytes(StandardCharsets.UTF_8));
         synchronized (replay) {
             cleanup(now);
             if (replay.size() >= capacity || replay.containsKey(replayKey)) return false;

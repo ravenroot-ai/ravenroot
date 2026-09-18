@@ -381,6 +381,50 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Resolves a browser-safe view from the immutable definition retained by one local deployment.
+     * Unknown and cross-tenant identifiers are the same empty result.
+     * @param tenantId tenant whose deployment is read
+     * @param deploymentId tenant-scoped deployment identifier
+     * @return browser-safe view, or empty when the source is unavailable to the tenant
+     */
+    default java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * Replays only events belonging to one exact local deployment incarnation and graph version.
+     * Implementations filter before returning the page; callers must never filter a tenant-wide page.
+     * @param tenantId tenant that owns the deployment
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId captured physical deployment incarnation
+     * @param graphVersion captured immutable graph version
+     * @param sequence last sequence consumed by the caller
+     * @return bounded filtered replay result
+     */
+    default DeploymentEventBatch localDeploymentEventsAfter(String tenantId, String deploymentId,
+                                                              String incarnationId, String graphVersion,
+                                                              long sequence) {
+        return DeploymentEventBatch.unavailable(DeploymentEventBatch.Status.UNAVAILABLE);
+    }
+
+    /**
+     * Subscribes to future events only after tenant, deployment and graph-version filtering.
+     * The listener is an adapter-side bounded wakeup or queue, never the filtering boundary.
+     * @param tenantId tenant that owns the deployment
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId captured physical deployment incarnation
+     * @param graphVersion captured immutable graph version
+     * @param listener consumer reached only by events for the captured source
+     * @return handle that closes the filtered subscription
+     */
+    default AutoCloseable subscribeToLocalDeploymentEvents(String tenantId, String deploymentId,
+                                                            String incarnationId, String graphVersion,
+                                                            java.util.function.Consumer<ExecutionEvent> listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        return () -> { };
+    }
+
+    /**
  * Starts one of this tenant's registered deployments and completes at readiness.
  *
  * <p>Idempotent and single-flight, inheriting {@code GraphDeployment.start}'s own contract:

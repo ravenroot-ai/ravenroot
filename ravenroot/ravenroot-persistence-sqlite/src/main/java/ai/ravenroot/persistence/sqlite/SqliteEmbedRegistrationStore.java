@@ -16,6 +16,7 @@ import ai.ravenroot.api.embed.EmbedRevokeCommand;
 import ai.ravenroot.api.embed.EmbedRevokeOutcome;
 import ai.ravenroot.api.embed.EmbedSnapshotLifecycle;
 import ai.ravenroot.api.embed.EmbedTheme;
+import ai.ravenroot.api.embed.EmbedViewerSource;
 import ai.ravenroot.api.embed.VerifiedEmbedGraphGrant;
 import ai.ravenroot.api.embed.VerifiedEmbedSessionGrant;
 import ai.ravenroot.api.security.RequestContext;
@@ -78,7 +79,7 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
     public static final String FILE_NAME = "ravenroot-embed-registrations.db";
 
     /** The highest schema version this binary knows. A file above it is refused, never opened. */
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
 
     /**
      * Seven gates in a fixed order, one character each.
@@ -111,7 +112,10 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
                 snapshot_lifecycle TEXT    NOT NULL,
                 eligibility_gates  TEXT    NOT NULL,
                 projection_json    TEXT    NOT NULL,
-                provisioned_at     TEXT    NOT NULL
+                provisioned_at     TEXT    NOT NULL,
+                source_version     TEXT    NOT NULL DEFAULT '1',
+                source_kind        TEXT    NOT NULL DEFAULT 'snapshot',
+                source_deployment_id TEXT
             ) WITHOUT ROWID
             """;
 
@@ -124,6 +128,7 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
                     + "parent_origin, capabilities, theme_override, resource_id, deployment_id, "
                     + "deployment_version, graph_id, graph_version_id, canonical_digest, policy_revision, "
                     + "snapshot_lifecycle, eligibility_gates, projection_json, provisioned_at "
+                    + ", source_version, source_kind, source_deployment_id "
                     + "FROM embed_registration WHERE registration_id = ?";
 
     private final Connection connection;
@@ -218,6 +223,13 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
             }
             statement.execute(CREATE_TABLE);
             statement.execute(CREATE_INDEX);
+            if (version == 1) {
+                statement.execute("ALTER TABLE embed_registration ADD COLUMN source_version "
+                        + "TEXT NOT NULL DEFAULT '1'");
+                statement.execute("ALTER TABLE embed_registration ADD COLUMN source_kind "
+                        + "TEXT NOT NULL DEFAULT 'snapshot'");
+                statement.execute("ALTER TABLE embed_registration ADD COLUMN source_deployment_id TEXT");
+            }
             if (version < SCHEMA_VERSION) statement.execute("PRAGMA user_version = " + SCHEMA_VERSION);
         }
     }
@@ -406,10 +418,18 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
                 theme == null ? Optional.empty() : Optional.of(EmbedTheme.fromWire(theme)));
         EmbedGraphProjection projection =
                 EmbedGraphProjectionCodec.decode(rows.getString("projection_json"));
+        String sourceVersion = rows.getString("source_version");
+        String sourceKind = rows.getString("source_kind");
+        EmbedViewerSource source = switch (sourceKind) {
+            case "snapshot" -> new EmbedViewerSource.Snapshot(sourceVersion);
+            case "deployment" -> new EmbedViewerSource.Deployment(sourceVersion,
+                    rows.getString("source_deployment_id"));
+            default -> throw new IllegalStateException("the stored viewer source kind is unknown");
+        };
         return new EmbedRegistrationAggregate(rows.getString("registration_id"), rows.getLong("revision"),
                 EmbedRegistrationState.valueOf(rows.getString("state")), sessionGrant,
                 EmbedSnapshotLifecycle.valueOf(rows.getString("snapshot_lifecycle")), eligibility,
-                projection, Instant.parse(rows.getString("provisioned_at")));
+                projection, Instant.parse(rows.getString("provisioned_at")), source);
     }
 
     private static boolean gate(String gates, int index) {
@@ -449,8 +469,8 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
                         + "workload_issuer, workload_subject, parent_origin, capabilities, theme_override, "
                         + "resource_id, deployment_id, deployment_version, graph_id, graph_version_id, "
                         + "canonical_digest, policy_revision, snapshot_lifecycle, eligibility_gates, "
-                        + "projection_json, provisioned_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                        + "projection_json, provisioned_at, source_version, source_kind, source_deployment_id) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             insert.setString(1, aggregate.registrationId());
             insert.setLong(2, aggregate.revision());
             insert.setString(3, aggregate.state().name());
@@ -471,6 +491,14 @@ public final class SqliteEmbedRegistrationStore implements EmbedRegistrationAuth
             insert.setString(18, encodeGates(aggregate.eligibility()));
             insert.setString(19, EmbedGraphProjectionCodec.encode(aggregate.projection()));
             insert.setString(20, aggregate.provisionedAt().toString());
+            insert.setString(21, aggregate.source().viewerSourceVersion());
+            if (aggregate.source() instanceof EmbedViewerSource.Deployment deployment) {
+                insert.setString(22, "deployment");
+                insert.setString(23, deployment.deploymentId());
+            } else {
+                insert.setString(22, "snapshot");
+                insert.setString(23, null);
+            }
             insert.executeUpdate();
         }
     }

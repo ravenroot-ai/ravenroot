@@ -371,6 +371,27 @@
         }
       }
     },
+    "/v1/deployments/{id}/events": {
+      "get": {
+        "summary": "Streams only execution observations matching the authenticated tenant, deployment, required incarnation header and graphVersion query. Opaque Last-Event-ID replay is process-local and gaps are terminal explicit events.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"}
+        }
+      }
+    },
     "/v1/deployments/{id}/pause": {
       "post": {
         "summary": "Durably closes admission for one tenant-scoped deployment generation while retaining accepted work for Resume. Requires Idempotency-Key and X-Ravenroot-Expected-Generation headers and a bounded X-Ravenroot-Reason.",
@@ -479,6 +500,27 @@
         }
       }
     },
+    "/v1/deployments/{id}/view": {
+      "get": {
+        "summary": "Returns the versioned, allowlisted viewer projection for one exact local deployment incarnation. Raw GraphML, node properties, credentials and payloads are absent.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"}
+        }
+      }
+    },
     "/v1/drain": {
       "post": {
         "summary": "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if the configured bound elapsed with work still outstanding.",
@@ -535,6 +577,21 @@
           "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
           "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
           "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"}
+        }
+      }
+    },
+    "/v1/embed/observation": {
+      "post": {
+        "summary": "Streams bounded execution observations for the exact deployment incarnation pinned by an opt-in embed registration and browser proof-of-possession session.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
+          "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
         }
       }
     },

@@ -68,7 +68,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Runtime-backed publication gate for the public 59-node catalog and its admission-ready examples. */
+/** Runtime-backed publication gate for the public 60-node catalog and its admission-ready examples. */
 final class PublishedNodeContractTest {
     private static final String UPDATE_PROPERTY = "ravenroot.docs.update";
     private static final Path REPOSITORY = repositoryRoot();
@@ -79,7 +79,7 @@ final class PublishedNodeContractTest {
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
         List<NodeTypeDescriptor> descriptors = descriptors();
-        assertEquals(59, descriptors.size(), "the documented baseline must classify every supported node");
+        assertEquals(60, descriptors.size(), "the documented baseline must classify every supported node");
         String actual = snapshot(descriptors);
         update(SNAPSHOT, actual);
         assertEquals(Files.readString(SNAPSHOT), actual,
@@ -551,7 +551,7 @@ final class PublishedNodeContractTest {
 
     private static String graphMl(NodeTypeDescriptor descriptor) {
         Map<String, String> values = descriptor.properties().stream()
-                .filter(PublishedNodeContractTest::includeInExample)
+                .filter(property -> includeInExample(descriptor.behavior(), property))
                 .collect(java.util.stream.Collectors.toMap(
                 NodePropertyDescriptor::name, property -> exampleValue(descriptor.behavior(), property),
                 (left, right) -> left, java.util.LinkedHashMap::new));
@@ -595,11 +595,15 @@ final class PublishedNodeContractTest {
         return declared.isEmpty() ? Set.of("continue") : declared;
     }
 
-    private static boolean includeInExample(NodePropertyDescriptor property) {
-        return property.required();
+    private static boolean includeInExample(String behavior, NodePropertyDescriptor property) {
+        return property.required() || (behavior.equals("bigint-op") && property.name().equals("right"));
     }
 
     private static String exampleValue(String behavior, NodePropertyDescriptor property) {
+        if (behavior.equals("bigint-op") && property.name().equals("operation")) return "add";
+        if (behavior.equals("bigint-op") && property.name().equals("left")) return "literal:1";
+        if (behavior.equals("bigint-op") && property.name().equals("right")) return "literal:1";
+        if (behavior.equals("bigint-op") && property.name().equals("target")) return "result";
         if (!property.allowedValues().isEmpty()) return property.allowedValues().get(0);
         if (!property.defaultValue().isBlank()) return property.defaultValue();
         if (!property.minimumValue().isBlank()) return property.minimumValue();

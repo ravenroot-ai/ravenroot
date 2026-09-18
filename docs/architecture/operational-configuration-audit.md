@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 22625 |
+| Atomic operational candidates discovered | 22648 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 22625 |
+| Reviewed | 22648 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 311 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 1839 |
-| Retained protocol or format invariants | 9431 |
+| Retained security ceilings or defaults | 1842 |
+| Retained protocol or format invariants | 9449 |
 | Retained published contract descriptions | 490 |
 | Retained presentation text | 578 |
-| Retained derived values | 1039 |
+| Retained derived values | 1041 |
 | Test fixtures | 7597 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1911.
+Retired source candidates preserved in inventory history: 1914.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 61.
+Checked source reconciliations: 62.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 22625 candidates.
+zero-count or unclassified rows as needed and sums to 22648 candidates.
 
 ### Status counts
 
@@ -77,18 +77,18 @@ zero-count or unclassified rows as needed and sums to 22625 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 20974 |
+| retained | 20997 |
 
 ### Classification counts
 
 | Classification | Candidates |
 |---|---:|
-| derived | 1039 |
+| derived | 1041 |
 | operator-configurable | 1651 |
 | presentation-text | 578 |
-| protocol-or-format-invariant | 9431 |
+| protocol-or-format-invariant | 9449 |
 | published-contract-description | 490 |
-| security-ceiling-or-default | 1839 |
+| security-ceiling-or-default | 1842 |
 | test-fixture | 7597 |
 | unclassified | 0 |
 
@@ -98,8 +98,8 @@ zero-count or unclassified rows as needed and sums to 22625 candidates.
 |---|---:|
 | deployment | 2735 |
 | deployment-example | 20 |
-| java | 6962 |
-| script | 2198 |
+| java | 6984 |
+| script | 2199 |
 | test-fixture | 7597 |
 | ui | 3113 |
 
@@ -117,8 +117,8 @@ assigned to an issue retroactively.
 | #318 | 107 |
 | #319 | 287 |
 | #320 | 1469 |
-| #321 | 8566 |
-| Retained; no remediation required | 12041 |
+| #321 | 8567 |
+| Retained; no remediation required | 12063 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 22625 |
-| Unchanged identities | 22625 |
-| Approved identity migrations | 0 |
-| Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 22625 |
+| Unchanged identities | 22604 |
+| Approved identity migrations | 18 |
+| Approved retirements | 3 |
+| Semantically classified additions | 26 |
+| Current candidates | 22648 |
 
 ## Final semantic review
 
@@ -5296,16 +5296,17 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-a6ea77fef4ae33131baf` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/WorkspaceBehavior.java:12` `WorkspaceBehavior` | java | retained | protocol-or-format-invariant | Reviewed wire key, route/component position, immutable format discriminator, fixed lifecycle/metric vocabulary or minimum representable scheduling sentinel; no concurrency, time or payload default is introduced by this atom. |
 | `oc-2992dd889c38de9b057a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/AuditedExecutionResultPurge.java:55` `AuditedExecutionResultPurge` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-3f19b3b11f883ebb97db` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/AuditedExecutionResultPurge.java:59` `AuditedExecutionResultPurge` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-41058c7e3b2cbcf42773` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorPropertySchema.java:487` `BehaviorPropertyException` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-109e739d92944560b134` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-3fd68e9baf32b4480522` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-587fd923f3177fe79f4d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-6b779f59d9f55df191e2` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-825ad55234c105f3b2e3` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-a8fdb2e49959627e34aa` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-713cdbecf9f8c99dac3e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:38` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-f7740183a9f490a81387` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:38` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
-| `oc-fcbb7d97fccb0783950c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:38` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-41058c7e3b2cbcf42773` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorPropertySchema.java:490` `BehaviorPropertyException` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-2af3b4ed2c0ce2ff7699` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-5ad1d820e7b6cda987ed` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-81fb87bfbbeaaf23d0f6` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-9731379b6fe530fa5296` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-a8bd4bf09c458e85d368` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-eb88001f329ffbe6a384` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-f83b839664137ebadb7a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:37` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-01a919075835658d19c0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:38` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-2ef7dc24f1c15552c52a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:38` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
+| `oc-c3606278a0b7c855b5fe` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:38` `withRunnerJobs` | java | retained | protocol-or-format-invariant | This trusted built-in behavior identifier is part of the closed legacy no-managed-egress compatibility vocabulary. |
 | `oc-1cf23e723f844709e0ea` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:349` `if` | java | retained | protocol-or-format-invariant | The closed external-I/O source proof assigns this exact candidate to the protocol-and-structural-format partition. |
 | `oc-6909f620153d4088d035` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:462` `State` | java | retained | presentation-text | The closed external-I/O source proof assigns this exact candidate to the diagnostic-presentation partition. |
 | `oc-1c057cf1c557104d6b82` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorRegistry.java:467` `State` | java | retained | presentation-text | The closed external-I/O source proof assigns this exact candidate to the diagnostic-presentation partition. |
@@ -5517,6 +5518,27 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-9d8464305037554acf7d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/WorkerIdentity.java:96` `WorkerIdentity` | java | retained | derived | This local fallback value is derived from process identity generation rather than selected by an operator. |
 | `oc-700606b0d397cec2aa82` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/WorkerInstanceRegistry.java:103` `WorkerInstanceRegistry` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-ba89291947567e322bfe` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/WorkerInstanceRegistry.java:306` `liveCount` | java | retained | derived | These numeric atoms initialize counters, offsets, masks, or indexes whose meaning is derived from surrounding representation logic. |
+| `oc-e9ee23bd9294f6b8695f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:27` `BigIntOpNodeBehaviorFactory` | java | retained | security-ceiling-or-default | This fixed runtime-owned ceiling bounds bigint parsing, arithmetic publication, or graph-authored property text and cannot be loosened by a graph. |
+| `oc-478ef65b0b71063d0189` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:28` `BigIntOpNodeBehaviorFactory` | java | retained | derived | This value is mechanically derived from the fixed operand prefix, optional sign, and runtime-owned decimal digit ceiling. |
+| `oc-5275ba86877d9f494fcc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:28` `BigIntOpNodeBehaviorFactory` | java | retained | derived | This value is mechanically derived from the fixed operand prefix, optional sign, and runtime-owned decimal digit ceiling. |
+| `oc-5c52f9397786a2f99b1a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:29` `BigIntOpNodeBehaviorFactory` | java | retained | security-ceiling-or-default | This fixed runtime-owned ceiling bounds bigint parsing, arithmetic publication, or graph-authored property text and cannot be loosened by a graph. |
+| `oc-3bc203edb44ae84c711e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:31` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-5fdb539cab77e984c8b7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-63231a02c822f7b8c542` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-93b3beae96c2587939a0` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-9d3b920c844151da98a9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-9db1e9cd42f6fdab622d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-eec7f8dc3feaafd35d8b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-f18b00d46af29e256b39` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-fe169891cb22d69d4185` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:34` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-63510cb3875102f1bf2d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:35` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-198d4285bfa91431821c` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-3df2ea4fc5263493a040` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-672119bfc4a420e6562f` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-681d91e8f6f62a5cb16a` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-7af89f874ea62374ba55` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-b17186512460aea660c9` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
+| `oc-ecbb66328ad15d02fd25` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BigIntOpNodeBehaviorFactory.java:36` `BigIntOpNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | This atom defines the closed data-only bigint operand grammar, operation vocabulary, or unary/binary arity contract. |
 | `oc-ce082d0bab9a86986c23` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:27` `BoundaryGuardNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-aa0d9107ac8f72873f2d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:28` `BoundaryGuardNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-35917f179c967ad6bd75` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/BoundaryGuardNodeBehaviorFactory.java:29` `BoundaryGuardNodeBehaviorFactory` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -14569,15 +14591,15 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-a2faa720243adc49d064` | `scripts/check_operational_docs.py:19` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-2b51c7ae26d4b73fd3e0` | `scripts/check_operational_docs.py:23` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-93911b9a81b1fa32280b` | `scripts/check_operational_docs.py:23` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-546344904b0e3300b995` | `scripts/check_operational_docs.py:29` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f0f5d75fd5ac4bdf87b8` | `scripts/check_operational_docs.py:29` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-06330096b2a4fc244de9` | `scripts/check_operational_docs.py:79` `cli_tokens` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-b2afa993ccbba37b2af9` | `scripts/check_operational_docs.py:81` `cli_tokens` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6b5dcca0dc8547618931` | `scripts/check_operational_docs.py:90` `assistant_variables` | script | retained | protocol-or-format-invariant | These are exact environment names consumed by release, documentation, and repository tooling. |
-| `oc-7cf08ccc1a414da87049` | `scripts/check_operational_docs.py:90` `assistant_variables` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-be1f3882200c0398babd` | `scripts/check_operational_docs.py:90` `assistant_variables` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-42242ef38df8431cebae` | `scripts/check_operational_docs.py:147` `errors` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-90a8f860d93513cdb2b2` | `scripts/check_operational_docs.py:147` `errors` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-546344904b0e3300b995` | `scripts/check_operational_docs.py:30` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f0f5d75fd5ac4bdf87b8` | `scripts/check_operational_docs.py:30` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-06330096b2a4fc244de9` | `scripts/check_operational_docs.py:80` `cli_tokens` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-b2afa993ccbba37b2af9` | `scripts/check_operational_docs.py:82` `cli_tokens` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6b5dcca0dc8547618931` | `scripts/check_operational_docs.py:91` `assistant_variables` | script | retained | protocol-or-format-invariant | These are exact environment names consumed by release, documentation, and repository tooling. |
+| `oc-7cf08ccc1a414da87049` | `scripts/check_operational_docs.py:91` `assistant_variables` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-be1f3882200c0398babd` | `scripts/check_operational_docs.py:91` `assistant_variables` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-42242ef38df8431cebae` | `scripts/check_operational_docs.py:148` `errors` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-90a8f860d93513cdb2b2` | `scripts/check_operational_docs.py:148` `errors` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-327df934ef733b4b0dfb` | `scripts/check_product_version.py:14` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-9b9edca543a603210500` | `scripts/check_product_version.py:15` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-d952d29d570bf7e375b8` | `scripts/check_product_version.py:15` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
@@ -15509,12 +15531,13 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-fe50082f32d95d86f662` | `scripts/publish_node_contract_reference.py:14` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-b539367c0acec10f76d7` | `scripts/publish_node_contract_reference.py:15` `module` | script | retained | protocol-or-format-invariant | The governed descriptor publication snapshot path identifies a tracked generated document, not operational execution configuration. |
 | `oc-c25365610963edd094a1` | `scripts/publish_node_contract_reference.py:16` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-0dca3b59b0ac47bd1606` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-1fa27af20f7a4b3d2949` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-55605e0a1da20665c096` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-74e1ef04353b9ae34d8b` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-e8b0082cebee7bd62a5e` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-e98d81109da2e5ff628a` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-2d3153b518ed0051e3f2` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-580897e7903916adf854` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-90a32278a5ef9ef69fff` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-cf25ff36b7b1939b2f4e` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-d621884c27d0897af911` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-d8099d6628c4c5b86360` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-db2cde0ea13ec2008418` | `scripts/publish_node_contract_reference.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
 | `oc-2d3291c122dbcb7b58f6` | `scripts/publish_node_contract_reference.py:18` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-5aec64b6fa33f62088a1` | `scripts/publish_node_contract_reference.py:18` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-79be8cc74e9015a7aa4b` | `scripts/publish_node_contract_reference.py:18` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |

@@ -17,7 +17,7 @@ SPEC.loader.exec_module(PUBLISHER)
 class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_runtime_snapshot_covers_every_node_and_sensitive_variant(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(59, sum(line.startswith("## `") for line in rendered.splitlines()))
+        self.assertEqual(60, sum(line.startswith("## `") for line in rendered.splitlines()))
         for behavior in (
             "matrix.send",
             "matrix.sync",
@@ -37,7 +37,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_render_publishes_the_full_catalog_metadata_shape(self) -> None:
         rendered = PUBLISHER.render()
         lines = rendered.splitlines()
-        self.assertEqual(61, rendered.count("| Catalog field | Runtime descriptor value |"))
+        self.assertEqual(62, rendered.count("| Catalog field | Runtime descriptor value |"))
         for label in (
             "Display name",
             "Category",
@@ -51,9 +51,9 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
             "Runtime concurrency",
             "Outcomes",
         ):
-            self.assertEqual(61, sum(line.startswith(f"| {label} |") for line in lines), label)
+            self.assertEqual(62, sum(line.startswith(f"| {label} |") for line in lines), label)
         self.assertEqual(
-            61,
+            62,
             rendered.count("| Property | Display label | Editor help | Type | Required |"),
         )
         self.assertIn(
@@ -68,7 +68,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
 
     def test_each_node_links_a_complete_graph(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(59, rendered.count("Complete GraphML example"))
+        self.assertEqual(60, rendered.count("Complete GraphML example"))
 
     def test_governed_variant_keeps_workspace_references_typed_and_legacy_separate(self) -> None:
         rendered = PUBLISHER.render()
@@ -89,7 +89,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
 
     def test_compact_index_links_every_node_anchor(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(59, rendered.count("](#"))
+        self.assertEqual(60, rendered.count("](#"))
         self.assertIn("may scroll horizontally", rendered)
 
 

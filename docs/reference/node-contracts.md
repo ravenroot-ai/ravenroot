@@ -42,15 +42,15 @@ bundle references rather than inferred from the descriptor snapshot.
 
 Each property table may scroll horizontally on a narrow viewport. Jump directly to a node:
 
-- [`agent`](#node-agent) · [`amqp.consume`](#node-amqp-consume) · [`amqp.publish`](#node-amqp-publish) · [`boundary-guard`](#node-boundary-guard) · [`cel-decision`](#node-cel-decision) · [`cel-transform`](#node-cel-transform) · [`delay`](#node-delay)
-- [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review) · [`github-events-source`](#node-github-events-source)
-- [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse) · [`json-path`](#node-json-path)
-- [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move)
-- [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook) · [`mattermost.send`](#node-mattermost-send) · [`object.delete`](#node-object-delete)
-- [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply)
-- [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision)
-- [`spel.transform`](#node-spel-transform) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send)
-- [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
+- [`agent`](#node-agent) · [`amqp.consume`](#node-amqp-consume) · [`amqp.publish`](#node-amqp-publish) · [`bigint-op`](#node-bigint-op) · [`boundary-guard`](#node-boundary-guard) · [`cel-decision`](#node-cel-decision) · [`cel-transform`](#node-cel-transform)
+- [`delay`](#node-delay) · [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review)
+- [`github-events-source`](#node-github-events-source) · [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse)
+- [`json-path`](#node-json-path) · [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete)
+- [`mail.imap.move`](#node-mail-imap-move) · [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook) · [`mattermost.send`](#node-mattermost-send)
+- [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive)
+- [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message)
+- [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message)
+- [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
 
 ## `agent` {#node-agent}
 
@@ -162,6 +162,32 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1-16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-publish retries | Only proven connection-establishment failures are retried (0-3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether republishing this message after a crash of unknown outcome is safe. The broker does not deduplicate; say repeatable only where the consumer discards a message id it has already handled. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+
+## `bigint-op` {#node-bigint-op}
+
+Canonical runtime rules: [core behavior reference](core-nodes.md).
+[Complete GraphML example](../examples/nodes/bigint-op.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Exact integer operation |
+| Category | Transformations |
+| Description | Applies one bounded, exact integer operation to top-level payload fields or decimal literals. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic,in-process,pure |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The copied payload contains the exact result in target; all attributes pass through. |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `operation` | Operation | One elementary integer operation. | `STRING` | true | Not declared | copy,add,subtract,multiply,floor-divide,modulo,equal,less-than | false | Not declared | Not declared | max UTF-8 bytes 32 |
+| `left` | Left operand | Operand reference: field:<name> or literal:<signed-decimal>. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 4105 |
+| `right` | Right operand | Second operand reference, required for every operation except copy. | `STRING` | false | Not declared | Not declared | false | operation:ONE_OF:add,subtract,multiply,floor-divide,modulo,equal,less-than | operation:ONE_OF:add,subtract,multiply,floor-divide,modulo,equal,less-than | max UTF-8 bytes 4105 |
+| `target` | Target field | Top-level payload field that receives the result. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 256 |
 
 ## `boundary-guard` {#node-boundary-guard}
 

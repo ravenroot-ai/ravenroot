@@ -32,8 +32,8 @@ class CheckOperationalDocsTest(unittest.TestCase):
         self.assertIn("RAVENROOT_ASSISTANT_CONSENT_DIR", variables)
 
     def test_standard_core_catalog_is_derived_from_composition(self):
-        self.assertEqual(11, len(core_nodes()))
-        self.assertTrue({"human-task", "http-request", "boundary-guard"} <= core_nodes())
+        self.assertEqual(12, len(core_nodes()))
+        self.assertTrue({"human-task", "bigint-op", "http-request", "boundary-guard"} <= core_nodes())
 
     def test_core_reference_links_matching_complete_graphs(self):
         self.assertEqual(

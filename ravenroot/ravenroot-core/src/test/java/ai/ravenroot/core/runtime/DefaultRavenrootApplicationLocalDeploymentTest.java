@@ -76,7 +76,8 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
 
     @Test
     void durableRegistrationKeepsTheLocalAliasButPublishesTheAuthorityIdentity() {
-        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+        var monitor = new ExecutionMonitor();
+        var application = application(new SameThreadExecutionEngine(), monitor,
                 new RecordingSourceBehavior());
         try {
             DeploymentId authorityId = DeploymentId.of("registry-42");
@@ -91,6 +92,16 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
                     target.observe().toCompletableFuture().join().state());
             assertTrue(application.localDeploymentTargets()
                     .resolve(TENANT_A.tenantId(), DeploymentId.of("friendly-name")).isEmpty());
+
+            var view = application.localDeploymentView("tenant-a", "friendly-name").orElseThrow();
+            var execution = new ExecutionMonitor.ExecutionIdentity(TENANT_A, authorityId.value(),
+                    view.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
+                    java.util.Map.of(), authorityId.value(), null);
+            monitor.executionStarted(execution);
+            var observed = application.localDeploymentEventsAfter("tenant-a", "friendly-name",
+                    view.source().incarnationId(), view.source().graphVersion(), 0);
+            assertEquals(1, observed.events().size());
+            assertEquals(execution.traversalId(), observed.events().getFirst().traversalId());
         } finally {
             application.close();
         }
@@ -192,16 +203,16 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             assertEquals(Optional.empty(), application.localDeploymentView("tenant-b", "observed"),
                     "a sibling tenant must be indistinguishable from an unknown deployment");
 
-            String engineId = localEngineId("tenant-a", "observed");
-            var accepted = new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+            String publishedDeploymentId = "observed";
+            var accepted = new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
                     first.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
-                    java.util.Map.of(), engineId, null);
-            var sibling = new ExecutionMonitor.ExecutionIdentity(TENANT_B, engineId,
+                    java.util.Map.of(), publishedDeploymentId, null);
+            var sibling = new ExecutionMonitor.ExecutionIdentity(TENANT_B, publishedDeploymentId,
                     first.source().graphVersion(), java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
-                    java.util.Map.of(), engineId, null);
-            var wrongVersion = new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                    java.util.Map.of(), publishedDeploymentId, null);
+            var wrongVersion = new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
                     "wrong-version", java.util.UUID.randomUUID(), java.util.UUID.randomUUID(),
-                    java.util.Map.of(), engineId, null);
+                    java.util.Map.of(), publishedDeploymentId, null);
             monitor.executionStarted(sibling);
             monitor.executionStarted(wrongVersion);
             monitor.executionStarted(accepted);
@@ -230,17 +241,17 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
                     application.localDeploymentEventsAfter("tenant-a", "observed",
                             first.source().incarnationId(), first.source().graphVersion(), 0).status());
 
-            monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+            monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
                     replacement.source().graphVersion(), java.util.UUID.randomUUID(),
-                    java.util.UUID.randomUUID(), java.util.Map.of(), engineId, null));
+                    java.util.UUID.randomUUID(), java.util.Map.of(), publishedDeploymentId, null));
             assertEquals(0, staleDeliveries.get(),
                     "incarnation A listener must not receive identical-byte incarnation B events");
             staleSubscription.close();
 
             for (int index = 0; index < 2_050; index++) {
-                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
                         replacement.source().graphVersion(), java.util.UUID.randomUUID(),
-                        java.util.UUID.randomUUID(), java.util.Map.of(), engineId, null));
+                        java.util.UUID.randomUUID(), java.util.Map.of(), publishedDeploymentId, null));
             }
             assertEquals(ai.ravenroot.api.application.DeploymentEventBatch.Status.GAP,
                     application.localDeploymentEventsAfter("tenant-a", "observed",
@@ -301,10 +312,10 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
                 assertEquals(published.source(), restarted.source());
                 assertEquals(LocalDeploymentState.READY, restarted.lifecycle());
 
-                String engineId = localEngineId("tenant-a", "restarting-view");
-                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, engineId,
+                String publishedDeploymentId = "restarting-view";
+                monitor.executionStarted(new ExecutionMonitor.ExecutionIdentity(TENANT_A, publishedDeploymentId,
                         restarted.source().graphVersion(), java.util.UUID.randomUUID(),
-                        java.util.UUID.randomUUID(), java.util.Map.of(), engineId, null));
+                        java.util.UUID.randomUUID(), java.util.Map.of(), publishedDeploymentId, null));
                 assertEquals(1, deliveries.get(),
                         "the pre-restart filtered subscription must remain bound after READY returns");
 
@@ -358,13 +369,6 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             release.countDown();
             application.close();
         }
-    }
-
-    private static String localEngineId(String tenant, String deploymentId) throws Exception {
-        byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
-                ("local-deployment\u0000" + tenant + "\u0000" + deploymentId)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return "local-" + java.util.HexFormat.of().formatHex(digest);
     }
 
     /**

@@ -367,6 +367,7 @@ jobs:
           python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
+          python3 -m unittest scripts.tests.test_github_release
           python3 -m unittest scripts.tests.test_verify_api_docs
           python3 scripts/audit_operational_configuration.py --check
           python3 scripts/check_release_configuration.py

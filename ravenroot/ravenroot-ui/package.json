@@ -31,7 +31,7 @@
     "@playwright/test": "1.62.0",
     "fast-check": "4.9.0",
     "jsdom": "29.1.1",
-    "vite": "7.3.6",
+    "vite": "8.2.2",
     "vitest": "^4.1.11"
   },
   "allowScripts": {

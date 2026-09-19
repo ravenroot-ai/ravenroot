@@ -8,6 +8,11 @@ import java.util.concurrent.CompletionStage;
  */
 public interface RunnerDriver extends AutoCloseable {
     /**
+     * Fails closed when the selected substrate cannot currently admit attested work.
+     * Implementations may use bounded read-only observations; success grants no job authority.
+     */
+    default void verifyAvailability() { }
+    /**
      * Returns enforceable capabilities, not a grant of control-plane approval.
      * @return exact tenant-scoped runner advertisement
      */
@@ -17,6 +22,12 @@ public interface RunnerDriver extends AutoCloseable {
      * @return operator-installed profile identifiers, not image names or graph-provided grants
      */
     default java.util.Set<String> runtimeProfiles() { return java.util.Set.of(); }
+    /**
+     * Adds an observed physical identity to a heartbeat without granting execution authority.
+     * @param assignment current accepted fenced assignment
+     * @return the same logical assignment with bounded physical observations
+     */
+    default RunnerAssignment observe(RunnerAssignment assignment) { return assignment; }
     /**
      * Executes once under the accepted live execution fence and seals a quiescent result.
      * @param assignment authenticated claimed job; never an unknown or report-only job

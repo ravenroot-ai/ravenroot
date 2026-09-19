@@ -129,6 +129,7 @@ public final class RunnerJson {
     public static Map<String, Object> entry(RunnerWorkspaceState.Entry entry) {
         var value = new LinkedHashMap<>(job(entry.job()));
         value.put("continuationUncertain", entry.continuationUncertain());
+        value.put("kubernetes", kubernetes(entry.kubernetes()));
         value.put("workspaceRef", entry.workspaceNodeId()); value.put("lifecycleCommand", entry.lifecycleCommand()); return value;
     }
     public static Map<String, Object> job(RunnerJob job) {
@@ -141,6 +142,8 @@ public final class RunnerJson {
         result.put("definition", job.definition().reference().name()); result.put("definitionVersion", job.definition().reference().version());
         result.put("deadline", job.deadline().toString()); result.put("leaseUntil", job.leaseUntil() == null ? null : job.leaseUntil().toString());
         result.put("authority", policy(job.authority())); result.put("stopReason", job.stopReason().name());
+        result.put("driver", job.runner().trustProfile().equals("kubernetes-pod-v1") ? "KUBERNETES" : "DOCKER");
+        result.put("kubernetes", job.result() == null || job.result().workspace() == null ? null : kubernetes(job.result().workspace().kubernetes()));
         result.put("outcome", job.result() == null ? null : job.result().outcome());
         result.put("result", job.result() == null ? null : directResult(job.result().payload()));
         result.put("artifacts", job.result() == null ? List.of() : job.result().artifacts().stream().map(RunnerJson::artifact).toList());
@@ -158,6 +161,7 @@ public final class RunnerJson {
         var result = new LinkedHashMap<String, Object>();
         result.put("name", profile.reference().name()); result.put("version", profile.reference().version());
         result.put("workspaceScope", profile.workspaceScope().name()); result.put("runtimeLifecycle", profile.runtimeLifecycle().name());
+        result.put("driver", profile.driver().name());
         result.put("runnerPool", profile.runnerPool()); result.put("runtimeProfile", profile.runtimeProfile());
         result.put("policy", policy(profile.policy())); result.put("retention", profile.retention().toString());
         result.put("completionPolicy", profile.completionPolicy().name()); result.put("allowedAgents", profile.allowedAgents());
@@ -174,6 +178,9 @@ public final class RunnerJson {
         return result;
     }
     public static WorkspaceProfile workspaceProfile(String tenant, Map<String, Object> value) {
+        if (!Set.of("name", "version", "workspaceScope", "runtimeLifecycle", "driver", "runnerPool", "runtimeProfile",
+                "policy", "retention", "completionPolicy", "allowedAgents", "capacity", "fleetLimits", "cpuMillicores")
+                .containsAll(value.keySet())) throw new IllegalArgumentException("unknown Workspace profile field");
         var c = map(value.get("capacity"));
         var capacity = new WorkspaceProfile.Capacity(Math.toIntExact(number(c, "mutatingUsers")), Math.toIntExact(number(c, "readOnlyUsers")),
                 Math.toIntExact(number(c, "materializedWorkspaces")), number(c, "aggregateStorageBytes"),
@@ -197,7 +204,8 @@ public final class RunnerJson {
                 capacity,
                 Duration.parse(text(value, "retention")), WorkspaceProfile.CompletionPolicy.valueOf(text(value, "completionPolicy")),
                 strings(value.get("allowedAgents")), fleetLimits,
-                value.containsKey("cpuMillicores") ? Math.toIntExact(number(value, "cpuMillicores")) : 1000);
+                value.containsKey("cpuMillicores") ? Math.toIntExact(number(value, "cpuMillicores")) : 1000,
+                value.containsKey("driver") ? WorkspaceProfile.Driver.valueOf(text(value, "driver")) : WorkspaceProfile.Driver.DOCKER);
     }
     public static Map<String, Object> workspace(WorkspaceResource workspace) {
         var value = new LinkedHashMap<String, Object>();
@@ -206,7 +214,38 @@ public final class RunnerJson {
         value.put("state", workspace.state().name()); value.put("runtimeId", workspace.runtimeId() == null ? null : workspace.runtimeId().toString());
         value.put("ownershipGeneration", workspace.generation());
         value.put("checkpoint", workspace.checkpoint()); value.put("stopRequested", workspace.stopRequested());
+        value.put("driver", workspace.profile().driver().name());
+        value.put("kubernetes", kubernetes(workspace.kubernetes()));
         value.put("updatedAt", workspace.updatedAt().toString()); return value;
+    }
+    /** Bounded technical projection; no endpoint, credential or user-selected Kubernetes object. */
+    public static Map<String, Object> kubernetes(KubernetesWorkload workload) {
+        if (workload == null) return null;
+        var value = new LinkedHashMap<String, Object>();
+        value.put("protocolVersion", workload.protocolVersion()); value.put("cluster", workload.cluster());
+        value.put("namespace", workload.namespace()); value.put("podName", workload.podName());
+        value.put("podUid", workload.podUid() == null ? null : workload.podUid().toString());
+        value.put("claimName", workload.claimName()); value.put("claimUid", workload.claimUid().toString());
+        value.put("volumeName", workload.volumeName()); value.put("ownershipGeneration", workload.generation());
+        value.put("phase", workload.phase().name()); value.put("requestedBytes", workload.requestedBytes());
+        value.put("enforcedBytes", workload.enforcedBytes()); value.put("attestationDigest", workload.attestationDigest());
+        value.put("condition", workload.condition().name()); value.put("reason", workload.reason().name()); value.put("exitCode", workload.exitCode());
+        value.put("modelTurns", workload.modelTurns()); value.put("toolCalls", workload.toolCalls()); value.put("modelTokens", workload.modelTokens());
+        return value;
+    }
+    /** Strict ingress projection for the authenticated manager's physical heartbeat. */
+    public static KubernetesWorkload kubernetes(Map<String, Object> value) {
+        if (!value.keySet().equals(Set.of("protocolVersion", "cluster", "namespace", "podName", "podUid", "claimName", "claimUid",
+                "volumeName", "ownershipGeneration", "phase", "requestedBytes", "enforcedBytes", "attestationDigest",
+                "condition", "reason", "exitCode", "modelTurns", "toolCalls", "modelTokens")))
+            throw new IllegalArgumentException("unknown or missing Kubernetes observation field");
+        return new KubernetesWorkload(Math.toIntExact(number(value, "protocolVersion")), text(value, "cluster"), text(value, "namespace"),
+                (String) value.get("podName"), value.get("podUid") == null ? null : UUID.fromString(text(value, "podUid")), text(value, "claimName"),
+                UUID.fromString(text(value, "claimUid")), (String) value.get("volumeName"), number(value, "ownershipGeneration"),
+                KubernetesWorkload.Phase.valueOf(text(value, "phase")), number(value, "requestedBytes"), number(value, "enforcedBytes"), (String) value.get("attestationDigest"),
+                KubernetesWorkload.Condition.valueOf(text(value, "condition")), KubernetesWorkload.Reason.valueOf(text(value, "reason")),
+                value.get("exitCode") == null ? null : Math.toIntExact(number(value, "exitCode")), Math.toIntExact(number(value, "modelTurns")),
+                Math.toIntExact(number(value, "toolCalls")), number(value, "modelTokens"));
     }
     public static Map<String, Object> artifact(RunnerArtifact artifact) {
         return Map.of("artifactId", artifact.artifactId().toString(), "kind", artifact.kind().name(),

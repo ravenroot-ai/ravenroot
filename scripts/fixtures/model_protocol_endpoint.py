@@ -32,7 +32,9 @@ def proposal(request):
                 raise ValueError("actual test tool result required")
             outcome = "passed" if evidence["exitCode"] == 0 else "failed"
     elif command in {"review", "handoff"}:
-        steps.append(("read_file", {"path": "PLAN.md"}))
+        steps.append(("list_files", {}))
+        if len(completed) >= 3 and "PLAN.md" in completed[2]:
+            steps.append(("read_file", {"path": "PLAN.md"}))
         if command == "review" and completed and "return a + b" in completed[0]:
             outcome = "approved"
     if len(completed) < len(steps):

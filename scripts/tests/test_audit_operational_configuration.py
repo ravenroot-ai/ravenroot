@@ -290,6 +290,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 errors = audit.final_review_authority_errors(root, bad_document, expected)
             self.assertTrue(any("overlaps another semantic authority" in error for error in errors))
 
+    def test_native_worker_schema_authority_rejects_cross_driver_and_open_fields(self) -> None:
+        schema = json.loads((ROOT / audit.HELM_SCHEMA_PATH).read_text())
+        self.assertTrue(audit.helm_schema_rule_matches(schema, "runnerPlane.workerPools", "worker-pools"))
+        for mutate in (
+                lambda item: item.pop("allOf"),
+                lambda item: item["properties"]["kubernetes"].update(additionalProperties=True),
+                lambda item: item["properties"]["kubernetes"]["properties"]["runtimeImages"]["items"].pop("pattern"),
+                lambda item: item["required"].remove("driver")):
+            changed = copy.deepcopy(schema)
+            mutate(audit.helm_schema_contract(changed, "runnerPlane.workerPools")["items"])
+            self.assertFalse(audit.helm_schema_rule_matches(changed, "runnerPlane.workerPools", "worker-pools"))
+
     def test_helm_authority_closes_values_schema_templates_runtime_tests_and_candidates(self) -> None:
         candidates = audit.discover(ROOT)
         authority = audit.helm_authority_from_source(ROOT, candidates)

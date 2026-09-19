@@ -612,6 +612,43 @@ public abstract class ExecutionStoreContract {
         assertEquals(1L, await(store().purgeExpiredProcessInstances(key.tenantId())));
     }
 
+    @Test final void kubernetesIdentityAndUsageSurviveHeartbeatCompletionAndStoreRestart() {
+        assumeCapability(StoreCapability.RUNNER_JOBS);
+        var key = newKey();
+        var base = explicitRunnerSubmission(key, "repository", null, "open");
+        var p = base.workspace().profile();
+        var profile = new ai.ravenroot.api.runner.WorkspaceProfile(p.reference(), p.workspaceScope(), p.runtimeLifecycle(),
+                p.runnerPool(), p.runtimeProfile(), p.policy(), p.capacity(), p.retention(), p.completionPolicy(), p.allowedAgents(),
+                p.fleetLimits(), p.cpuMillicores(), ai.ravenroot.api.runner.WorkspaceProfile.Driver.KUBERNETES);
+        var resource = new ai.ravenroot.api.runner.WorkspaceResource("repository", base.workspaceId(), profile, "runner",
+                ai.ravenroot.api.runner.WorkspaceResource.State.UNMATERIALIZED, null, null, false, clock().instant());
+        var runner = new ai.ravenroot.api.runner.RunnerRegistration(1, key.tenantId(), "runner", "kubernetes-pod-v1", Set.of(), base.deployment());
+        var submit = new ai.ravenroot.api.runner.RunnerJobOperation.Submit(base.identity(), base.definition(), base.command(), base.deployment(),
+                runner, base.input(), base.deadline(), base.workspaceId(), base.continuation(), resource, "open");
+        var session = UUID.randomUUID();
+        await(store().renewRunnerAvailability(new ai.ravenroot.api.runner.RunnerAvailability(key.tenantId(), "runner", session,
+                2, 0, Set.of("reference"), clock().instant(), clock().instant().plus(TTL)), TTL));
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(runnerInitial(submit), new GraphVersionPin("native-graph-v1"))).runner(submit).build()));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Claim(submit.jobId(), "runner", TTL, session));
+        var physical = new ai.ravenroot.api.runner.KubernetesWorkload(1, "logical-cluster", "workloads", "rr-pod", UUID.randomUUID(),
+                "rr-volume", UUID.randomUUID(), "fixed-volume", 1, ai.ravenroot.api.runner.KubernetesWorkload.Phase.RUNNING,
+                1_000_000, 900_000, "sha256:" + "a".repeat(64), ai.ravenroot.api.runner.KubernetesWorkload.Condition.READY,
+                ai.ravenroot.api.runner.KubernetesWorkload.Reason.NONE, null, 3, 7, 100);
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Heartbeat(submit.jobId(), "runner", 1, TTL, session, physical));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        var restored = await(store().loadRunnerWorkspace(key)).orElseThrow();
+        assertEquals(physical, restored.jobs().get(submit.jobId()).kubernetes());
+        assertEquals(physical, restored.workspaces().get("repository").kubernetes());
+        var result = new ai.ravenroot.api.runner.RunnerResult("ready", submit.input(), List.of(), submit.jobId(),
+                new ai.ravenroot.api.runner.RunnerResult.WorkspaceObservation(submit.workspaceId(), physical.podUid().toString(), null, physical));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result));
+        runnerApply(key, new ai.ravenroot.api.runner.RunnerJobOperation.Complete(submit.jobId(), "runner", 1, result));
+        if (store().supports(StoreCapability.DURABLE)) reopen();
+        assertEquals(result, await(store().loadRunnerWorkspace(key)).orElseThrow().jobs().get(submit.jobId()).job().result());
+        assertTrue(await(store().loadRunnerWorkspace(new ExecutionKey("other", key.processInstanceId()))).isEmpty());
+    }
+
     private void appendRunnerTraversal(ai.ravenroot.api.runner.RunnerJobOperation.Submit submit) {
         var key = submit.identity().execution();
         await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(await(store().load(key)).revision()))

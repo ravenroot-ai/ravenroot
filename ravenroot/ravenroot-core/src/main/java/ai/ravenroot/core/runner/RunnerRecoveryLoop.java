@@ -33,11 +33,19 @@ public final class RunnerRecoveryLoop implements AutoCloseable {
                                 jobs.store().maxInventoryPageSize())).after(cursors.get(tenant))).toCompletableFuture().join();
                 cursors.put(tenant, page.nextCursor().orElse(null));
                 var measurements = new EnumMap<RunnerTelemetry.PageGauge, Long>(RunnerTelemetry.PageGauge.class);
+                var physicalClaims = new java.util.HashSet<java.util.UUID>();
                 for (var gauge : RunnerTelemetry.PageGauge.values()) measurements.put(gauge, 0L);
                 for (var process : page.items()) {
                     var workspace = jobs.store().loadRunnerWorkspace(process.key()).toCompletableFuture().join().orElse(null);
                     if (workspace == null) continue;
                     for (var resource : workspace.workspaces().values()) {
+                        var nativeWorkload = resource.kubernetes();
+                        if (nativeWorkload != null) {
+                            add(measurements, RunnerTelemetry.PageGauge.valueOf("KUBERNETES_" + nativeWorkload.phase().name()), 1);
+                            add(measurements, RunnerTelemetry.PageGauge.valueOf("KUBERNETES_REASON_" + nativeWorkload.reason().name()), 1);
+                            if (physicalClaims.add(nativeWorkload.claimUid())) add(measurements,
+                                    RunnerTelemetry.PageGauge.KUBERNETES_BACKEND_RESERVED_BYTES, nativeWorkload.requestedBytes());
+                        }
                         if (resource.state() == WorkspaceResource.State.RELEASED) continue;
                         add(measurements, RunnerTelemetry.PageGauge.RETAINED_WORKSPACES, 1);
                         if (!resource.terminal()) add(measurements, RunnerTelemetry.PageGauge.ACTIVE_WORKSPACES, 1);
@@ -50,6 +58,8 @@ public final class RunnerRecoveryLoop implements AutoCloseable {
                             PrincipalType.WORKLOAD, "ravenroot-control-plane");
                     for (var entry : new ArrayList<>(workspace.jobs().values()).reversed()) {
                         var job = entry.job(); swept.increment(); jobs.telemetry().increment(RunnerTelemetry.Counter.RECOVERY_OBSERVED);
+                        if (entry.kubernetes() != null && physicalClaims.add(entry.kubernetes().claimUid()))
+                            add(measurements, RunnerTelemetry.PageGauge.KUBERNETES_BACKEND_RESERVED_BYTES, entry.kubernetes().requestedBytes());
                         if (job.state() == RunnerJob.State.QUEUED) add(measurements, RunnerTelemetry.PageGauge.QUEUED_JOBS, 1);
                         if (job.state() == RunnerJob.State.CANCELLING) add(measurements, RunnerTelemetry.PageGauge.CANCELLING_JOBS, 1);
                         if (job.result() != null) for (var artifact : job.result().artifacts())

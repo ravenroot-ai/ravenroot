@@ -16,10 +16,28 @@ import java.util.UUID;
  * @param stopRequested sticky cancellation that prevents later Agent admission
  * @param updatedAt authoritative store timestamp of the last transition
  * @param generation positive named ownership generation, one for process resources
+ * @param kubernetes native workload evidence, null for other execution drivers
  */
 public record WorkspaceResource(String nodeId, UUID workspaceId, WorkspaceProfile profile,
                                 String runnerId, State state, String runtimeId, String checkpoint,
-                                boolean stopRequested, Instant updatedAt, long generation) {
+                                boolean stopRequested, Instant updatedAt, long generation, KubernetesWorkload kubernetes) {
+    /**
+     * Reconstructs a resource with no Kubernetes materialization evidence.
+     * @param nodeId graph Workspace node
+     * @param workspaceId logical filesystem identity
+     * @param profile approved profile
+     * @param runnerId pinned runner
+     * @param state logical lifecycle
+     * @param runtimeId observed runtime
+     * @param checkpoint immutable checkpoint
+     * @param stopRequested sticky stop
+     * @param updatedAt authoritative transition time
+     * @param generation ownership generation
+     */
+    public WorkspaceResource(String nodeId, UUID workspaceId, WorkspaceProfile profile, String runnerId, State state,
+                             String runtimeId, String checkpoint, boolean stopRequested, Instant updatedAt, long generation) {
+        this(nodeId, workspaceId, profile, runnerId, state, runtimeId, checkpoint, stopRequested, updatedAt, generation, null);
+    }
     /**
      * Creates the first ownership generation of a graph-declared resource.
      * @param nodeId same-graph Workspace node
@@ -56,7 +74,9 @@ public record WorkspaceResource(String nodeId, UUID workspaceId, WorkspaceProfil
         Objects.requireNonNull(workspaceId); Objects.requireNonNull(profile); Objects.requireNonNull(state);
         runnerId = RunnerPolicy.identifier(runnerId); Objects.requireNonNull(updatedAt);
         if (generation < 1) throw new IllegalArgumentException("Workspace ownership generation must be positive");
-        new RunnerResult.WorkspaceObservation(workspaceId, runtimeId, checkpoint);
+        new RunnerResult.WorkspaceObservation(workspaceId, runtimeId, checkpoint, kubernetes);
+        if (kubernetes != null && (generation != kubernetes.generation() || profile.driver() != WorkspaceProfile.Driver.KUBERNETES))
+            throw new IllegalArgumentException("Kubernetes Workspace generation mismatch");
         if (checkpoint != null && !checkpoint.matches("sha256:[0-9a-f]{64}")) {
             throw new IllegalArgumentException("workspace checkpoint must identify immutable evidence");
         }
@@ -120,7 +140,7 @@ public record WorkspaceResource(String nodeId, UUID workspaceId, WorkspaceProfil
             default -> throw new IllegalArgumentException("unknown workspace command");
         };
         return new WorkspaceResource(nodeId, workspaceId, profile, runnerId, next, runtimeId, checkpoint,
-                stopRequested || command.equals("abort"), now, generation);
+                stopRequested || command.equals("abort"), now, generation, kubernetes);
     }
     /**
      * Accepts fenced physical observations without silently changing a retained runtime.
@@ -131,6 +151,24 @@ public record WorkspaceResource(String nodeId, UUID workspaceId, WorkspaceProfil
      * @return resource with acknowledged lifecycle/evidence and unchanged sticky stop
      */
     public WorkspaceResource observed(String command, String runtime, String savedCheckpoint, Instant now) {
+        return observed(command, runtime, savedCheckpoint, now, kubernetes);
+    }
+    /**
+     * Accepts native workload identity only within the current generation and pinned substrate.
+     * @param command completed lifecycle command
+     * @param runtime exact Pod UID or other physical runtime
+     * @param savedCheckpoint immutable checkpoint
+     * @param now store transition time
+     * @param workload attested Kubernetes identity, or null for other drivers
+     * @return updated resource
+     */
+    public WorkspaceResource observed(String command, String runtime, String savedCheckpoint, Instant now,
+                                       KubernetesWorkload workload) {
+        if (kubernetes != null && (workload == null || !kubernetes.cluster().equals(workload.cluster())
+                || !kubernetes.namespace().equals(workload.namespace())
+                || profile.workspaceScope() != WorkspaceProfile.Scope.EPHEMERAL
+                    && !kubernetes.claimUid().equals(workload.claimUid())))
+            throw new IllegalStateException("Kubernetes placement changed without a quiescent migration");
         State next = switch (command) {
             case "open" -> stopRequested ? State.ABORTING : State.READY;
             case "close" -> State.CLOSED;
@@ -144,6 +182,6 @@ public record WorkspaceResource(String nodeId, UUID workspaceId, WorkspaceProfil
         }
         return new WorkspaceResource(nodeId, workspaceId, profile, runnerId, next,
                 runtime == null ? runtimeId : runtime, savedCheckpoint == null ? checkpoint : savedCheckpoint,
-                stopRequested, now, generation);
+                stopRequested, now, generation, workload);
     }
 }

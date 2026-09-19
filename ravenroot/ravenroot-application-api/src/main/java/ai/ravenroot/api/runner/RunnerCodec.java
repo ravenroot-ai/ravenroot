@@ -24,6 +24,8 @@ import java.util.UUID;
  * runtime class names, or runner-controlled deserializers. The enclosing digest detects corruption.
  */
 public final class RunnerCodec {
+    /** Exact native-workload reader capabilities required before remote delegation. */
+    public static final String NATIVE_CAPABILITIES = "workspace=4,assignment=3,result=3,profile=2";
     /** Maximum encoded document size, including its corruption-detection digest. */
     public static final int MAX_BYTES = 16_777_216;
     /**
@@ -35,8 +37,12 @@ public final class RunnerCodec {
     private static final int MAGIC = 0x52524a31;
     private static final int WORKSPACE_V2 = 0x52524a32;
     private static final int WORKSPACE_V3 = 0x52524a33;
+    private static final int WORKSPACE_V4 = 0x52524a34;
     private static final int ASSIGNMENT_V2 = 0x52524132;
+    private static final int ASSIGNMENT_V3 = 0x52524133;
     private static final int RESULT_V2 = 0x52525232;
+    private static final int RESULT_V3 = 0x52525233;
+    private static final int PROFILE_V2 = 0x52525032;
     private static final int DEFINITION_V2 = 0x52414432;
     private RunnerCodec() { }
     /**
@@ -67,12 +73,13 @@ public final class RunnerCodec {
      * @return independent encoded bytes with an integrity digest
      */
     public static byte[] workspace(RunnerWorkspaceState value) {
-        return encode(WORKSPACE_V3, out -> {
+        return encode(WORKSPACE_V4, out -> {
             key(out, value.execution()); uuid(out, value.workspaceId()); string(out, value.runnerId());
             out.writeInt(value.jobs().size());
             for (var entry : value.jobs().values()) {
                 job(out, entry.job()); payload(out, entry.continuation()); out.writeBoolean(entry.continuationUncertain());
                 nullableString(out, entry.workspaceNodeId()); nullableString(out, entry.lifecycleCommand());
+                kubernetes(out, entry.kubernetes());
             }
             out.writeBoolean(value.processTerminalAt() != null);
             if (value.processTerminalAt() != null) instant(out, value.processTerminalAt());
@@ -88,17 +95,19 @@ public final class RunnerCodec {
      */
     public static RunnerWorkspaceState workspace(byte[] bytes) {
         boolean versionTwo = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V2;
-        boolean versionThree = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V3;
-        return decode(bytes, versionThree ? WORKSPACE_V3 : versionTwo ? WORKSPACE_V2 : MAGIC, in -> {
+        boolean versionFour = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V4;
+        boolean versionThree = versionFour || bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == WORKSPACE_V3;
+        return decode(bytes, versionFour ? WORKSPACE_V4 : versionThree ? WORKSPACE_V3 : versionTwo ? WORKSPACE_V2 : MAGIC, in -> {
             ExecutionKey execution = key(in); UUID workspace = uuid(in); String runner = string(in);
             var jobs = new LinkedHashMap<UUID, RunnerWorkspaceState.Entry>();
             int size = count(in, versionThree ? MAX_BYTES : RunnerWorkspaceState.MAX_JOBS);
             for (int i = 0; i < size; i++) {
-                RunnerJob job = job(in, versionThree);
+                RunnerJob job = job(in, versionThree, versionFour);
                 var continuation = payload(in); boolean uncertain = in.readBoolean();
                 String node = versionThree ? nullableString(in) : null;
                 String command = versionThree ? nullableString(in) : null;
-                if (jobs.put(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, continuation, uncertain, node, command)) != null) {
+                var physical = versionFour ? kubernetes(in) : null;
+                if (jobs.put(job.identity().runnerJobId(), new RunnerWorkspaceState.Entry(job, continuation, uncertain, node, command, physical)) != null) {
                     throw new IllegalArgumentException("duplicate stored runner job");
                 }
             }
@@ -106,7 +115,7 @@ public final class RunnerCodec {
             var resources = new LinkedHashMap<String, WorkspaceResource>();
             int resourceCount = versionThree ? count(in, MAX_BYTES) : 0;
             for (int i = 0; i < resourceCount; i++) {
-                var resource = workspaceResource(in);
+                var resource = workspaceResource(in, versionFour);
                 if (resources.put(resource.nodeId(), resource) != null) throw new IllegalArgumentException("duplicate workspace node");
             }
             return new RunnerWorkspaceState(execution, workspace, runner, jobs, terminalAt, resources);
@@ -145,15 +154,16 @@ public final class RunnerCodec {
      * @param value validated immutable value
      * @return independent encoded bytes with an integrity digest
      */
-    public static byte[] result(RunnerResult value) { return encode(RESULT_V2, out -> result(out, value)); }
+    public static byte[] result(RunnerResult value) { return encode(RESULT_V3, out -> result(out, value)); }
     /**
      * Decodes a sealed terminal report, rejecting corruption, trailing bytes and invalid bounds.
      * @param bytes complete version-one document
      * @return validated immutable value
      */
     public static RunnerResult result(byte[] bytes) {
-        boolean extended = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == RESULT_V2;
-        return decode(bytes, extended ? RESULT_V2 : MAGIC, in -> result(in, extended));
+        boolean nativeIdentity = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == RESULT_V3;
+        boolean extended = nativeIdentity || bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == RESULT_V2;
+        return decode(bytes, nativeIdentity ? RESULT_V3 : extended ? RESULT_V2 : MAGIC, in -> result(in, extended, nativeIdentity));
     }
     /**
      * Encodes a bounded runner dispatch view without graph checkpoints using protocol version one.
@@ -161,7 +171,7 @@ public final class RunnerCodec {
      * @return independent encoded bytes with an integrity digest
      */
     public static byte[] assignment(RunnerAssignment value) {
-        return encode(ASSIGNMENT_V2, out -> {
+        return encode(ASSIGNMENT_V3, out -> {
             out.writeInt(value.protocolVersion()); uuid(out, value.workspaceId()); job(out, value.job());
             out.writeBoolean(value.workspace() != null);
             if (value.workspace() != null) workspaceResource(out, value.workspace());
@@ -174,9 +184,10 @@ public final class RunnerCodec {
      * @return validated immutable value
      */
     public static RunnerAssignment assignment(byte[] bytes) {
-        boolean extended = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == ASSIGNMENT_V2;
-        return decode(bytes, extended ? ASSIGNMENT_V2 : MAGIC, in -> new RunnerAssignment(in.readInt(), uuid(in), job(in, extended),
-                extended && in.readBoolean() ? workspaceResource(in) : null, extended ? nullableString(in) : null));
+        boolean nativeIdentity = bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == ASSIGNMENT_V3;
+        boolean extended = nativeIdentity || bytes != null && bytes.length >= 4 && java.nio.ByteBuffer.wrap(bytes).getInt() == ASSIGNMENT_V2;
+        return decode(bytes, nativeIdentity ? ASSIGNMENT_V3 : extended ? ASSIGNMENT_V2 : MAGIC, in -> new RunnerAssignment(in.readInt(), uuid(in), job(in, extended, nativeIdentity),
+                extended && in.readBoolean() ? workspaceResource(in, nativeIdentity) : null, extended ? nullableString(in) : null));
     }
 
     /**
@@ -184,13 +195,16 @@ public final class RunnerCodec {
      * @param value validated profile, including all scoped capacity ceilings
      * @return integrity-protected storage document
      */
-    public static byte[] workspaceProfile(WorkspaceProfile value) { return encode(out -> workspaceProfile(out, value)); }
+    public static byte[] workspaceProfile(WorkspaceProfile value) { return encode(PROFILE_V2, out -> workspaceProfile(out, value)); }
     /**
      * Restores the exact approved profile without consulting mutable deployment defaults.
      * @param value complete integrity-protected profile bytes
      * @return validated immutable profile
      */
-    public static WorkspaceProfile workspaceProfile(byte[] value) { return decode(value, RunnerCodec::workspaceProfile); }
+    public static WorkspaceProfile workspaceProfile(byte[] value) {
+        boolean extended = value != null && value.length >= 4 && java.nio.ByteBuffer.wrap(value).getInt() == PROFILE_V2;
+        return decode(value, extended ? PROFILE_V2 : MAGIC, in -> workspaceProfile(in, extended));
+    }
     private static void workspaceProfile(DataOutputStream out, WorkspaceProfile value) throws IOException {
         string(out, value.reference().tenantId()); string(out, value.reference().name()); out.writeLong(value.reference().version());
         string(out, value.workspaceScope().name()); string(out, value.runtimeLifecycle().name());
@@ -206,13 +220,15 @@ public final class RunnerCodec {
             out.writeInt(ceiling.retainedWorkspaces()); out.writeLong(ceiling.storageBytes());
         }
         out.writeInt(value.cpuMillicores());
+        string(out, value.driver().name());
     }
-    private static WorkspaceProfile workspaceProfile(DataInputStream in) throws IOException {
+    private static WorkspaceProfile workspaceProfile(DataInputStream in, boolean extended) throws IOException {
         return new WorkspaceProfile(new AgentDefinition.Reference(string(in), string(in), in.readLong()),
                 WorkspaceProfile.Scope.valueOf(string(in)), WorkspaceProfile.RuntimeLifecycle.valueOf(string(in)),
                 string(in), string(in), policy(in), new WorkspaceProfile.Capacity(in.readInt(), in.readInt(), in.readInt(),
                 in.readLong(), in.readInt(), in.readInt(), WorkspaceProfile.Admission.valueOf(string(in))),
-                Duration.parse(string(in)), WorkspaceProfile.CompletionPolicy.valueOf(string(in)), strings(in), fleetLimits(in), in.readInt());
+                Duration.parse(string(in)), WorkspaceProfile.CompletionPolicy.valueOf(string(in)), strings(in), fleetLimits(in), in.readInt(),
+                extended ? WorkspaceProfile.Driver.valueOf(string(in)) : WorkspaceProfile.Driver.DOCKER);
     }
     private static RunnerFleetLimits fleetLimits(DataInputStream in) throws IOException {
         var scopes = new java.util.EnumMap<RunnerFleetLimits.Scope, RunnerFleetLimits.Ceiling>(RunnerFleetLimits.Scope.class);
@@ -225,10 +241,11 @@ public final class RunnerCodec {
         string(out, value.runnerId()); string(out, value.state().name());
         nullableString(out, value.runtimeId());
         nullableString(out, value.checkpoint()); out.writeBoolean(value.stopRequested()); instant(out, value.updatedAt()); out.writeLong(value.generation());
+        kubernetes(out, value.kubernetes());
     }
-    private static WorkspaceResource workspaceResource(DataInputStream in) throws IOException {
-        return new WorkspaceResource(string(in), uuid(in), workspaceProfile(in), string(in), WorkspaceResource.State.valueOf(string(in)),
-                nullableString(in), nullableString(in), in.readBoolean(), instant(in), in.readLong());
+    private static WorkspaceResource workspaceResource(DataInputStream in, boolean nativeIdentity) throws IOException {
+        return new WorkspaceResource(string(in), uuid(in), workspaceProfile(in, nativeIdentity), string(in), WorkspaceResource.State.valueOf(string(in)),
+                nullableString(in), nullableString(in), in.readBoolean(), instant(in), in.readLong(), nativeIdentity ? kubernetes(in) : null);
     }
     private static void nullableString(DataOutputStream out, String value) throws IOException {
         out.writeBoolean(value != null); if (value != null) string(out, value);
@@ -269,14 +286,14 @@ public final class RunnerCodec {
         if (value.result() != null) result(out, value.result());
     }
 
-    private static RunnerJob job(DataInputStream in, boolean extended) throws IOException {
+    private static RunnerJob job(DataInputStream in, boolean extended, boolean nativeIdentity) throws IOException {
         RunnerJobIdentity identity = identity(in); AgentDefinition definition = definition(in, extended); String command = string(in);
         RunnerRegistration runner = registration(in); RunnerPolicy authority = policy(in); OpaquePayload input = payload(in);
         Instant deadline = instant(in); Instant updated = instant(in); long revision = in.readLong(); long fence = in.readLong();
         RunnerJob.State state = RunnerJob.State.valueOf(string(in));
         RunnerJob.StopReason reason = RunnerJob.StopReason.valueOf(string(in));
         Instant lease = in.readBoolean() ? instant(in) : null;
-        RunnerResult result = in.readBoolean() ? result(in, extended) : null;
+        RunnerResult result = in.readBoolean() ? result(in, extended, nativeIdentity) : null;
         return RunnerJob.restore(identity, definition, command, runner, authority, input, deadline, updated,
                 revision, fence, state, reason, lease, result);
     }
@@ -360,17 +377,41 @@ public final class RunnerCodec {
         if (value.workspace() != null) {
             uuid(out, value.workspace().workspaceId()); nullableString(out, value.workspace().runtimeId());
             nullableString(out, value.workspace().checkpoint());
+            kubernetes(out, value.workspace().kubernetes());
         }
     }
 
-    private static RunnerResult result(DataInputStream in, boolean extended) throws IOException {
+    private static RunnerResult result(DataInputStream in, boolean extended, boolean nativeIdentity) throws IOException {
         String outcome = string(in); OpaquePayload payload = payload(in); UUID quiescence = uuid(in);
         var artifacts = new ArrayList<RunnerArtifact>(); int count = count(in, 128);
         for (int i = 0; i < count; i++) artifacts.add(new RunnerArtifact(identity(in), uuid(in),
                 RunnerArtifact.Kind.valueOf(string(in)), string(in), in.readLong()));
         var workspace = extended && in.readBoolean()
-                ? new RunnerResult.WorkspaceObservation(uuid(in), nullableString(in), nullableString(in)) : null;
+                ? new RunnerResult.WorkspaceObservation(uuid(in), nullableString(in), nullableString(in), nativeIdentity ? kubernetes(in) : null) : null;
         return new RunnerResult(outcome, payload, artifacts, quiescence, workspace);
+    }
+
+    private static void kubernetes(DataOutputStream out, KubernetesWorkload value) throws IOException {
+        out.writeBoolean(value != null);
+        if (value == null) return;
+        out.writeInt(value.protocolVersion()); string(out, value.cluster()); string(out, value.namespace());
+        nullableString(out, value.podName()); out.writeBoolean(value.podUid() != null);
+        if (value.podUid() != null) uuid(out, value.podUid());
+        string(out, value.claimName()); uuid(out, value.claimUid()); nullableString(out, value.volumeName());
+        out.writeLong(value.generation()); string(out, value.phase().name()); out.writeLong(value.requestedBytes());
+        out.writeLong(value.enforcedBytes()); nullableString(out, value.attestationDigest());
+        string(out, value.condition().name()); string(out, value.reason().name());
+        out.writeBoolean(value.exitCode() != null); if (value.exitCode() != null) out.writeInt(value.exitCode());
+        out.writeInt(value.modelTurns()); out.writeInt(value.toolCalls()); out.writeLong(value.modelTokens());
+    }
+
+    private static KubernetesWorkload kubernetes(DataInputStream in) throws IOException {
+        if (!in.readBoolean()) return null;
+        return new KubernetesWorkload(in.readInt(), string(in), string(in), nullableString(in),
+                in.readBoolean() ? uuid(in) : null, string(in), uuid(in), nullableString(in), in.readLong(),
+                KubernetesWorkload.Phase.valueOf(string(in)), in.readLong(), in.readLong(), nullableString(in),
+                KubernetesWorkload.Condition.valueOf(string(in)), KubernetesWorkload.Reason.valueOf(string(in)),
+                in.readBoolean() ? in.readInt() : null, in.readInt(), in.readInt(), in.readLong());
     }
 
     private static void identity(DataOutputStream out, RunnerJobIdentity value) throws IOException {

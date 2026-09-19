@@ -20,6 +20,19 @@ and Workspace identity. See [ADR 0042](https://github.com/ravenroot-ai/ravenroot
 
 ## HTTP surface
 
+Native workers send `X-Ravenroot-Runner-Codecs: workspace=4,assignment=3,result=3,profile=2`.
+The server refuses a registered native worker with missing/incompatible capabilities before claims,
+availability, reports or cleanup mutations. Workspace profile `driver` defaults to `DOCKER` only for
+legacy documents; `KUBERNETES` is pinned to `kubernetes-pod-v1` registration. New envelopes preserve
+logical cluster, namespace, Pod/PVC UID, volume, generation, protocol, bounded status and budget use.
+Legacy envelopes remain readable, while old binaries reject new version magic. There is no lossy
+native-to-Docker downgrade. See [native migration/recovery](../operator-guide/kubernetes-runners.md).
+
+Heartbeat JSON optionally carries the closed `kubernetes` physical observation. It is accepted only
+under the current live job fence; Pod/PVC identity and generation cannot change within a job and
+usage cannot regress. Technical metadata appears separately from Agent output in authenticated
+inspection, CLI, events/audit and Workbench.
+
 All paths are under `/v1/runner-plane` and use the existing authenticated browser, authorization and
 request-limiting boundary.
 The prefix itself has no GET, PUT or POST operation; unknown paths return structured 404 errors.

@@ -11,6 +11,19 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerPlaneConfigurationTest {
+    @Test void anEmptyBootstrapCatalogIsValidAndDoesNotRebuildTheWorker(@TempDir Path directory) throws Exception {
+        var sample = RunnerJson.read(Files.readAllBytes(Path.of("../../docs/examples/governed-runner/control-plane.json")));
+        sample.put("artifactDirectory", directory.resolve("artifacts").toString());
+        var tenant = RunnerJson.map(RunnerJson.map(sample.get("tenants")).get("example-tenant"));
+        tenant.put("definitions", List.of()); tenant.put("workspaceProfiles", List.of()); tenant.put("runners", List.of());
+        var file = directory.resolve("empty.json"); Files.write(file, RunnerJson.write(sample));
+        var configuration = RunnerPlaneConfiguration.fromEnvironment(Map.of("RAVENROOT_RUNNER_CONFIG", file.toString()));
+        assertTrue(configuration.definitions().isEmpty());
+        try (var store = new SqliteExecutionStore(directory.resolve("empty.db"), Clock.systemUTC())) {
+            configuration.service(store, Clock.systemUTC());
+            assertTrue(store.runnerResources("example-tenant").toCompletableFuture().join().isEmpty());
+        }
+    }
     @Test void workerAndDriverCapacitiesAndTimingsAreOperatorOwned() {
         for (int capacity : new int[]{2, 37}) {
             var configured = RunnerWorkerMain.configuration(Map.of("maxConcurrentJobs", capacity,

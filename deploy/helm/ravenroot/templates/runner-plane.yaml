@@ -64,6 +64,16 @@ spec:
   selector:
     app.kubernetes.io/name: {{ include "ravenroot.fullname" . }}-runner-coordinator
   ports: [{ name: http, port: {{ .Values.runnerPlane.coordinatorPort }}, targetPort: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ravenroot.fullname" . }}-runner-coordinator
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ravenroot.fullname" . }}-runner-coordinator
 {{- $root := . }}
 {{- $names := dict }}
 {{- range .Values.runnerPlane.workerPools }}
@@ -88,16 +98,28 @@ spec:
         app.kubernetes.io/instance: {{ $root.Release.Name }}
     spec:
       automountServiceAccountToken: false
+      {{- if eq .driver "kubernetes" }}
+      serviceAccountName: {{ include "ravenroot.fullname" $root }}-manager-{{ .name }}
+      {{- end }}
       nodeSelector:
         {{- toYaml .nodeSelector | nindent 8 }}
       containers:
-        - name: supervisor
+        - name: {{ if eq .driver "kubernetes" }}manager{{ else }}supervisor{{ end }}
           image: {{ .image | quote }}
           args: [/etc/ravenroot/worker/worker.json]
+          {{- if eq .driver "kubernetes" }}
+          readinessProbe:
+            exec:
+              command: [java, -cp, /opt/ravenroot/ravenroot.jar, ai.ravenroot.server.RunnerReadinessMain, /tmp/ravenroot-runner-ready]
+            periodSeconds: 5
+          {{- end }}
           env:
             - name: RAVENROOT_RUNNER_INSTANCE
               valueFrom:
                 fieldRef: { fieldPath: metadata.name }
+            {{- if eq .driver "kubernetes" }}
+            - { name: RAVENROOT_RUNNER_READINESS_FILE, value: /tmp/ravenroot-runner-ready }
+            {{- end }}
           envFrom:
             - secretRef: { name: {{ .modelSecret }} }
           # The supervisor is deliberately authority-bearing on dedicated Docker hosts.
@@ -114,15 +136,33 @@ spec:
             - { name: config, mountPath: /etc/ravenroot/worker, readOnly: true }
             - { name: identities, mountPath: /run/identities, readOnly: true }
             - { name: state, mountPath: /var/lib/ravenroot-runner }
+            {{- if eq .driver "docker" }}
             - { name: docker, mountPath: /var/run/docker.sock }
+            {{- else }}
+            - { name: kubernetes-identity, mountPath: /var/run/ravenroot-kubernetes, readOnly: true }
+            - { name: kubernetes-config, mountPath: /etc/ravenroot/kubernetes, readOnly: true }
+            {{- end }}
             - { name: temporary, mountPath: /tmp }
       volumes:
         - name: config
           configMap: { name: {{ .configMap }} }
         - name: identities
           secret: { secretName: {{ .identitySecret }}, defaultMode: 256 }
+        {{- if eq .driver "docker" }}
         - name: docker
           hostPath: { path: {{ .socketHostPath | quote }}, type: Socket }
+        {{- else }}
+        - name: kubernetes-identity
+          projected:
+            defaultMode: 256
+            sources:
+              - serviceAccountToken: { path: token, expirationSeconds: 3600 }
+              - configMap:
+                  name: kube-root-ca.crt
+                  items: [{ key: ca.crt, path: ca.crt }]
+        - name: kubernetes-config
+          configMap: { name: {{ include "ravenroot.fullname" $root }}-kubernetes-{{ .name }} }
+        {{- end }}
         - name: temporary
           emptyDir: {}
   volumeClaimTemplates:

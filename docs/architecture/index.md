@@ -10,6 +10,7 @@ Understand the invariants connecting graph semantics, actor execution, durabilit
 - [Durability, events, and recovery](durability-events.md) — See how accepted work, journaled events, retained results, gaps, and recovery fit together.
 - [Durable process inventory](process-inventory.md) — Distinguish the process-local live-execution view from the durable, tenant-scoped inventory that survives a restart, and how its recovery disposition is derived.
 - [AI, programs, and extension boundaries](ai-extension-boundaries.md) — Distinguish declarative graph intent from privileged adapters, tools, credentials, and code execution.
+- [Native Kubernetes execution](../operator-guide/kubernetes-runners.md) — Separate manager authority, Pod/PVC ownership, attestation and report-only recovery from graph intent.
 - [Embedded projection security model](embed-security-model.md) — Trace operator attestations and short-lived sessions into a restricted read-only projection.
 
 ## Authority boundary

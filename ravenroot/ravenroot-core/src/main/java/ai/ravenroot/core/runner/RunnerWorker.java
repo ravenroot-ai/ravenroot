@@ -16,8 +16,13 @@ public final class RunnerWorker implements AutoCloseable {
     private final AtomicBoolean driverClosed = new AtomicBoolean();
     private final AtomicLong failures = new AtomicLong();
     private final RunnerTelemetry.Relay telemetry = new RunnerTelemetry.Relay();
+    private java.util.function.Consumer<Boolean> readiness = ignored -> { };
+    /** Operator-only readiness sink; readiness never grants assignment authority. */
+    public RunnerWorker withReadiness(java.util.function.Consumer<Boolean> value) {
+        readiness = Objects.requireNonNull(value); readiness.accept(false); return this;
+    }
     public RunnerTelemetry.Relay telemetry() { return telemetry; }
-    private void failure() { failures.incrementAndGet(); telemetry.increment(RunnerTelemetry.Counter.WORKER_FAILURE); }
+    private void failure() { readiness.accept(false); failures.incrementAndGet(); telemetry.increment(RunnerTelemetry.Counter.WORKER_FAILURE); }
     private synchronized void observeActive() {
         telemetry.activeJobs(active.size()); telemetry.workerCapacity(capacity(), availableJobs());
     }
@@ -41,7 +46,9 @@ public final class RunnerWorker implements AutoCloseable {
         } }, configuration.heartbeatInterval().toMillis(), configuration.heartbeatInterval().toMillis(), TimeUnit.MILLISECONDS);
     }
     private void advertise() throws Exception {
+        driver.verifyAvailability();
         if (!driver.runtimeProfiles().isEmpty()) client.availability(capacity(), activeJobs(), driver.runtimeProfiles(), configuration.availabilityTtl());
+        readiness.accept(true);
     }
     public synchronized void tick() {
         if (closed.get()) return;
@@ -115,7 +122,7 @@ public final class RunnerWorker implements AutoCloseable {
         synchronized (slot) {
             if (closed.get() || active.get(id) != slot) return;
             try {
-                slot.assignment = client.heartbeat(slot.assignment);
+                slot.assignment = client.heartbeat(driver.observe(slot.assignment));
                 if (slot.assignment.job().stopReason() != RunnerJob.StopReason.NONE) driver.cancel(slot.assignment);
             } catch (Exception unavailable) {
                 failure();
@@ -128,7 +135,7 @@ public final class RunnerWorker implements AutoCloseable {
     public int capacity() { return configuration.maxConcurrentJobs(); }
     public int availableJobs() { return Math.max(0, capacity() - activeJobs()); }
     /** Stops new dispatch before the owning host durably fences and quiesces retained Workspaces. */
-    public synchronized void stopAdmissions() { closed.set(true); polling.shutdownNow(); }
+    public synchronized void stopAdmissions() { closed.set(true); readiness.accept(false); polling.shutdownNow(); }
     @Override public void close() {
         stopAdmissions();
         if (!driverClosed.compareAndSet(false, true)) return;

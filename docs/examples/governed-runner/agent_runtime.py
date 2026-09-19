@@ -140,6 +140,13 @@ def quiesce_children(deadline):
 def run(request):
     if request.get("protocolVersion") != 2:
         raise ValueError("governed runtime protocol 2 required")
+    # Kubernetes exec addresses a name, not a UID. Check the Downward API identity before any
+    # authority or input is consumed so a replaced Pod cannot execute an older assignment.
+    if "RAVENROOT_POD_UID" in os.environ and os.environ["RAVENROOT_POD_UID"] != request.get("runtimeId"):
+        raise PermissionError("Kubernetes Pod UID does not match the accepted assignment")
+    if "RAVENROOT_POD_UID" in os.environ:
+        from kubernetes_attestation import network_isolated
+        network_isolated()
     policy = request["authority"]
     capabilities = set(policy["capabilities"])
     limits = request["budgets"]

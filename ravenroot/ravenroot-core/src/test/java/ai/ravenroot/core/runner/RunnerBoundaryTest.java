@@ -109,6 +109,22 @@ class RunnerBoundaryTest {
                 .put(job, RunnerArtifact.Kind.STDERR, new ByteArrayInputStream(new byte[1])));
     }
 
+    @Test void nativeWorkersMustDeclareCompatibleEnvelopesBeforeDelegation(@TempDir Path directory) throws Exception {
+        try (var store = new InMemoryExecutionStore(CLOCK)) {
+            var nativeRunner = new RunnerRegistration(1, "tenant", "runner", "kubernetes-pod-v1", Set.of(), policy());
+            var service = new RunnerJobService(store, CLOCK, List.of(), List.of(nativeRunner), Map.of("tenant", policy()));
+            var control = new AuthorizedRunnerControl(service, new DefaultAuthorizationService(ignored -> { }),
+                    "trusted", new RunnerArtifactStore(directory.toRealPath()), CLOCK);
+            var actor = new RequestContext("request", "runner", PrincipalType.WORKLOAD, "trusted", "tenant",
+                    Set.of(Role.TENANT_ADMIN), Set.of("ravenroot.runner.dispatch"));
+            assertThrows(IllegalStateException.class, () -> control.verifyWorkerCodecs(actor, null));
+            assertThrows(IllegalStateException.class, () -> control.verifyWorkerCodecs(actor, "workspace=3,assignment=2,result=2,profile=1"));
+            assertDoesNotThrow(() -> control.verifyWorkerCodecs(actor, RunnerCodec.NATIVE_CAPABILITIES));
+            var foreign = new RequestContext("request", "runner", PrincipalType.WORKLOAD, "other", "tenant", actor.roles(), actor.scopes());
+            assertThrows(AuthorizationDeniedException.class, () -> control.verifyWorkerCodecs(foreign, RunnerCodec.NATIVE_CAPABILITIES));
+        }
+    }
+
     @Test void workloadsCannotApproveAndIssuerIsPartOfRunnerIdentity(@TempDir Path directory) throws Exception {
         try (var store = new InMemoryExecutionStore(CLOCK)) {
             var service = new RunnerJobService(store, CLOCK, List.of(), List.of(), Map.of("tenant", policy()));

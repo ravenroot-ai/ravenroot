@@ -13,6 +13,32 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RunnerDeploymentContract(unittest.TestCase):
+    def test_native_manager_image_and_worker_configuration_agree(self):
+        configuration = json.loads((ROOT / "docs/examples/governed-runner/worker-kubernetes.json").read_text())
+        dockerfile = (ROOT / "docs/examples/governed-runner/KubernetesManager.Dockerfile").read_text()
+        self.assertIn("COPY --from=kubectl /bin/kubectl " + configuration["kubernetes"]["kubectl"], dockerfile)
+        self.assertEqual("kubernetes", configuration["driver"])
+        self.assertNotIn("docker", configuration)
+
+    @unittest.skipUnless(shutil.which("helm"), "Helm is required")
+    def test_native_driver_has_no_socket_and_requires_closed_admission(self):
+        command = ["helm", "template", "native", str(ROOT / "deploy/helm/ravenroot"), "-f",
+                   str(ROOT / "docs/examples/governed-runner/kubernetes-values.yaml")]
+        rendered = subprocess.run(command, check=False, capture_output=True, text=True)
+        self.assertEqual(0, rendered.returncode, rendered.stderr)
+        for prohibited in ("docker.sock", "containerd.sock", "hostPath:", "cluster-admin"):
+            self.assertNotIn(prohibited, rendered.stdout)
+        for required in ("kind: ValidatingAdmissionPolicy", "operations: [CONNECT]", "validationActions: [Deny, Audit]",
+                         "kind: NetworkPolicy", "policyTypes: [Ingress, Egress]", "kind: ResourceQuota", "kind: PodDisruptionBudget",
+                         "RunnerReadinessMain", "tokenFile: /var/run/ravenroot-kubernetes/token", "helm.sh/resource-policy: keep"):
+            self.assertIn(required, rendered.stdout)
+        for override in ("runnerPlane.workerPools[0].socketHostPath=/var/run/docker.sock",
+                         "runnerPlane.workerPools[0].kubernetes.namespace=default",
+                         "runnerPlane.workerPools[0].kubernetes.privileged=true",
+                         "runnerPlane.workerPools[0].kubernetes.runtimeImages[0]=untrusted:latest"):
+            invalid = subprocess.run(command + ["--set", override], check=False, capture_output=True, text=True)
+            self.assertNotEqual(0, invalid.returncode, override)
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required")
     def test_trusted_local_overlay_has_one_loopback_port_and_in_process_worker_without_token(self):
         environment = dict(os.environ, RAVENROOT_DOCKER_CLI_IMAGE="docker@sha256:" + "a" * 64,
@@ -39,6 +65,7 @@ class RunnerDeploymentContract(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         block = workflow.split("  full-backend-tests:", 1)[1].split("\n  backend-test:", 1)[0]
         self.assertIn("python3 scripts/fixtures/runner_quota_acceptance.py", block)
+        self.assertIn("python3 scripts/fixtures/kubernetes_runner_acceptance.py", block)
         self.assertNotIn("RAVENROOT_RUNNER_ACCEPTANCE_CONFIG", block)
         self.assertNotIn("continue-on-error", block)
         self.assertNotIn("secrets.", block)
@@ -72,7 +99,7 @@ class RunnerDeploymentContract(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("helm"), "Helm is required")
     def test_coordinators_and_two_worker_pools_scale_independently_without_replicating_graph_authority(self):
-        pools = [{"name": name, "replicas": replicas, "image": "registry.example.test/worker@sha256:" + "a" * 64,
+        pools = [{"name": name, "driver": "docker", "replicas": replicas, "image": "registry.example.test/worker@sha256:" + "a" * 64,
                   "configMap": name + "-config", "identitySecret": name + "-identities", "modelSecret": "model",
                   "socketHostPath": "/var/run/docker.sock", "nodeSelector": {"ravenroot.ai/quota-host": "true"},
                   "stateSize": "1Gi", "storageClass": "", "resources": {

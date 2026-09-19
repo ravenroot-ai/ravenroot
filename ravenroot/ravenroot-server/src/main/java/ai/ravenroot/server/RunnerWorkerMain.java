@@ -16,7 +16,11 @@ public final class RunnerWorkerMain {
         try (var input = Files.newInputStream(Path.of(arguments[0]).toRealPath())) { bytes = input.readNBytes(1_048_577); }
         var config = RunnerJson.read(bytes);
         var keys = new HashSet<>(config.keySet()); keys.remove("worker"); keys.remove("agentRuntime");
-        if (!keys.equals(Set.of("tenantId", "registration", "endpoint", "tokenFile", "docker", "stateDirectory", "runtimeImages"))) {
+        String selectedDriver = config.containsKey("driver") ? RunnerJson.text(config, "driver") : "docker";
+        keys.remove("driver");
+        String driverSetting = switch (selectedDriver) { case "docker" -> "docker"; case "kubernetes" -> "kubernetes";
+            default -> throw new IllegalArgumentException("unknown runner driver"); };
+        if (!keys.equals(Set.of("tenantId", "registration", "endpoint", "tokenFile", driverSetting, "stateDirectory", "runtimeImages"))) {
             throw new IllegalArgumentException("invalid standalone runner configuration");
         }
         var workerConfiguration = configuration(config.get("worker"));
@@ -41,16 +45,27 @@ public final class RunnerWorkerMain {
             if (!(value instanceof String image)) throw new IllegalArgumentException("runner image digest required");
             images.put(name, image);
         });
-        try (var driver = new LocalContainerRunner(registration, Path.of(RunnerJson.text(config, "docker")),
-                Path.of(RunnerJson.text(config, "stateDirectory")), images, Clock.systemUTC(), client::upload, workerConfiguration);
+        try (ai.ravenroot.api.runner.RunnerDriver driver = selectedDriver.equals("docker")
+                ? new LocalContainerRunner(registration, Path.of(RunnerJson.text(config, "docker")),
+                    Path.of(RunnerJson.text(config, "stateDirectory")), images, Clock.systemUTC(), client::upload, workerConfiguration)
+                : new KubernetesPodRunner(registration, KubernetesRunnerConfiguration.from(RunnerJson.map(config.get("kubernetes"))),
+                    Path.of(RunnerJson.text(config, "stateDirectory")), images, Clock.systemUTC(), client::upload, workerConfiguration);
              var worker = new RunnerWorker(client, driver, workerConfiguration);
              var telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
                      ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()),
                      new ai.ravenroot.core.runtime.ExecutionMonitor(), null, worker.telemetry()).orElse(() -> { })) {
-            if (registration.capabilities().capabilities().contains(ai.ravenroot.api.runner.RunnerPolicy.Capability.WORKSPACE_WRITE)) {
-                for (String image : images.values()) driver.verifyWorkspaceQuota(image);
+            String readiness = System.getenv("RAVENROOT_RUNNER_READINESS_FILE");
+            if (readiness != null) worker.withReadiness(RunnerReadinessMain.sink(Path.of(readiness), workerConfiguration.availabilityTtl()));
+            if (driver instanceof LocalContainerRunner local) {
+                if (registration.capabilities().capabilities().contains(ai.ravenroot.api.runner.RunnerPolicy.Capability.WORKSPACE_WRITE)) {
+                    for (String image : images.values()) local.verifyWorkspaceQuota(image);
+                }
+                if (config.containsKey("agentRuntime")) local.withAgentRuntime(agentRuntime(RunnerJson.map(config.get("agentRuntime"))));
+            } else if (driver instanceof KubernetesPodRunner kubernetes) {
+                kubernetes.withTelemetry(worker.telemetry());
+                kubernetes.preflight();
+                if (config.containsKey("agentRuntime")) kubernetes.withAgentRuntime(agentRuntime(RunnerJson.map(config.get("agentRuntime"))));
             }
-            if (config.containsKey("agentRuntime")) driver.withAgentRuntime(agentRuntime(RunnerJson.map(config.get("agentRuntime"))));
             worker.start();
             Runtime.getRuntime().addShutdownHook(new Thread(worker::close, "runner-shutdown"));
             new CountDownLatch(1).await();

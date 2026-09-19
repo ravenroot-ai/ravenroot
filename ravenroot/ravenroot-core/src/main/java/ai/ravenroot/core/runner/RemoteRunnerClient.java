@@ -80,8 +80,12 @@ public final class RemoteRunnerClient implements RunnerControlClient {
                 "POST", RunnerJson.write(Map.of("ttlSeconds", configuration.leaseTtl().toSeconds(), "workerSession", workerSession.toString())), Map.of()));
     }
     public RunnerAssignment heartbeat(RunnerAssignment assignment) throws IOException, InterruptedException {
+        var value = new LinkedHashMap<String, Object>(Map.of("fence", assignment.job().fence(),
+                "ttlSeconds", configuration.leaseTtl().toSeconds(), "workerSession", workerSession.toString()));
+        if (assignment.workspace() != null && assignment.workspace().kubernetes() != null)
+            value.put("kubernetes", RunnerJson.kubernetes(assignment.workspace().kubernetes()));
         return RunnerCodec.assignment(send(path(assignment) + "/heartbeat", "POST",
-                RunnerJson.write(Map.of("fence", assignment.job().fence(), "ttlSeconds", configuration.leaseTtl().toSeconds(), "workerSession", workerSession.toString())), Map.of()));
+                RunnerJson.write(value), Map.of()));
     }
     public RunnerAssignment complete(RunnerAssignment assignment, RunnerResult result) throws IOException, InterruptedException {
         return RunnerCodec.assignment(send(path(assignment) + "/complete", "POST", RunnerCodec.result(result),
@@ -104,7 +108,8 @@ public final class RemoteRunnerClient implements RunnerControlClient {
             throw new IllegalArgumentException("runner workload credential is unavailable");
         }
         var request = HttpRequest.newBuilder(endpoint.resolve(path)).timeout(configuration.httpRequestTimeout())
-                .header("Authorization", "Bearer " + credential).header("Accept", "application/octet-stream, application/json");
+                .header("Authorization", "Bearer " + credential).header("Accept", "application/octet-stream, application/json")
+                .header("X-Ravenroot-Runner-Codecs", RunnerCodec.NATIVE_CAPABILITIES);
         request.header("Content-Type", headers.getOrDefault("Content-Type", "application/json"));
         headers.forEach((name, value) -> { if (!name.equals("Content-Type")) request.header(name, value); });
         var response = RunnerHttp.send(http, request.method(method, HttpRequest.BodyPublishers.ofByteArray(bytes)).build(),

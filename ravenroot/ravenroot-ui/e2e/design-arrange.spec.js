@@ -96,8 +96,8 @@ test.describe('Design arrangements', () => {
     }))).toEqual({ n0: { x: 100, y: 100 }, n9: { x: 245, y: 210 }, historyDepth: 0 });
     await openLayoutMenu(page);
     const labels = await page.locator('#application-menu .application-menu-item span:first-child').allTextContents();
-    expect(labels.slice(-8)).toEqual([
-      'Design', 'Monitoring', 'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
+    expect(labels.slice(-9)).toEqual([
+      'Design', 'Monitoring', 'Render', 'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
       'Arrange — Hierarchical (new)', 'Arrange — Layered (top-down)',
     ]);
     await page.screenshot({ path: '/tmp/ravenroot-648-arrange-menu.png', fullPage: true });
@@ -133,6 +133,21 @@ test.describe('Design arrangements', () => {
     await page.locator('#btn-undo').click();
     await expect.poll(() => positions(page)).toEqual(before);
     await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(0);
+  });
+
+  test('keeps arrangement selection independent and selecting it again clears future Render choice', async ({ page }) => {
+    await arrange(page, 'Arrange — Flow');
+    const arranged = await positions(page);
+    await openLayoutMenu(page);
+    await page.locator('[data-command-id="layout.arrange.flow"]').click();
+    expect(await page.evaluate(() => ({
+      choice: window.ravenroot.activeDocument().designArrangement,
+      stored: window.ravenroot.activeDocument().graph.graphProperties['ravenroot.designArrangement'],
+    }))).toEqual({ choice: null, stored: undefined });
+    expect(await positions(page)).toEqual(arranged);
+    await page.locator('#btn-render').click();
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+    expect(await positions(page)).not.toEqual(arranged);
   });
 
   test('preserves coordinates for Keep positions and retains edge identity across every arrangement', async ({ page }) => {
@@ -324,6 +339,11 @@ test.describe('Design arrangements', () => {
       choice: window.ravenroot.activeDocument().designArrangement,
       layout: window.ravenroot.activeDocument().layoutMode,
     }))).toEqual({ active: firstId, documents: [firstId, secondId], choice: 'flow', layout: 'dagre' });
+    const restoredPositions = await positions(page);
+    for (const [id, expected] of Object.entries(arranged)) {
+      expect(restoredPositions[id].x).toBeCloseTo(expected.x, 3);
+      expect(restoredPositions[id].y).toBeCloseTo(expected.y, 3);
+    }
     await openLayoutMenu(page);
     await expect(page.locator('[data-command-id="layout.arrange.flow"]'))
       .toHaveAttribute('aria-checked', 'true');

@@ -68,8 +68,8 @@ async function beginRepeatedDesign(page) {
       });
       observer.disconnect();
     }).observe(owner.pane, { attributes: true, attributeFilter: ['aria-busy'] });
-    owner.cy.one('layoutstart', () => document.querySelector('#btn-design').click());
-    document.querySelector('#btn-design').click();
+    owner.cy.one('layoutstart', () => document.querySelector('#btn-render').click());
+    document.querySelector('#btn-render').click();
   });
   await expect.poll(() => page.evaluate(() =>
     window.__issue605LayoutEvents.filter(event => event.phase === 'start').length)).toBeGreaterThanOrEqual(2);
@@ -78,12 +78,18 @@ async function beginRepeatedDesign(page) {
 async function selectDesign(page) {
   const pane = page.locator('.doc-pane--active');
   await page.locator('#btn-design').click();
-  await expect(pane).toHaveAttribute('aria-busy', 'true');
-  await expect(pane).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
+  await expect(pane).not.toHaveAttribute('aria-busy', 'true');
   await expect.poll(() => page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();
     return [owner.renderMode, owner.layoutMode, owner.visualStyle];
   })).toEqual(['design', 'cyto', 'cyto']);
+}
+
+async function renderActive(page) {
+  const pane = page.locator('.doc-pane--active');
+  await page.locator('#btn-render').click();
+  await expect(pane).toHaveAttribute('aria-busy', 'true');
+  await expect(pane).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -185,7 +191,7 @@ test('normalizes legacy document modes on activation without exposing hidden alg
   })).toEqual(['design', 'cyto', 'cyto']);
 });
 
-test('Design performs the same deterministic full relayout from different coordinates', async ({ page }) => {
+test('Render performs the same deterministic full Design layout from different coordinates', async ({ page }) => {
   await page.locator('#btn-monitoring').click();
   await expect(page.locator('.doc-elastic-host.active')).toBeVisible();
   await page.evaluate(() => {
@@ -194,6 +200,7 @@ test('Design performs the same deterministic full relayout from different coordi
   });
   const firstInput = await positions(page);
   await selectDesign(page);
+  await renderActive(page);
   const first = await positions(page);
   expect(first).not.toEqual(firstInput);
   expect(await page.evaluate(() => window.cy.edges().toArray()
@@ -203,7 +210,7 @@ test('Design performs the same deterministic full relayout from different coordi
     window.cy.nodes().forEach((node, index) =>
       node.position({ x: -900 + index * 89, y: 1400 - index * 137 }));
   });
-  await selectDesign(page);
+  await renderActive(page);
   expect(await positions(page)).toEqual(first);
 });
 
@@ -218,12 +225,15 @@ test('Monitoring owns the continuous renderer lifecycle and Design restores auth
       layoutMode: owner.layoutMode,
       visualStyle: owner.visualStyle,
       rendererKind: owner.renderer.kind,
-      simulationLive: owner.renderer.simulation.alpha() > 0,
+      simulationLive: owner.renderer.simulation.alpha() > 0 && owner.renderer.simulation.alphaTarget() > 0,
     };
   })).toEqual({
     renderMode: 'monitoring', layoutMode: 'elastic', visualStyle: 'cyto',
-    rendererKind: 'elastic', simulationLive: true,
+    rendererKind: 'elastic', simulationLive: false,
   });
+
+  await page.locator('#btn-render').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.simulation.alpha() > .5)).toBe(true);
 
   await selectDesign(page);
   await expect(page.locator('.doc-elastic-host.active')).toHaveCount(0);
@@ -232,13 +242,49 @@ test('Monitoring owns the continuous renderer lifecycle and Design restores auth
   await expect(page.locator('#btn-add-node')).toBeEnabled();
 });
 
+test('mode switches restore independent geometry, viewport, selection and Monitoring forces without rendering', async ({ page }) => {
+  const design = await page.evaluate(() => {
+    window.cy.nodes().forEach((node, index) => node.position({ x: 210 + index * 117, y: 140 + index * 83 }));
+    window.cy.viewport({ zoom: .82, pan: { x: 61, y: 37 } });
+    window.cy.elements().unselect(); window.cy.getElementById('end').select();
+    return { positions: Object.fromEntries(window.cy.nodes().map(node => [node.id(), node.position()])),
+      zoom: window.cy.zoom(), pan: window.cy.pan() };
+  });
+  await page.locator('#btn-monitoring').click();
+  await expect(page.locator('.doc-elastic-host.active')).toBeVisible();
+  await page.locator('#rep-slider').fill('710');
+  await page.locator('#attr-slider').fill('65');
+  const monitoring = await page.evaluate(() => {
+    const renderer = window.ravenroot.activeDocument().renderer;
+    renderer.simulation.stop();
+    renderer.nodes.forEach((node, index) => { node.x = 900 - index * 91; node.y = 500 + index * 47; });
+    renderer.paint();
+    return Object.fromEntries(renderer.nodes.map(node => [node.id, { x: node.x, y: node.y }]));
+  });
+  await page.locator('#btn-design').click();
+  await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+  expect(await page.evaluate(() => ({
+    positions: Object.fromEntries(window.cy.nodes().map(node => [node.id(), node.position()])),
+    zoom: window.cy.zoom(), pan: window.cy.pan(), selected: window.cy.nodes(':selected').map(node => node.id()),
+  }))).toEqual({ ...design, selected: ['end'] });
+  await page.locator('#btn-monitoring').click();
+  await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+  expect(await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    return { positions: Object.fromEntries(owner.renderer.nodes.map(node => [node.id, { x: node.x, y: node.y }])),
+      forces: owner.monitoringForces, alpha: owner.renderer.simulation.alpha() };
+  })).toEqual({ positions: monitoring, forces: { repulsion: 710, attraction: .65, speed: .5 }, alpha: 1 });
+  await expect(page.locator('#rep-slider')).toHaveValue('710');
+  await expect(page.locator('#attr-slider')).toHaveValue('65');
+});
+
 test('Design relayout retires edge gestures and owns the canvas until final routing', async ({ page }) => {
   await page.locator('#btn-modify').click();
   await page.locator('#cy-wrap').focus();
   await page.keyboard.press('e');
   await expect(page.locator('#cy-wrap')).toHaveAttribute('data-edge-gesture-state', 'composing');
 
-  await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   const pane = page.locator('.doc-pane--active');
   await expect(pane).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#cy-wrap')).toHaveAttribute('data-edge-gesture-state', 'idle');
@@ -321,13 +367,14 @@ test('a background Design owner cannot move or block the active Design document'
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.kind))
     .toBe('elastic');
   const second = await page.evaluate(() => window.ravenroot.openDocument({ name: 'editing.graphml' }));
-  await selectDesign(page);
+  await renderActive(page);
   await page.locator('#btn-modify').click();
 
   await page.evaluate(id => window.ravenroot.activateDocument(id), first);
   const firstPane = page.locator(`.doc-pane[data-document-id="${first}"]`);
   const secondPane = page.locator(`.doc-pane[data-document-id="${second}"]`);
   await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   await expect(firstPane).toHaveAttribute('aria-busy', 'true');
   await page.evaluate(id => window.ravenroot.activateDocument(id), second);
   await expect(secondPane).toHaveClass(/doc-pane--active/);
@@ -358,7 +405,7 @@ test('Monitoring retires an in-flight Design owner without accepting stale coord
     }));
     const owner = window.ravenroot.activeDocument();
     owner.cy.one('layoutstart', () => document.querySelector('#btn-monitoring').click());
-    document.querySelector('#btn-design').click();
+    document.querySelector('#btn-render').click();
   });
   await expect.poll(() => page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();

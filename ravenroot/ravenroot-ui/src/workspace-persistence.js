@@ -1,4 +1,9 @@
-import { normalizeDesignArrangement, visualGroupPresentation } from './graph-view-state.js';
+import {
+  documentModeViewStates,
+  normalizeDesignArrangement,
+  normalizedMonitoringForces,
+  visualGroupPresentation,
+} from './graph-view-state.js';
 
 export const WORKSPACE_DATABASE_NAME = 'ravenroot-workspaces';
 export const WORKSPACE_DATABASE_VERSION = 1;
@@ -68,6 +73,9 @@ export function persistedDocument(document_) {
     graph,
     presentation: Object.freeze({
       ...visualGroupPresentation(document_),
+      viewStates: documentModeViewStates(document_),
+      monitoringForces: normalizedMonitoringForces(document_.monitoringForces
+        ?? document_.presentation?.monitoringForces),
       renderMode: (document_.renderMode ?? document_.presentation?.renderMode) === 'monitoring'
         ? 'monitoring' : 'design',
       layoutMode: typeof (document_.layoutMode ?? document_.presentation?.layoutMode) === 'string'

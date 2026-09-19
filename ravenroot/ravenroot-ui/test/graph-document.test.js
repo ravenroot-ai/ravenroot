@@ -40,6 +40,8 @@ describe('editable GraphML documents', () => {
     const updated = parseGraphML(serializeGraphML(graph));
     expect(updated.graphProperties['ravenroot.designArrangement']).toBe('organic');
     expect(serializeGraphML(graph).match(/ravenroot\.designArrangement/g)).toHaveLength(1);
+    setGraphPresentation(graph, { designArrangement: null });
+    expect(graph.graphProperties).not.toHaveProperty('ravenroot.designArrangement');
   });
 
   // A drawing made from scratch has no join unless its author selects one. That is true only

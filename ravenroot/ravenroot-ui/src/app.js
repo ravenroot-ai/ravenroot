@@ -2,9 +2,12 @@ import cytoscape from 'cytoscape';
 import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
 import { createVisualGroup, editVisualGroups } from './graph-editing.js';
 import { createVisualGroupRenderer } from './visual-group-renderer.js';
+import { visualGroupLayoutInput } from './visual-group-projection.js';
 import {
   DESIGN_ARRANGEMENTS,
+  documentModeViewStates,
   normalizedCanvasState,
+  normalizedMonitoringForces,
   visualGroupPresentation,
 } from './graph-view-state.js';
 import cytoscapeDagre from 'cytoscape-dagre';
@@ -1804,6 +1807,12 @@ function refreshVisualGroups(owner = workspace.active, { animate = false, select
       focusGroupId: owner === workspace.active
         ? owner.restoredVisualGroupFocus ?? owner.focusedVisualGroupId ?? null : null,
       onToggle: (id, collapsed) => toggleVisualGroup(id, collapsed, owner),
+      onGroupMove: id => {
+        owner.selectedVisualGroupId = id;
+        owner.focusedVisualGroupId = id;
+        captureDocumentModeView(owner, 'monitoring');
+        scheduleWorkspacePersistence();
+      },
       onUpdate: () => scheduleMinimap(owner) });
     owner.restoredVisualGroupSelection = null;
     owner.restoredVisualGroupFocus = null;
@@ -2378,6 +2387,64 @@ function allocateDocumentDisplayName(name) {
   return count === 1 ? name : `${name} (${count})`;
 }
 
+function ensureModeViewStates(owner) {
+  if (!owner) return { design: null, monitoring: null };
+  if (!owner.viewStates || typeof owner.viewStates !== 'object') {
+    owner.viewStates = documentModeViewStates(owner);
+  }
+  owner.viewStates.design ??= null;
+  owner.viewStates.monitoring ??= null;
+  owner.monitoringForces = normalizedMonitoringForces(owner.monitoringForces
+    ?? owner.viewStates.monitoring?.forces);
+  return owner.viewStates;
+}
+
+function captureDocumentModeView(owner, mode = owner?.renderMode) {
+  if (!owner?.cy || owner.cy.destroyed()) return null;
+  const semanticMode = normalizeRenderMode(mode);
+  const elastic = elasticRendererFor(owner);
+  const transform = elastic?.svg ? d3.zoomTransform(elastic.svg) : null;
+  const canvasState = normalizedCanvasState({
+    zoom: semanticMode === 'monitoring' && transform ? transform.k : owner.cy.zoom(),
+    pan: semanticMode === 'monitoring' && transform
+      ? { x: transform.x, y: transform.y } : owner.cy.pan(),
+    selectedIds: selectedRealNodeIds(owner),
+    focusNodeId: owner.cursorId,
+    selectedGroupId: selectedVisualGroup(owner)?.id || owner.selectedVisualGroupId || null,
+    focusGroupId: owner.focusedVisualGroupId || null,
+    positions: Object.fromEntries(semanticMode === 'monitoring' && elastic?.nodes
+      ? elastic.nodes.map(node => [node.id, { x: node.x, y: node.y }])
+      : owner.cy.nodes().filter(node => Object.hasOwn(owner.graph?.nodeMap || {}, node.id()))
+        .map(node => [node.id(), node.position()])),
+  }, owner.graph);
+  const state = {
+    canvasState,
+    visualGroupState: structuredClone(owner.visualGroupState || {}),
+    forces: normalizedMonitoringForces(owner.monitoringForces),
+    layoutMode: owner.layoutMode,
+  };
+  ensureModeViewStates(owner)[semanticMode] = state;
+  owner.canvasState = canvasState;
+  return state;
+}
+
+function restoreDesignView(owner) {
+  const state = ensureModeViewStates(owner).design;
+  if (!state?.canvasState || !owner?.cy) return false;
+  owner.visualGroupState = structuredClone(state.visualGroupState || {});
+  const saved = normalizedCanvasState(state.canvasState, owner.graph);
+  owner.cy.batch(() => Object.entries(saved.positions)
+    .forEach(([id, position]) => owner.cy.getElementById(id).position(position)));
+  if (saved.zoom && saved.pan) owner.cy.viewport({ zoom: saved.zoom, pan: saved.pan });
+  applyStableSelection(owner.cy, saved.selectedIds);
+  owner.cursorId = saved.focusNodeId;
+  owner.selectedVisualGroupId = saved.selectedGroupId;
+  owner.focusedVisualGroupId = saved.focusGroupId;
+  owner.restoredVisualGroupSelection = saved.selectedGroupId;
+  owner.restoredVisualGroupFocus = saved.focusGroupId;
+  return true;
+}
+
 function captureActiveDocument() {
   const document_ = workspace.active;
   if (!document_) return;
@@ -2406,24 +2473,16 @@ function captureActiveDocument() {
   document_.execution.finished = finishedExecutions;
   document_.execution.events = recentRuntimeEvents;
   document_.execution.reconciliationState = activeExecutionReconciliation;
-  if (cy && !cy.destroyed()) {
-    const elastic = elasticRendererFor(document_);
-    const transform = elastic?.svg ? d3.zoomTransform(elastic.svg) : null;
-    document_.canvasState = normalizedCanvasState({
-      zoom: transform?.k ?? cy.zoom(), pan: transform ? { x: transform.x, y: transform.y } : cy.pan(),
-      selectedIds: selectedRealNodeIds(document_), focusNodeId: graphCursorId,
-      selectedGroupId: selectedVisualGroup(document_)?.id || null,
-      focusGroupId: selectedVisualGroup(document_)?.id || null,
-      positions: Object.fromEntries(elastic?.nodes ? elastic.nodes.map(node => [node.id, { x: node.x, y: node.y }])
-        : cy.nodes().filter(node => Object.hasOwn(graphData?.nodeMap || {}, node.id())).map(node => [node.id(), node.position()])),
-    }, graphData);
-  }
+  if (cy && !cy.destroyed()) captureDocumentModeView(document_, renderMode);
 }
 
 function cancelRetiredLayouts(cancelled = []) {
   cancelled.forEach(item => {
     layoutJobs.delete(item.generation);
     if (typeof item.nativeCancel === 'function') item.nativeCancel();
+    // ELK's controller stop is a no-op, but its published Cytoscape animations are stoppable.
+    // Freeze them at retirement so a mode restore cannot be overwritten by stale tween frames.
+    item.cy?.nodes().stop(true, false);
   });
 }
 
@@ -2485,6 +2544,13 @@ function applyActiveDocument() {
   designArrangement = presentation.designArrangement;
   visualStyle = presentation.visualStyle;
   if (document_) Object.assign(document_, presentation);
+  if (document_) {
+    const views = ensureModeViewStates(document_);
+    const view = views[renderMode];
+    document_.canvasState = view?.canvasState ?? document_.canvasState;
+    document_.visualGroupState = structuredClone(view?.visualGroupState
+      ?? document_.visualGroupState ?? {});
+  }
   layoutBusy = document_?.layoutBusy ?? false;
   filterActive = document_?.filterActive ?? null;
   traceActive = document_?.traceActive ?? false;
@@ -3246,6 +3312,16 @@ function addDocumentRecord(name = defaultDocumentName(), displayName = allocateD
   }));
   nextDocumentId += 1;
   if (options.presentation) Object.assign(document_, options.presentation);
+  // The record does not own its graph until initCy binds it below. Preserve supplied workspace
+  // snapshots verbatim here; reconciling them against a null graph would erase every group state.
+  document_.viewStates = options.presentation?.viewStates
+    ? structuredClone(options.presentation.viewStates) : documentModeViewStates(document_);
+  document_.monitoringForces = normalizedMonitoringForces(options.presentation?.monitoringForces
+    ?? document_.viewStates.monitoring?.forces);
+  const restoredView = document_.viewStates[normalizeRenderMode(document_.renderMode)];
+  document_.canvasState = restoredView?.canvasState ?? document_.canvasState;
+  document_.visualGroupState = structuredClone(restoredView?.visualGroupState
+    ?? document_.visualGroupState ?? {});
   document_.restoredVisualGroupSelection = document_.canvasState?.selectedGroupId || null;
   document_.restoredVisualGroupFocus = document_.canvasState?.focusGroupId || null;
   applyActiveDocument();
@@ -3413,6 +3489,8 @@ function completeReplaceActiveDocument(target, graph, name) {
   target.incarnation = createDocumentIncarnation();
   target.visualGroupState = {};
   target.canvasState = null;
+  target.viewStates = { design: null, monitoring: null };
+  target.monitoringForces = normalizedMonitoringForces();
   target.visualGroupPresentationDirty = false;
   activeDocumentIncarnation = target.incarnation;
   graphName = name;
@@ -3638,7 +3716,7 @@ function syncActiveDocumentChrome() {
   // Read through the working view rather than through `workspace.active`: `applyActiveDocument` has
   // just loaded the record into these variables, and reading the record again here would be a second
   // answer to a question that must only have one.
-  syncLayoutChrome(hasDocument ? layoutMode : null);
+  syncLayoutChrome(hasDocument ? workspace.active : null);
   syncFontChrome(hasDocument ? fontSize : DEFAULT_FONT_SIZE);
   window.document.getElementById('b-zoom').textContent = hasDocument && cy
     ? `${Math.round(cy.zoom() * 100)}%` : '—';
@@ -3678,9 +3756,22 @@ function syncExecutionReconciliationChrome(hasDocument) {
 // has to repaint them: without this the toolbar goes on claiming the layout of the document the user
 // has just left — highlighting Elastic, and offering its force sliders, over a document laid out by
 // something else entirely.
-function syncLayoutChrome() {
+function syncLayoutChrome(owner = null) {
   const elasticCtrl = document.getElementById('elastic-ctrl');
   if (elasticCtrl) elasticCtrl.classList.toggle('visible', renderMode === 'monitoring');
+  const forces = normalizedMonitoringForces(owner?.monitoringForces);
+  const repulsion = document.getElementById('rep-slider');
+  const attraction = document.getElementById('attr-slider');
+  const speed = document.getElementById('speed-slider');
+  if (repulsion) repulsion.value = forces.repulsion;
+  if (attraction) attraction.value = Math.round(forces.attraction * 100);
+  if (speed) speed.value = Math.round(forces.speed * 100);
+  const repulsionValue = document.getElementById('rep-val');
+  const attractionValue = document.getElementById('attr-val');
+  const speedValue = document.getElementById('speed-val');
+  if (repulsionValue) repulsionValue.textContent = forces.repulsion;
+  if (attractionValue) attractionValue.textContent = forces.attraction.toFixed(2);
+  if (speedValue) speedValue.textContent = Math.round(forces.speed * 100);
   refreshCommands();
   requestAnimationFrame(syncCommandBarDensity);
 }
@@ -4209,9 +4300,9 @@ function initCy(elements, gd, options = {}) {
     });
   });
 
-  // This internal paint path is synchronous and position-neutral: loading, activation and rebuilding
-  // never move coordinates. Explicit render-mode commands use setRenderMode and do run their owned
-  // layout before the renderer-specific routing pass.
+  // This internal paint path is synchronous and position-neutral: loading, activation, mode restore
+  // and rebuilding never move coordinates. Only the separate Render command deliberately runs the
+  // active mode's layout.
   setVisualStyle(options.visualStyle || visualStyle, { target: cy, owner: rendererOwner });
   updateStats();
   buildLegend();
@@ -4504,18 +4595,22 @@ function resumeDocumentRenderer(owner) {
         renderer.svg.setAttribute('height', String(renderer.host.clientHeight));
       }
       rehydrateD3RuntimeEdges(owner);
-      renderer.simulation?.alpha(0.18).restart();
     }
   }
   resumePendingElasticLayout(owner);
 }
 
-function startD3Elastic(owner = workspace.active, target = cy, token = owner?.layoutSessionToken) {
-  if (!target || !owner?.pane?.classList.contains('doc-pane--shown') || !layoutRequestIsCurrent(token)) return;
+function startD3Elastic(owner = workspace.active, target = cy, token = owner?.layoutSessionToken,
+  { startSimulation = true } = {}) {
+  const eligible = token ? layoutRequestIsCurrent(token)
+    : workspace.find(owner?.id) === owner && owner?.cy === target;
+  if (!target || !owner?.pane?.classList.contains('doc-pane--shown') || !eligible) return;
   destroyDocumentRenderer(owner, 'restarted');
   const renderer = registerElasticRenderer(owner, target, token);
 
   // ---- collect data from Cytoscape elements ----
+  const monitoringState = ensureModeViewStates(owner).monitoring;
+  const monitoringPositions = monitoringState?.canvasState?.positions || {};
   const nodeRange = metricExtent(target.nodes(), n => Number(n.data('instances')));
   const fontPx = owner.fontSize || DEFAULT_FONT_SIZE;
 
@@ -4528,7 +4623,8 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     const obj = {
       id: n.id(), label: n.data('name') || n.id(),
       r: size / 2, color,
-      x: n.position().x, y: n.position().y,
+      x: monitoringPositions[n.id()]?.x ?? n.position().x,
+      y: monitoringPositions[n.id()]?.y ?? n.position().y,
       instances: Number.isFinite(inst) ? inst : null,
       runtimeState,
       runtimeObserved: Boolean(n.data('runtimeObserved')),
@@ -4581,10 +4677,12 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
   const svgEl = renderer.svg;
   svgEl.classList.add('active');
 
-  const initAttr = parseInt(document.getElementById('attr-slider')?.value || '30', 10) / 100;
-  const initRep  = parseInt(document.getElementById('rep-slider')?.value  || '320', 10);
-  const initSpeed = parseInt(document.getElementById('speed-slider')?.value || '50', 10) / 100;
-  const designViewport = { k: target.zoom(), x: target.pan().x, y: target.pan().y };
+  const forces = normalizedMonitoringForces(owner.monitoringForces ?? monitoringState?.forces);
+  owner.monitoringForces = forces;
+  const savedViewport = monitoringState?.canvasState;
+  const designViewport = savedViewport?.zoom && savedViewport?.pan
+    ? { k: savedViewport.zoom, x: savedViewport.pan.x, y: savedViewport.pan.y }
+    : { k: target.zoom(), x: target.pan().x, y: target.pan().y };
   const elasticMount = mountD3ElasticRenderer({
     svg: svgEl,
     tooltip: renderer.tooltip,
@@ -4595,10 +4693,11 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     palette: rendererPalette,
     markerKey: renderer.token.generation,
     fontSize: fontPx,
-    attraction: initAttr,
-    repulsion: initRep,
-    speed: initSpeed,
+    attraction: forces.attraction,
+    repulsion: forces.repulsion,
+    speed: forces.speed,
     initialTransform: designViewport,
+    startSimulation,
     // Mount eligibility belongs to the layout request; a mounted simulation belongs to the
     // renderer generation. Presentation toggles may retire pending layouts without retiring it.
     isLive: () => rendererSessions.isLive(renderer.token) && workspace.find(owner.id) === owner && owner.cy === target,
@@ -5137,7 +5236,7 @@ function setVisualStyle(name, options = {}) {
     owner.layoutMode = 'preset';
     if (owner === workspace.active) layoutMode = 'preset';
     syncPaneLayout();
-    syncLayoutChrome('preset');
+    syncLayoutChrome(owner);
   }
   target.batch(() => applyVisualStyle(name, target, owner));
 }
@@ -5239,6 +5338,17 @@ function syncOwnedLayoutBusy(owner) {
 function completeOwnedLayout(job) {
   const { owner, token } = job;
   const current = layoutRequestIsCurrent(token);
+  if (current && job.projectedGroupMoves?.length) {
+    job.target.batch(() => job.projectedGroupMoves.forEach(group => {
+      const summary = job.target.getElementById(group.summaryId);
+      if (summary.empty()) return;
+      const end = summary.position();
+      const dx = end.x - group.start.x;
+      const dy = end.y - group.start.y;
+      group.members.forEach(member => job.target.getElementById(member.id)
+        .position({ x: member.position.x + dx, y: member.position.y + dy }));
+    }));
+  }
   if (job.fitAfterLayout && layoutRequestIsCurrent(token)) {
     if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
     else {
@@ -5249,9 +5359,10 @@ function completeOwnedLayout(job) {
   }
   if (job.recordPositions && layoutRequestIsCurrent(token)
       && documentIsEditable(owner) && owner.graph?.format !== 'graphify' && owner.cy === job.target) {
-    const positions = job.target.nodes().map(node => ({
-      id: node.id(), ox: node.position('x'), oy: node.position('y'),
-    }));
+    const positions = owner.graph.nodes.map(node => {
+      const rendered = job.target.getElementById(node.id);
+      return { id: node.id, ox: rendered.position('x'), oy: rendered.position('y') };
+    });
     if (moveNodesTo(owner.graph, positions, owner.history, job.commandLabel)) {
       if (workspace.active === owner) updateHistoryUi();
       else {
@@ -5353,6 +5464,7 @@ function runOwnedLayout(token) {
     return;
   }
   const { owner, target, preservePositions, keepPositions, fitAfterLayout } = job;
+  const layoutTarget = job.layoutElements?.length ? job.layoutElements : target.elements(':visible');
 
   if (keepPositions) {
     // A running native layout can move nodes between the command click and cancellation, while an
@@ -5404,20 +5516,20 @@ function runOwnedLayout(token) {
 
   const animate = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
   let nativeLayout;
-  if (token.mode === 'dagre') nativeLayout = target.layout({
+  if (token.mode === 'dagre') nativeLayout = layoutTarget.layout({
     name: 'dagre', rankDir: 'LR', rankSep: 110, nodeSep: 55, edgeSep: 20,
     animate, animationDuration: animate ? 450 : 0, animationEasing: 'ease-in-out',
     fit: !fitAfterLayout, padding: 60,
   });
-  else if (token.mode === 'cose') nativeLayout = target.layout({
+  else if (token.mode === 'cose') nativeLayout = layoutTarget.layout({
     name: 'cose', animate, animationDuration: animate ? 800 : 0, fit: !fitAfterLayout, padding: 60,
     nodeOverlap: 24, idealEdgeLength: 140, nodeRepulsion: () => 10000, gravity: 1.2,
   });
-  else if (ELK_LAYOUT_MODES.has(token.mode)) nativeLayout = target.layout(elkOptions(token.mode, {
+  else if (ELK_LAYOUT_MODES.has(token.mode)) nativeLayout = layoutTarget.layout(elkOptions(token.mode, {
     fit: !fitAfterLayout,
     animate,
   }));
-  else if (isLayeredMode(token.mode)) nativeLayout = target.layout({
+  else if (isLayeredMode(token.mode)) nativeLayout = layoutTarget.layout({
     name: LAYERED_LAYOUT_NAME, mode: token.mode,
     animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
     fit: !fitAfterLayout, padding: 70,
@@ -5490,7 +5602,8 @@ function setLayout(name, options = {}) {
     }
   }
   finishVisualGroups(owner);
-  owner?.visualGroupsRenderer?.suspend();
+  if (name === 'elastic') owner?.visualGroupsRenderer?.suspend();
+  else refreshVisualGroups(owner);
   // Native `stop()` may synchronously publish a final frame, so Keep must capture the canvas before
   // the session request invokes cancellation callbacks for the layout it replaces.
   const retainedPositions = options.keepPositions && target ? target.nodes().map(node => ({
@@ -5517,7 +5630,7 @@ function setLayout(name, options = {}) {
     owner.fontSize = fontSize;
     owner.n8nActive = n8nActive;
   }
-  syncLayoutChrome(name);
+  syncLayoutChrome(owner);
   updateModifyAvailability();
   if (!owner || !target) return;
 
@@ -5527,6 +5640,18 @@ function setLayout(name, options = {}) {
   syncPaneLayout();
 
   let job;
+  const projectionInput = name === 'elastic' ? null : visualGroupLayoutInput(groupProjection(owner));
+  let layoutElements = target.collection();
+  for (const id of [...(projectionInput?.nodeIds || []), ...(projectionInput?.edgeIds || [])]) {
+    const element = target.getElementById(id);
+    if (element.nonempty()) layoutElements = layoutElements.union(element);
+  }
+  if (!layoutElements.length) layoutElements = target.elements(':visible');
+  const projectedGroupMoves = (projectionInput?.collapsedGroups || []).map(group => ({
+    ...group,
+    start: { ...target.getElementById(group.summaryId).position() },
+    members: group.memberNodeIds.map(id => ({ id, position: { ...target.getElementById(id).position() } })),
+  }));
   // Layered drawings share the ELK serialisation contract: one asynchronous engine run per
   // document at a time, cancelled before it starts and otherwise allowed to settle.
   const kind = ELK_LAYOUT_MODES.has(name) || isLayeredMode(name) ? 'elk' : 'native';
@@ -5554,6 +5679,8 @@ function setLayout(name, options = {}) {
     recordPositions: Boolean(options.recordPositions),
     fitAfterLayout: Boolean(options.fitAfterLayout),
     commandLabel: options.commandLabel || null,
+    layoutElements,
+    projectedGroupMoves,
     nativeLayout: null,
   };
   owner.layoutSessionToken = request.token;
@@ -5567,20 +5694,41 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const target = cy;
   if (!owner || !target) return;
   const semanticMode = normalizeRenderMode(name);
+  if (semanticMode === renderMode) return true;
   if (!skipDraftGuard && semanticMode !== renderMode) {
     return runAfterInspectorDraft(() => setRenderMode(name, { skipDraftGuard: true }));
   }
+  invalidateDocumentLayouts(owner);
+  captureDocumentModeView(owner, renderMode);
+  if (dragSnapshot?.owner === owner) cancelNodeMoveGesture();
+  if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
   renderMode = semanticMode;
   owner.renderMode = semanticMode;
-  // Product choices project onto existing internal engines. Design restores its exact selected
-  // arrangement; Monitoring owns the continuous D3 lifecycle.
-  const style = 'cyto';
-  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
-  target.batch(() => applyVisualStyle(style, target, owner));
-  setLayout(semanticMode === 'design' ? (arrangement?.layout || 'cyto') : 'elastic',
-    semanticMode === 'design' && designArrangement === 'keep'
-      ? { preservePositions: true, keepPositions: true } : {});
+  const incoming = ensureModeViewStates(owner)[semanticMode];
+  owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
+  if (semanticMode === 'design') {
+    stopElasticRendering(owner, 'mode-restored');
+    target.nodes().unlock();
+    layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
+      ? incoming.layoutMode : (DESIGN_ARRANGEMENTS[designArrangement]?.layout || 'cyto');
+    owner.layoutMode = layoutMode;
+    restoreDesignView(owner);
+    target.batch(() => applyVisualStyle('cyto', target, owner, { preserveEdgeGeometry: true }));
+    refreshVisualGroups(owner, { selection: incoming?.canvasState?.selectedIds,
+      focus: incoming?.canvasState?.focusNodeId });
+  } else {
+    finishVisualGroups(owner);
+    owner.visualGroupsRenderer?.suspend();
+    layoutMode = 'elastic';
+    owner.layoutMode = 'elastic';
+    target.nodes().lock();
+    startD3Elastic(owner, target, null, { startSimulation: false });
+  }
+  syncPaneLayout();
+  syncLayoutChrome(owner);
+  updateModifyAvailability();
   scheduleWorkspacePersistence();
+  return true;
 }
 
 function arrangeDesign(name, { skipDraftGuard = false } = {}) {
@@ -5589,6 +5737,14 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!arrangement || renderMode !== 'design' || !owner || !cy) return false;
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
+  }
+  if (designArrangement === name) {
+    designArrangement = null;
+    owner.designArrangement = null;
+    setGraphPresentation(owner.graph, { designArrangement: null });
+    refreshCommands();
+    scheduleWorkspacePersistence();
+    return true;
   }
   designArrangement = name;
   owner.designArrangement = name;
@@ -5603,6 +5759,31 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   return true;
 }
 
+function renderActiveMode({ skipDraftGuard = false } = {}) {
+  const owner = workspace.active;
+  if (!owner || !cy) return false;
+  if (!skipDraftGuard) {
+    return runAfterInspectorDraft(() => renderActiveMode({ skipDraftGuard: true }));
+  }
+  if (renderMode === 'monitoring') {
+    const renderer = elasticRendererFor(owner);
+    if (!renderer) startD3Elastic(owner, cy, null, { startSimulation: true });
+    else renderer.simulation?.alpha(.7).restart();
+    return true;
+  }
+  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
+  setLayout(arrangement?.layout || 'cyto', {
+    preservePositions: arrangement?.preservePositions,
+    keepPositions: designArrangement === 'keep',
+    recordPositions: !arrangement?.preservePositions,
+    fitAfterLayout: !arrangement?.preservePositions,
+    commandLabel: designArrangement
+      ? commandRegistry.get(`layout.arrange.${designArrangement}`)?.label || 'Render graph'
+      : 'Render graph',
+  });
+  return true;
+}
+
 // Activation normally resumes the renderer already owned by the document. A legacy split record,
 // however, may name Elastic while still owning only its old Cytoscape renderer (or the inverse).
 // Normalizing the fields without reconciling that handle makes the radio truthful about state but
@@ -5612,8 +5793,17 @@ function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
   const kind = rendererFor(owner)?.kind;
-  if (renderMode === 'monitoring' && kind !== 'elastic') setLayout('elastic');
-  else if (renderMode === 'design' && kind === 'elastic') setLayout('cyto');
+  if (renderMode === 'monitoring' && kind !== 'elastic') {
+    owner.layoutMode = 'elastic';
+    layoutMode = 'elastic';
+    owner.cy.nodes().lock();
+    startD3Elastic(owner, owner.cy, null, { startSimulation: false });
+  } else if (renderMode === 'design' && kind === 'elastic') {
+    stopElasticRendering(owner, 'mode-restored');
+    owner.cy.nodes().unlock();
+    restoreDesignView(owner);
+    refreshVisualGroups(owner);
+  }
 }
 
 function fitGraph() {
@@ -5693,28 +5883,44 @@ function onFontSize(val, target = cy, writeChrome = target === cy) {
 function onElasticRepulsion(val) {
   const v = parseInt(val);
   document.getElementById('rep-val').textContent = v;
-  const renderer = elasticRendererFor(workspace.active);
-  if (!renderer?.simulation) return;
-  renderer.simulation.force('charge', d3.forceManyBody().strength(-v));
-  renderer.simulation.alpha(0.5).restart();
+  const owner = workspace.active;
+  if (owner) owner.monitoringForces = normalizedMonitoringForces({
+    ...owner.monitoringForces, repulsion: v,
+  });
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.simulation) {
+    renderer.simulation.force('charge', d3.forceManyBody().strength(-v));
+    renderer.simulation.alpha(0.5).restart();
+  }
+  scheduleWorkspacePersistence();
 }
 
 function onElasticAttraction(val) {
   const v = parseInt(val);
   const strength = v / 100;
   document.getElementById('attr-val').textContent = strength.toFixed(2);
-  const renderer = elasticRendererFor(workspace.active);
-  if (!renderer?.simulation) return;
-  renderer.simulation.force('link').strength(strength);
-  renderer.simulation.alpha(0.5).restart();
+  const owner = workspace.active;
+  if (owner) owner.monitoringForces = normalizedMonitoringForces({
+    ...owner.monitoringForces, attraction: strength,
+  });
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.simulation) {
+    renderer.simulation.force('link').strength(strength);
+    renderer.simulation.alpha(0.5).restart();
+  }
+  scheduleWorkspacePersistence();
 }
 
 function onElasticSpeed(val) {
   const speed = Math.max(0.1, Math.min(1, parseInt(val, 10) / 100));
   document.getElementById('speed-val').textContent = Math.round(speed * 100);
-  const renderer = elasticRendererFor(workspace.active);
-  if (!renderer?.simulation) return;
-  renderer.simulation.velocityDecay(0.65 - speed * 0.45).alphaTarget(0).restart();
+  const owner = workspace.active;
+  if (owner) owner.monitoringForces = normalizedMonitoringForces({
+    ...owner.monitoringForces, speed,
+  });
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.simulation) renderer.simulation.velocityDecay(0.65 - speed * 0.45).alphaTarget(0).restart();
+  scheduleWorkspacePersistence();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -9873,10 +10079,7 @@ function applyNodeGrabPolicy(targetCy, state = canvasInteractionState({
   navigating: navigationEnabled,
 })) {
   if (!targetCy || targetCy.destroyed()) return;
-  const owner = workspace.documents.find(document_ => document_.cy === targetCy);
-  const projection = groupProjection(owner);
   targetCy.nodes().forEach(node => {
-    if (projection?.syntheticIds.has(node.id()) && !groupAuthoringAllowed(owner)) { node.ungrabify(); return; }
     if (node.data('rrVisualRole') === 'ghost' || node.data('rrVisualRole') === 'header' || !node.visible()) { node.ungrabify(); return; }
     if (nodeIsGrabbable(state, node.selected())) node.grabify();
     else node.ungrabify();
@@ -14402,6 +14605,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   setWorkspaceLayout: mode => setWorkspaceLayoutMode(mode),
   resetWorkspaceLayout: () => resetWorkspaceLayout(),
   setRenderMode: name => setRenderMode(name),
+  render: () => renderActiveMode(),
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
@@ -14654,7 +14858,7 @@ function syncCommandBarDensity() {
   // widths. Secondary view and file mirrors collapse first; the application menus remain as their
   // textual counterpart.
   const densityClasses = [
-    'density-hide-view', 'density-hide-file', 'density-hide-monitoring-controls',
+    'density-hide-view', 'density-hide-file',
   ];
   topbar.classList.remove(...densityClasses);
   for (const className of densityClasses) {

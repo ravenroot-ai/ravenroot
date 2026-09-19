@@ -21,6 +21,49 @@ export function normalizedCanvasState(value, graph) {
   };
 }
 
+export const DEFAULT_MONITORING_FORCES = Object.freeze({
+  repulsion: 320,
+  attraction: .3,
+  speed: .5,
+});
+
+export function normalizedMonitoringForces(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const bounded = (candidate, fallback, minimum, maximum) => {
+    const number = Number(candidate);
+    return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+  };
+  return {
+    repulsion: bounded(source.repulsion, DEFAULT_MONITORING_FORCES.repulsion, 30, 1200),
+    attraction: bounded(source.attraction, DEFAULT_MONITORING_FORCES.attraction, .05, 1.5),
+    speed: bounded(source.speed, DEFAULT_MONITORING_FORCES.speed, .1, 1),
+  };
+}
+
+export function normalizedModeViewState(value, graph) {
+  if (!value || typeof value !== 'object') return null;
+  const groups = readVisualGroups(graph).groups;
+  return {
+    canvasState: normalizedCanvasState(value.canvasState, graph),
+    visualGroupState: reconcileVisualGroupState(groups, value.visualGroupState),
+    forces: normalizedMonitoringForces(value.forces),
+    layoutMode: typeof value.layoutMode === 'string' ? value.layoutMode : null,
+  };
+}
+
+export function documentModeViewStates(document_) {
+  const stored = document_?.viewStates ?? document_?.presentation?.viewStates;
+  const legacy = {
+    canvasState: document_?.canvasState ?? document_?.presentation?.canvasState,
+    visualGroupState: document_?.visualGroupState ?? document_?.presentation?.visualGroupState,
+  };
+  const activeMode = normalizeRenderMode(document_?.renderMode ?? document_?.presentation?.renderMode);
+  return {
+    design: normalizedModeViewState(stored?.design ?? (activeMode === DESIGN_RENDER_MODE ? legacy : null), document_?.graph),
+    monitoring: normalizedModeViewState(stored?.monitoring ?? (activeMode === MONITORING_RENDER_MODE ? legacy : null), document_?.graph),
+  };
+}
+
 export function visualGroupPresentation(document_) {
   const groups = readVisualGroups(document_?.graph).groups;
   return {

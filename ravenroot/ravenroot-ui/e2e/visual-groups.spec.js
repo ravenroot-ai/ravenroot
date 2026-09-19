@@ -87,7 +87,7 @@ test('read-only presentation toggles do not mutate pinned graph or add history',
     const owner = window.ravenroot.workspace.active;
     owner._testPinnedGraph = JSON.stringify(owner.graph);
   });
-  expect(await page.evaluate(() => window.cy.nodes('[rrVisualRole="summary"]').first().grabbable())).toBe(false);
+  expect(await page.evaluate(() => window.cy.nodes('[rrVisualRole="summary"]').first().grabbable())).toBe(true);
   await page.evaluate(() => { window.cy.nodes('[rrVisualRole="summary"]').select(); });
   await expect(page.locator('#btn-modify')).toBeDisabled();
   await page.getByRole('button', { name: 'Expand', exact: true }).click();
@@ -117,6 +117,29 @@ test('toggle-only changes on an imported baseline use close and replace save gua
   await expect(page.locator('#unsaved-document-dialog')).toHaveAttribute('open', '');
   await page.locator('[data-unsaved-action="cancel"]').click();
   expect(await page.evaluate(() => window.ravenroot.workspace.active.name)).toBe('groups.graphml');
+});
+
+test('a collapsed imported presentation never paints an ungrouped intermediate frame', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    window.__groupPaintFrames = [];
+    const record = () => {
+      if (window.ravenroot?.workspace.active?.graph?.nodeMap?.work) {
+        window.__groupPaintFrames.push({
+          work: window.cy.getElementById('work').visible(),
+          branch: window.cy.getElementById('branch').visible(),
+          summaries: window.cy.nodes('[rrVisualRole="summary"]:visible').length,
+        });
+      }
+      if (window.__groupPaintFrames.length < 5) requestAnimationFrame(record);
+    };
+    requestAnimationFrame(record);
+  });
+  await page.locator('#replace-file-inp').setInputFiles({ name: 'groups.graphml', mimeType: 'application/xml', buffer: importedGroups });
+  await expect.poll(() => page.evaluate(() => window.__groupPaintFrames.length)).toBe(5);
+  expect(await page.evaluate(() => window.__groupPaintFrames)).toEqual(
+    Array.from({ length: 5 }, () => ({ work: false, branch: false, summaries: 1 })),
+  );
 });
 
 test('a physical summary drag is one rigid move and member deletion reconciles in one undo', async ({ page }) => {
@@ -155,6 +178,78 @@ test('a physical summary drag is one rigid move and member deletion reconciles i
   expect((await canonical(page)).nodes).toHaveLength(4);
 });
 
+test('every Design arrangement lays out a collapsed summary and rigidly translates its members', async ({ page }) => {
+  await editable(page);
+  await select(page, ['dosomething', 'end', 'error']);
+  await groupSelection(page);
+  const before = await page.evaluate(() => Object.fromEntries(
+    window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
+  ));
+  await page.locator('#menu-layout').click();
+  await page.locator('[data-command-id="layout.arrange.flow"]').click();
+  await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+  const after = await page.evaluate(() => Object.fromEntries(
+    window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
+  ));
+  const delta = { x: after.dosomething.x - before.dosomething.x,
+    y: after.dosomething.y - before.dosomething.y };
+  expect(Math.hypot(delta.x, delta.y)).toBeGreaterThan(1);
+  for (const id of ['end', 'error']) {
+    expect(after[id].x - before[id].x).toBeCloseTo(delta.x, 6);
+    expect(after[id].y - before[id].y).toBeCloseTo(delta.y, 6);
+  }
+  expect(after.start).not.toEqual(before.start);
+  expect(await page.evaluate(() => ({
+    visibleNodes: window.cy.nodes(':visible').map(node => node.id()),
+    hiddenMembers: ['dosomething', 'end', 'error'].every(id => !window.cy.getElementById(id).visible()),
+  }))).toMatchObject({ hiddenMembers: true });
+  await select(page, await page.evaluate(() => window.cy.nodes('[rrVisualRole="summary"]').map(node => node.id())));
+  await page.getByRole('button', { name: 'Expand', exact: true }).click();
+  await page.waitForFunction(() => !window.ravenroot.workspace.active.visualGroupsRenderer.isAnimating);
+  const expanded = await page.evaluate(() => Object.fromEntries(['dosomething', 'end', 'error']
+    .map(id => [id, window.cy.getElementById(id).position()])));
+  for (const id of ['dosomething', 'end', 'error']) expect(expanded[id]).toEqual(after[id]);
+  await page.locator('#btn-undo').click();
+  expect(await page.evaluate(() => Object.fromEntries(
+    window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
+  ))).toEqual(before);
+});
+
+test('Monitoring summary drag wins over activation and retains rigid member geometry', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#replace-file-inp').setInputFiles({ name: 'groups.graphml', mimeType: 'application/xml', buffer: importedGroups });
+  await page.waitForFunction(() => window.ravenroot.workspace.active.graph.nodeMap.work);
+  await page.locator('#btn-monitoring').click();
+  const summary = page.getByRole('button', { name: 'Expand visual group Processing, 2 members', exact: true });
+  await expect(summary).toBeVisible();
+  const before = await page.evaluate(() => Object.fromEntries(
+    window.ravenroot.activeDocument().renderer.nodes.filter(node => ['work', 'branch'].includes(node.id))
+      .map(node => [node.id, { x: node.x, y: node.y }]),
+  ));
+  const box = await summary.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 58, box.y + box.height / 2 + 36, { steps: 8 });
+  await page.mouse.up();
+  const after = await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    return { collapsed: owner.visualGroupState['group-work'].collapsed,
+      positions: Object.fromEntries(owner.renderer.nodes.filter(node => ['work', 'branch'].includes(node.id))
+        .map(node => [node.id, { x: node.x, y: node.y }])) };
+  });
+  expect(after.collapsed).toBe(true);
+  const delta = { x: after.positions.work.x - before.work.x, y: after.positions.work.y - before.work.y };
+  expect(Math.hypot(delta.x, delta.y)).toBeGreaterThan(4);
+  expect(after.positions.branch.x - before.branch.x).toBeCloseTo(delta.x, 6);
+  expect(after.positions.branch.y - before.branch.y).toBeCloseTo(delta.y, 6);
+  await page.locator('#btn-design').click();
+  await page.locator('#btn-monitoring').click();
+  expect(await page.evaluate(() => Object.fromEntries(
+    window.ravenroot.activeDocument().renderer.nodes.filter(node => ['work', 'branch'].includes(node.id))
+      .map(node => [node.id, { x: node.x, y: node.y }]),
+  ))).toEqual(after.positions);
+});
+
 test('workspace reload retains document-owned group view, viewport, same-name separation and fork independence', async ({ page }) => {
   let tenant = 'group-tenant-a';
   await page.route('**/v1/configuration', route => route.fulfill({ status: 200, contentType: 'application/json',
@@ -176,14 +271,33 @@ test('workspace reload retains document-owned group view, viewport, same-name se
     return [first.id, second];
   });
   await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  expect(await page.evaluate(() => window.ravenroot.workspace.documents.map(owner => ({
+    working: owner.visualGroupState['group-work'].collapsed,
+    saved: owner.viewStates.design?.visualGroupState['group-work'].collapsed,
+  })))).toEqual([{ working: false, saved: false }, { working: true, saved: true }]);
+  expect(await page.evaluate(async () => {
+    const request = indexedDB.open('ravenroot-workspaces');
+    const database = await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    const tx = database.transaction('tenant-workspaces', 'readonly');
+    const all = tx.objectStore('tenant-workspaces').getAll();
+    const records = await new Promise((resolve, reject) => {
+      all.onsuccess = () => resolve(all.result); all.onerror = () => reject(all.error);
+    });
+    database.close();
+    return records[0].documents.map(owner => owner.presentation.viewStates.design.visualGroupState['group-work'].collapsed);
+  })).toEqual([false, true]);
   expect(await page.evaluate(() => window.cy.zoom())).toBeCloseTo(0.73, 6);
   await page.reload(); await ready();
   const restored = await page.evaluate(() => ({
     ids: window.ravenroot.workspace.documents.map(owner => owner.id),
     states: window.ravenroot.workspace.documents.map(owner => owner.visualGroupState['group-work'].collapsed),
+    savedStates: window.ravenroot.workspace.documents.map(owner => owner.viewStates.design?.visualGroupState['group-work'].collapsed),
     zoom: window.cy.zoom(), pan: window.cy.pan(),
   }));
-  expect(restored.ids).toEqual(ids); expect(restored.states).toEqual([false, true]);
+  expect(restored.ids).toEqual(ids); expect({ working: restored.states, saved: restored.savedStates })
+    .toEqual({ working: [false, true], saved: [false, true] });
   expect(restored.zoom).toBeCloseTo(0.73, 6); expect(restored.pan).toEqual({ x: 72, y: 49 });
   await page.evaluate(id => { window.ravenroot.activateDocument(id); window.ravenroot.forkDocument(); }, ids[1]);
   const fork = await page.evaluate(() => window.ravenroot.workspace.active.id);

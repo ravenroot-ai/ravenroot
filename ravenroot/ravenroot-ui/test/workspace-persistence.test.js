@@ -16,6 +16,13 @@ const graph = () => ({ format: 'graphml', sourceXml: '<graphml/>', nodes: [{ id:
 const document_ = (id, tenantId = 'tenant-a') => ({ documentId: id, tenantId, mode: 'draft',
   name: `${id}.graphml`, displayName: id, graph: graph(), renderMode: 'design', layoutMode: 'cyto',
   designArrangement: 'keep', visualStyle: 'cyto', fontSize: 20,
+  monitoringForces: { repulsion: 640, attraction: .45, speed: .7 },
+  viewStates: {
+    design: { canvasState: { zoom: 2, pan: { x: 3, y: 4 }, positions: { start: { x: 8, y: 9 } } },
+      visualGroupState: {}, layoutMode: 'cyto' },
+    monitoring: { canvasState: { zoom: 1.5, pan: { x: 5, y: 6 }, positions: { start: { x: 20, y: 30 } } },
+      visualGroupState: {}, forces: { repulsion: 640, attraction: .45, speed: .7 }, layoutMode: 'elastic' },
+  },
   provenance: { originMode: 'draft', sourceDocumentId: null,
     sourceGraphVersion: null, deploymentId: null }, execution: { executionId: 'never-store', client: {} },
   sourceSession: { sessionId: 'never-store' } });
@@ -88,6 +95,8 @@ describe('tenant workspace snapshot', () => {
     expect(restored.documents[0].graph.nodeMap.start.id).toBe('start');
     expect(restored.documents[0].presentation).toMatchObject({
       renderMode: 'design', layoutMode: 'cyto', designArrangement: 'keep',
+      monitoringForces: { repulsion: 640, attraction: .45, speed: .7 },
+      viewStates: { design: { canvasState: { zoom: 2 } }, monitoring: { canvasState: { zoom: 1.5 } } },
     });
     expect(validateWorkspaceSnapshot({ ...snapshot, activeDocumentId: 'stale' }, scope))
       .toMatchObject({ activeDocumentId: 'b', recoveredStaleSelection: true });

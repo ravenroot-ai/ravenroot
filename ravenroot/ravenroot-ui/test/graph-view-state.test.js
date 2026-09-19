@@ -10,6 +10,7 @@ import {
   DESIGN_ARRANGEMENTS,
   DESIGN_LAYOUT_MODES,
   DESIGN_RENDER_MODE,
+  documentModeViewStates,
   documentPresentationState,
   graphLayoutPlan,
   initialLayoutForGraph,
@@ -18,6 +19,7 @@ import {
   MONITORING_RENDER_MODE,
   normalizeRenderMode,
   normalizeDesignArrangement,
+  normalizedMonitoringForces,
   normalizeVisualStyle,
   renderGraphStatistics,
   renderModePresentation,
@@ -117,6 +119,22 @@ describe('Cytoscape layout lifecycle', () => {
     expect(normalizeDesignArrangement(null, 'dagre')).toBe('flow');
     expect(normalizeDesignArrangement('keep', 'dagre')).toBe('keep');
     expect(normalizeDesignArrangement('unknown', 'cyto')).toBeNull();
+  });
+  it('normalizes independent document-owned mode snapshots and Monitoring forces', () => {
+    const graph = createWorkflowDocument();
+    const views = documentModeViewStates({ graph, renderMode: 'design', viewStates: {
+      design: { canvasState: { zoom: 2, pan: { x: 4, y: 5 },
+        positions: { start: { x: 10, y: 20 } }, selectedIds: ['start'] },
+      visualGroupState: {}, layoutMode: 'dagre' },
+      monitoring: { canvasState: { zoom: 3, pan: { x: 6, y: 7 }, positions: {} },
+        forces: { repulsion: 900, attraction: .75, speed: .8 }, visualGroupState: {} },
+    } });
+    expect(views.design).toMatchObject({ layoutMode: 'dagre',
+      canvasState: { zoom: 2, selectedIds: ['start'] } });
+    expect(views.monitoring).toMatchObject({
+      forces: { repulsion: 900, attraction: .75, speed: .8 }, canvasState: { zoom: 3 } });
+    expect(normalizedMonitoringForces({ repulsion: -1, attraction: 9, speed: 0 }))
+      .toEqual({ repulsion: 30, attraction: 1.5, speed: .1 });
   });
   it('keeps the established position-planning default independent from the visual style', () => {
     expect(initialLayoutForGraph(createWorkflowDocument())).toBe('n8n');

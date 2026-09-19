@@ -58,6 +58,7 @@ for (const renderer of [{ name: 'Design', selector: '#btn-design' }]) {
     await open(page);
     await page.evaluate(() => window.ravenroot.setApplicationTheme('dark'));
     await page.locator(renderer.selector).click();
+    await page.locator('#btn-render').click();
     await expect(page.locator('.doc-pane--active')).toHaveAttribute('aria-busy', 'true');
     await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', {
       timeout: 10_000,

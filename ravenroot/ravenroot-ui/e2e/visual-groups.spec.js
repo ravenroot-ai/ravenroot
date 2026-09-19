@@ -178,7 +178,18 @@ test('a physical summary drag is one rigid move and member deletion reconciles i
   expect((await canonical(page)).nodes).toHaveLength(4);
 });
 
-test('every Design arrangement lays out a collapsed summary and rigidly translates its members', async ({ page }) => {
+const designArrangementEngines = [
+  ['hierarchical', 'Hierarchical'],
+  ['flow', 'Flow'],
+  ['organic', 'Organic'],
+  ['hierarchical-new', 'Hierarchical (new)'],
+  ['layered-down', 'Layered (top-down)'],
+];
+
+for (const [arrangementId, arrangementLabel] of designArrangementEngines) test(
+  `every Design arrangement engine: ${arrangementLabel} lays out a collapsed summary and rigidly translates its members`,
+  async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await editable(page);
   await select(page, ['dosomething', 'end', 'error']);
   await groupSelection(page);
@@ -186,7 +197,7 @@ test('every Design arrangement lays out a collapsed summary and rigidly translat
     window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
   ));
   await page.locator('#menu-layout').click();
-  await page.locator('[data-command-id="layout.arrange.flow"]').click();
+  await page.locator(`[data-command-id="layout.arrange.${arrangementId}"]`).click();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
   const after = await page.evaluate(() => Object.fromEntries(
     window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
@@ -213,6 +224,26 @@ test('every Design arrangement lays out a collapsed summary and rigidly translat
   expect(await page.evaluate(() => Object.fromEntries(
     window.ravenroot.workspace.active.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }]),
   ))).toEqual(before);
+});
+
+test('Monitoring group selection remains independent across Design round-trips', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#replace-file-inp').setInputFiles({ name: 'groups.graphml', mimeType: 'application/xml', buffer: importedGroups });
+  await page.waitForFunction(() => window.ravenroot.workspace.active.graph.nodeMap.work);
+  await select(page, ['start']);
+  await page.locator('#btn-monitoring').click();
+  const summary = page.getByRole('button', { name: 'Expand visual group Processing, 2 members', exact: true });
+  await summary.focus();
+  await expect(summary).toHaveAttribute('data-selected', 'true');
+  await page.locator('#btn-design').click();
+  await expect.poll(() => page.evaluate(() => window.cy.$(':selected').map(element => element.id()))).toEqual(['start']);
+  await page.locator('#btn-monitoring').click();
+  await expect(summary).toHaveAttribute('data-selected', 'true');
+  expect(await page.evaluate(() => {
+    const view = window.ravenroot.activeDocument().viewStates.monitoring.canvasState;
+    return { selectedIds: view.selectedIds, selectedGroupId: view.selectedGroupId,
+      focusGroupId: view.focusGroupId };
+  })).toEqual({ selectedIds: [], selectedGroupId: 'group-work', focusGroupId: 'group-work' });
 });
 
 test('Monitoring summary drag wins over activation and retains rigid member geometry', async ({ page }) => {

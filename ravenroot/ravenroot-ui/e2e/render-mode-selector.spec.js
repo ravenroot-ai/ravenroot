@@ -278,6 +278,37 @@ test('mode switches restore independent geometry, viewport, selection and Monito
   await expect(page.locator('#attr-slider')).toHaveValue('65');
 });
 
+test('mode snapshots independently restore Design edge and mixed selection and Monitoring selection', async ({ page }) => {
+  const selected = () => page.evaluate(() => window.cy.$(':selected')
+    .map(element => element.id()).sort());
+  await page.evaluate(() => {
+    window.cy.elements().unselect();
+    window.cy.getElementById('edge-start-dosomething').select();
+  });
+  await page.locator('#btn-monitoring').click();
+  await page.evaluate(() => {
+    window.cy.elements().unselect();
+    window.cy.getElementById('end').select();
+  });
+  await page.locator('#btn-design').click();
+  await expect.poll(selected).toEqual(['edge-start-dosomething']);
+
+  await page.evaluate(() => {
+    window.cy.elements().unselect();
+    window.cy.getElementById('start').select();
+    window.cy.getElementById('edge-start-dosomething').select();
+  });
+  await page.locator('#btn-monitoring').click();
+  await expect.poll(selected).toEqual(['end']);
+  expect(await page.evaluate(() => {
+    const views = window.ravenroot.activeDocument().viewStates;
+    return { design: views.design.canvasState.selectedIds.slice().sort(),
+      monitoring: views.monitoring.canvasState.selectedIds.slice().sort() };
+  })).toEqual({ design: ['edge-start-dosomething', 'start'], monitoring: ['end'] });
+  await page.locator('#btn-design').click();
+  await expect.poll(selected).toEqual(['edge-start-dosomething', 'start']);
+});
+
 test('Design relayout retires edge gestures and owns the canvas until final routing', async ({ page }) => {
   await page.locator('#btn-modify').click();
   await page.locator('#cy-wrap').focus();

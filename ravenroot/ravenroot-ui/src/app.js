@@ -6,6 +6,8 @@ import { visualGroupLayoutInput } from './visual-group-projection.js';
 import {
   DESIGN_ARRANGEMENTS,
   documentModeViewStates,
+  graphHasPersistedLayout,
+  loadedGraphLayoutPlan,
   normalizedCanvasState,
   normalizedMonitoringForces,
   visualGroupPresentation,
@@ -1741,6 +1743,15 @@ function selectedRealNodeIds(owner = workspace.active, captured = null) {
     .filter(id => Object.hasOwn(owner?.graph?.nodeMap || {}, id));
 }
 
+function selectedCanonicalElementIds(owner = workspace.active) {
+  const canonical = new Set([
+    ...(owner?.graph?.nodes || []).map(node => node.id),
+    ...(owner?.graph?.edges || []).map(edge => edge.id),
+  ]);
+  return (owner?.cy?.$(':selected').map(element => element.id()) || [])
+    .filter(id => canonical.has(id));
+}
+
 function finishVisualGroups(owner = workspace.active) {
   // Finishing an already-settled transition repaints its last projection. That projection owns a
   // selection snapshot from the last group refresh, not the live selection a user may have made
@@ -2408,7 +2419,7 @@ function captureDocumentModeView(owner, mode = owner?.renderMode) {
     zoom: semanticMode === 'monitoring' && transform ? transform.k : owner.cy.zoom(),
     pan: semanticMode === 'monitoring' && transform
       ? { x: transform.x, y: transform.y } : owner.cy.pan(),
-    selectedIds: selectedRealNodeIds(owner),
+    selectedIds: selectedCanonicalElementIds(owner),
     focusNodeId: owner.cursorId,
     selectedGroupId: selectedVisualGroup(owner)?.id || owner.selectedVisualGroupId || null,
     focusGroupId: owner.focusedVisualGroupId || null,
@@ -2436,6 +2447,19 @@ function restoreDesignView(owner) {
   owner.cy.batch(() => Object.entries(saved.positions)
     .forEach(([id, position]) => owner.cy.getElementById(id).position(position)));
   if (saved.zoom && saved.pan) owner.cy.viewport({ zoom: saved.zoom, pan: saved.pan });
+  applyStableSelection(owner.cy, saved.selectedIds);
+  owner.cursorId = saved.focusNodeId;
+  owner.selectedVisualGroupId = saved.selectedGroupId;
+  owner.focusedVisualGroupId = saved.focusGroupId;
+  owner.restoredVisualGroupSelection = saved.selectedGroupId;
+  owner.restoredVisualGroupFocus = saved.focusGroupId;
+  return true;
+}
+
+function restoreMonitoringView(owner) {
+  const state = ensureModeViewStates(owner).monitoring;
+  if (!state?.canvasState || !owner?.cy) return false;
+  const saved = normalizedCanvasState(state.canvasState, owner.graph);
   applyStableSelection(owner.cy, saved.selectedIds);
   owner.cursorId = saved.focusNodeId;
   owner.selectedVisualGroupId = saved.selectedGroupId;
@@ -3344,8 +3368,16 @@ function defaultDocumentName() {
 }
 
 function initLoadedGraph(graph, currentStyle) {
+  const owner = workspace.active;
+  const needsInitialDesignLayout = owner?.renderMode === 'design'
+    && !graphHasPersistedLayout(graph)
+    && !graph.nodes.every(node => Number.isFinite(owner.canvasState?.positions?.[node.id]?.x)
+      && Number.isFinite(owner.canvasState?.positions?.[node.id]?.y));
+  const initialLayoutPlan = needsInitialDesignLayout
+    ? loadedGraphLayoutPlan(graph, owner.layoutMode, owner.designArrangement) : null;
   initCy(buildElements(graph), graph, {
     visualStyle: currentStyle,
+    initialLayoutPlan,
   });
 }
 
@@ -4339,6 +4371,17 @@ function initCy(elements, gd, options = {}) {
       const id = savedGroup.collapsed ? savedGroup.summaryId : savedGroup.headerId;
       applyStableSelection(instance, [id]); setGraphCursor(id);
     }
+  }
+  // An imported Design document without coordinates has no geometry to restore. Its persisted
+  // arrangement is therefore the one initialization layout. This call is still in the load task,
+  // after collapsed-group projection exists and before the browser can paint the preset seed.
+  if (options.initialLayoutPlan) {
+    setLayout(options.initialLayoutPlan.name, {
+      preservePositions: options.initialLayoutPlan.preservePositions,
+      recordPositions: false,
+      fitAfterLayout: !options.initialLayoutPlan.preservePositions,
+      animate: false,
+    });
   }
 }
 
@@ -5514,7 +5557,8 @@ function runOwnedLayout(token) {
     return;
   }
 
-  const animate = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
+  const animate = job.animate
+    ?? globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
   let nativeLayout;
   if (token.mode === 'dagre') nativeLayout = layoutTarget.layout({
     name: 'dagre', rankDir: 'LR', rankSep: 110, nodeSep: 55, edgeSep: 20,
@@ -5679,6 +5723,7 @@ function setLayout(name, options = {}) {
     recordPositions: Boolean(options.recordPositions),
     fitAfterLayout: Boolean(options.fitAfterLayout),
     commandLabel: options.commandLabel || null,
+    animate: typeof options.animate === 'boolean' ? options.animate : null,
     layoutElements,
     projectedGroupMoves,
     nativeLayout: null,
@@ -5721,6 +5766,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
     owner.visualGroupsRenderer?.suspend();
     layoutMode = 'elastic';
     owner.layoutMode = 'elastic';
+    restoreMonitoringView(owner);
     target.nodes().lock();
     startD3Elastic(owner, target, null, { startSimulation: false });
   }

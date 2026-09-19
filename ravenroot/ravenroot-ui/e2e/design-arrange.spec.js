@@ -26,6 +26,26 @@ function denseGraphMl() {
     <graph id="dense" edgedefault="directed">${nodes}${chain}${parallel}</graph></graphml>`;
 }
 
+function unpositionedArrangedGraphMl() {
+  return `<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+    <key id="name" for="node" attr.name="name" attr.type="string"/>
+    <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+    <key id="render-mode" for="graph" attr.name="ravenroot.renderMode" attr.type="string"/>
+    <key id="layout-mode" for="graph" attr.name="ravenroot.layoutMode" attr.type="string"/>
+    <key id="arrangement" for="graph" attr.name="ravenroot.designArrangement" attr.type="string"/>
+    <graph id="raw" edgedefault="directed">
+      <data key="render-mode">design</data><data key="layout-mode">dagre</data>
+      <data key="arrangement">flow</data>
+      <node id="raw-start"><data key="name">Start</data><data key="kind">START</data></node>
+      <node id="raw-a"><data key="name">A</data><data key="kind">PASSTHROUGH</data></node>
+      <node id="raw-b"><data key="name">B</data><data key="kind">PASSTHROUGH</data></node>
+      <node id="raw-end"><data key="name">End</data><data key="kind">END</data></node>
+      <edge id="raw-edge-1" source="raw-start" target="raw-a"/>
+      <edge id="raw-edge-2" source="raw-a" target="raw-b"/>
+      <edge id="raw-edge-3" source="raw-b" target="raw-end"/>
+    </graph></graphml>`;
+}
+
 async function openLayoutMenu(page) {
   await page.locator('#menu-layout').click();
   await expect(page.locator('#application-menu')).toBeVisible();
@@ -107,6 +127,44 @@ test.describe('Design arrangements', () => {
       await expect(page.locator(`[data-command-id="layout.arrange.${arrangementCommandIds[label]}"]`))
         .toHaveAttribute('aria-disabled', 'true');
     }
+  });
+
+  test('uses persisted arrangement as the only first layout for raw GraphML without coordinates', async ({ page }) => {
+    await page.evaluate(xml => {
+      window.__rawInitialLayouts = [];
+      window.__rawPaintFrames = [];
+      const collectionPrototype = Object.getPrototypeOf(window.cy.elements());
+      const originalLayout = collectionPrototype.layout;
+      collectionPrototype.layout = function(options) {
+        if (this.cy().getElementById('raw-start').nonempty()) {
+          window.__rawInitialLayouts.push(options.name);
+        }
+        return originalLayout.call(this, options);
+      };
+      const record = () => {
+        if (window.cy?.getElementById('raw-start').nonempty()) {
+          window.__rawPaintFrames.push(window.cy.nodes().map(node => node.position()));
+        }
+        if (window.__rawPaintFrames.length < 4) requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);
+      window.ravenroot.replaceActiveDocumentFromText(xml, 'raw-arranged.graphml');
+    }, unpositionedArrangedGraphMl());
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+    await expect.poll(() => page.evaluate(() => window.__rawPaintFrames.length)).toBe(4);
+    expect(await page.evaluate(() => window.__rawInitialLayouts)).toEqual(['dagre']);
+    expect(await page.evaluate(() => {
+      const owner = window.ravenroot.activeDocument();
+      return {
+        arrangement: owner.designArrangement,
+        layout: owner.layoutMode,
+        historyDepth: owner.history.depth(),
+        dirty: owner.history.isDirty(),
+        everyPaintArranged: window.__rawPaintFrames.every(frame =>
+          new Set(frame.map(position => `${position.x}:${position.y}`)).size === 4),
+      };
+    })).toEqual({ arrangement: 'flow', layout: 'dagre', historyDepth: 0, dirty: false,
+      everyPaintArranged: true });
   });
 
   test('records one winning arrangement, keeps every edge independent, and undoes the geometry', async ({ page }) => {

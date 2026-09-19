@@ -8533,7 +8533,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "9e9c006c984bb517280baef433e0dc46351944034be9563c15843a1e0b38bfa9",
+          "digest": "8245bef8e1507f0c87eea68ac134123b39558fab625a23fb057148de68ff767a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views."
         },
         {
@@ -8829,7 +8829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "9e9c006c984bb517280baef433e0dc46351944034be9563c15843a1e0b38bfa9",
+          "digest": "8245bef8e1507f0c87eea68ac134123b39558fab625a23fb057148de68ff767a",
           "assertion": "UI resolves catalog entries through stable lookup tokens. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views."
         }
       ],
@@ -8987,7 +8987,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "9e9c006c984bb517280baef433e0dc46351944034be9563c15843a1e0b38bfa9",
+          "digest": "8245bef8e1507f0c87eea68ac134123b39558fab625a23fb057148de68ff767a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views."
         }
       ],
@@ -10766,7 +10766,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "9e9c006c984bb517280baef433e0dc46351944034be9563c15843a1e0b38bfa9",
+          "digest": "8245bef8e1507f0c87eea68ac134123b39558fab625a23fb057148de68ff767a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views."
         },
         {
@@ -11429,7 +11429,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "9e9c006c984bb517280baef433e0dc46351944034be9563c15843a1e0b38bfa9",
+          "digest": "8245bef8e1507f0c87eea68ac134123b39558fab625a23fb057148de68ff767a",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issues #448 and #455 preserve this authority while adding transparent authoring and document-owned graph views."
         },
         {

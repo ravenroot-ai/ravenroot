@@ -71,6 +71,7 @@ plus the repository's service, bundle, development, build, and test scripts.
 | `ravenroot node-types` | Read effective catalog |
 | `ravenroot inspect FILE` | Inspect without effects |
 | `ravenroot validate FILE` | Validate the GraphML profile |
+| `ravenroot validate --register-machine FILE` | Validate GraphML, then run the bounded static Register Machine Profile v1 linter with separate errors and warnings |
 | `ravenroot run FILE` | Execute with Run semantics |
 | `ravenroot inventory` | List the tenant's whole durable process inventory (`GET /v1/executions/inventory`, paged to completion internally — never a partial page); unfiltered, terminal rows **included** by default; a trailing `retained-from=` line always prints, even for an idle tenant |
 | `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`), also followed by a trailing `retained-from=` line; the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |

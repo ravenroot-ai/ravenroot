@@ -27,6 +27,8 @@
       url: /operator-guide/governed-runners.html
     - title: Disposable Agent example repository
       url: /examples/governed-runner/disposable-repository/
+    - title: Register Machine example library
+      url: /examples/register-machine/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -113,6 +115,8 @@
       url: /reference/
     - title: GraphML profile
       url: /reference/graphml.html
+    - title: Register Machine Profile v1
+      url: /reference/register-machine-profile.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
     - title: Core node reference

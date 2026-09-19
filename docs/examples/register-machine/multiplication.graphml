@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="g-join" for="graph" attr.name="join.semantics" attr.type="string"/>
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="operation" for="node" attr.name="operation" attr.type="string"/><key id="left" for="node" attr.name="left" attr.type="string"/>
+  <key id="right" for="node" attr.name="right" attr.type="string"/><key id="target" for="node" attr.name="target" attr.type="string"/>
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/><key id="trueOutcome" for="node" attr.name="trueOutcome" attr.type="string"/>
+  <key id="falseOutcome" for="node" attr.name="falseOutcome" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="repeated-addition-register-multiplication" edgedefault="directed"><data key="g-join">declared</data>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="set-factor"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:12345</data><data key="target">factor</data></node>
+    <node id="set-multiplier"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:7</data><data key="target">multiplier</data></node>
+    <node id="set-product"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:0</data><data key="target">product</data></node>
+    <node id="zero-test"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">equal</data><data key="left">field:multiplier</data><data key="right">literal:0</data><data key="target">isZero</data></node>
+    <node id="branch"><data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data><data key="expression">payload.isZero</data><data key="trueOutcome">zero</data><data key="falseOutcome">nonzero</data></node>
+    <node id="add-factor"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">add</data><data key="left">field:product</data><data key="right">field:factor</data><data key="target">product</data></node>
+    <node id="decrement-multiplier"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">subtract</data><data key="left">field:multiplier</data><data key="right">literal:1</data><data key="target">multiplier</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="e0" source="start" target="set-factor"/><edge id="e1" source="set-factor" target="set-multiplier"/>
+    <edge id="e2" source="set-multiplier" target="set-product"/><edge id="e3" source="set-product" target="zero-test"/>
+    <edge id="e4" source="zero-test" target="branch"/><edge id="e5" source="branch" target="end"><data key="outcome">zero</data></edge>
+    <edge id="e6" source="branch" target="add-factor"><data key="outcome">nonzero</data></edge><edge id="e7" source="add-factor" target="decrement-multiplier"/>
+    <edge id="e8" source="decrement-multiplier" target="zero-test"/>
+  </graph>
+</graphml>

@@ -158,7 +158,7 @@ listings. `--help` and `help` print usage.
 | `runtime` | Active executions and active arrivals by node. |
 | `node-types` | Effective running catalog; use it to verify enabled bundles. |
 | `inspect FILE` | Read and inspect local GraphML without executing it. |
-| `validate FILE` | Validate the local GraphML profile; runs locally even with `--server`. |
+| `validate [--register-machine] FILE` | Validate the local GraphML profile; the optional flag also runs the bounded static Register Machine Profile v1 linter with separate errors and warnings. Runs locally even with `--server`. |
 | `events decode` | Decode a captured execution SSE body from standard input into JSON lines; runs locally without a backend or credentials. |
 | `run FILE [PAYLOAD]` | Submit Run and print process, traversal, execution, graph-version, and execution-policy identifiers. |
 | `result EXECUTION-ID` | Read live or durable terminal evidence and qualified failure/cancellation fields. |

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Base-100 stack: push 17, push 42, then pop 42 while retaining encoded 17. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="behavior" for="node" attr.name="behavior" attr.type="string"/><key id="operation" for="node" attr.name="operation" attr.type="string"/><key id="left" for="node" attr.name="left" attr.type="string"/><key id="right" for="node" attr.name="right" attr.type="string"/><key id="target" for="node" attr.name="target" attr.type="string"/>
+  <graph id="register-encoded-stack" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="empty"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">copy</data><data key="left">literal:0</data><data key="target">stack</data></node>
+    <node id="push17-shift"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">multiply</data><data key="left">field:stack</data><data key="right">literal:100</data><data key="target">stack</data></node>
+    <node id="push17"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">add</data><data key="left">field:stack</data><data key="right">literal:17</data><data key="target">stack</data></node>
+    <node id="push42-shift"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">multiply</data><data key="left">field:stack</data><data key="right">literal:100</data><data key="target">stack</data></node>
+    <node id="push42"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">add</data><data key="left">field:stack</data><data key="right">literal:42</data><data key="target">stack</data></node>
+    <node id="pop-value"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">modulo</data><data key="left">field:stack</data><data key="right">literal:100</data><data key="target">popped</data></node>
+    <node id="pop-stack"><data key="kind">BEHAVIOR</data><data key="behavior">bigint-op</data><data key="operation">floor-divide</data><data key="left">field:stack</data><data key="right">literal:100</data><data key="target">stack</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="e0" source="start" target="empty"/><edge id="e1" source="empty" target="push17-shift"/><edge id="e2" source="push17-shift" target="push17"/><edge id="e3" source="push17" target="push42-shift"/><edge id="e4" source="push42-shift" target="push42"/><edge id="e5" source="push42" target="pop-value"/><edge id="e6" source="pop-value" target="pop-stack"/><edge id="e7" source="pop-stack" target="end"/>
+  </graph>
+</graphml>

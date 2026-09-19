@@ -37,6 +37,16 @@ the effective running deployment.
 The earlier broad catalog page also named `llm-prompt` and `agent` among shipped behavior families.
 They are optional AI-bundle nodes in this baseline and are now inventoried below.
 
+## Computational profiles
+
+| Profile | Maintained contract and library | Validation evidence |
+|---|---|---|
+| Register Machine Profile v1 | [Profile reference](register-machine-profile.md), [executable GraphML library](../examples/register-machine/) | Bounded static-validator tests; compiler/interpreter differential properties; real-engine exact-output, event, cancellation, Pi, payload-JSON, and SQLite-reopen tests; opt-in measurement matrix |
+
+Profiles compose existing catalog nodes and add no hidden behavior registration. The register-machine
+editor presets serialize ordinary `bigint-op`, `cel-decision`, `log`, edge, and terminal elements;
+the running catalog and generated node-descriptor reference therefore remain unchanged.
+
 ## First-party optional bundles
 
 The extension-pack POM and every production `NodePackage` define membership. Module READMEs are the

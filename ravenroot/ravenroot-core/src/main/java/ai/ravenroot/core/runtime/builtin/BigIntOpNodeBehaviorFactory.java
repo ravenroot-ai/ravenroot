@@ -7,7 +7,7 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.catalog.PropertyCondition;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.payload.PayloadLimits;
-import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.core.graph.BigIntOpContract;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.runtime.NodeBehaviorFactory;
 import ai.ravenroot.core.runtime.NodeHandler;
@@ -20,15 +20,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.regex.Pattern;
 
 /** Exact, bounded elementary integer arithmetic over top-level payload fields. */
 final class BigIntOpNodeBehaviorFactory implements NodeBehaviorFactory {
-    static final int MAX_DECIMAL_DIGITS = 4_096;
-    private static final int MAX_OPERAND_REFERENCE_UTF8_BYTES = "literal:".length() + 1 + MAX_DECIMAL_DIGITS;
+    private static final int MAX_OPERAND_REFERENCE_UTF8_BYTES =
+            "literal:".length() + 1 + BigIntOpContract.MAX_DECIMAL_DIGITS;
     private static final int MAX_OPERATION_UTF8_BYTES = 32;
-    private static final BigInteger MAX_MAGNITUDE_EXCLUSIVE = BigInteger.TEN.pow(MAX_DECIMAL_DIGITS);
-    private static final Pattern SIGNED_DECIMAL = Pattern.compile("[+-]?[0-9]+");
+    private static final BigInteger MAX_MAGNITUDE_EXCLUSIVE =
+            BigInteger.TEN.pow(BigIntOpContract.MAX_DECIMAL_DIGITS);
 
     private static final List<String> OPERATION_NAMES = List.of(
             "copy", "add", "subtract", "multiply", "floor-divide", "modulo", "equal", "less-than");
@@ -165,7 +164,7 @@ final class BigIntOpNodeBehaviorFactory implements NodeBehaviorFactory {
     private static String target(GraphNode node) {
         String target = requiredValue(node, "target");
         requireFieldName(node, "target", target);
-        if (SecurityContext.isReservedKey(target)) {
+        if (!BigIntOpContract.isWritableTarget(target)) {
             throw invalid(node, "target", "cannot use Ravenroot's reserved security namespace");
         }
         return target;
@@ -180,8 +179,7 @@ final class BigIntOpNodeBehaviorFactory implements NodeBehaviorFactory {
     }
 
     private static void requireFieldName(GraphNode node, String property, String field) {
-        if (field.isBlank() || field.length() > PayloadLimits.DEFAULTS.maxKeyLength()
-                || field.chars().anyMatch(Character::isISOControl)) {
+        if (!BigIntOpContract.isFieldName(field)) {
             throw invalid(node, property, "must name a non-blank top-level payload field of at most "
                     + PayloadLimits.DEFAULTS.maxKeyLength() + " characters without control characters");
         }
@@ -190,10 +188,11 @@ final class BigIntOpNodeBehaviorFactory implements NodeBehaviorFactory {
     private static void requireDecimalText(GraphNode node, String property, String decimal) {
         int sign = decimal.startsWith("+") || decimal.startsWith("-") ? 1 : 0;
         int digits = decimal.length() - sign;
-        if (digits < 1 || digits > MAX_DECIMAL_DIGITS) {
-            throw invalid(node, property, "decimal operand must contain 1 to " + MAX_DECIMAL_DIGITS + " digits");
+        if (digits < 1 || digits > BigIntOpContract.MAX_DECIMAL_DIGITS) {
+            throw invalid(node, property, "decimal operand must contain 1 to "
+                    + BigIntOpContract.MAX_DECIMAL_DIGITS + " digits");
         }
-        if (!SIGNED_DECIMAL.matcher(decimal).matches()) {
+        if (!BigIntOpContract.isExecutableDecimal(decimal)) {
             throw invalid(node, property, "literal is not a signed base-10 integer");
         }
     }
@@ -207,8 +206,9 @@ final class BigIntOpNodeBehaviorFactory implements NodeBehaviorFactory {
             integer = BigInteger.valueOf(((Number) value).longValue());
         } else if (value instanceof BigDecimal decimal && decimal.scale() <= 0) {
             long digits = (long) decimal.precision() - decimal.scale();
-            if (decimal.signum() != 0 && digits > MAX_DECIMAL_DIGITS) {
-                throw fieldFailure(node, property, field, "exceeds the " + MAX_DECIMAL_DIGITS + "-digit ceiling");
+            if (decimal.signum() != 0 && digits > BigIntOpContract.MAX_DECIMAL_DIGITS) {
+                throw fieldFailure(node, property, field, "exceeds the "
+                        + BigIntOpContract.MAX_DECIMAL_DIGITS + "-digit ceiling");
             }
             integer = decimal.toBigIntegerExact();
         } else if (value instanceof String text) {
@@ -225,18 +225,19 @@ final class BigIntOpNodeBehaviorFactory implements NodeBehaviorFactory {
     private static void requireRuntimeDecimal(GraphNode node, String property, String field, String decimal) {
         int sign = decimal.startsWith("+") || decimal.startsWith("-") ? 1 : 0;
         int digits = decimal.length() - sign;
-        if (digits < 1 || digits > MAX_DECIMAL_DIGITS) {
+        if (digits < 1 || digits > BigIntOpContract.MAX_DECIMAL_DIGITS) {
             throw fieldFailure(node, property, field,
-                    "must contain 1 to " + MAX_DECIMAL_DIGITS + " decimal digits");
+                    "must contain 1 to " + BigIntOpContract.MAX_DECIMAL_DIGITS + " decimal digits");
         }
-        if (!SIGNED_DECIMAL.matcher(decimal).matches()) {
+        if (!BigIntOpContract.isExecutableDecimal(decimal)) {
             throw fieldFailure(node, property, field, "does not contain a signed base-10 integer");
         }
     }
 
     private static void requireMagnitude(GraphNode node, String subject, BigInteger value) {
         if (value.abs().compareTo(MAX_MAGNITUDE_EXCLUSIVE) >= 0) {
-            throw invalid(node, subject, "exceeds the " + MAX_DECIMAL_DIGITS + "-digit ceiling");
+            throw invalid(node, subject, "exceeds the "
+                    + BigIntOpContract.MAX_DECIMAL_DIGITS + "-digit ceiling");
         }
     }
 

@@ -8533,8 +8533,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "272545bc290aa4407df4551ec874e8663734b16d079491972c35947a224aaa9c",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-graph-proposal.js",
@@ -8829,8 +8829,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "272545bc290aa4407df4551ec874e8663734b16d079491972c35947a224aaa9c",
-          "assertion": "UI resolves catalog entries through stable lookup tokens. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
+          "assertion": "UI resolves catalog entries through stable lookup tokens. Issue #448 preserves this authority while adding transparent register-machine authoring."
         }
       ],
       "candidateCount": 131,
@@ -8987,8 +8987,8 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "272545bc290aa4407df4551ec874e8663734b16d079491972c35947a224aaa9c",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         }
       ],
       "candidateCount": 43,
@@ -10766,8 +10766,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "272545bc290aa4407df4551ec874e8663734b16d079491972c35947a224aaa9c",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/assistant-context.js",
@@ -11429,8 +11429,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "272545bc290aa4407df4551ec874e8663734b16d079491972c35947a224aaa9c",
-          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
+          "digest": "7d05c9d43f9fde184ca747ad44b850b6c82e07fa0e5f9a3f6fa78e97b4d1bca9",
+          "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #448 preserves this authority while adding transparent register-machine authoring."
         },
         {
           "path": "ravenroot/ravenroot-ui/src/deployment-panel.js",

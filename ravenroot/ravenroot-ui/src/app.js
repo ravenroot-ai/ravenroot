@@ -73,6 +73,10 @@ import { createRendererSessions } from './renderer-session.js';
 import { renderNodeCatalogItems } from './node-catalog-view.js';
 import { namedAgentPresets } from './named-agent-presets.js';
 import {
+  availableRegisterMachinePresets,
+  insertRegisterMachinePreset,
+} from './register-machine-presets.js';
+import {
   canvasInteractionState,
   isAdditiveSelection,
   modelPositionFromClient,
@@ -6730,7 +6734,9 @@ function renderNodeForm(model, creating) {
 }
 
 function catalogDescriptor(behavior) {
-  return nodeTypeCatalog.find(type => type.behavior === behavior) || namedAgentCatalog.find(type => type.presetId === behavior) || null;
+  return nodeTypeCatalog.find(type => type.behavior === behavior)
+    || namedAgentCatalog.find(type => type.presetId === behavior)
+    || availableRegisterMachinePresets(nodeTypeCatalog).find(type => type.presetId === behavior) || null;
 }
 
 function programCatalogEditorDescriptor(descriptor) {
@@ -9112,11 +9118,15 @@ function renderNodeCatalog() {
     container.innerHTML = `<div class="catalog-empty" data-catalog-state="${escapeAttribute(state.kind)}">${escapeHtml(state.message)}</div>`;
     return;
   }
-  renderNodeCatalogItems(container, [...nodeTypeCatalog, ...namedAgentCatalog], {
+  renderNodeCatalogItems(container, [...nodeTypeCatalog, ...availableRegisterMachinePresets(nodeTypeCatalog), ...namedAgentCatalog], {
     iconFor: type => catalogNodeIcon(type, NODE_ICONS),
     selectedBehavior: selectedCatalogBehavior,
     onActivate: selectCatalogNodeType,
     onDragStart: (event, behavior) => {
+      if (availableRegisterMachinePresets(nodeTypeCatalog).some(preset => preset.presetId === behavior)) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer?.setData('application/x-ravenroot-node', behavior);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
     },
@@ -9130,7 +9140,11 @@ function selectCatalogNodeType(behavior) {
   renderNodeCatalog();
   // Keep the established inspector-first configuration route while making the type persistent for
   // stage clicks and drag-and-drop. Authors may configure-and-submit immediately or place copies.
-  showAddCatalogNodeForm(behavior);
+  if (availableRegisterMachinePresets(nodeTypeCatalog).some(preset => preset.presetId === behavior)) {
+    showRegisterMachinePresetForm(behavior);
+  } else {
+    showAddCatalogNodeForm(behavior);
+  }
 }
 
 function toggleLegendFilter(elType, type) {
@@ -9494,6 +9508,57 @@ function showAddNodeForm({ skipDraftGuard = false } = {}) {
   const id = uniqueId('node', graphData.nodes);
   document.getElementById('info-title').textContent = 'Add node';
   renderNodeForm(createNode(id, 'New node', 'PASSTHROUGH'), true);
+}
+
+function showRegisterMachinePresetForm(presetId, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard) {
+    return runAfterInspectorDraft(() => showRegisterMachinePresetForm(presetId, { skipDraftGuard: true }));
+  }
+  if (!graphData) newWorkflow();
+  if (!modifyEnabled) return showInspectorMessage('Turn Modify ON before inserting a register-machine preset.');
+  if (graphData.format === 'graphify') return showInspectorMessage(
+    'Graphify JSON is view-only. Create or load a Ravenroot GraphML workflow to edit it.');
+  const preset = availableRegisterMachinePresets(nodeTypeCatalog).find(candidate => candidate.presetId === presetId);
+  if (!preset) return showInspectorMessage('Unknown register-machine preset.');
+  revealInspector();
+  document.getElementById('info-title').textContent = `Insert ${preset.displayName}`;
+  const needsBoolean = presetId === 'register-zero-test' || presetId === 'register-decjz';
+  const needsValue = presetId === 'register-set';
+  const needsTargets = presetId === 'register-decjz';
+  const targetOptions = graphData.nodes.map(node =>
+    `<option value="${escapeAttribute(node.id)}">${escapeHtml(node.name || node.id)} · ${escapeHtml(node.id)}</option>`).join('');
+  document.getElementById('info-body').innerHTML = `
+    <form id="register-machine-preset-editor" class="editor-form" data-tooltip-exempt="persistent-form-labels">
+      <p>${escapeHtml(preset.description)} The expansion remains ordinary editable GraphML.</p>
+      <div class="editor-grid">
+        <div class="editor-field full"><label>Register</label><input name="register" value="counter"
+          pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>
+        ${needsValue ? '<div class="editor-field full"><label>Exact decimal value</label><textarea name="decimal" spellcheck="false" required>0</textarea></div>' : ''}
+        ${needsBoolean ? '<div class="editor-field full"><label>Boolean temporary</label><input name="boolean" value="isZero" pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" maxlength="64" required></div>' : ''}
+        ${needsTargets ? `<div class="editor-field"><label>Zero destination</label><select name="zeroTarget" required>${targetOptions}</select></div>
+          <div class="editor-field"><label>Nonzero destination</label><select name="nonzeroTarget" required>${targetOptions}</select></div>` : ''}
+      </div>
+      <div class="editor-actions"><button class="btn primary" type="submit">Insert expansion</button></div>
+    </form>`;
+  const form = document.getElementById('register-machine-preset-editor');
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (layoutBusy) return showFormError(form, 'Layout in progress');
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
+    const values = Object.fromEntries(new FormData(form));
+    let inserted;
+    try {
+      inserted = insertRegisterMachinePreset(graphData, presetId, values,
+        { x: 120 + graphData.nodes.length * 16, y: 120 + graphData.nodes.length * 8 }, editHistory);
+    } catch (error) {
+      return showFormError(form, error?.message || 'Cannot insert register-machine expansion');
+    }
+    retireInspectorDraft(form);
+    rebuildGraph({ syncPositions: false });
+    updateHistoryUi();
+    showNodeInfo(cy.getElementById(inserted.primary.id));
+    addActivityMessage('editor', `Inserted ${preset.displayName} as ordinary nodes and edges`, 'completed');
+  });
 }
 
 function showAddCatalogNodeForm(behavior, { skipDraftGuard = false } = {}) {

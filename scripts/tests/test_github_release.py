@@ -83,8 +83,14 @@ elif argv[:2] == ["release", "upload"]:
     )
     save()
 elif argv[:2] == ["release", "edit"]:
-    state["release"]["draft"] = "--draft=false" not in argv
+    # The misbehaviour switches below model a registry that accepts the publish call and then
+    # reports something else: the only way a deterministic stand-in can exercise the checks that
+    # run *after* publication.
+    if not state.get("sticky_draft"):
+        state["release"]["draft"] = "--draft=false" not in argv
     state["release"]["prerelease"] = "--prerelease" in argv
+    if state.get("drop_asset_on_publish"):
+        state["release"]["assets"] = state["release"]["assets"][:-1]
     save()
 else:
     fail(f"unsupported gh invocation: {argv}")
@@ -186,7 +192,7 @@ class GitHubReleaseRehearsalTest(unittest.TestCase):
         self.assertLess(
             commands.index(creation),
             min(index for index, command in enumerate(commands) if command.startswith("release upload")),
-            "assets must be uploaded into the draft, never into a published release",
+            "the draft must exist before any asset is uploaded",
         )
         self.assertTrue(any(command.startswith("release edit") for command in commands))
 
@@ -209,6 +215,28 @@ class GitHubReleaseRehearsalTest(unittest.TestCase):
         ]
         self.state.write_text(json.dumps(state))
         self.assertEqual(1, self.run_main())
+
+    def misbehave(self, **flags) -> None:
+        state = json.loads(self.state.read_text())
+        state.update(flags)
+        self.state.write_text(json.dumps(state))
+
+    def test_release_left_in_draft_by_the_publish_call_is_refused(self):
+        self.misbehave(sticky_draft=True)
+        self.assertEqual(
+            1,
+            self.run_main(),
+            "publication that leaves the release in draft must not be reported as complete",
+        )
+        self.assertTrue(self.current()["draft"])
+
+    def test_asset_lost_during_publication_is_refused(self):
+        self.misbehave(drop_asset_on_publish=True)
+        self.assertEqual(
+            1,
+            self.run_main(),
+            "a release published without every immutable asset must not be reported as complete",
+        )
 
     def test_release_whose_notes_differ_from_the_reviewed_notes_fails_closed(self):
         self.assertEqual(0, self.run_main())

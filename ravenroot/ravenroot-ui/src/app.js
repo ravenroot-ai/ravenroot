@@ -2502,6 +2502,8 @@ function captureActiveDocument() {
 
 function cancelRetiredLayouts(cancelled = []) {
   cancelled.forEach(item => {
+    const job = layoutJobs.get(item.generation);
+    releaseInitialLayoutExposure(job);
     layoutJobs.delete(item.generation);
     if (typeof item.nativeCancel === 'function') item.nativeCancel();
     // ELK's controller stop is a no-op, but its published Cytoscape animations are stoppable.
@@ -2540,7 +2542,10 @@ function invalidateDocumentLayouts(owner) {
   clearLayoutDeferredWork(owner);
   cancelRetiredLayouts(layoutSessions.invalidate(owner.id).cancelled);
   layoutJobs.forEach((job, generation) => {
-    if (job.owner.id === owner.id) layoutJobs.delete(generation);
+    if (job.owner.id === owner.id) {
+      releaseInitialLayoutExposure(job);
+      layoutJobs.delete(generation);
+    }
   });
   syncOwnedLayoutBusy(owner);
   owner.layoutSessionToken = null;
@@ -3988,6 +3993,7 @@ function initCy(elements, gd, options = {}) {
   }
 
   const canvasContainer = documentContainer(workspace.active);
+  setInitialLayoutExposure(workspace.active, Boolean(options.initialLayoutPlan));
   const zoomBridge = installCanvasZoomBridge(canvasContainer);
   try {
     cy = cytoscape({
@@ -4005,6 +4011,7 @@ function initCy(elements, gd, options = {}) {
     selectionType: 'additive',
     });
   } catch (error) {
+    setInitialLayoutExposure(workspace.active, false);
     zoomBridge.destroy();
     throw error;
   }
@@ -4376,12 +4383,18 @@ function initCy(elements, gd, options = {}) {
   // arrangement is therefore the one initialization layout. This call is still in the load task,
   // after collapsed-group projection exists and before the browser can paint the preset seed.
   if (options.initialLayoutPlan) {
-    setLayout(options.initialLayoutPlan.name, {
-      preservePositions: options.initialLayoutPlan.preservePositions,
-      recordPositions: false,
-      fitAfterLayout: !options.initialLayoutPlan.preservePositions,
-      animate: false,
-    });
+    try {
+      setLayout(options.initialLayoutPlan.name, {
+        preservePositions: options.initialLayoutPlan.preservePositions,
+        recordPositions: false,
+        fitAfterLayout: !options.initialLayoutPlan.preservePositions,
+        animate: false,
+        revealInitialLayout: true,
+      });
+    } catch (error) {
+      setInitialLayoutExposure(workspace.active, false);
+      throw error;
+    }
   }
 }
 
@@ -5353,6 +5366,24 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // while the replacement layout is already registered and about to start.
 const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
+const INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS = 15000;
+
+function setInitialLayoutExposure(owner, pending) {
+  const container = owner?.container;
+  if (!container) return;
+  container.classList.toggle('doc-canvas--initial-layout-pending', pending);
+  container.inert = pending;
+  if (pending) container.setAttribute('aria-hidden', 'true');
+  else container.removeAttribute('aria-hidden');
+}
+
+function releaseInitialLayoutExposure(job) {
+  if (!job?.revealInitialLayout) return;
+  job.revealInitialLayout = false;
+  if (job.initialExposureTimeout != null) clearTimeout(job.initialExposureTimeout);
+  job.initialExposureTimeout = null;
+  setInitialLayoutExposure(job.owner, false);
+}
 
 function renderModeLabel(mode) {
   const semanticMode = normalizeRenderMode(mode);
@@ -5416,6 +5447,7 @@ function completeOwnedLayout(job) {
   }
   layoutJobs.delete(token.generation);
   const released = token.kind === 'elk' ? layoutSessions.complete(token).start : null;
+  releaseInitialLayoutExposure(job);
   syncOwnedLayoutBusy(owner);
   if (current && !released && owner.layoutMode !== 'elastic') refreshVisualGroups(owner);
   if (released) runOwnedLayout(released);
@@ -5559,52 +5591,60 @@ function runOwnedLayout(token) {
 
   const animate = job.animate
     ?? globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
+  const fail = error => {
+    console.error('Graph arrangement failed; positions are unchanged.', error);
+    settleOwnedLayout(token);
+  };
   let nativeLayout;
-  if (token.mode === 'dagre') nativeLayout = layoutTarget.layout({
-    name: 'dagre', rankDir: 'LR', rankSep: 110, nodeSep: 55, edgeSep: 20,
-    animate, animationDuration: animate ? 450 : 0, animationEasing: 'ease-in-out',
-    fit: !fitAfterLayout, padding: 60,
-  });
-  else if (token.mode === 'cose') nativeLayout = layoutTarget.layout({
-    name: 'cose', animate, animationDuration: animate ? 800 : 0, fit: !fitAfterLayout, padding: 60,
-    nodeOverlap: 24, idealEdgeLength: 140, nodeRepulsion: () => 10000, gravity: 1.2,
-  });
-  else if (ELK_LAYOUT_MODES.has(token.mode)) nativeLayout = layoutTarget.layout(elkOptions(token.mode, {
-    fit: !fitAfterLayout,
-    animate,
-  }));
-  else if (isLayeredMode(token.mode)) nativeLayout = layoutTarget.layout({
-    name: LAYERED_LAYOUT_NAME, mode: token.mode,
-    animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
-    fit: !fitAfterLayout, padding: 70,
-    prepareLabels: side => applyLayeredLabelSide(target, side, owner),
-    isCurrent: () => layoutRequestIsCurrent(token),
-    onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
-  });
-  else if (token.mode === 'preset') {
-    target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
-    target.fit(60);
-    settleOwnedLayout(token);
-    return;
-  }
-  if (!nativeLayout) {
-    settleOwnedLayout(token);
-    return;
-  }
-  job.nativeLayout = nativeLayout;
-  nativeLayout.one('layoutstop', () => finishOwnedLayout(token));
-  if (token.kind === 'elk') {
-    // `cytoscape-elk` defers its own start and its `stop()` is a no-op. Give same-turn close,
-    // replace, and newer requests a real pre-start cancellation point instead of destroying an
-    // instance underneath plugin work that has already escaped onto its task queue.
-    queueMicrotask(() => {
-      if (!layoutRequestIsCurrent(token)) {
-        settleOwnedLayout(token);
-        return;
-      }
-      nativeLayout.run();
+  try {
+    if (token.mode === 'dagre') nativeLayout = layoutTarget.layout({
+      name: 'dagre', rankDir: 'LR', rankSep: 110, nodeSep: 55, edgeSep: 20,
+      animate, animationDuration: animate ? 450 : 0, animationEasing: 'ease-in-out',
+      fit: !fitAfterLayout, padding: 60,
     });
-  } else nativeLayout.run();
+    else if (token.mode === 'cose') nativeLayout = layoutTarget.layout({
+      name: 'cose', animate, animationDuration: animate ? 800 : 0, fit: !fitAfterLayout, padding: 60,
+      nodeOverlap: 24, idealEdgeLength: 140, nodeRepulsion: () => 10000, gravity: 1.2,
+    });
+    else if (ELK_LAYOUT_MODES.has(token.mode)) nativeLayout = layoutTarget.layout(elkOptions(token.mode, {
+      fit: !fitAfterLayout,
+      animate,
+    }));
+    else if (isLayeredMode(token.mode)) nativeLayout = layoutTarget.layout({
+      name: LAYERED_LAYOUT_NAME, mode: token.mode,
+      animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
+      fit: !fitAfterLayout, padding: 70,
+      prepareLabels: side => applyLayeredLabelSide(target, side, owner),
+      isCurrent: () => layoutRequestIsCurrent(token),
+      onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
+    });
+    else if (token.mode === 'preset') {
+      target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
+      target.fit(60);
+      settleOwnedLayout(token);
+      return;
+    }
+    if (!nativeLayout) {
+      settleOwnedLayout(token);
+      return;
+    }
+    job.nativeLayout = nativeLayout;
+    nativeLayout.one('layoutstop', () => finishOwnedLayout(token));
+    if (token.kind === 'elk') {
+      // `cytoscape-elk` defers its own start and its `stop()` is a no-op. Give same-turn close,
+      // replace, and newer requests a real pre-start cancellation point instead of destroying an
+      // instance underneath plugin work that has already escaped onto its task queue.
+      queueMicrotask(() => {
+        if (!layoutRequestIsCurrent(token)) {
+          settleOwnedLayout(token);
+          return;
+        }
+        try { nativeLayout.run(); } catch (error) { fail(error); }
+      });
+    } else nativeLayout.run();
+  } catch (error) {
+    fail(error);
+  }
 }
 
 function resumePendingElasticLayout(owner) {
@@ -5724,12 +5764,21 @@ function setLayout(name, options = {}) {
     fitAfterLayout: Boolean(options.fitAfterLayout),
     commandLabel: options.commandLabel || null,
     animate: typeof options.animate === 'boolean' ? options.animate : null,
+    revealInitialLayout: Boolean(options.revealInitialLayout),
+    initialExposureTimeout: null,
     layoutElements,
     projectedGroupMoves,
     nativeLayout: null,
   };
   owner.layoutSessionToken = request.token;
   layoutJobs.set(request.token.generation, job);
+  if (job.revealInitialLayout) {
+    job.initialExposureTimeout = setTimeout(() => {
+      if (layoutJobs.get(request.token.generation) !== job) return;
+      console.error('Initial graph arrangement did not settle before its visibility deadline.');
+      settleOwnedLayout(request.token);
+    }, INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS);
+  }
   syncOwnedLayoutBusy(owner);
   if (request.start) runOwnedLayout(request.token);
 }

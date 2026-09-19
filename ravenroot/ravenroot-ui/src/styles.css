@@ -1434,6 +1434,10 @@
     /* The canvas fills what the strip leaves. It is created inside its pane and never moved: moving
        it stops Cytoscape painting, and resize/fit/forceRender do not bring it back. */
     .doc-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+    /* A document with no authored coordinates has no honest preset frame to show. Keep only that
+       initial canvas visually withheld until its selected finite arrangement and routing settle;
+       the pane header and live busy announcement remain available throughout. */
+    .doc-canvas--initial-layout-pending { opacity: 0; pointer-events: none; }
     /* ELK cannot be cancelled once its worker result has entered Cytoscape's animation. The canvas
        is therefore one accessible busy operation through final edge routing: document switching
        remains available on the pane, while pointer edits cannot race coordinates still in flight. */

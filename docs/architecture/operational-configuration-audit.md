@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 8003 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1927.
+Retired source candidates preserved in inventory history: 1929.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 65.
+Checked source reconciliations: 66.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 23320 candidates.
@@ -111,13 +111,14 @@ assigned to an issue retroactively.
 
 | Owning remediation | Candidates |
 |---|---:|
+| #315 | 5 |
 | #316 | 1 |
-| #317 | 147 |
-| #318 | 97 |
-| #319 | 280 |
-| #320 | 1394 |
+| #317 | 149 |
+| #318 | 107 |
+| #319 | 287 |
+| #320 | 1469 |
 | #321 | 8567 |
-| Retained; no remediation required | 12834 |
+| Retained; no remediation required | 12735 |
 
 ## Latest reconciliation
 
@@ -126,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23276 |
-| Unchanged identities | 23271 |
-| Approved identity migrations | 0 |
-| Approved retirements | 5 |
-| Semantically classified additions | 49 |
+| Source inventory candidates | 23267 |
+| Unchanged identities | 23263 |
+| Approved identity migrations | 2 |
+| Approved retirements | 2 |
+| Semantically classified additions | 55 |
 | Current candidates | 23320 |
 
 ## Final semantic review
@@ -141,6 +142,92 @@ tamper-evident; new candidates receive no classification by similarity.
 
 | Group | Classification | Candidates | Decision |
 |---|---|---:|---|
+| Agent Identity And Scope Token Grammars | protocol-or-format-invariant | 2 | These regular expressions define the accepted identity and scope token grammar. |
+| Agent Parser Cardinality Ceilings | security-ceiling-or-default | 2 | These fixed parser bounds limit environment token length and distinct scope cardinality. |
+| Agent Scope Limit Diagnostic | presentation-text | 1 | This fixed cause-free diagnostic is operator-facing failure text, not an operating value. |
+| Agent setting: agent.authority-scopes | operator-configurable | 2 | The exact tokens(environment, AUTHORITY_SCOPES, Set.of("runtime:delegate")) expression binds RAVENROOT_AGENT_AUTHORITY_SCOPES and fallback Set.of("runtime:delegate") to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#authorityScopes; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.cost-currency | operator-configurable | 1 | The exact currency(environment, "RAVENROOT_AGENT_COST_CURRENCY", "USD") expression binds RAVENROOT_AGENT_COST_CURRENCY and fallback "USD" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#currency; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.data-scopes | operator-configurable | 1 | The exact tokens(environment, "RAVENROOT_AGENT_DATA_SCOPES", Set.of()) expression binds RAVENROOT_AGENT_DATA_SCOPES and fallback Set.of() to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#dataScopes; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.input-token-rate-micros | operator-configurable | 3 | The exact nonNegative(environment, "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", 10) expression binds RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS and fallback 10 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#inputTokenRateMicros; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-cost-micros | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_COST_MICROS", 100_000_000) expression binds RAVENROOT_AGENT_MAX_COST_MICROS and fallback 100_000_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#costMicros; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-delegation-depth | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH", 8) expression binds RAVENROOT_AGENT_MAX_DELEGATION_DEPTH and fallback 8 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#delegationDepth; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-elapsed-millis | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_ELAPSED_MILLIS", 3_600_000) expression binds RAVENROOT_AGENT_MAX_ELAPSED_MILLIS and fallback 3_600_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#elapsedMillis; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-input-tokens | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS", 20_000_000) expression binds RAVENROOT_AGENT_MAX_INPUT_TOKENS and fallback 20_000_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#inputTokens; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-output-tokens | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS", 2_000_000) expression binds RAVENROOT_AGENT_MAX_OUTPUT_TOKENS and fallback 2_000_000 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#outputTokens; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-team-active | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_TEAM_ACTIVE", 16) expression binds RAVENROOT_AGENT_MAX_TEAM_ACTIVE and fallback 16 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#teamActive; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-team-cumulative | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", 64) expression binds RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE and fallback 64 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#teamCumulative; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-tool-calls | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_TOOL_CALLS", 4_096) expression binds RAVENROOT_AGENT_MAX_TOOL_CALLS and fallback 4_096 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#toolCalls; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.max-turns | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_TURNS", 1_024) expression binds RAVENROOT_AGENT_MAX_TURNS and fallback 1_024 to ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/AgentBudgetVector.java#AgentBudgetVector#turns; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.maximum-input-tokens-per-turn | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000) expression binds RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN and fallback 128_000 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#maximumInputTokensPerTurn; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.maximum-output-tokens-per-turn | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000) expression binds RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN and fallback 32_000 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#maximumOutputTokensPerTurn; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.output-token-rate-micros | operator-configurable | 3 | The exact nonNegative(environment, "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", 30) expression binds RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS and fallback 30 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#outputTokenRateMicros; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.policy-version | operator-configurable | 1 | The exact identity(environment, "RAVENROOT_AGENT_POLICY_VERSION", "server-finite-v1") expression binds RAVENROOT_AGENT_POLICY_VERSION and fallback "server-finite-v1" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#policyVersion; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.rate-card-version | operator-configurable | 3 | The exact identity(environment, "RAVENROOT_AGENT_RATE_CARD_VERSION", "builtin-conservative-v1") expression binds RAVENROOT_AGENT_RATE_CARD_VERSION and fallback "builtin-conservative-v1" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#rateCardVersion; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.root-lifetime-seconds | operator-configurable | 3 | The exact positive(environment, "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", 3_600) expression binds RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS and fallback 3_600 to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#rootLifetime; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Agent setting: agent.runtime-instance | operator-configurable | 1 | The exact identity(environment, "RAVENROOT_AGENT_RUNTIME_INSTANCE", "ravenroot-server") expression binds RAVENROOT_AGENT_RUNTIME_INSTANCE and fallback "ravenroot-server" to ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/security/nodepackage/AgentAuthorityBudgetPolicy.java#AgentAuthorityBudgetPolicy#runtimeInstanceId; shared parser, startup, consumer, and runnable-test proofs are closed by the source-derived family. |
+| Deployment Container Runtime Defaults | security-ceiling-or-default | 6 | Image build metadata and healthcheck command tokens are partitioned separately from numeric runtime choices. |
+| Deployment Container Security Identity | security-ceiling-or-default | 8 | Docker and Kubernetes use the same numeric identity; changing it is a coordinated image/filesystem security change. |
+| Deployment Empty Environment Carriers | protocol-or-format-invariant | 81 | The empty scalar contains no operating value; adjacent environment names identify the external contract. |
+| Deployment Environment Binding Identities | protocol-or-format-invariant | 90 | Carrier identity is separated from non-empty deployment defaults and from explicit empty pass-through values. |
+| Deployment Example Binding Identities | protocol-or-format-invariant | 14 | The example binding key is compatibility vocabulary; its operator value is not hard-coded in the example. |
+| Deployment Image Build And Carrier Invariants | protocol-or-format-invariant | 43 | Runtime resource and health values, ports, and non-root identities are separated into dedicated groups. |
+| Deployment Port Contracts | protocol-or-format-invariant | 2 | The two production Dockerfiles publish the same application port contract. |
+| Deployment Runtime Resources And Health Defaults | security-ceiling-or-default | 20 | Empty environment carriers and environment-name identities are separated, so every member here is an actual non-empty deployment choice. |
+| Centralized Embed Enablement Setting | operator-configurable | 5 | The typed Boolean setting already existed; #321 removed three raw consumers and the duplicate startup parser, so one exact false-default parser now owns validation for every startup decision. |
+| Executable Verification Fixtures | test-fixture | 513 | The exact eleven-script roster is executable and interpreter-backed. Every script source is digest-pinned; the checker derives the complete candidate roster from those paths. |
+| Java Cli And Dev Tooling Component Defaults | security-ceiling-or-default | 4 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Cli And Dev Tooling Derived Arithmetic | derived | 1 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Cli And Dev Tooling Diagnostic Presentation | presentation-text | 3 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Cli And Dev Tooling Protocol Storage And Domain Invariants | protocol-or-format-invariant | 78 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Cli And Dev Tooling Resource And Safety Bounds | security-ceiling-or-default | 18 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Cli And Dev Tooling Timing And Lifecycle Defaults | security-ceiling-or-default | 4 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Cli Environment Binding Identities | protocol-or-format-invariant | 16 | Each candidate is a literal key at an environment lookup boundary; adjacent default atoms are partitioned independently. |
+| Java Connectors And Providers Component Defaults | security-ceiling-or-default | 6 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Connectors And Providers Derived Arithmetic | derived | 21 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Connectors And Providers Diagnostic Presentation | presentation-text | 2 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Connectors And Providers Protocol Storage And Domain Invariants | protocol-or-format-invariant | 1073 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Connectors And Providers Resource And Safety Bounds | security-ceiling-or-default | 551 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Connectors And Providers Timing And Lifecycle Defaults | security-ceiling-or-default | 72 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Core Runtime And Api Component Defaults | security-ceiling-or-default | 6 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Core Runtime And Api Derived Arithmetic | derived | 9 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Core Runtime And Api Diagnostic Presentation | presentation-text | 14 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Core Runtime And Api Protocol Storage And Domain Invariants | protocol-or-format-invariant | 449 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Core Runtime And Api Resource And Safety Bounds | security-ceiling-or-default | 188 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Core Runtime And Api Timing And Lifecycle Defaults | security-ceiling-or-default | 24 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Extension Environment Binding Identities | protocol-or-format-invariant | 44 | Each candidate is a literal key at an extension/profile lookup boundary; default and capacity atoms are partitioned independently. |
+| Java Property Binding Identities | protocol-or-format-invariant | 93 | The scanner independently identifies System property vocabulary, separating key identity from the value selected through it. |
+| Java Server Component Defaults | security-ceiling-or-default | 3 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Derived Arithmetic | derived | 9 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Diagnostic Presentation | presentation-text | 10 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Environment Binding Identities | protocol-or-format-invariant | 95 | Each candidate is a literal key at a server environment lookup boundary; typed setting authorities remain independently enforced. |
+| Java Server Protocol Storage And Domain Invariants | protocol-or-format-invariant | 313 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Resource And Safety Bounds | security-ceiling-or-default | 109 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Server Timing And Lifecycle Defaults | security-ceiling-or-default | 29 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Supporting Runtime Derived Arithmetic | derived | 1 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Supporting Runtime Protocol Storage And Domain Invariants | protocol-or-format-invariant | 86 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Java Supporting Runtime Resource And Safety Bounds | security-ceiling-or-default | 4 | The group is partitioned by Java subsystem and semantic role; every member keeps its full containing-expression evidence and exact candidate identity. |
+| Script Command Format And Exit Invariants | protocol-or-format-invariant | 1095 | Operational numeric defaults and human diagnostics are separated first. |
+| Script Diagnostic Presentation | presentation-text | 129 | Paths, flags, substitutions, regular expressions, and machine tokens are excluded from this presentation group. |
+| Script Environment Defaults | security-ceiling-or-default | 4 | Their environment key identities are reviewed separately, preserving the distinction between external binding and local fallback. |
+| Script Launcher Environment Binding Identities | protocol-or-format-invariant | 101 | The shell lookup name is external CLI vocabulary; parameter-expansion defaults are reviewed in a separate group. |
+| Script Operational Defaults And Bounds | security-ceiling-or-default | 16 | The exact source line names the operational role; exit codes and command grammar are partitioned separately. |
+| Script Tool And Path Defaults | security-ceiling-or-default | 294 | They are launcher/tool defaults with external overrides where declared, not hidden production server authorities. |
+| Script Tooling Environment Binding Identities | protocol-or-format-invariant | 99 | The script lookup name is external tool vocabulary; parsed values and fallback atoms are reviewed separately. |
+| Ui Event Replay Safety Bounds | security-ceiling-or-default | 2 | Eight bounds a traversal view; 256 bounds a deployment view. Eviction retains the newest cursors and deliberately permits an evicted old stream to be observed again. |
+| Ui Layout And Rendering Derived Values | derived | 109 | The owning symbol names the visual quantity that derives the rendered projection. |
+| Ui Message Catalog Copy | presentation-text | 133 | The source object values are structurally separated from the keys, so visible copy is not mistaken for a protocol identity. |
+| Ui Message Catalog Keys | protocol-or-format-invariant | 131 | The source object keys are structurally separated from their adjacent values; only the keys enter this protocol group. |
+| Ui Presentation Copy | presentation-text | 43 | The group excludes selectors and structured identifiers; those remain protocol atoms. |
+| Ui Protocol Dom And Storage Identities | protocol-or-format-invariant | 1687 | Presentation copy and numeric operating bounds are separated before this compatibility partition. |
+| Ui Resource And Safety Bounds | security-ceiling-or-default | 108 | Only numeric atoms whose owning symbol names the resource boundary enter this group. |
+| Ui State Derived Values | derived | 501 | Timing, capacity, and geometry symbols are removed first, leaving local state arithmetic. |
+| Ui Timing And Retry Defaults | security-ceiling-or-default | 14 | Only numeric atoms whose owning symbol names the timing role enter this group. |
+| JWKS Cache Lifetime Setting | operator-configurable | 4 | The 300-second cache lifetime is an existing operator default; 30 seconds and one hour are validation endpoints, not additional fixed lifetimes. |
+| JWKS Connect Timeout Setting | operator-configurable | 1 | The former fixed three-second external connection timeout is converted to a typed environment setting with the same shipped fallback. |
+| JWKS Request Timeout Setting | operator-configurable | 1 | The former fixed five-second HttpRequest response timeout is converted to a typed environment setting with the same shipped fallback; streamed-body admission remains bounded separately by the payload ceiling. |
+| JWKS Response Payload Ceiling | security-ceiling-or-default | 2 | The 64 KiB limit is enforced before parsing untrusted JWKS bytes and is retained as an intrinsic admission ceiling. |
+| JWKS HTTP Media Contract | protocol-or-format-invariant | 2 | The Accept header and JSON/JWK-set media values are wire compatibility tokens consumed by request and response validation. |
+| JWKS Payload Overflow Sentinel | derived | 1 | The extra byte is derived from the 64 KiB cap and exists only to detect overflow without admitting it. |
 
 ## Follow-up domain ownership
 

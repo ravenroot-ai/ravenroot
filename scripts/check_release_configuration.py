@@ -144,6 +144,11 @@ def check_workflows() -> None:
         raise ValueError(
             f"OCI, Central, and GitHub Release reconciliation tests must run in {contracts_job}"
         )
+    if "python3 -m unittest scripts.tests.test_github_release" not in block:
+        raise ValueError(
+            f"the GitHub Release step rehearsal must run in {contracts_job}: it is the only place "
+            "that step is exercised before a release depends on it"
+        )
     if "python3 -m unittest scripts.tests.test_extension_pack" not in block:
         raise ValueError(f"the extension-pack membership contract must run in {contracts_job}")
 

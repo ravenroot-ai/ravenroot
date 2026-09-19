@@ -17,7 +17,8 @@ import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
 import { isLayeredMode, layeredLabelSide } from './layered-drawing.js';
 import {
-  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, copyLayeredDrawing,
+  layeredDrawingOf, registerLayeredLayout,
 } from './layered-layout.js';
 import * as d3 from 'd3';
 import {
@@ -2503,12 +2504,12 @@ function captureActiveDocument() {
 function cancelRetiredLayouts(cancelled = []) {
   cancelled.forEach(item => {
     const job = layoutJobs.get(item.generation);
-    releaseInitialLayoutExposure(job);
     layoutJobs.delete(item.generation);
     if (typeof item.nativeCancel === 'function') item.nativeCancel();
     // ELK's controller stop is a no-op, but its published Cytoscape animations are stoppable.
     // Freeze them at retirement so a mode restore cannot be overwritten by stale tween frames.
-    item.cy?.nodes().stop(true, false);
+    (job?.isolatedLayoutCy || item.cy)?.nodes().stop(true, false);
+    releaseInitialLayoutExposure(job);
   });
 }
 
@@ -5382,7 +5383,35 @@ function releaseInitialLayoutExposure(job) {
   job.revealInitialLayout = false;
   if (job.initialExposureTimeout != null) clearTimeout(job.initialExposureTimeout);
   job.initialExposureTimeout = null;
+  job.isolatedLayoutCy?.destroy();
+  job.isolatedLayoutCy = null;
   setInitialLayoutExposure(job.owner, false);
+}
+
+function applyInitialLayoutFallback(job) {
+  const nodes = job.liveLayoutElements.nodes().filter(node => !node.isParent());
+  const columns = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
+  job.target.batch(() => nodes.forEach((node, index) => node.position({
+    x: 120 + (index % columns) * 180,
+    y: 100 + Math.floor(index / columns) * 130,
+  })));
+  applyProjectedGroupMoves(job);
+  job.target.resize();
+  job.target.fit(undefined, 65);
+  clampAutomaticFitZoom(job.owner);
+}
+
+function retireInitialLayoutWithFallback(job, diagnostic) {
+  if (!job?.revealInitialLayout || layoutJobs.get(job.token.generation) !== job) return;
+  if (layoutRequestIsCurrent(job.token)) applyInitialLayoutFallback(job);
+  if (diagnostic) console.error(diagnostic);
+  cancelRetiredLayouts(layoutSessions.invalidate(job.owner.id).cancelled);
+  job.owner.layoutSessionToken = null;
+  syncOwnedLayoutBusy(job.owner);
+  if (job.owner.cy === job.target) {
+    captureDocumentModeView(job.owner, 'design');
+    scheduleWorkspacePersistence();
+  }
 }
 
 function renderModeLabel(mode) {
@@ -5412,17 +5441,7 @@ function syncOwnedLayoutBusy(owner) {
 function completeOwnedLayout(job) {
   const { owner, token } = job;
   const current = layoutRequestIsCurrent(token);
-  if (current && job.projectedGroupMoves?.length) {
-    job.target.batch(() => job.projectedGroupMoves.forEach(group => {
-      const summary = job.target.getElementById(group.summaryId);
-      if (summary.empty()) return;
-      const end = summary.position();
-      const dx = end.x - group.start.x;
-      const dy = end.y - group.start.y;
-      group.members.forEach(member => job.target.getElementById(member.id)
-        .position({ x: member.position.x + dx, y: member.position.y + dy }));
-    }));
-  }
+  if (current) applyProjectedGroupMoves(job);
   if (job.fitAfterLayout && layoutRequestIsCurrent(token)) {
     if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
     else {
@@ -5453,12 +5472,47 @@ function completeOwnedLayout(job) {
   if (released) runOwnedLayout(released);
 }
 
+function applyProjectedGroupMoves(job) {
+  if (!job.projectedGroupMoves?.length) return;
+  const { target } = job;
+  target.batch(() => job.projectedGroupMoves.forEach(group => {
+    const summary = target.getElementById(group.summaryId);
+    if (summary.empty()) return;
+    const end = summary.position();
+    const dx = end.x - group.start.x;
+    const dy = end.y - group.start.y;
+    group.members.forEach(member => target.getElementById(member.id)
+      .position({ x: member.position.x + dx, y: member.position.y + dy }));
+  }));
+}
+
+function publishIsolatedLayout(job) {
+  if (!job.isolatedLayoutCy) return;
+  job.target.batch(() => job.isolatedLayoutCy.nodes().forEach(source => {
+    const target = job.target.getElementById(source.id());
+    if (target.nonempty()) target.position(source.position());
+  }));
+  if (isLayeredMode(job.token.mode)) copyLayeredDrawing(job.isolatedLayoutCy, job.target);
+}
+
+/*
+ * Layout completion below publishes positions only after the owning generation is still current.
+ * Initial imports run on an isolated core, so even an uncancellable late ELK promise has no route
+ * back into the visible document after timeout, replacement, or a newer request.
+ */
 function finishOwnedLayout(token) {
   const job = layoutJobs.get(token.generation);
   if (!job) return;
   const { owner, target } = job;
   const publish = layoutRequestIsCurrent(token);
+  if (publish && job.revealInitialLayout && isLayeredMode(token.mode)
+      && !layeredDrawingOf(job.isolatedLayoutCy)) {
+    retireInitialLayoutWithFallback(job,
+      'Initial layered arrangement failed; deterministic fallback positions were restored.');
+    return;
+  }
   if (publish) {
+    publishIsolatedLayout(job);
     if (target.scratch('_rrRefitAfterLayout') && !job.fitAfterLayout) {
       if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
       else {
@@ -5475,7 +5529,7 @@ function finishOwnedLayout(token) {
         : owner.visualStyle === 'n8n4' ? scheduleN8n4EdgeCurves
           : owner.visualStyle === 'cyto' ? scheduleCytoEdgeCurves : null;
     // Positioning and renderer-specific routing are one operation. A pointer edit must not land
-    // between `layoutstop` and the final route callback and then be restyled by stale work.
+    // between publication and the final route callback and then be restyled by stale work.
     if (deferredRouting) {
       deferredRouting(owner, target, token, () => completeOwnedLayout(job));
       return;
@@ -5592,8 +5646,13 @@ function runOwnedLayout(token) {
   const animate = job.animate
     ?? globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true;
   const fail = error => {
-    console.error('Graph arrangement failed; positions are unchanged.', error);
-    settleOwnedLayout(token);
+    if (job.revealInitialLayout) {
+      retireInitialLayoutWithFallback(job,
+        `Initial graph arrangement failed; deterministic fallback positions were restored. ${error}`);
+    } else {
+      console.error('Graph arrangement failed; positions are unchanged.', error);
+      settleOwnedLayout(token);
+    }
   };
   let nativeLayout;
   try {
@@ -5614,7 +5673,7 @@ function runOwnedLayout(token) {
       name: LAYERED_LAYOUT_NAME, mode: token.mode,
       animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
       fit: !fitAfterLayout, padding: 70,
-      prepareLabels: side => applyLayeredLabelSide(target, side, owner),
+      prepareLabels: side => applyLayeredLabelSide(layoutTarget, side, owner),
       isCurrent: () => layoutRequestIsCurrent(token),
       onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
     });
@@ -5749,10 +5808,19 @@ function setLayout(name, options = {}) {
       // Dagre/CoSE animate node positions separately from the layout controller. Stopping only the
       // controller can leave those animations publishing retired frames after Keep restores its
       // click-time snapshot.
-      job?.target?.nodes().stop(true, false);
+      job?.layoutElements?.nodes().stop(true, false);
     } : null,
   });
   cancelRetiredLayouts(request.cancelled);
+  const liveLayoutElements = layoutElements;
+  const isolatedLayoutCy = options.revealInitialLayout ? cytoscape({
+    headless: true,
+    styleEnabled: true,
+    elements: liveLayoutElements.jsons(),
+    style: target.style().json(),
+    layout: { name: 'preset' },
+  }) : null;
+  if (isolatedLayoutCy) layoutElements = isolatedLayoutCy.elements();
   job = {
     owner,
     target,
@@ -5767,6 +5835,8 @@ function setLayout(name, options = {}) {
     revealInitialLayout: Boolean(options.revealInitialLayout),
     initialExposureTimeout: null,
     layoutElements,
+    liveLayoutElements,
+    isolatedLayoutCy,
     projectedGroupMoves,
     nativeLayout: null,
   };
@@ -5775,8 +5845,8 @@ function setLayout(name, options = {}) {
   if (job.revealInitialLayout) {
     job.initialExposureTimeout = setTimeout(() => {
       if (layoutJobs.get(request.token.generation) !== job) return;
-      console.error('Initial graph arrangement did not settle before its visibility deadline.');
-      settleOwnedLayout(request.token);
+      retireInitialLayoutWithFallback(job,
+        'Initial graph arrangement exceeded its visibility deadline; deterministic fallback positions were restored.');
     }, INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS);
   }
   syncOwnedLayoutBusy(owner);

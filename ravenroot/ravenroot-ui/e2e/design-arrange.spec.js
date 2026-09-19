@@ -102,6 +102,61 @@ async function expectIndependentParallelEdges(page) {
   return snapshot;
 }
 
+async function startTimedOutInitialElk(page) {
+  return page.evaluate(xml => {
+    window.__lateInitialElkRuns = 0;
+    window.__lateInitialElkStops = 0;
+    window.__timeoutVisibleFrames = [];
+    const collectionPrototype = Object.getPrototypeOf(window.cy.elements());
+    const originalLayout = collectionPrototype.layout;
+    const originalSetTimeout = window.setTimeout;
+    window.setTimeout = function(callback, delay, ...args) {
+      return originalSetTimeout.call(window, callback, delay === 15000 ? 40 : delay, ...args);
+    };
+    collectionPrototype.layout = function(options) {
+      const controller = originalLayout.call(this, options);
+      if (options.name !== 'elk' || this.cy().getElementById('raw-start').empty()) return controller;
+      window.__lateInitialLayoutCy = this.cy();
+      const run = controller.run.bind(controller);
+      controller.one('layoutstop', () => { window.__lateInitialElkStops += 1; });
+      controller.run = () => {
+        originalSetTimeout.call(window, () => {
+          window.__lateInitialElkRuns += 1;
+          run();
+        }, 300);
+        return controller;
+      };
+      return controller;
+    };
+    const recordVisible = () => {
+      if (window.cy?.getElementById('raw-start').nonempty()) {
+        const owner = window.ravenroot.activeDocument();
+        if (Number(getComputedStyle(owner.container).opacity) > 0) {
+          window.__timeoutVisibleFrames.push(window.cy.nodes().map(node => node.position()));
+        }
+      }
+      if (!window.__timeoutVisibleFrames.length) requestAnimationFrame(recordVisible);
+    };
+    requestAnimationFrame(recordVisible);
+    try {
+      window.ravenroot.replaceActiveDocumentFromText(xml, 'timed-out-elk.graphml');
+      const owner = window.ravenroot.activeDocument();
+      return {
+        uniquePositions: new Set(window.cy.nodes().map(node => {
+          const p = node.position(); return `${p.x}:${p.y}`;
+        })).size,
+        opacity: getComputedStyle(owner.container).opacity,
+        inert: owner.container.inert,
+        ariaHidden: owner.container.getAttribute('aria-hidden'),
+        busy: owner.layoutBusy,
+      };
+    } finally {
+      collectionPrototype.layout = originalLayout;
+      window.setTimeout = originalSetTimeout;
+    }
+  }, unpositionedArrangedGraphMl('hierarchical', 'hierarchical'));
+}
+
 test.describe('Design arrangements', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -230,6 +285,9 @@ test.describe('Design arrangements', () => {
           inert: owner.container.inert,
           ariaHidden: owner.container.getAttribute('aria-hidden'),
           busy: owner.layoutBusy,
+          uniquePositions: new Set(window.cy.nodes().map(node => {
+            const p = node.position(); return `${p.x}:${p.y}`;
+          })).size,
           historyDepth: owner.history.depth(),
           dirty: owner.history.isDirty(),
         };
@@ -238,7 +296,7 @@ test.describe('Design arrangements', () => {
       }
     }, unpositionedArrangedGraphMl())).toEqual({
       opacity: '1', concealed: false, inert: false, ariaHidden: null,
-      busy: false, historyDepth: 0, dirty: false,
+      busy: false, uniquePositions: 4, historyDepth: 0, dirty: false,
     });
   });
 
@@ -263,6 +321,45 @@ test.describe('Design arrangements', () => {
         concealedBeforeRetirement: true, opacity: '1', concealed: false, inert: false,
         ariaHidden: null, busy: false, n0: { x: 100, y: 100 },
       });
+  });
+
+  for (const scenario of ['fallback', 'user edit', 'newer arrangement']) test(
+    `timed-out ELK cannot publish after ${scenario}`, async ({ page }) => {
+    expect(await startTimedOutInitialElk(page)).toEqual({
+      uniquePositions: 1, opacity: '0', inert: true, ariaHidden: 'true', busy: true,
+    });
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+    await expect.poll(() => page.evaluate(() => window.__timeoutVisibleFrames.length)).toBe(1);
+    expect(await page.evaluate(() => {
+      const owner = window.ravenroot.activeDocument();
+      return {
+        firstVisibleUnique: new Set(window.__timeoutVisibleFrames[0].map(p => `${p.x}:${p.y}`)).size,
+        opacity: getComputedStyle(owner.container).opacity,
+        inert: owner.container.inert,
+        ariaHidden: owner.container.getAttribute('aria-hidden'),
+        busy: owner.layoutBusy,
+        isolatedDestroyed: window.__lateInitialLayoutCy.destroyed(),
+        historyDepth: owner.history.depth(),
+        dirty: owner.history.isDirty(),
+      };
+    })).toEqual({ firstVisibleUnique: 4, opacity: '1', inert: false, ariaHidden: null,
+      busy: false, isolatedDestroyed: true, historyDepth: 0, dirty: false });
+
+    if (scenario === 'user edit') {
+      await page.evaluate(() => window.cy.getElementById('raw-a').position({ x: 777, y: 333 }));
+    } else if (scenario === 'newer arrangement') {
+      await arrange(page, 'Arrange — Flow');
+    }
+    const stable = await positions(page);
+    await expect.poll(() => page.evaluate(() => window.__lateInitialElkRuns)).toBe(1);
+    await page.waitForTimeout(500);
+    expect(await positions(page)).toEqual(stable);
+    expect(await page.evaluate(() => ({
+      activeLayout: window.ravenroot.activeDocument().layoutMode,
+      busy: window.ravenroot.activeDocument().layoutBusy,
+      lateRuns: window.__lateInitialElkRuns,
+    }))).toEqual({ activeLayout: scenario === 'newer arrangement' ? 'dagre' : 'hierarchical',
+      busy: false, lateRuns: 1 });
   });
 
   test('records one winning arrangement, keeps every edge independent, and undoes the geometry', async ({ page }) => {

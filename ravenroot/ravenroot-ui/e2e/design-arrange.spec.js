@@ -346,7 +346,9 @@ test.describe('Design arrangements', () => {
       busy: false, isolatedDestroyed: true, historyDepth: 0, dirty: false });
 
     if (scenario === 'user edit') {
-      await page.evaluate(() => window.cy.getElementById('raw-a').position({ x: 777, y: 333 }));
+      await page.evaluate(() => {
+        window.cy.getElementById('raw-a').position({ x: 777, y: 333 });
+      });
     } else if (scenario === 'newer arrangement') {
       await arrange(page, 'Arrange — Flow');
     }

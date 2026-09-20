@@ -9,7 +9,7 @@ the explicit decision to publish a selected set of product changes.
 | Branch | Purpose | Accepted changes |
 |---|---|---|
 | `main` | Default branch, released product history, and current public documentation | Release or content-promotion pull requests from the internal `dev` branch; exceptionally, protected internal `hotfix/*` pull requests |
-| `dev` | Integration branch for the next release | Reviewed topic branches and pull requests from repository branches or forks |
+| `dev` | Integration branch for the next release | Reviewed topic branches and pull requests from repository branches or forks (a fork's pull request additionally needs a maintainer to mirror its head into a repository branch before `ci-required` can run — see [Where the checks run](#where-the-checks-run)) |
 | `feature/*`, `fix/*`, `docs/*`, `test/*` | Focused contribution branches based on `dev` | One bounded change returning to `dev` |
 | `hotfix/*` | Exceptional urgent correction based on `main` | Patch release returning to `main`, followed by synchronization to `dev` |
 
@@ -26,7 +26,9 @@ exactly this repository and its head branch is either:
 The check runs from the base branch through `pull_request_target`, has no repository permissions, does
 not check out either branch, calls no API, and executes no pull request code. A fork therefore cannot
 replace or spoof the required check. The check must be configured as required on `main`. Fork and
-ordinary topic pull requests target `dev`.
+ordinary topic pull requests target `dev`; a fork's pull request cannot obtain `ci-required` there by
+itself (see [Where the checks run](#where-the-checks-run)), which is a gap in verification reach, not
+in `main-source-policy` or in this section's own guarantee.
 
 Source acceptance is not hotfix authorization. A repository ruleset targeting `hotfix/*` must restrict
 branch creation and updates to release maintainers. Protection on `main` must require review and
@@ -76,6 +78,17 @@ boundary, the API documentation gate, and the runtime smoke tests. It runs on:
 - a routed Dependabot pull request into `dev`, dispatched by `route-dependabot.yml` once its
   Dependabot-into-`main` pull request has been authorized and retargeted. A later merge into `dev`
   relies on that dispatch's result, so it earns the full suite rather than a lighter one.
+
+None of these three routes reaches a pull request opened from a fork. The dispatch's `--ref` must
+name a branch that already exists in this repository — not a fork head, and not `refs/pull/N/head`;
+the fast workflow fires only on `feature/**` pushes in this repository; and the Dependabot route
+handles only Dependabot's own pull requests. A fork's pull request into `dev` therefore cannot obtain
+`ci-required` by itself, and `dev`'s ruleset requires it before the pull request can be queued or
+merged. The current procedure is manual, not automated: a maintainer pushes the contributor's exact
+head commit to a branch in this repository — the same SHA, unchanged, so the dispatched run's result
+lands on the pull request's own head — and then dispatches the full tier on that branch
+(`gh workflow run ci.yml --ref <branch> -f tier=full`). Until a maintainer does this, the pull request
+stays unverified.
 
 `ci.yml` does not trigger on a pull request into `dev` at all. It used to run a small `admission`
 diagnostic tier there, but a lighter tier able to publish `ci-required` on a commit headed for `dev`

@@ -540,6 +540,17 @@ class TriggerTest(unittest.TestCase):
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("feature/" in problem for problem in verify_workflow(broken)))
 
+    def test_a_comment_naming_feature_branches_does_not_trip_the_check(self) -> None:
+        """The on: block's own explanatory prose names `feature/**`; it must not be mistaken for it."""
+        commented = self.contents.replace(
+            "  merge_group:\n    types: [checks_requested]\n",
+            "  # feature/** must never reach this workflow; ci-fast.yml alone runs it.\n"
+            "  merge_group:\n    types: [checks_requested]\n",
+            1,
+        )
+        self.assertNotEqual(commented, self.contents)
+        self.assertEqual(verify_workflow(commented), [])
+
 
 if __name__ == "__main__":
     unittest.main()

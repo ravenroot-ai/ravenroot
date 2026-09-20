@@ -14,6 +14,14 @@ documentation. Active development is integrated on `dev`.
 3. Make the change, its tests, its documentation, and any required change fragment together.
 4. Push the topic branch to your fork and open a pull request against `ravenroot-ai/ravenroot:dev`.
 
+Opening the pull request does not by itself produce `ci-required` on it: `ci.yml` no longer triggers
+on any pull request into `dev`, including one from a fork, and `dev`'s ruleset requires that check
+before the pull request can be queued or merged. Today a maintainer has to push the exact head commit
+of your pull request to a branch inside this repository — the same SHA, unchanged — and dispatch the
+full tier on it (`gh workflow run ci.yml --ref <branch> -f tier=full`); the dispatched run then lands
+on your pull request's own head, and `ci-required` reports there. There is no automated route yet, so
+your pull request stays unverified until a maintainer does this.
+
 Ordinary pull requests from forks or repository branches must target `dev`, not `main`. Pull requests
 to `main` are reserved for the internal `dev` branch and protected internal `hotfix/*` branches. A
 maintainer classifies each such pull request with exactly one of `release:none`, `release:patch`,

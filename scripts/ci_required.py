@@ -273,14 +273,26 @@ def declared_name(block: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def trigger_lines_without_comments(block: str) -> str:
+    """Drop every full-line YAML comment from a trigger block before a substring check.
+
+    Every comment in this repository's workflow files is its own line; nothing here uses a trailing
+    inline comment. `on:` blocks carry explanatory prose — including, now, prose that names
+    `feature/**` while explaining why it must not appear — and a bare substring check over the raw
+    block would be tripped by that prose rather than by an actual trigger.
+    """
+    return "\n".join(line for line in block.splitlines() if not line.strip().startswith("#"))
+
+
 def verify_triggers(contents: str) -> list[str]:
     """Hold ci.yml's events to the model: no work-branch pushes, a merge-queue trigger, full dispatch.
 
     This is the complete intended trigger shape, asserted positively in both directions: each event
     ci.yml is supposed to fire on is named exactly, and `feature/**` — the one branch pattern that
-    must never reach this workflow — is checked absent. Two independent copies of one decision drift
-    silently when only some of them are asserted; this used to say nothing about `pull_request` at
-    all, which is exactly how it stayed silent while that trigger named `dev`.
+    must never reach this workflow — is checked absent from the actual trigger syntax, comments
+    stripped first. Two independent copies of one decision drift silently when only some of them are
+    asserted; this used to say nothing about `pull_request` at all, which is exactly how it stayed
+    silent while that trigger named `dev`.
     """
     problems: list[str] = []
     triggers = trigger_block(contents)
@@ -300,7 +312,7 @@ def verify_triggers(contents: str) -> list[str]:
             "ci.yml: the `merge_group` trigger is missing. Without it ci-required is never reported on "
             "a merge-group commit, and every pull request in a merge queue times out."
         )
-    if "feature/" in triggers:
+    if "feature/" in trigger_lines_without_comments(triggers):
         problems.append(
             "ci.yml: must not trigger on a feature/** branch in any event. That pattern belongs to "
             "ci-fast.yml alone; the full tier on every work-branch push would saturate the runners."
@@ -384,12 +396,15 @@ FULL_FUNCTIONAL_JOBS = frozenset(POLICY_JOBS) | frozenset(PRODUCT_JOBS)
 def verify_full_coverage_on_dev_pull_requests() -> list[str]:
     """Refuse any tier reachable on a pull-request head into `dev` that lacks the full job set.
 
-    This is the structural form of the constraint point 4 exists to enforce: `admission` reported
-    `ci-required` success on a pull request into `dev` while only a handful of cheap jobs had run.
-    Deleting that tier is not enough on its own, because nothing stops a future edit from allowing a
-    new partial tier on the same event key. This check makes that impossible to do silently: any tier
-    named for `("pull_request", "dev")` in `ALLOWED_TIERS_BY_EVENT` has to require every job in
-    `FULL_FUNCTIONAL_JOBS`, or this refuses before the workflow or the classifier are even consulted.
+    `FULL_FUNCTIONAL_JOBS` is defined by the same expression as `REQUIRED_BY_TIER["full"]`, so this
+    check is tautological for the `full` tier itself and can never fire by that set shrinking: dropping
+    a job from `ci.yml` without updating this constant is refused independently, by `verify_workflow`'s
+    own two-way reconciliation between the workflow and the topology tables. What this actually catches
+    is point 4's failure mode returning under a new name: a tier newly named for `("pull_request",
+    "dev")` in `ALLOWED_TIERS_BY_EVENT` without requiring every job in `FULL_FUNCTIONAL_JOBS` — exactly
+    how the retired `admission` tier reported `ci-required` success there while only a handful of cheap
+    jobs had run. This check makes reintroducing such a tier here impossible to do silently, before the
+    workflow or the classifier are even consulted.
     """
     problems: list[str] = []
     for key, tiers in ALLOWED_TIERS_BY_EVENT.items():

@@ -120,37 +120,6 @@ ALLOWED_TIERS_BY_EVENT = {
     ("merge_group", ""): frozenset({"full"}),
 }
 
-# The complete functional job set: everything a pull-request head into `dev` must be verified by. A
-# tier whose required jobs do not cover this set must never be reachable from `("pull_request", "dev")`
-# above — see `verify_full_coverage_on_dev_pull_requests`.
-FULL_FUNCTIONAL_JOBS = frozenset(POLICY_JOBS) | frozenset(PRODUCT_JOBS)
-
-
-def verify_full_coverage_on_dev_pull_requests() -> list[str]:
-    """Refuse any tier reachable on a pull-request head into `dev` that lacks the full job set.
-
-    This is the structural form of the constraint point 4 exists to enforce: `admission` reported
-    `ci-required` success on a pull request into `dev` while only a handful of cheap jobs had run.
-    Deleting that tier is not enough on its own, because nothing stops a future edit from allowing a
-    new partial tier on the same event key. This check makes that impossible to do silently: any tier
-    named for `("pull_request", "dev")` in `ALLOWED_TIERS_BY_EVENT` has to require every job in
-    `FULL_FUNCTIONAL_JOBS`, or this refuses before the workflow or the classifier are even consulted.
-    """
-    problems: list[str] = []
-    for key, tiers in ALLOWED_TIERS_BY_EVENT.items():
-        if key[0] != "pull_request" or key[1] != "dev":
-            continue
-        for tier in sorted(tiers):
-            required = REQUIRED_BY_TIER.get(tier, frozenset())
-            if not FULL_FUNCTIONAL_JOBS.issubset(required):
-                problems.append(
-                    f"{key!r} allows tier {tier!r}, whose required jobs do not cover the full "
-                    "functional set. A tier missing part of the full suite must never be able to "
-                    "publish ci-required on a pull-request head into dev."
-                )
-    return problems
-
-
 # The work-branch fast tier lives in its own workflow and is advice, not a gate. It is modelled here
 # for one reason: to hold it to the constraint that it never publishes `ci-required`.
 FAST_GATE_JOB = "ci-fast"
@@ -403,6 +372,37 @@ def verify_dispatch_routing(classification: str, gate: str) -> list[str]:
         for binding in ROUTED_INPUT_BINDINGS
         if not step or binding not in step.group(0)
     )
+    return problems
+
+
+# The complete functional job set: everything a pull-request head into `dev` must be verified by. A
+# tier whose required jobs do not cover this set must never be reachable from `("pull_request", "dev")`
+# above — see `verify_full_coverage_on_dev_pull_requests`.
+FULL_FUNCTIONAL_JOBS = frozenset(POLICY_JOBS) | frozenset(PRODUCT_JOBS)
+
+
+def verify_full_coverage_on_dev_pull_requests() -> list[str]:
+    """Refuse any tier reachable on a pull-request head into `dev` that lacks the full job set.
+
+    This is the structural form of the constraint point 4 exists to enforce: `admission` reported
+    `ci-required` success on a pull request into `dev` while only a handful of cheap jobs had run.
+    Deleting that tier is not enough on its own, because nothing stops a future edit from allowing a
+    new partial tier on the same event key. This check makes that impossible to do silently: any tier
+    named for `("pull_request", "dev")` in `ALLOWED_TIERS_BY_EVENT` has to require every job in
+    `FULL_FUNCTIONAL_JOBS`, or this refuses before the workflow or the classifier are even consulted.
+    """
+    problems: list[str] = []
+    for key, tiers in ALLOWED_TIERS_BY_EVENT.items():
+        if key[0] != "pull_request" or key[1] != "dev":
+            continue
+        for tier in sorted(tiers):
+            required = REQUIRED_BY_TIER.get(tier, frozenset())
+            if not FULL_FUNCTIONAL_JOBS.issubset(required):
+                problems.append(
+                    f"{key!r} allows tier {tier!r}, whose required jobs do not cover the full "
+                    "functional set. A tier missing part of the full suite must never be able to "
+                    "publish ci-required on a pull-request head into dev."
+                )
     return problems
 
 

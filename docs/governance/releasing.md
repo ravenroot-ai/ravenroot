@@ -84,11 +84,15 @@ name a branch that already exists in this repository — not a fork head, and no
 the fast workflow fires only on `feature/**` pushes in this repository; and the Dependabot route
 handles only Dependabot's own pull requests. A fork's pull request into `dev` therefore cannot obtain
 `ci-required` by itself, and `dev`'s ruleset requires it before the pull request can be queued or
-merged. The current procedure is manual, not automated: a maintainer pushes the contributor's exact
-head commit to a branch in this repository — the same SHA, unchanged, so the dispatched run's result
-lands on the pull request's own head — and then dispatches the full tier on that branch
-(`gh workflow run ci.yml --ref <branch> -f tier=full`). Until a maintainer does this, the pull request
-stays unverified.
+merged. Before mirroring it, a maintainer must review the contribution, with particular attention to
+anything under `.github/`: a dispatched run executes the workflow definition committed on the branch
+it runs on, under `workflow_dispatch`, with this repository's full token, secrets, and environments,
+whereas the fork's own `pull_request` event ran that same file read-only and without secrets. The
+current procedure is otherwise manual, not automated: once reviewed, a maintainer pushes the
+contributor's exact head commit to a branch in this repository — the same SHA, unchanged, so the
+dispatched run's result lands on the pull request's own head — and then dispatches the full tier on
+that branch (`gh workflow run ci.yml --ref <branch> -f tier=full`). Until a maintainer does this, the
+pull request stays unverified.
 
 `ci.yml` does not trigger on a pull request into `dev` at all. It used to run a small `admission`
 diagnostic tier there, but a lighter tier able to publish `ci-required` on a commit headed for `dev`

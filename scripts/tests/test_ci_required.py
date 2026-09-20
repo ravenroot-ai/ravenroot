@@ -551,6 +551,20 @@ class TriggerTest(unittest.TestCase):
         self.assertNotEqual(commented, self.contents)
         self.assertEqual(verify_workflow(commented), [])
 
+    def test_a_trailing_comment_naming_feature_branches_still_trips_the_check(self) -> None:
+        """Only a whole comment line is stripped; a trailing one is not, so this still fires.
+
+        `#` can open inside a quoted scalar, so truncating a line at its first `#` is unsafe in
+        general; this documents that known, accepted limitation rather than a bug to fix.
+        """
+        commented = self.contents.replace(
+            "  merge_group:\n    types: [checks_requested]\n",
+            "  merge_group:\n    types: [checks_requested]  # not feature/**\n",
+            1,
+        )
+        self.assertNotEqual(commented, self.contents)
+        self.assertTrue(any("feature/" in problem for problem in verify_workflow(commented)))
+
 
 if __name__ == "__main__":
     unittest.main()

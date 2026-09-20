@@ -276,10 +276,12 @@ def declared_name(block: str) -> str | None:
 def trigger_lines_without_comments(block: str) -> str:
     """Drop every full-line YAML comment from a trigger block before a substring check.
 
-    Every comment in this repository's workflow files is its own line; nothing here uses a trailing
-    inline comment. `on:` blocks carry explanatory prose — including, now, prose that names
-    `feature/**` while explaining why it must not appear — and a bare substring check over the raw
-    block would be tripped by that prose rather than by an actual trigger.
+    Only a whole line that is a comment is dropped; a trailing comment deliberately is not. This
+    file's pinned actions carry roughly thirty of them (`uses: actions/checkout@<sha> # v7.0.1`), and
+    `#` can also open inside a quoted scalar, so truncating a line at its first `#` would corrupt
+    content rather than strip a comment. `on:` blocks carry explanatory prose on lines of its own —
+    including, now, prose that names `feature/**` while explaining why it must not appear — and a bare
+    substring check over the raw block would be tripped by that prose rather than by an actual trigger.
     """
     return "\n".join(line for line in block.splitlines() if not line.strip().startswith("#"))
 

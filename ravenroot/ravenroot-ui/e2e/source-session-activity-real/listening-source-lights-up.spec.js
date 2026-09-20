@@ -161,10 +161,16 @@ test('a listening source graph lights up in the editor while it admits real traf
 
   // 3. The log node's output reaches the panel. The issue predicted this needs no separate work --
   // the output was always produced, published and delivered, and only ever dropped at routing.
-  const activity = page.locator('#activity-log .activity-entry', { hasText: `NODE_COMPLETED · ${LOG_NODE}` });
+  //
+  // Since #458 the panel opens at the Output observance level, where a `log` node's emission is
+  // presented as concise workflow output: the emitted value IS the row, and the generic
+  // `NODE_COMPLETED · <node-id>` title with its process/traversal/invocation/attempt identifiers is
+  // deliberately not something a reader has to see past to find it. Trace still renders the technical
+  // form; `e2e/activity-visibility-modes.spec.js` and `test/activity-visibility.test.js` pin both, so
+  // what is asserted here is the level a freshly loaded editor actually presents.
+  const activity = page.locator('#activity-log .activity-entry.output-value');
   await expect(activity.last(), `published log completion: ${JSON.stringify(published.logCompletion)}`)
-    .toContainText(/output=/, { timeout: 10_000 });
-  await expect(activity.last()).toContainText(/admitted message-\d+/);
+    .toContainText(/admitted message-\d+/, { timeout: 10_000 });
 
   // 4. Stop ends it cleanly, and the pill says so rather than the canvas quietly freezing.
   await page.locator('#btn-stop').click();

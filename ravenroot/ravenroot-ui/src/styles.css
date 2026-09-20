@@ -2026,6 +2026,16 @@
       border-radius: 4px; padding: 3px 7px; cursor: pointer; font-size: 10px;
     }
     .activity-clear:hover, .property-remove:hover { border-color: var(--err); color: var(--outcome-error-text); }
+    /* ── THE OBSERVATION-LEVEL SELECTOR ───────────────────────────────────────────────────────
+       Sized against the header's own 24px controls so the header keeps its fixed height and the
+       panel's identity text keeps a chance to render before anything ellipsises — panels are
+       movable into a 224px column, where every pixel in this row is contested. Three visible words
+       rather than a popup menu: how much of the stream is shown is the single most consequential
+       reading choice this panel offers, and it should not be behind a disclosure. */
+    .activity-modes { flex: 0 0 auto; gap: 2px; }
+    .activity-modes .btn {
+      padding: 2px 7px; font-size: 10px; line-height: 1.4; border-radius: 4px;
+    }
     /* Fills the dock panel's body instead of claiming a fixed 240px of the right column. */
     #activity-log {
       flex: 1 1 auto; min-width: 0; min-height: 0; max-width: 100%; overflow-y: auto;
@@ -2045,6 +2055,14 @@
     .activity-entry.bypassed .activity-dot { background: var(--mag); }
     .activity-content { min-width: 0; max-width: 100%; }
     .activity-title { color: var(--tx-1); }
+    /* A concise log emission (Output and Nodes) puts the emitted value in the title slot, so it
+       inherits that slot's wrapping contract: `pre-wrap` keeps a real line feed in pretty-printed
+       JSON/XML instead of collapsing it, and `anywhere` keeps one unbounded token from widening the
+       panel. The value is already normalized, redacted and byte-bounded by `runtimeActivityOutput`;
+       this rule is layout only and never a disclosure decision. */
+    .activity-entry.output-value .activity-title {
+      white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+    }
     .activity-detail {
       min-width: 0; max-width: 100%; margin-top: 2px; color: var(--tx-3);
       white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;

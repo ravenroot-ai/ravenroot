@@ -128,8 +128,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 23384 |
-| Unchanged identities | 22430 |
-| Approved identity migrations | 936 |
+| Unchanged identities | 22429 |
+| Approved identity migrations | 937 |
 | Approved retirements | 18 |
 | Semantically classified additions | 167 |
 | Current candidates | 23533 |
@@ -13933,8 +13933,8 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-bea093226cc17dd89d62` | `ravenroot/ravenroot-ui/src/runtime-client.js:916` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-45465d4bcefa7915bd5e` | `ravenroot/ravenroot-ui/src/runtime-client.js:917` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-5ce405fe932d262f3128` | `ravenroot/ravenroot-ui/src/runtime-client.js:918` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-34b8e6bf48a765392800` | `ravenroot/ravenroot-ui/src/runtime-client.js:942` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-d0399e96c5920700b2f7` | `ravenroot/ravenroot-ui/src/runtime-client.js:942` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-1c72491e7f55107fddde` | `ravenroot/ravenroot-ui/src/runtime-client.js:942` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task and runtime-client presentation token. |
+| `oc-219a5f29aa0e5d193583` | `ravenroot/ravenroot-ui/src/runtime-client.js:942` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-1912eb1a00b24e9b5ac0` | `ravenroot/ravenroot-ui/src/runtime-client.js:1114` `json` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-2ce62f0149c266981ed9` | `ravenroot/ravenroot-ui/src/runtime-client.js:1290` `if` | ui | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
 | `oc-7c224fe5f617d89e40a6` | `ravenroot/ravenroot-ui/src/runtime-client.js:1290` `if` | ui | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |

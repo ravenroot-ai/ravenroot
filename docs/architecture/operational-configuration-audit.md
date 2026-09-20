@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23533 |
+| Atomic operational candidates discovered | 23548 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23533 |
+| Reviewed | 23548 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
@@ -51,7 +51,7 @@ semantic review and focused source inventories remain required for those boundar
 | Retained published contract descriptions | 514 |
 | Retained presentation text | 658 |
 | Retained derived values | 1055 |
-| Test fixtures | 8004 |
+| Test fixtures | 8019 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 1959.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 71.
+Checked source reconciliations: 72.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23533 candidates.
+zero-count or unclassified rows as needed and sums to 23548 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23533 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 21872 |
+| retained | 21887 |
 
 ### Classification counts
 
@@ -89,7 +89,7 @@ zero-count or unclassified rows as needed and sums to 23533 candidates.
 | protocol-or-format-invariant | 9704 |
 | published-contract-description | 514 |
 | security-ceiling-or-default | 1937 |
-| test-fixture | 8004 |
+| test-fixture | 8019 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -100,7 +100,7 @@ zero-count or unclassified rows as needed and sums to 23533 candidates.
 | deployment-example | 20 |
 | java | 7161 |
 | script | 2289 |
-| test-fixture | 8004 |
+| test-fixture | 8019 |
 | ui | 3201 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8555 |
-| Retained; no remediation required | 12958 |
+| Retained; no remediation required | 12973 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23384 |
-| Unchanged identities | 22429 |
-| Approved identity migrations | 937 |
-| Approved retirements | 18 |
-| Semantically classified additions | 167 |
-| Current candidates | 23533 |
+| Source inventory candidates | 23533 |
+| Unchanged identities | 23533 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 15 |
+| Current candidates | 23548 |
 
 ## Final semantic review
 
@@ -4700,18 +4700,18 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-40f9ca51337e30398f75` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskExecutionLimits.java:28` `legacy` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-5a33deeafe5823777fda` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskExecutionLimits.java:28` `legacy` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-c3384f64d80d03d22e1d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskExecutionLimits.java:28` `legacy` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-9023942258e8b8ea2203` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:20` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-46285a0f92cd0f66a645` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:21` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-538b90f13743d261d8c4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:22` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-555238b5e35964c0de96` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:22` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-6c7af157b308845efb67` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:23` `HumanTaskFormSchema` | java | retained | protocol-or-format-invariant | Issue #456 fixed Human Task wire, persistence, authorization, sandbox, or configuration-audit protocol vocabulary. |
-| `oc-15cfe035a01a844a7a1b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:25` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-9892a9ad55fbfe74b9cb` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:25` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-abc756342f841edf6f9e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:25` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-d01a0d05f9d19a5f6345` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:25` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-e707cb961f0ffb6f6193` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:25` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-cf4866f738c55e08af29` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskOverride.java:7` `HumanTaskOverride` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-a99ea66330517e54c3d3` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskOverride.java:8` `HumanTaskOverride` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-9023942258e8b8ea2203` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:25` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-46285a0f92cd0f66a645` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:26` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-538b90f13743d261d8c4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:27` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-555238b5e35964c0de96` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:27` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-6c7af157b308845efb67` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:28` `HumanTaskFormSchema` | java | retained | protocol-or-format-invariant | Issue #456 fixed Human Task wire, persistence, authorization, sandbox, or configuration-audit protocol vocabulary. |
+| `oc-15cfe035a01a844a7a1b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:30` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-9892a9ad55fbfe74b9cb` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:30` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-abc756342f841edf6f9e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:30` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-d01a0d05f9d19a5f6345` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:30` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-e707cb961f0ffb6f6193` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskFormSchema.java:30` `HumanTaskFormSchema` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-cf4866f738c55e08af29` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskOverride.java:12` `HumanTaskOverride` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-a99ea66330517e54c3d3` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskOverride.java:13` `HumanTaskOverride` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
 | `oc-9e349b995f6f42c15f91` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:77` `HumanTaskPolicy` | java | retained | security-ceiling-or-default | authorization token count hard ceiling |
 | `oc-a6cd7eff69b1f329a41f` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:80` `HumanTaskPolicy` | java | retained | security-ceiling-or-default | inbox page hard ceiling |
 | `oc-262035d7f0ad22108f32` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:82` `HumanTaskPolicy` | java | retained | security-ceiling-or-default | durable write-attempt hard ceiling |
@@ -4739,40 +4739,40 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-bed96105cd437e1b3b17` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:92` `HumanTaskPolicy` | java | already-centralized | operator-configurable | responseMaxKeyLength is the typed one task response key authority resolved from the paired JVM property/environment binding and typed default. |
 | `oc-db1120047fa563ea4773` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:92` `HumanTaskPolicy` | java | already-centralized | operator-configurable | responseMaxTextLength is the typed one task response text authority resolved from the paired JVM property/environment binding and typed default. |
 | `oc-dd7b6773c874c5bb88e0` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:92` `HumanTaskPolicy` | java | already-centralized | operator-configurable | responseMaxDepth is the typed one task response authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-5dccd8711fb698d75c36` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:302` `if` | java | retained | protocol-or-format-invariant | Issue #456 fixed Human Task wire, persistence, authorization, sandbox, or configuration-audit protocol vocabulary. |
-| `oc-dcc15a62562bd8dc3052` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:330` `compareTo` | java | retained | derived | Positive-comparison threshold in remaining.compareTo(Duration.ofSeconds(maximumSeconds)) > 0; it rejects a remaining delay above the active maximum. |
-| `oc-582a64f53dc95b98224e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:331` `compareTo` | java | retained | presentation-text | This string is the diagnostic suffix emitted when a derived Duration.ofSeconds(maximumSeconds) comparison rejects a deadline; it does not select a duration. |
-| `oc-517c0cdff78c66868e28` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:382` `Confirmation` | java | retained | security-ceiling-or-default | One multiplicative factor composing the single 16 KiB decision-comment hard ceiling; not an independent ceiling. |
-| `oc-5fa6bfb6d3b1d337de4b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:382` `Confirmation` | java | retained | security-ceiling-or-default | One multiplicative factor composing the single 16 KiB decision-comment hard ceiling; not an independent ceiling. |
-| `oc-b9f3dab9f196c66c3e1d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:383` `Confirmation` | java | retained | security-ceiling-or-default | attention polling minimum |
-| `oc-472b2256d43714360378` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:384` `Confirmation` | java | retained | security-ceiling-or-default | attention polling hard ceiling |
-| `oc-d85b62a4ca32cf23df0c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:386` `Confirmation` | java | retained | security-ceiling-or-default | attention page hard ceiling |
-| `oc-a8dce9ba8cfc8a9b37cd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:390` `Confirmation` | java | retained | security-ceiling-or-default | attention node-count hard ceiling |
-| `oc-9761e97c9839df2af4ab` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:392` `Confirmation` | java | retained | derived | Fixed JSON wrapper overhead derived from the closed decision-body shape. |
-| `oc-715b6443f872d1680dd5` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:394` `Confirmation` | java | retained | security-ceiling-or-default | built-in confirmation prompt default |
-| `oc-22007da4bb0af01bb133` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:401` `Confirmation` | java | retained | security-ceiling-or-default | built-in resolve label default |
-| `oc-eb922e15fc1999b5e437` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:402` `Confirmation` | java | retained | security-ceiling-or-default | built-in deny label default |
-| `oc-a74ec52512d31fd33704` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:403` `Confirmation` | java | retained | security-ceiling-or-default | built-in cancel label default |
-| `oc-22143c9f96e06f63a8bb` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:404` `Confirmation` | java | already-centralized | operator-configurable | maxPromptUtf8Bytes is the typed embedded confirmation presentation authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-ad46d9a8a01bbf4a1eb7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:404` `Confirmation` | java | already-centralized | operator-configurable | maxPromptUtf8Bytes is the typed embedded confirmation presentation authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-d64f9056a09c9ecc0eb1` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:404` `Confirmation` | java | already-centralized | operator-configurable | maxActionLabelUtf8Bytes is the typed embedded confirmation presentation authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-20beaab6128721612845` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | maxReviewTextBytes is the typed immutable Human Task review-presentation ceiling resolved from the paired JVM property/environment binding and typed default. |
-| `oc-2c54915a278507d9cd2e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | pollBackoffMaxMillis is the typed live attention refresh backoff authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-4bcefc07a50cbbb3d931` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | attentionDefaultPageSize is the typed live embedded-attention query default authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-51461124f3e21ac23b5b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | attentionMaxPageSize is the typed live embedded-attention query authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-7198283982b76e55d330` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | maxReviewTextBytes is the typed immutable Human Task review-presentation ceiling resolved from the paired JVM property/environment binding and typed default. |
-| `oc-81eb588eecc987d8f3f8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | maxCommentUtf8Bytes is the typed one decision metadata comment authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-a6c019e404bf57c6cbe6` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | maxCommentUtf8Bytes is the typed one decision metadata comment authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-aa7039dd379bd1f4bd87` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | defaultReviewTextBytes is the typed immutable Human Task review-presentation default resolved from the paired JVM property/environment binding and typed default. |
-| `oc-c8e8f9b1c7a1590124f8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | defaultReviewTextBytes is the typed immutable Human Task review-presentation default resolved from the paired JVM property/environment binding and typed default. |
-| `oc-dad7e342145d182fec64` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:405` `Confirmation` | java | already-centralized | operator-configurable | pollAfterMillis is the typed live attention refresh base interval authority resolved from the paired JVM property/environment binding and typed default. |
-| `oc-6b9347f45d3005e39929` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:13` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-b566be3d7bb9c8c75fa7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:14` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-7eb21ca43657745ba346` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:15` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
-| `oc-86e8e7ed2ffa2a20120a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:15` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-5dccd8711fb698d75c36` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:326` `if` | java | retained | protocol-or-format-invariant | Issue #456 fixed Human Task wire, persistence, authorization, sandbox, or configuration-audit protocol vocabulary. |
+| `oc-dcc15a62562bd8dc3052` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:354` `compareTo` | java | retained | derived | Positive-comparison threshold in remaining.compareTo(Duration.ofSeconds(maximumSeconds)) > 0; it rejects a remaining delay above the active maximum. |
+| `oc-582a64f53dc95b98224e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:355` `compareTo` | java | retained | presentation-text | This string is the diagnostic suffix emitted when a derived Duration.ofSeconds(maximumSeconds) comparison rejects a deadline; it does not select a duration. |
+| `oc-517c0cdff78c66868e28` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:406` `Confirmation` | java | retained | security-ceiling-or-default | One multiplicative factor composing the single 16 KiB decision-comment hard ceiling; not an independent ceiling. |
+| `oc-5fa6bfb6d3b1d337de4b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:406` `Confirmation` | java | retained | security-ceiling-or-default | One multiplicative factor composing the single 16 KiB decision-comment hard ceiling; not an independent ceiling. |
+| `oc-b9f3dab9f196c66c3e1d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:407` `Confirmation` | java | retained | security-ceiling-or-default | attention polling minimum |
+| `oc-472b2256d43714360378` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:408` `Confirmation` | java | retained | security-ceiling-or-default | attention polling hard ceiling |
+| `oc-d85b62a4ca32cf23df0c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:410` `Confirmation` | java | retained | security-ceiling-or-default | attention page hard ceiling |
+| `oc-a8dce9ba8cfc8a9b37cd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:414` `Confirmation` | java | retained | security-ceiling-or-default | attention node-count hard ceiling |
+| `oc-9761e97c9839df2af4ab` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:416` `Confirmation` | java | retained | derived | Fixed JSON wrapper overhead derived from the closed decision-body shape. |
+| `oc-715b6443f872d1680dd5` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:418` `Confirmation` | java | retained | security-ceiling-or-default | built-in confirmation prompt default |
+| `oc-22007da4bb0af01bb133` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:425` `Confirmation` | java | retained | security-ceiling-or-default | built-in resolve label default |
+| `oc-eb922e15fc1999b5e437` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:426` `Confirmation` | java | retained | security-ceiling-or-default | built-in deny label default |
+| `oc-a74ec52512d31fd33704` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:427` `Confirmation` | java | retained | security-ceiling-or-default | built-in cancel label default |
+| `oc-22143c9f96e06f63a8bb` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:428` `Confirmation` | java | already-centralized | operator-configurable | maxPromptUtf8Bytes is the typed embedded confirmation presentation authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-ad46d9a8a01bbf4a1eb7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:428` `Confirmation` | java | already-centralized | operator-configurable | maxPromptUtf8Bytes is the typed embedded confirmation presentation authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-d64f9056a09c9ecc0eb1` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:428` `Confirmation` | java | already-centralized | operator-configurable | maxActionLabelUtf8Bytes is the typed embedded confirmation presentation authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-20beaab6128721612845` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | maxReviewTextBytes is the typed immutable Human Task review-presentation ceiling resolved from the paired JVM property/environment binding and typed default. |
+| `oc-2c54915a278507d9cd2e` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | pollBackoffMaxMillis is the typed live attention refresh backoff authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-4bcefc07a50cbbb3d931` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | attentionDefaultPageSize is the typed live embedded-attention query default authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-51461124f3e21ac23b5b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | attentionMaxPageSize is the typed live embedded-attention query authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-7198283982b76e55d330` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | maxReviewTextBytes is the typed immutable Human Task review-presentation ceiling resolved from the paired JVM property/environment binding and typed default. |
+| `oc-81eb588eecc987d8f3f8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | maxCommentUtf8Bytes is the typed one decision metadata comment authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-a6c019e404bf57c6cbe6` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | maxCommentUtf8Bytes is the typed one decision metadata comment authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-aa7039dd379bd1f4bd87` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | defaultReviewTextBytes is the typed immutable Human Task review-presentation default resolved from the paired JVM property/environment binding and typed default. |
+| `oc-c8e8f9b1c7a1590124f8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | defaultReviewTextBytes is the typed immutable Human Task review-presentation default resolved from the paired JVM property/environment binding and typed default. |
+| `oc-dad7e342145d182fec64` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPolicy.java:429` `Confirmation` | java | already-centralized | operator-configurable | pollAfterMillis is the typed live attention refresh base interval authority resolved from the paired JVM property/environment binding and typed default. |
+| `oc-6b9347f45d3005e39929` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:22` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-b566be3d7bb9c8c75fa7` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:23` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-7eb21ca43657745ba346` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:24` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
+| `oc-86e8e7ed2ffa2a20120a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskPresentation.java:24` `HumanTaskPresentation` | java | retained | security-ceiling-or-default | Issue #456 bounded safety ceiling or conservative default for Human Task schemas, presentations, capabilities, durable administration, or configuration evidence. |
 | `oc-a415bd1997ec418afe80` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReentryMapping.java:17` `HumanTaskReentryMapping` | java | retained | presentation-text | The bounded-key helper receives this field-name string only to identify expiredOutcome in a local validation exception. |
-| `oc-0e825162b60c75e0a8cd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:253` `if` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify executionLimits in a local validation exception. |
-| `oc-49184dbfa00f076825a2` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:274` `equals` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify confirmationLimits in a local validation exception. |
+| `oc-0e825162b60c75e0a8cd` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:278` `if` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify executionLimits in a local validation exception. |
+| `oc-49184dbfa00f076825a2` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskRegistration.java:299` `equals` | java | retained | presentation-text | Objects.requireNonNull uses this string only to identify confirmationLimits in a local validation exception. |
 | `oc-98c72d815f685107a88c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReviewPresentation.java:23` `HumanTaskReviewPresentation` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
 | `oc-20fafacf4f96d16f2d4a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReviewPresentation.java:25` `HumanTaskReviewPresentation` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |
 | `oc-9a0332dc7e028df84e3a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/HumanTaskReviewPresentation.java:27` `HumanTaskReviewPresentation` | java | retained | protocol-or-format-invariant | This fixed source atom is part of the typed lifecycle protocol. |

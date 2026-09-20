@@ -219,7 +219,7 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
                 CreateLedgerEntry prior = loadCreateLedgerEntry(command.tenantId(), command.key());
                 if (prior != null) {
                     if (command.retainIdentity()) {
-                        Record replay = replay(new LedgerEntry(prior.digest(), prior.record()), command.digest());
+                        replay(new LedgerEntry(prior.digest(), prior.record()), command.digest());
                         insertIdentityBinding(command.tenantId(), command.key(), command.digest(),
                                 prior.deploymentId());
                         Aggregate current = loadAggregate(command.tenantId(), prior.deploymentId());

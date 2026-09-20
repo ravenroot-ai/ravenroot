@@ -1064,7 +1064,7 @@ final class PostgresSchema {
                         "CREATE TABLE human_task_interaction_revocation (tenant_id TEXT NOT NULL, capability_id UUID NOT NULL, task_id UUID NOT NULL, generation BIGINT NOT NULL, revoked_at_epoch_second BIGINT NOT NULL, revoked_at_nano INTEGER NOT NULL, expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, capability_id))",
                         "CREATE INDEX human_task_interaction_revocation_expiry ON human_task_interaction_revocation (tenant_id, expires_at_epoch_second, expires_at_nano)")),
                 new SchemaMigration(13, "non-expiring deployment identity bindings", List.of(
-                        "CREATE TABLE deployment_identity_binding (tenant_id TEXT NOT NULL, binding_key TEXT NOT NULL, digest TEXT NOT NULL, deployment_id UUID NOT NULL, PRIMARY KEY (tenant_id, binding_key), FOREIGN KEY (tenant_id, deployment_id) REFERENCES deployment (tenant_id, deployment_id))",
+                        "CREATE TABLE deployment_identity_binding (tenant_id TEXT NOT NULL, binding_key TEXT NOT NULL, digest TEXT NOT NULL, deployment_id TEXT NOT NULL, PRIMARY KEY (tenant_id, binding_key), FOREIGN KEY (tenant_id, deployment_id) REFERENCES deployment (tenant_id, deployment_id))",
                         "INSERT INTO deployment_identity_binding (tenant_id, binding_key, digest, deployment_id) SELECT tenant_id, command_key, digest, deployment_id FROM deployment_command WHERE action = 'CREATE'")));
     }
 }

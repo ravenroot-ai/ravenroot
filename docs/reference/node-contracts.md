@@ -532,7 +532,7 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Description | Creates durable, tenant-scoped work for a person and resumes from the pinned graph version. |
 | Visual type | human-task |
 | Agentic | false |
-| Capabilities | bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe |
+| Capabilities | bounded-metadata,built-in-form-v1,durable,embedded-confirmation-v1,human-task,registered-presentation-v1,restart-safe |
 | Declared default nature | Not declared |
 | Declared allowed natures | Not declared |
 | Application command allowlist | Not declared |
@@ -548,6 +548,10 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | `responseSchemaVersion` | Response schema version | Exact protocol label required at resolution. | `STRING` | false | 1 | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
 | `responseKind` | Response kind | Required top-level response shape. | `STRING` | false | MAP | SCALAR,LIST,MAP | false | Not declared | Not declared | Not declared |
 | `maxResponseBytes` | Maximum response bytes | Inclusive encoded-envelope byte bound owned by the server. | `INTEGER` | false | 65536 | Not declared | false | Not declared | Not declared | min 1; max 262144 |
+| `presentationKind` | Presentation kind | Closed built-in presentation or an opaque registered profile; no HTML, URL, or credential is graph-authored. | `STRING` | false | CLASSIC | CLASSIC,CONFIRMATION,FORM,CUSTOM,EXTERNAL | false | Not declared | Not declared | Not declared |
+| `presentationProfileId` | Presentation profile | Opaque registered profile identifier for CUSTOM or EXTERNAL presentations. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 256 |
+| `presentationProfileVersion` | Presentation profile version | Pinned allowed profile version for CUSTOM or EXTERNAL presentations. | `INTEGER` | false | 1 | Not declared | false | Not declared | Not declared | min 1; max 2147483647 |
+| `formSchema` | Form schema | Closed version-one form schema JSON; nested values and executable content are not supported. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 65536 |
 | `confirmationPresentationVersion` | Confirmation presentation | Version one enables the built-in embedded simple confirmation. | `STRING` | false | Not declared | 1 | false | Not declared | Not declared | Not declared |
 | `confirmationPrompt` | Confirmation prompt | Bounded plain-text prompt shown for this task. | `TEXT` | false | Confirm this task. | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 4096 |
 | `confirmationComment` | Comment | Whether the built-in decision comment is disallowed, optional, or required. | `STRING` | false | OPTIONAL | DISALLOWED,OPTIONAL,REQUIRED | false | confirmationPresentationVersion:EQUALS:1 | Not declared | Not declared |

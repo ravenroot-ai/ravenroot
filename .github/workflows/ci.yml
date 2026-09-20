@@ -1,8 +1,14 @@
 name: Continuous integration
 
 on:
+  # A pull request into `dev` publishes no run here: that trigger used to hand the review commit a
+  # cheap `admission` tier, and a lighter tier able to publish `ci-required` on a commit headed for
+  # `dev` is exactly the defect this workflow exists to refuse. The review candidate is instead
+  # verified by one dispatched `full` run on its exact commit before the pull request is opened; the
+  # merge queue verifies the integration commit; and a routed Dependabot pull request into `dev` is
+  # dispatched the same way, in full, since a later merge relies on its result.
   pull_request:
-    branches: [dev, main]
+    branches: [main]
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [dev, main]
@@ -214,81 +220,6 @@ jobs:
           git fetch --force --quiet --tags origin
           python3 scripts/release_contract.py check-promotion \
             --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS"
-
-  # Pull requests expose a few independent, high-signal checks. They all start together and keep
-  # running when a sibling fails, so an author gets the useful breakage map without waiting for the
-  # expensive regression suite. The merge queue owns that suite on the actual integration commit.
-  admission-policy:
-    name: admission-policy
-    needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'admission'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out repository history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Validate the review and CI contracts
-        run: |
-          python3 scripts/check_no_raw_control_bytes.py
-          python3 scripts/check_argline.py
-          python3 -m unittest scripts.tests.test_classify_main_change
-          python3 -m unittest scripts.tests.test_ci_required
-          python3 -m unittest scripts.tests.test_ci_topology
-          docker compose --file compose.yaml config --quiet
-          ./dev.sh verify-supervisor
-          git diff --check HEAD^
-          python3 scripts/check_commit_attribution.py
-
-  admission-ui:
-    name: admission-ui
-    needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'admission'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
-      - name: Install UI dependencies
-        working-directory: ravenroot/ravenroot-ui
-        run: npm ci
-      - name: Run the UI unit suite
-        working-directory: ravenroot/ravenroot-ui
-        run: npm test
-
-  admission-backend:
-    name: admission-backend
-    needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'admission'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Set up Java
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-          cache-dependency-path: |
-            ravenroot/pom.xml
-            ravenroot/**/pom.xml
-      - name: Compile backend production sources
-        working-directory: ravenroot
-        run: mvn -B --no-transfer-progress -DskipTests compile
 
   full-docs-policy:
     name: full-docs-policy
@@ -1100,9 +1031,6 @@ jobs:
     if: always()
     needs:
       - release-classification
-      - admission-policy
-      - admission-ui
-      - admission-backend
       - docs-site
       - full-docs-policy
       - full-python-contracts

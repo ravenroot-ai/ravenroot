@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Classify a CI event without trusting mutable pull-request prose.
 
-The review commit gets a small, diagnostic `admission` tier. The merge queue then verifies the
-actual integration commit with the `full` tier. Once that exact commit reaches `dev`, `postmerge`
-deliberately repeats no functional test. `promotion` likewise reuses the full-tier evidence already
-bound to the commit, while `docs` covers a content-only push to `main`.
+`ci.yml` no longer triggers on a pull request into `dev`: a review commit is instead verified by one
+dispatched `full` run on its exact commit, before the pull request is opened. The merge queue then
+verifies the actual integration commit, also with the `full` tier. A routed Dependabot pull request
+into `dev` reaches this classifier the same way a genuine pull request would have — `event_name`
+"pull_request", `base_ref` "dev" — but only through `ci.yml`'s dispatch inputs, since the native
+trigger is gone; it earns `full` as well, because a later merge into `dev` relies on its result being
+the complete suite, not a cheap diagnostic one. Once the integration commit reaches `dev`,
+`postmerge` deliberately repeats no functional test. `promotion` likewise reuses the full-tier
+evidence already bound to the commit, while `docs` covers a content-only push to `main`.
 """
 
 from __future__ import annotations
@@ -140,8 +145,12 @@ def classify(
     if event_name == "merge_group":
         return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
+    # `ci.yml` no longer triggers on a pull request into `dev`, so this combination can only be the
+    # routed Dependabot dispatch, which sets `EVENT_NAME`/`BASE_REF` to replay itself as exactly this
+    # event. Its result is what a later merge into `dev` relies on, so it gets the complete suite —
+    # the same tier a genuine pull request into `dev` would need if one could still trigger this way.
     if event_name == "pull_request" and base_ref == "dev":
-        return {"tier": "admission", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":
         selected = sorted(RELEASE_LABELS.intersection(labels))

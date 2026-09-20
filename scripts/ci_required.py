@@ -56,13 +56,7 @@ E2E_SHARDS = 4
 
 # Jobs whose gate is the tier, mapped to the check context each publishes. The keys are the workflow
 # job identifiers `toJSON(needs)` reports; the values are the names GitHub shows and a ruleset
-# requires. Three of them differ, which is precisely why the mapping is written down.
-ADMISSION_JOBS = {
-    "admission-policy": "admission-policy",
-    "admission-ui": "admission-ui",
-    "admission-backend": "admission-backend",
-}
-
+# requires. One of them differs, which is precisely why the mapping is written down.
 POLICY_JOBS = {
     "docs-site": "docs-site",
     "full-docs-policy": "full-docs-policy",
@@ -90,13 +84,13 @@ PRODUCT_JOBS = {
     "full-regression": "full-regression",
 }
 
-GATED_JOBS = {**ADMISSION_JOBS, **POLICY_JOBS, **PRODUCT_JOBS}
+GATED_JOBS = {**POLICY_JOBS, **PRODUCT_JOBS}
 
-# What each tier demands. `admission` gives review fast diagnostics; `full` verifies the merge-group
-# integration commit; `postmerge` and `promotion` repeat no functional work. What guards `main` also
-# includes the security gate and main-source-policy, neither of which this module observes.
+# What each tier demands. `full` verifies the merge-group integration commit, the dispatched review
+# candidate, and the routed Dependabot pull request into `dev`; `postmerge` and `promotion` repeat no
+# functional work. What guards `main` also includes the security gate and main-source-policy, neither
+# of which this module observes.
 REQUIRED_BY_TIER = {
-    "admission": frozenset(ADMISSION_JOBS),
     "full": frozenset(POLICY_JOBS) | frozenset(PRODUCT_JOBS),
     "docs": frozenset({"docs-site", "full-docs-policy", "full-source-policy"}),
     "postmerge": frozenset(),
@@ -107,8 +101,15 @@ REQUIRED_BY_TIER = {
 # statement of what it is allowed to decide, so a classification defect that hands an event headed
 # for `dev` a lighter tier is refused here instead of trusted. Push events are keyed by the branch
 # pushed; pull requests by their base. Anything not listed is refused.
+#
+# `ci.yml` no longer triggers on a pull request into `dev`, so `("pull_request", "dev")` is reached
+# only by the routed Dependabot dispatch replaying itself as that event. It may carry `full` alone:
+# the retired `admission` tier used to be allowed here, and a lighter tier able to publish
+# `ci-required` on a pull-request head into `dev` is exactly the defect this module exists to refuse.
+# `verify_full_coverage_on_dev_pull_requests` holds this key to that structurally, not just by
+# convention, so a future edit cannot reintroduce a partial tier here without failing closed.
 ALLOWED_TIERS_BY_EVENT = {
-    ("pull_request", "dev"): frozenset({"admission"}),
+    ("pull_request", "dev"): frozenset({"full"}),
     # A pull request into main is keyed by its head as well: only this repository's `dev` is a
     # promotion, a `hotfix/*` runs the full tier, and any other head is not part of the model.
     ("pull_request", "main", "dev"): frozenset({"promotion"}),
@@ -119,13 +120,43 @@ ALLOWED_TIERS_BY_EVENT = {
     ("merge_group", ""): frozenset({"full"}),
 }
 
+# The complete functional job set: everything a pull-request head into `dev` must be verified by. A
+# tier whose required jobs do not cover this set must never be reachable from `("pull_request", "dev")`
+# above — see `verify_full_coverage_on_dev_pull_requests`.
+FULL_FUNCTIONAL_JOBS = frozenset(POLICY_JOBS) | frozenset(PRODUCT_JOBS)
+
+
+def verify_full_coverage_on_dev_pull_requests() -> list[str]:
+    """Refuse any tier reachable on a pull-request head into `dev` that lacks the full job set.
+
+    This is the structural form of the constraint point 4 exists to enforce: `admission` reported
+    `ci-required` success on a pull request into `dev` while only a handful of cheap jobs had run.
+    Deleting that tier is not enough on its own, because nothing stops a future edit from allowing a
+    new partial tier on the same event key. This check makes that impossible to do silently: any tier
+    named for `("pull_request", "dev")` in `ALLOWED_TIERS_BY_EVENT` has to require every job in
+    `FULL_FUNCTIONAL_JOBS`, or this refuses before the workflow or the classifier are even consulted.
+    """
+    problems: list[str] = []
+    for key, tiers in ALLOWED_TIERS_BY_EVENT.items():
+        if key[0] != "pull_request" or key[1] != "dev":
+            continue
+        for tier in sorted(tiers):
+            required = REQUIRED_BY_TIER.get(tier, frozenset())
+            if not FULL_FUNCTIONAL_JOBS.issubset(required):
+                problems.append(
+                    f"{key!r} allows tier {tier!r}, whose required jobs do not cover the full "
+                    "functional set. A tier missing part of the full suite must never be able to "
+                    "publish ci-required on a pull-request head into dev."
+                )
+    return problems
+
+
 # The work-branch fast tier lives in its own workflow and is advice, not a gate. It is modelled here
 # for one reason: to hold it to the constraint that it never publishes `ci-required`.
 FAST_GATE_JOB = "ci-fast"
 FAST_JOBS = frozenset({"fast-policy", "fast-ui", "fast-backend"})
 FAST_TRIGGER = "on:\n  push:\n    branches: ['feature/**']\n"
 
-ADMISSION_CONDITION = "needs.release-classification.outputs.tier == 'admission'"
 POLICY_CONDITION = (
     "contains(fromJSON('[\"docs\",\"full\"]'), needs.release-classification.outputs.tier)"
 )
@@ -135,7 +166,6 @@ PRODUCT_CONDITION = "needs.release-classification.outputs.tier == 'full'"
 AGGREGATOR_CONDITION = f"always() && {PRODUCT_CONDITION}"
 
 EXPECTED_CONDITIONS = {
-    **{job: ADMISSION_CONDITION for job in ADMISSION_JOBS},
     **{job: POLICY_CONDITION for job in ("docs-site", "full-docs-policy", "full-source-policy")},
     **{job: PRODUCT_CONDITION for job in ("full-python-contracts", "full-shell-contracts")},
     **{job: PRODUCT_CONDITION for job in PRODUCT_JOBS},
@@ -275,9 +305,22 @@ def declared_name(block: str) -> str | None:
 
 
 def verify_triggers(contents: str) -> list[str]:
-    """Hold ci.yml's events to the model: no work-branch pushes, a merge-queue trigger, full dispatch."""
+    """Hold ci.yml's events to the model: no work-branch pushes, a merge-queue trigger, full dispatch.
+
+    This is the complete intended trigger shape, asserted positively in both directions: each event
+    ci.yml is supposed to fire on is named exactly, and `feature/**` — the one branch pattern that
+    must never reach this workflow — is checked absent. Two independent copies of one decision drift
+    silently when only some of them are asserted; this used to say nothing about `pull_request` at
+    all, which is exactly how it stayed silent while that trigger named `dev`.
+    """
     problems: list[str] = []
     triggers = trigger_block(contents)
+    if "  pull_request:\n    branches: [main]\n" not in triggers:
+        problems.append(
+            "ci.yml: `pull_request` must name exactly `[main]`. A pull request into `dev` must publish "
+            "no run here; the review candidate is verified by a dispatched full run instead, and a "
+            "lighter tier able to publish ci-required on that commit is the defect point 4 refuses."
+        )
     if "  push:\n    branches: [dev, main]\n" not in triggers:
         problems.append(
             "ci.yml: `push` must name exactly `[dev, main]`. Work-branch pushes belong to the fast "
@@ -287,6 +330,11 @@ def verify_triggers(contents: str) -> list[str]:
         problems.append(
             "ci.yml: the `merge_group` trigger is missing. Without it ci-required is never reported on "
             "a merge-group commit, and every pull request in a merge queue times out."
+        )
+    if "feature/" in triggers:
+        problems.append(
+            "ci.yml: must not trigger on a feature/** branch in any event. That pattern belongs to "
+            "ci-fast.yml alone; the full tier on every work-branch push would saturate the runners."
         )
     tier_input = re.search(r"(?ms)^      tier:\n(.*?)(?=^      \S|^  \S)", triggers)
     if not tier_input or "options: [full]\n" not in tier_input.group(1):
@@ -363,7 +411,7 @@ def verify_single_publisher(directory: Path) -> list[str]:
 
     Check runs belong to the commit, and a skipped job counts as passed for a required check. A
     `ci-required` published by any other run — work-branch feedback above all — would therefore
-    satisfy the ruleset without the event-specific admission or integration tier having run.
+    satisfy the ruleset without the event's actual tier having run.
     """
     problems: list[str] = []
     for path in sorted(directory.glob("*.y*ml")):
@@ -574,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
     # Both gates hold both workflows to the constraint, so a change that breaks it is refused by
     # whichever of them runs first — including by ci-required on the full run of that change.
     problems = verify_single_publisher(WORKFLOW_DIRECTORY)
+    problems.extend(verify_full_coverage_on_dev_pull_requests())
     try:
         problems.extend(verify_fast_workflow(FAST_WORKFLOW.read_text(encoding="utf-8")))
     except FileNotFoundError:

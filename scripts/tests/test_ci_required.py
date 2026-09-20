@@ -9,18 +9,19 @@ from pathlib import Path
 from scripts.classify_main_change import ROUTED_INPUTS
 from scripts.ci_required import (
     ALLOWED_TIERS_BY_EVENT,
-    ADMISSION_JOBS,
     CLASSIFICATION_JOB,
     FAST_GATE_JOB,
     FAST_JOBS,
     FAST_WORKFLOW,
     CLASSIFICATION_GUARD,
+    FULL_FUNCTIONAL_JOBS,
     ROUTED_INPUT_BINDINGS,
     ROUTING_GUARD,
     WORKFLOW_DIRECTORY,
     job_blocks,
     verify_event,
     verify_dispatch_routing,
+    verify_full_coverage_on_dev_pull_requests,
     verify_promotion_evidence,
     verify_fast_results,
     verify_fast_workflow,
@@ -112,9 +113,11 @@ class VerifyResultsTest(unittest.TestCase):
         problems = verify_results("promotion", results_for("promotion"))
         self.assertEqual(problems, [])
 
-    def test_review_is_diagnostic_and_integration_is_full(self) -> None:
-        self.assertEqual(REQUIRED_BY_TIER["admission"], frozenset(ADMISSION_JOBS))
-        self.assertTrue(REQUIRED_BY_TIER["admission"].isdisjoint(REQUIRED_BY_TIER["full"]))
+    def test_the_admission_tier_is_retired(self) -> None:
+        """Point 4: nothing may classify an event into the old cheap diagnostic tier any more."""
+        self.assertNotIn("admission", REQUIRED_BY_TIER)
+        for tiers in ALLOWED_TIERS_BY_EVENT.values():
+            self.assertNotIn("admission", tiers)
         for job in ("full-ui-e2e", "full-ui-e2e-shard", "full-backend-tests"):
             self.assertIn(job, REQUIRED_BY_TIER["full"])
 
@@ -301,10 +304,18 @@ class VerifyWorkflowTest(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertNotIn(job, defined)
 
+    def test_the_admission_tier_is_gone_rather_than_unreachable(self) -> None:
+        """Point 4: nothing reaches `admission` any more, so its jobs and condition are removed too."""
+        self.assertNotIn("'admission'", self.contents)
+        defined = set(job_blocks(self.contents))
+        for job in ("admission-policy", "admission-ui", "admission-backend"):
+            with self.subTest(job=job):
+                self.assertNotIn(job, defined)
+
     def test_every_gated_job_belongs_to_exactly_one_class(self) -> None:
-        self.assertEqual(set(ADMISSION_JOBS) & (set(POLICY_JOBS) | set(PRODUCT_JOBS)), set())
         self.assertEqual(set(POLICY_JOBS) & set(PRODUCT_JOBS), set())
-        self.assertEqual(set(GATED_JOBS), set(ADMISSION_JOBS) | set(POLICY_JOBS) | set(PRODUCT_JOBS))
+        self.assertEqual(set(GATED_JOBS), set(POLICY_JOBS) | set(PRODUCT_JOBS))
+        self.assertEqual(set(GATED_JOBS), FULL_FUNCTIONAL_JOBS)
 
     def test_the_declared_check_contexts_are_distinct(self) -> None:
         for tier in REQUIRED_BY_TIER:
@@ -339,12 +350,12 @@ class VerifyEventTest(unittest.TestCase):
 
     def test_each_dev_stage_accepts_only_its_own_tier(self) -> None:
         for event, base, ref, expected in (
-            ("pull_request", "dev", "feature/x", "admission"),
+            ("pull_request", "dev", "feature/x", "full"),
             ("push", "", "dev", "postmerge"),
             ("workflow_dispatch", "", "feature/x", "full"),
             ("merge_group", "", "gh-readonly-queue/dev/pr-1", "full"),
         ):
-            for tier in ("admission", "full", "postmerge", "promotion", "docs", "fast", ""):
+            for tier in ("full", "postmerge", "promotion", "docs", "admission", "fast", ""):
                 if tier == expected:
                     continue
                 with self.subTest(event=event, tier=tier):
@@ -365,6 +376,39 @@ class VerifyEventTest(unittest.TestCase):
         ):
             with self.subTest(event=event, base=base, ref=ref):
                 self.assertTrue(verify_event(event, base, ref, "full"))
+
+
+class FullCoverageOnDevPullRequestsTest(unittest.TestCase):
+    """Point 4's structural guard: no tier missing part of the full suite may be reachable here.
+
+    This is not merely a comment or a convention checked by other tests incidentally — it is a
+    standing assertion over the tables themselves, so a future edit that reintroduces a partial tier
+    for a pull-request head into `dev` fails this check even before the workflow or an event is
+    considered.
+    """
+
+    def test_the_committed_tables_carry_full_coverage(self) -> None:
+        self.assertEqual(verify_full_coverage_on_dev_pull_requests(), [])
+
+    def test_reintroducing_a_partial_tier_here_is_refused(self) -> None:
+        """The exact regression point 4 exists to close, caught structurally rather than by review."""
+        partial_tier = "admission"
+        self.assertNotIn(partial_tier, REQUIRED_BY_TIER)
+        original_allowed = ALLOWED_TIERS_BY_EVENT[("pull_request", "dev")]
+        try:
+            REQUIRED_BY_TIER[partial_tier] = frozenset({"full-source-policy"})
+            ALLOWED_TIERS_BY_EVENT[("pull_request", "dev")] = frozenset({partial_tier})
+            problems = verify_full_coverage_on_dev_pull_requests()
+            self.assertTrue(any(partial_tier in problem for problem in problems), problems)
+        finally:
+            del REQUIRED_BY_TIER[partial_tier]
+            ALLOWED_TIERS_BY_EVENT[("pull_request", "dev")] = original_allowed
+
+    def test_an_event_key_unrelated_to_a_dev_pull_request_is_not_constrained(self) -> None:
+        """The guard is scoped to `("pull_request", "dev")`; a promotion carries no functional job."""
+        self.assertEqual(REQUIRED_BY_TIER["promotion"], frozenset())
+        self.assertIn("promotion", ALLOWED_TIERS_BY_EVENT[("pull_request", "main", "dev")])
+        self.assertEqual(verify_full_coverage_on_dev_pull_requests(), [])
 
 
 def workflow_directory(files: dict[str, str]) -> Path:
@@ -470,6 +514,31 @@ class TriggerTest(unittest.TestCase):
                                        "  push:\n    branches: [dev, main, 'feature/**']\n", 1)
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("push" in problem for problem in verify_workflow(broken)))
+
+    def test_the_committed_pull_request_trigger_names_main_alone(self) -> None:
+        """Point 4: a pull request into dev must publish no run here at all."""
+        self.assertEqual(verify_workflow(self.contents), [])
+        self.assertIn("  pull_request:\n    branches: [main]\n", self.contents)
+
+    def test_a_pull_request_trigger_naming_dev_is_refused(self) -> None:
+        """The exact regression point 4 exists to close: `dev` back on the pull_request trigger."""
+        broken = self.contents.replace(
+            "  pull_request:\n    branches: [main]\n",
+            "  pull_request:\n    branches: [dev, main]\n", 1,
+        )
+        self.assertNotEqual(broken, self.contents)
+        self.assertTrue(any("pull_request" in problem for problem in verify_workflow(broken)))
+
+    def test_a_feature_branch_trigger_on_ci_yml_is_refused(self) -> None:
+        """`feature/**` belongs to ci-fast.yml alone; ci.yml running the full tier on it is refused."""
+        broken = self.contents.replace(
+            "  merge_group:\n    types: [checks_requested]\n",
+            "  merge_group:\n    types: [checks_requested]\n"
+            "  push_2:\n    branches: ['feature/**']\n",
+            1,
+        )
+        self.assertNotEqual(broken, self.contents)
+        self.assertTrue(any("feature/" in problem for problem in verify_workflow(broken)))
 
 
 if __name__ == "__main__":

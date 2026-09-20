@@ -47,6 +47,10 @@ without presenting the same choice as two independent contracts.
 | 2026-09-06 | [0039](0039-unreachable-executions-are-reconciled.md) | Accepted | Extends [ADR 0035](0035-cancellation-as-a-distinct-termination-reason.md)'s termination vocabulary with a second value and defines the caller-invoked recovery that ends a traversal proven unable to reach an outcome and returns its admission capacity. |
 | 2026-09-06 | [0040](0040-shared-persistence-adapters-share-ports-not-a-jdbc-core.md) | Accepted contract | Extends ADR 0014 to deployments whose processes are not on one host: a durable adapter is a standalone module sharing the ports, the closed capability set, the sealed failure vocabularies and the conformance suite, and sharing no production code; correctness rests on database transactions and row-level compare-and-set; all durable stores of one deployment address one database; migration is serialized by a database advisory lock. |
 
+| 2026-09-14 | [0041](0041-governed-workspace-agent-runner-plane.md) | Superseded by 0042 | Historical generic workspace-agent contract; fenced recovery foundations retained. |
+| 2026-09-16 | [0042](0042-explicit-workspaces-and-runner-coordinators.md) | Accepted | Explicit Workspace lifecycles, named Agents, independent runtime reuse, fleet capacity and runner-only shared-authority scaling. |
+| 2026-09-18 | [0043](0043-kubernetes-native-governed-runner.md) | Accepted | Native Pod/PVC materialization, positive enforcement attestation, credential separation and report-only Kubernetes recovery. |
+
 ## Publication rules
 
 - An accepted architecture contract is not, by itself, an implementation claim.

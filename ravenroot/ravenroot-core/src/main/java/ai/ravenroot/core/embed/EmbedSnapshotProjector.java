@@ -9,6 +9,8 @@ import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.GraphVersionRecord;
 import ai.ravenroot.core.graph.GraphVersionState;
+import ai.ravenroot.core.graph.GraphDefinition;
+import ai.ravenroot.api.catalog.NodeBypassProperty;
 
 import java.util.Comparator;
 import java.util.Map;
@@ -109,7 +111,7 @@ public final class EmbedSnapshotProjector {
         }
         var nodes = definition.nodes().stream()
                 .sorted(Comparator.comparing(GraphNode::id))
-                .map(node -> projectNode(node, budget))
+                .map(node -> projectSnapshotNode(node, budget))
                 .toList();
         var edges = definition.edges().stream()
                 .sorted(Comparator.comparing(GraphEdge::source).thenComparing(GraphEdge::target))
@@ -125,9 +127,78 @@ public final class EmbedSnapshotProjector {
         return projection;
     }
 
-    private static EmbedGraphProjection.Node projectNode(GraphNode node, EmbedProjectionBudget budget) {
+    /**
+     * Projects an already-authoritative immutable definition without fabricating snapshot policy.
+     * Used by the process-local deployment viewer, whose policy is the distinct authorized read.
+     */
+    public static EmbedGraphProjection projectDefinition(GraphDefinition definition, String graphId,
+                                                          String graphVersionId, String canonicalDigest,
+                                                          EmbedProjectionBudget budget) {
+        Objects.requireNonNull(definition, "definition");
+        Objects.requireNonNull(budget, "budget");
+        requireIdentifier(graphId, budget);
+        requireIdentifier(graphVersionId, budget);
+        requireIdentifier(canonicalDigest, budget);
+        if (definition.nodes().size() > budget.maxNodes() || definition.edges().size() > budget.maxEdges()) {
+            throw new ProjectionTooLarge();
+        }
+        var nodes = definition.nodes().stream()
+                .sorted(Comparator.comparing(GraphNode::id))
+                .map(node -> projectDeploymentNode(node, budget))
+                .toList();
+        var edges = definition.edges().stream()
+                .sorted(Comparator.comparing(GraphEdge::source).thenComparing(GraphEdge::target)
+                        .thenComparing(edge -> edge.id() == null ? "" : edge.id()))
+                .map(edge -> {
+                    requireIdentifier(edge.source(), budget);
+                    requireIdentifier(edge.target(), budget);
+                    requireOptional(edge.id(), budget);
+                    requireIdentifier(edge.outcome(), budget);
+                    boolean failure = definition.failureRouted(edge);
+                    return new EmbedGraphProjection.Edge(edge.source(), edge.target(), edge.id(),
+                            edge.outcome(), edgeVisualType(edge.outcome(), failure),
+                            failure ? EmbedGraphProjection.Routing.FAILURE
+                                    : EmbedGraphProjection.Routing.OUTCOME);
+                })
+                .toList();
+        var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
+                graphId, graphVersionId, canonicalDigest, nodes, edges);
+        if (projection.jsonBytes() > budget.maxJsonBytes()) throw new ProjectionTooLarge();
+        return projection;
+    }
+
+    private static EmbedGraphProjection.Node projectSnapshotNode(GraphNode node, EmbedProjectionBudget budget) {
         requireIdentifier(node.id(), budget);
         return new EmbedGraphProjection.Node(node.id(), node.kind().name(), layout(node, budget));
+    }
+
+    private static EmbedGraphProjection.Node projectDeploymentNode(GraphNode node, EmbedProjectionBudget budget) {
+        requireIdentifier(node.id(), budget);
+        String label = optionalString(node.properties().get("name"));
+        String visualType = optionalString(node.properties().get("classification"));
+        requireOptional(label, budget);
+        requireOptional(visualType, budget);
+        boolean bypassed = Boolean.TRUE.equals(node.properties().get(NodeBypassProperty.NAME));
+        return new EmbedGraphProjection.Node(node.id(), node.kind().name(), layout(node, budget),
+                label, visualType, bypassed);
+    }
+
+    private static String optionalString(Object value) {
+        return value instanceof String text && !text.isBlank() ? text : null;
+    }
+
+    private static String edgeVisualType(String outcome, boolean failure) {
+        if (failure) return "failed";
+        String normalized = outcome.toUpperCase(java.util.Locale.ROOT);
+        if ("FAILED".equals(normalized)) return "failed";
+        if ("COMPLETED".equals(normalized)) return "completed";
+        if ("CONTINUE".equals(normalized)) return "continue";
+        if ("VALIDATE".equals(normalized)) return "validate";
+        if ("PING".equals(normalized)) return "ping";
+        if ("UNDEFINED".equals(normalized)) return "undefined";
+        if (normalized.endsWith("_OUTCOME")) return "outcome";
+        if (normalized.startsWith("CALLBACK_")) return "callback";
+        return "default";
     }
 
     private static EmbedGraphProjection.Layout layout(GraphNode node, EmbedProjectionBudget budget) {
@@ -158,6 +229,10 @@ public final class EmbedSnapshotProjector {
 
     private static void requireIdentifier(String value, EmbedProjectionBudget budget) {
         if (value.length() > budget.maxIdentifierChars()) throw new ProjectionTooLarge();
+    }
+
+    private static void requireOptional(String value, EmbedProjectionBudget budget) {
+        if (value != null) requireIdentifier(value, budget);
     }
 
     private static final class ProjectionTooLarge extends RuntimeException {

@@ -35,6 +35,8 @@ public final class AgentException extends RuntimeException {
         RESPONSE_UNREADABLE,
         /** The response was larger than the profile's ceiling. */
         RESPONSE_TOO_LARGE,
+        /** The locally encoded request exceeded the profile's ceiling and was not dispatched. */
+        REQUEST_TOO_LARGE,
         /** The endpoint reported a content filter rather than a turn. */
         COMPLETION_REFUSED,
         /** The endpoint answered with neither an answer nor a tool call. */
@@ -103,7 +105,7 @@ public final class AgentException extends RuntimeException {
          */
         MCP_TOOL_NAME_COLLISION,
         /**
-         * The node declares more MCP servers than {@code AgentNodeBehavior.MAX_MCP_SERVERS}.
+         * The node declares more MCP servers than {@code AgentOperationalConfiguration.DEFAULT_MAX_MCP_SERVERS}.
          *
          * <p>A refusal and not a truncation. Truncating would give the author an agent missing tools
          * they declared, working well enough to reach production before anyone noticed which ones

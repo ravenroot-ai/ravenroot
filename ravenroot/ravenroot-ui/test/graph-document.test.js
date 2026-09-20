@@ -18,11 +18,32 @@ import {
   planJoinSemanticsMigration,
   quorumWouldCollideWithLegacyStamp,
   serializeGraphML,
+  setGraphPresentation,
   validateWorkflow,
   wouldSaveStampEachJoinPolicy,
 } from '../src/graph-document.js';
 
 describe('editable GraphML documents', () => {
+  it('replaces the editor-owned presentation properties on save and round-trips them', () => {
+    const graph = parseGraphML(serializeGraphML(createWorkflowDocument()));
+    setGraphPresentation(graph, {
+      renderMode: 'monitoring', layoutMode: 'elastic', designArrangement: 'flow',
+    });
+
+    expect(parseGraphML(serializeGraphML(graph)).graphProperties).toMatchObject({
+      'ravenroot.renderMode': 'monitoring',
+      'ravenroot.layoutMode': 'elastic',
+      'ravenroot.designArrangement': 'flow',
+    });
+
+    setGraphPresentation(graph, { designArrangement: 'organic' });
+    const updated = parseGraphML(serializeGraphML(graph));
+    expect(updated.graphProperties['ravenroot.designArrangement']).toBe('organic');
+    expect(serializeGraphML(graph).match(/ravenroot\.designArrangement/g)).toHaveLength(1);
+    setGraphPresentation(graph, { designArrangement: null });
+    expect(graph.graphProperties).not.toHaveProperty('ravenroot.designArrangement');
+  });
+
   // A drawing made from scratch has no join unless its author selects one. That is true only
   // because the document this editor creates says so: the graph-level marker is what versions the
   // undeclared case, and without it a node with two incoming edges is still inferred to be a

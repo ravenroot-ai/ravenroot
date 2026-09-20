@@ -28,6 +28,15 @@ import java.util.UUID;
  */
 public sealed interface ExecutionTransition {
 
+    /** Current process command authority, atomic with audit and idempotency evidence.
+     * @param next current process control state
+     */
+    record ProcessControlChanged(ai.ravenroot.api.application.ProcessControlState next) implements ExecutionTransition {
+        @Override public ProcessInstance applyTo(ProcessInstance current) {
+            return required(current).control(next);
+        }
+    }
+
     /**
      * Folds this transition over {@code current}, which is {@code null} only for
      * {@link ProcessCreated}. Domain rejections surface as {@link IllegalArgumentException} or

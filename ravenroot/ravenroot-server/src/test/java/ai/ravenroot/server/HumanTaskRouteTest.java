@@ -35,6 +35,7 @@ import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.humantask.HumanTaskDefinition;
+import ai.ravenroot.core.humantask.HumanTaskReviewDefinition;
 import ai.ravenroot.core.humantask.HumanTaskResult;
 import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
@@ -78,6 +79,52 @@ class HumanTaskRouteTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void administrativeInventoryAndGuardedForcedAbandonmentUseTheSameDurableTask() throws Exception {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        try (var store = new SqliteExecutionStore(directory.resolve("human-task-admin-route.db"), clock);
+             var engine = new PekkoExecutionEngine("human-task-admin-route-test")) {
+            Fixture fixture = request(store, clock);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
+                    new TenantApproverAuthenticator())) {
+                server.installHumanTasks(fixture.service(), ignored -> { });
+                server.start();
+                HttpClient client = HttpClient.newHttpClient();
+                String selector = "?taskId=" + fixture.taskId();
+                HttpResponse<String> denied = client.send(HttpRequest.newBuilder(URI.create(
+                                "http://127.0.0.1:" + server.port() + "/v1/admin/human-tasks" + selector))
+                                .header("X-Test-Tenant", "tenant-a").GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(403, denied.statusCode(), denied.body());
+
+                HttpResponse<String> listed = adminGet(client, server, selector);
+                assertEquals(200, listed.statusCode(), listed.body());
+                assertTrue(listed.body().contains("\"classification\":\"ACTIONABLE\""), listed.body());
+                assertTrue(listed.body().contains("\"handlerStatus\":\"WAITING\""), listed.body());
+                assertFalse(listed.body().contains("private-input"), listed.body());
+
+                HttpResponse<String> dryRun = adminPost(client, server,
+                        selector + "&mode=FORCE_ABANDON&dryRun=true", "admin-purge");
+                assertEquals(200, dryRun.statusCode(), dryRun.body());
+                assertTrue(dryRun.body().contains("\"outcome\":\"PLANNED\""), dryRun.body());
+
+                HttpResponse<String> applied = adminPost(client, server,
+                        selector + "&mode=FORCE_ABANDON&dryRun=false", "admin-purge");
+                assertEquals(200, applied.statusCode(), applied.body());
+                assertTrue(applied.body().contains("\"outcome\":\"ABANDONED\""), applied.body());
+                assertEquals(ai.ravenroot.api.persistence.HumanTaskStatus.CANCELLED,
+                        store.loadHumanTask("tenant-a", fixture.taskId()).toCompletableFuture().join()
+                                .orElseThrow().status());
+
+                HttpResponse<String> unbounded = adminPost(client, server,
+                        "?mode=FORCE_ABANDON&dryRun=false", "admin-unbounded");
+                assertEquals(400, unbounded.statusCode(), unbounded.body());
+            }
+        }
+    }
 
     @Test
     void tenantInboxAndGenerationFencedResolutionExposeNoResponseContent() throws Exception {
@@ -223,6 +270,7 @@ class HumanTaskRouteTest {
                 HttpResponse<String> configuration = rawGet(server, "tenant-a", "/v1/configuration");
                 assertEquals(200, configuration.statusCode(), configuration.body());
                 assertTrue(configuration.body().contains("\"confirmationPresentationVersions\":[1]"));
+                assertTrue(configuration.body().contains("\"reviewPresentationVersions\":[1]"));
                 assertTrue(configuration.body().contains("\"attentionPageSize\":20"));
 
                 String context = "/v1/human-tasks/attention?graphVersion=graph-v1&processInstanceId="
@@ -233,6 +281,7 @@ class HumanTaskRouteTest {
                 assertTrue(attention.body().contains("\"actions\":[\"CANCEL\",\"RESOLVE\",\"DENY\"]"),
                         attention.body());
                 assertFalse(attention.body().contains("private-input"), attention.body());
+                assertFalse(attention.body().contains("reviewPresentation"), attention.body());
                 assertFalse(attention.body().contains("decisionComment"), attention.body());
                 assertFalse(attention.body().contains("authorizedRoles"), attention.body());
 
@@ -241,10 +290,13 @@ class HumanTaskRouteTest {
                 assertEquals(200, exact.statusCode(), exact.body());
                 assertTrue(exact.body().contains(resolve.taskId().toString()), exact.body());
                 assertTrue(exact.body().contains("\"nodeCounts\":[]"), exact.body());
+                assertTrue(exact.body().contains("\"reviewPresentation\""), exact.body());
+                assertTrue(exact.body().contains("private-input"), exact.body());
                 HttpResponse<String> withheld = rawGet(server, "other",
                         "/v1/human-tasks/attention?taskId=" + resolve.taskId() + "&generation=1&limit=20");
                 assertEquals(200, withheld.statusCode(), withheld.body());
                 assertTrue(withheld.body().contains("\"items\":[]"), withheld.body());
+                assertFalse(withheld.body().contains("private-input"), withheld.body());
 
                 String comment = "  Reviewed \\\"π\\\"\\nnext  ";
                 HttpResponse<String> applied = confirmation(server, resolve, "tenant-a", "approver",
@@ -254,7 +306,7 @@ class HumanTaskRouteTest {
                 assertTrue(applied.body().contains("\"status\":\"RESOLVED\""), applied.body());
                 assertTrue(applied.body().contains("\"availableActions\":[]"), applied.body());
                 for (String forbidden : List.of("Reviewed", "approver", "responseSchema", "continuation",
-                        "resumeTraversalId")) {
+                        "resumeTraversalId", "private-input", "reviewPresentation")) {
                     assertFalse(applied.body().contains(forbidden), applied.body());
                 }
                 var storedResolve = store.loadHumanTask("tenant-a", resolve.taskId())
@@ -337,6 +389,7 @@ class HumanTaskRouteTest {
                 assertEquals(200, restored.statusCode(), restored.body());
                 assertTrue(restored.body().contains("\"commentMaxUtf8Bytes\":8192"), restored.body());
                 assertTrue(restored.body().contains("\"promptMaxUtf8Bytes\":8192"), restored.body());
+                assertTrue(restored.body().contains("private-input"), restored.body());
 
                 String oldPinValidComment = "x".repeat(6_000);
                 var fixture = new Fixture(service, taskId, processInstanceId);
@@ -436,7 +489,8 @@ class HumanTaskRouteTest {
                 HandlerAuthorization.ofRoles(Role.APPROVER.name()), Optional.empty(), Duration.ofHours(1),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
                 policy.executionLimits(policy.defaultResponseBytes()),
-                presentation);
+                presentation, new HumanTaskReviewDefinition(1, "payload.secret",
+                        policy.confirmation().defaultReviewTextUtf8Bytes()));
         HumanTaskResult result;
         try (var recorder = ExecutionRecorder.open(store, key, "embedded-route-fixture",
                 Duration.ofSeconds(30), revision); var ignored = service.bindLive(key, recorder)) {
@@ -479,6 +533,23 @@ class HumanTaskRouteTest {
                         URI.create("http://127.0.0.1:" + server.port() + path))
                         .header("X-Test-Tenant", tenant).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<String> adminGet(HttpClient client, RavenrootServer server, String query)
+            throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                        + "/v1/admin/human-tasks" + query))
+                        .header("X-Test-Tenant", "tenant-a").header("X-Test-Admin", "true")
+                        .GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<String> adminPost(HttpClient client, RavenrootServer server, String query,
+                                                   String idempotencyKey) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                        + "/v1/admin/human-tasks/purge" + query))
+                        .header("X-Test-Tenant", "tenant-a").header("X-Test-Admin", "true")
+                        .header("Idempotency-Key", idempotencyKey)
+                        .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private static HttpResponse<String> confirmation(
@@ -539,9 +610,11 @@ class HumanTaskRouteTest {
         @Override public AuthenticatedPrincipal authenticate(Headers headers) {
             String subject = Optional.ofNullable(headers.getFirst("X-Test-Subject")).orElse("approver");
             boolean approver = !"false".equals(headers.getFirst("X-Test-Approver"));
+            Set<Role> roles = "true".equals(headers.getFirst("X-Test-Admin"))
+                    ? Set.of(Role.TENANT_ADMIN) : approver ? Set.of(Role.APPROVER) : Set.of();
             return new AuthenticatedPrincipal(subject, AuthenticatedPrincipal.Type.USER,
                     "urn:ravenroot:test", headers.getFirst("X-Test-Tenant"),
-                    approver ? Set.of(Role.APPROVER) : Set.of(),
+                    roles,
                     Arrays.stream(AuthorizationAction.values()).filter(AuthorizationAction::available)
                             .map(AuthorizationAction::requiredScope)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));

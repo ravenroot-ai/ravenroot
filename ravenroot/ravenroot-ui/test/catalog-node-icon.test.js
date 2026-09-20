@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { catalogNodeIcon, resolveDescriptorNodeType } from '../src/catalog-node-icon.js';
+import {
+  catalogNodeIcon,
+  COMMON_NODE_GLYPHS,
+  nodeTypeCardShape,
+  resolveDescriptorNodeType,
+} from '../src/catalog-node-icon.js';
 
 // The generic per-type glyph map, standing in for `NODE_ICONS` in app.js. `agent` deliberately maps
 // to a plain glyph here (as it does in app.js): the brain preview for agent-typed descriptors is a
@@ -12,12 +17,32 @@ describe('resolveDescriptorNodeType', () => {
     expect(resolveDescriptorNodeType({ visualType: 'agent', agentic: false })).toBe('agent');
   });
 
+  it('repairs the generic identities published for Human Task and Log by older servers', () => {
+    expect(resolveDescriptorNodeType({ behavior: 'human-task', visualType: 'flow' })).toBe('human-task');
+    expect(resolveDescriptorNodeType({ behavior: 'log', visualType: 'handler' })).toBe('trace');
+    expect(resolveDescriptorNodeType({ behavior: 'logger', visualType: 'actor' })).toBe('trace');
+  });
+
   it('falls back to agent when agentic is set and visualType is absent', () => {
     expect(resolveDescriptorNodeType({ agentic: true })).toBe('agent');
   });
 
   it('falls back to actor when neither visualType nor agentic is set', () => {
     expect(resolveDescriptorNodeType({})).toBe('actor');
+  });
+});
+
+describe('default Design card shapes', () => {
+  it('uses the common rounded card for Human Task and Trace', () => {
+    expect(nodeTypeCardShape('human-task')).toBe('roundrectangle');
+    expect(nodeTypeCardShape('trace')).toBe('roundrectangle');
+    expect(nodeTypeCardShape('flow')).toBe('roundrectangle');
+  });
+
+  it('identifies Human Task with a person and Trace with a document glyph', () => {
+    expect(COMMON_NODE_GLYPHS).toEqual({ 'human-task': '👤', trace: '▤', workspace: '▣' });
+    expect(Object.values(COMMON_NODE_GLYPHS)).not.toContain('⇢');
+    expect(Object.values(COMMON_NODE_GLYPHS)).not.toContain('♙');
   });
 });
 

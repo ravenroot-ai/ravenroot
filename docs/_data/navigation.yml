@@ -23,6 +23,14 @@
       url: /user-guide/test-run-observe.html
     - title: Human Task confirmations
       url: /user-guide/human-task-confirmations.html
+    - title: Governed agents and runners
+      url: /operator-guide/governed-runners.html
+    - title: Kubernetes-native runners
+      url: /operator-guide/kubernetes-runners.html
+    - title: Disposable Agent example repository
+      url: /examples/governed-runner/disposable-repository/
+    - title: Register Machine example library
+      url: /examples/register-machine/
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
@@ -63,6 +71,10 @@
       url: /integrator-guide/extension-pack.html
     - title: Model, agent, and program integration
       url: /integrator-guide/ai-programs.html
+    - title: Governed runner protocol
+      url: /integrator-guide/runner-protocol.html
+    - title: Workspace acceptance evidence
+      url: /integrator-guide/workspace-acceptance.html
 
 - title: Architecture and security
   items:
@@ -105,6 +117,8 @@
       url: /reference/
     - title: GraphML profile
       url: /reference/graphml.html
+    - title: Register Machine Profile v1
+      url: /reference/register-machine-profile.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
     - title: Core node reference
@@ -115,6 +129,8 @@
       url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
+    - title: Session memory
+      url: /reference/session-memory.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: Interaction WebSocket protocol
@@ -204,6 +220,8 @@
       url: /developer-guide/
     - title: Build, harness, and tests
       url: /developer-guide/build-test.html
+    - title: Embedded-viewer parity evidence
+      url: /developer-guide/embed-viewer-verification.html
     - title: Extensions and adapters
       url: /developer-guide/extension-development.html
     - title: API, documentation, and releases
@@ -212,6 +230,12 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.4.1-alpha.1 release notes
+      url: /releases/v0.4.1-alpha.1.html
+    - title: Ravenroot 0.4.0-alpha.1 release notes
+      url: /releases/v0.4.0-alpha.1.html
+    - title: Ravenroot 0.3.0-alpha.1 release notes
+      url: /releases/v0.3.0-alpha.1.html
     - title: Ravenroot 0.2.0-alpha.1 release notes
       url: /releases/v0.2.0-alpha.1.html
     - title: Ravenroot 0.1.0-alpha.1 release notes

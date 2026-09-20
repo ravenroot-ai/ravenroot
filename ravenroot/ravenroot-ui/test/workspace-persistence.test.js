@@ -15,7 +15,15 @@ const graph = () => ({ format: 'graphml', sourceXml: '<graphml/>', nodes: [{ id:
   edges: [], nodeMap: { start: { id: 'start' } } });
 const document_ = (id, tenantId = 'tenant-a') => ({ documentId: id, tenantId, mode: 'draft',
   name: `${id}.graphml`, displayName: id, graph: graph(), renderMode: 'design', layoutMode: 'cyto',
-  visualStyle: 'cyto', fontSize: 20, provenance: { originMode: 'draft', sourceDocumentId: null,
+  designArrangement: 'keep', visualStyle: 'cyto', fontSize: 20,
+  monitoringForces: { repulsion: 640, attraction: .45, speed: .7 },
+  viewStates: {
+    design: { canvasState: { zoom: 2, pan: { x: 3, y: 4 }, positions: { start: { x: 8, y: 9 } } },
+      visualGroupState: {}, layoutMode: 'cyto' },
+    monitoring: { canvasState: { zoom: 1.5, pan: { x: 5, y: 6 }, positions: { start: { x: 20, y: 30 } } },
+      visualGroupState: {}, forces: { repulsion: 640, attraction: .45, speed: .7 }, layoutMode: 'elastic' },
+  },
+  provenance: { originMode: 'draft', sourceDocumentId: null,
     sourceGraphVersion: null, deploymentId: null }, execution: { executionId: 'never-store', client: {} },
   sourceSession: { sessionId: 'never-store' } });
 
@@ -33,6 +41,26 @@ describe('tenant workspace snapshot', () => {
     expect(snapshot.activeDocumentId).toBe('a');
     expect(JSON.stringify(snapshot)).not.toContain('never-store');
     expect(snapshot.documents[0].graph).not.toHaveProperty('nodeMap');
+  });
+
+  it('keeps live deployment attachments session-only without changing existing document persistence', () => {
+    const scope = workspaceScope('https://runtime.example', 'tenant-a');
+    const draft = document_('draft');
+    const graphify = document_('graphify');
+    graphify.graph = { format: 'graphify', sourceJson: '{}', nodes: [{ id: 'file' }], edges: [],
+      nodeMap: { file: { id: 'file' } } };
+    const deployment = { ...document_('live'), mode: 'deployed',
+      graph: { format: 'deployment', nodes: [{ id: 'start' }], edges: [],
+        nodeMap: { start: { id: 'start' } } } };
+
+    const snapshot = workspaceSnapshot(scope, [draft, deployment, graphify], 'live');
+
+    expect(snapshot.documents.map(item => item.documentId)).toEqual(['draft', 'graphify']);
+    expect(snapshot.activeDocumentId).toBe('graphify');
+    expect(() => persistedDocument(deployment)).toThrow(/session-only/);
+    expect(() => validateWorkspaceSnapshot({ ...snapshot,
+      documents: [...snapshot.documents, { ...snapshot.documents[0], documentId: 'stale-live',
+        mode: 'deployed', graph: deployment.graph }] }, scope)).toThrow(/session-only/);
   });
 
   it('resets runtime projections while preserving arbitrary authored property names and artifact identity', () => {
@@ -65,12 +93,27 @@ describe('tenant workspace snapshot', () => {
     expect(restored.documents.map(item => item.documentId)).toEqual(['a', 'b']);
     expect(restored.activeDocumentId).toBe('a');
     expect(restored.documents[0].graph.nodeMap.start.id).toBe('start');
-    expect(restored.documents[0].presentation).toMatchObject({ renderMode: 'design', layoutMode: 'cyto' });
+    expect(restored.documents[0].presentation).toMatchObject({
+      renderMode: 'design', layoutMode: 'cyto', designArrangement: 'keep',
+      monitoringForces: { repulsion: 640, attraction: .45, speed: .7 },
+      viewStates: { design: { canvasState: { zoom: 2 } }, monitoring: { canvasState: { zoom: 1.5 } } },
+    });
     expect(validateWorkspaceSnapshot({ ...snapshot, activeDocumentId: 'stale' }, scope))
       .toMatchObject({ activeDocumentId: 'b', recoveredStaleSelection: true });
     expect(() => validateWorkspaceSnapshot({ ...snapshot,
       documents: [{ ...snapshot.documents[0], tenantId: 'tenant-b' }] }, scope))
       .toThrow(/tenant or document identity isolation/);
+  });
+
+  it('retains the exact Design arrangement for a Graphify view without writing graph metadata', () => {
+    const source = document_('graphify');
+    source.graph = { format: 'graphify', sourceJson: '{}', nodes: [{ id: 'file' }], edges: [],
+      nodeMap: { file: { id: 'file' } } };
+    source.layoutMode = 'cose';
+    source.designArrangement = 'organic';
+    const stored = persistedDocument(source);
+    expect(stored.presentation).toMatchObject({ layoutMode: 'cose', designArrangement: 'organic' });
+    expect(stored.graph).not.toHaveProperty('graphProperties');
   });
 
   it('reports open and blocked storage failures without inventing a replacement database', async () => {

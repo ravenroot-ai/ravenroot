@@ -43,6 +43,7 @@ Detailed contract: [Agent authority](configuration.md#agent-authority-and-budget
 | `RAVENROOT_AGENT_RATE_CARD_VERSION` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AGENT_RUNTIME_INSTANCE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RUNNER_CONFIG` | unset disables the runner plane; otherwise an operator-owned JSON file path with protocol-v1 tenant policies, approved definitions, designated runners and artifact retention configuration; requires a durable store and restart |
 
 ## Authoring assistant
 
@@ -74,6 +75,37 @@ Detailed contract: [Bundle profile](bundles/).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
+| `RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_PROFILE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_LLM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_CONCURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_PROFILE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_SERVERS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_NAME_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AI_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CONSUMER_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_AMQP091_PROFILE_` | See the linked contract for exact type, default, and applicability. |
@@ -194,6 +226,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | See the linked contract for exact type, default, and applicability. |
@@ -207,6 +240,7 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |
@@ -386,6 +420,32 @@ Detailed contract: [Server lifecycle](configuration.md#server-process-and-readin
 | `RAVENROOT_SERVER_STOP_DELAY_SECONDS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_UI_DIR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_UNKNOWN_BEHAVIOR` | See the linked contract for exact type, default, and applicability. |
+
+## Governed runner coordination
+
+Detailed contract: [Governed runner coordination](../operator-guide/governed-runners.md#graph-lifecycle-and-independent-scaling).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_LOCAL_RUNNER_CONFIG` | unset disables the private supervised local worker; otherwise a closed operator JSON file for tenant local, approved registration, runtime images and budgets; no endpoint/token fields; requires exact 127.0.0.1 exposure, disabled local authentication and durable governed control plane |
+| `RAVENROOT_RUNNER_COORDINATOR_HTTP_QUEUE` | positive integer HTTP executor queue capacity; unset defaults to `64`; coordinator startup only, independent of worker queues |
+| `RAVENROOT_RUNNER_COORDINATOR_HTTP_THREADS` | positive integer HTTP executor threads; unset defaults to `16`; coordinator startup only, independent of worker job capacity |
+| `RAVENROOT_RUNNER_INSTANCE` | operator-supplied stable worker identity replaces `{instance}` in registration.runnerId and tokenFile; absent is valid only when neither field uses that placeholder |
+| `RAVENROOT_RUNNER_READINESS_FILE` | optional operator-owned expiring readiness file; native Helm managers use `/tmp/ravenroot-runner-ready`; positive preflight and current worker availability are required, and stale or absent files are not ready |
+| `RAVENROOT_RUNNER_SHARED_ARTIFACTS` | must equal `true` to attest one shared POSIX-locking artifact volume for the PostgreSQL runner-only coordinator topology; unset refuses that executable |
+
+## Native Agent attestation envelope
+
+Detailed contract: [Native Agent attestation envelope](../operator-guide/kubernetes-runners.md#attestation-environment).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_CPU_MILLICORES` | manager-generated positive CPU ceiling in millicores; cgroup enforcement must not exceed it |
+| `RAVENROOT_MEMORY_LIMIT_BYTES` | manager-generated positive memory ceiling in bytes; cgroup enforcement must not exceed it |
+| `RAVENROOT_NETWORK_CONTROL_HOST` | manager-resolved numeric address of the secretless TCP/9443 attestation control; required inside the native Agent |
+| `RAVENROOT_POD_UID` | manager-generated Downward API Pod UID; required inside the native Agent, never an operator authority override |
+| `RAVENROOT_PROCESS_LIMIT` | manager-generated positive process ceiling; the native PID boundary probe must fail within it |
+| `RAVENROOT_WORKSPACE_LIMIT_BYTES` | manager-generated positive Workspace storage ceiling in bytes; actual filesystem enforcement must be positively attested |
 
 ## Tool and approval policy
 

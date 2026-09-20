@@ -22,6 +22,7 @@ export const NODE_VISUAL_TYPES = Object.freeze([
   { type: 'agent', label: 'Agent' }, { type: 'flow', label: 'Flow' },
   { type: 'actor', label: 'Actor' }, { type: 'system', label: 'System' },
   { type: 'trace', label: 'Trace' }, { type: 'human-task', label: 'Human task' },
+  { type: 'workspace', label: 'Workspace' },
 ].map(Object.freeze));
 
 const NODE_VISUAL_TYPE_NAMES = new Set(NODE_VISUAL_TYPES.map(entry => entry.type));
@@ -91,6 +92,7 @@ export const JOIN_QUORUM_PROPERTY = 'joinQuorum';
 export const JOIN_TIMEOUT_PROPERTY = 'joinTimeout';
 export const GRAPH_RENDER_MODE_PROPERTY = 'ravenroot.renderMode';
 export const GRAPH_LAYOUT_MODE_PROPERTY = 'ravenroot.layoutMode';
+export const GRAPH_DESIGN_ARRANGEMENT_PROPERTY = 'ravenroot.designArrangement';
 // The legacy state-machine merge policy (JoinSemantics#EACH_POLICY): legal, and this editor's own
 // serializeGraphML stamps it on EVERY SAVE of a legacy state-machine fan-in below -- not only while
 // migrating one, and not only once. "Migrating" and "saving" are two different events (a save with
@@ -316,11 +318,15 @@ export function createWorkflowDocument() {
   };
 }
 
-export function setGraphPresentation(graph, { renderMode, layoutMode } = {}) {
+export function setGraphPresentation(graph, { renderMode, layoutMode, designArrangement } = {}) {
   if (!graph || typeof graph !== 'object') return graph;
   graph.graphProperties = { ...(graph.graphProperties || {}) };
   if (renderMode != null) graph.graphProperties[GRAPH_RENDER_MODE_PROPERTY] = String(renderMode);
   if (layoutMode != null) graph.graphProperties[GRAPH_LAYOUT_MODE_PROPERTY] = String(layoutMode);
+  if (designArrangement !== undefined) {
+    if (designArrangement == null) delete graph.graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY];
+    else graph.graphProperties[GRAPH_DESIGN_ARRANGEMENT_PROPERTY] = String(designArrangement);
+  }
   return graph;
 }
 
@@ -802,15 +808,21 @@ export function serializeGraphML(graph) {
   // A graph-level <data> is written as the first child of <graph>, before the nodes and
   // edges. GraphML's content model does not order them, but every reader and every diff in this
   // repository reads the document top-down, and a statement about the whole graph buried after two
-  // hundred nodes is one nobody finds. Never removes or overwrites a value the opened document
-  // already carried: the marker is stamped by whoever created the document, and a save is not a
-  // migration.
-  function setGraphProperty(name, value) {
+  // hundred nodes is one nobody finds. Ordinary properties are never removed or overwritten: the
+  // marker is stamped by whoever created the document, and a save is not a migration. The two
+  // editor-owned presentation keys opt into replacement because changing them is the save action.
+  function setGraphProperty(name, value, { replace = false } = {}) {
     const keyId = ensureKey('graph', name);
     const existing = Array.from(graphElement.children)
       .find(child => child.localName === 'data' && child.namespaceURI === namespace
         && child.getAttribute('key') === keyId);
-    if (existing) return;
+    if (existing) {
+      if (!replace || existing.children.length > 0
+        || existing.textContent.trim() === String(value).trim()) return;
+      while (existing.firstChild) existing.removeChild(existing.firstChild);
+      existing.appendChild(doc.createTextNode(String(value)));
+      return;
+    }
     const data = doc.createElementNS(namespace, 'data');
     data.setAttribute('key', keyId);
     data.appendChild(doc.createTextNode(String(value)));
@@ -858,7 +870,13 @@ export function serializeGraphML(graph) {
   }
   Object.entries(graph.graphProperties || {}).forEach(([name, value]) => {
     if (name === VISUAL_GROUPS_PROPERTY) return;
-    if (value != null && value !== '') setGraphProperty(name, value);
+    if (value != null && value !== '') setGraphProperty(name, value, {
+      // These keys are editor-owned mutable view state. Ordinary graph properties still retain
+      // their source value verbatim, but changing Render or Arrange must replace the previous saved
+      // choice instead of leaving the first value permanently frozen in sourceXml.
+      replace: name === GRAPH_RENDER_MODE_PROPERTY || name === GRAPH_LAYOUT_MODE_PROPERTY
+        || name === GRAPH_DESIGN_ARRANGEMENT_PROPERTY,
+    });
   });
 
   function findById(localName, id) {

@@ -35,6 +35,26 @@ Behavior-specific properties such as `template`, `durationMs`, or `path` are def
 
 A graph contains exactly one `START`, exactly one `END`, and no more than one `ERROR`. Every edge source and target resolves to a declared node. The validator also checks behavior discovery and routing structure before execution is accepted.
 
+## Explicit Workspace references
+
+With the governed runner plane enabled, `behavior=workspace` declares a lifecycle resource.
+An `agent` node may name its node ID in `workspaceRef`, declared as a node-scoped string GraphML key
+but typed as `WORKSPACE_REFERENCE` in the runtime catalog. Missing, cross-graph and non-Workspace
+targets are refused; duplicate node IDs remain invalid. A profile/definition selector never grants
+approval or tenant authority, and runtime admission checks the pinned approved versions.
+
+`agentDefinition` selects the versioned governed Agent; `agentVersion` defaults to 1. Without a
+`workspaceRef`, a named definition uses the ordinary bounded managed AI path. An Agent with neither
+selector retains its existing bundle behavior. No `workspace-agent` alias exists.
+
+Declare `command` on each call/return edge explicitly. For example, `answered` from Polaris can
+route to Betelgeuse with `command=resume`; the return does not inherit the caller's command.
+Workspace scope and runtime lifecycle are independent approved-profile choices. GraphML cannot
+select an image, host directory, credential, socket or arbitrary placement host. The
+[minimal team](../examples/governed-runner/three-agents.graphml) and
+[development cycle](../examples/governed-runner/development-cycle.graphml) are complete validated
+examples; see the [descriptor contract](node-contracts.md#governed-workspace-and-named-agent-variant).
+
 ## Preservation and export
 
 Original bytes are authoritative. Unknown keys, data, and extensions are retained for an unmodified round trip. A mutation after import invalidates byte-exact preservation; export refuses instead of emitting a lossy document under a preservation claim.
@@ -75,5 +95,9 @@ repair command. The runtime treats the property as scalar graph metadata.
 ## Validation interface
 
 `ravenroot validate graph.graphml` exits 0 for acceptance, 1 for a refused or invalid document, and 2 for CLI misuse. The HTTP inspection surface is `POST /v1/graphs/inspect`.
+
+`ravenroot validate --register-machine graph.graphml` performs the same ingest first, then applies
+the explicit [Register Machine Profile v1](register-machine-profile.md) static validator. Profile
+warnings do not change exit 0; profile errors return exit 1. No profile marker is added to GraphML.
 
 See [Graph semantics](../architecture/graph-semantics.md) for lifecycle invariants and [Graph validation](../troubleshooting/graph-execution.md) for recovery.

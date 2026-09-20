@@ -2,6 +2,8 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ApplicationStatus;
 import ai.ravenroot.api.application.DurableExecutionEvent;
+import ai.ravenroot.api.application.DeploymentEventBatch;
+import ai.ravenroot.api.application.DeploymentViewerView;
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
@@ -51,6 +53,9 @@ import ai.ravenroot.api.programming.ProgramRequest;
 import ai.ravenroot.api.programming.ProgramRuntime;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphVersionSnapshot;
+import ai.ravenroot.core.embed.EmbedSnapshotProjector;
+import ai.ravenroot.api.embed.EmbedProjectionBudget;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -1493,7 +1498,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     if (terminalFailure instanceof
                             ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
                             || terminalFailure instanceof
-                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
+                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension
+                            || terminalFailure instanceof ai.ravenroot.core.runner.RunnerJobSuspension) {
                         // The durable aggregate is WAITING. It is neither a failed result nor live
                         // in-memory work; the handler-trigger path creates the fresh traversal.
                     } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
@@ -1555,7 +1561,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 if (agentBudgets != null && !(terminalFailure instanceof
                         ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension)
                         && !(terminalFailure instanceof
-                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension)) {
+                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension)
+                        && !(terminalFailure instanceof ai.ravenroot.core.runner.RunnerJobSuspension)) {
                     cleanupFailure = cleanup(cleanupFailure, () -> agentBudgets.finishProcess(
                             new ai.ravenroot.api.persistence.ExecutionKey(
                                     security.tenantId(), processInstanceId),
@@ -1888,6 +1895,21 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         active.runner.cancelTraversal(traversalId);
         Thread.startVirtualThread(active::close);
         return true;
+    }
+
+    @Override
+    public int stopProcessInvocations(String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        int stopped = 0;
+        for (var entry : activeExecutions.entrySet()) {
+            ActiveExecution active = entry.getValue();
+            if (!tenantId.equals(active.tenantId) || !processInstanceId.equals(active.processInstanceId)
+                    || !activeExecutions.remove(entry.getKey(), active)) continue;
+            stopped++;
+            Thread.startVirtualThread(active::close);
+        }
+        return stopped;
     }
 
     /**
@@ -2484,7 +2506,40 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // working registration. A count of zero is not an error on this surface, which admits
         // source-less graphs; it is only an error for a source session.
         int sourceCount = inspectEffectiveSources(graphBytes);
-        return localDeploymentStatus(key.deploymentId(), register(key, graphBytes, sourceCount).record());
+        Registration registration = register(key, graphBytes, sourceCount,
+                DeploymentId.of(key.deploymentId()));
+        bindLifecycleIdentity(registration.record(), security);
+        return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    /**
+     * Registers the caller-facing local alias against a separately minted durable lifecycle id.
+     *
+     * <p>This composition seam keeps the local HTTP name stable while ensuring executions, Human
+     * Tasks, and {@link #localDeploymentTargets()} all carry the registry's opaque identity. The
+     * durable authority must create or replay {@code lifecycleId} before calling this method.</p>
+     */
+    public LocalDeploymentStatus registerDurableLocalDeployment(SecurityContext security,
+                                                                 String deploymentId,
+                                                                 DeploymentId lifecycleId,
+                                                                 InputStream graphMl) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(lifecycleId, "lifecycleId");
+        java.util.Objects.requireNonNull(graphMl, "graphMl");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()),
+                requireLocalDeploymentId(deploymentId));
+        byte[] graphBytes = readGraphMlBytes(graphMl);
+        int sourceCount = inspectEffectiveSources(graphBytes);
+        Registration registration = register(key, graphBytes, sourceCount, lifecycleId);
+        bindLifecycleIdentity(registration.record(), security);
+        return localDeploymentStatus(key.deploymentId(), registration.record());
+    }
+
+    private void bindLifecycleIdentity(LocalDeploymentRecord record, SecurityContext security) {
+        GraphDeployment deployment = deployments.get(record.engineId());
+        if (deployment instanceof DefaultGraphDeployment hosted) {
+            hosted.bindLifecycleIdentity(security);
+        }
     }
 
     /**
@@ -2514,8 +2569,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return (tenantId, deploymentId) -> {
             java.util.Objects.requireNonNull(tenantId, "tenantId");
             java.util.Objects.requireNonNull(deploymentId, "deploymentId");
-            LocalDeploymentRecord record =
-                    localDeployments.get(new LocalDeploymentKey(requireTenant(tenantId), deploymentId.value()));
+            String tenant = requireTenant(tenantId);
+            LocalDeploymentRecord record = localDeployments.entrySet().stream()
+                    .filter(entry -> entry.getKey().tenantId().equals(tenant)
+                            && entry.getValue().lifecycleId().equals(deploymentId))
+                    .map(java.util.Map.Entry::getValue)
+                    .findFirst().orElse(null);
             if (record == null) {
                 return java.util.Optional.empty();
             }
@@ -2540,6 +2599,86 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
         return java.util.Optional.ofNullable(localDeployments.get(key))
                 .map(record -> localDeploymentStatus(key.deploymentId(), record));
+    }
+
+    @Override
+    public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            var definition = record.deployment().immutableDefinition().orElse(null);
+            if (definition == null) return java.util.Optional.empty();
+            String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
+            var projection = EmbedSnapshotProjector.projectDefinition(definition, deploymentId,
+                    record.deployment().graphVersion(), digest, EmbedProjectionBudget.DEFAULTS);
+            return java.util.Optional.of(new DeploymentViewerView(DeploymentViewerView.CURRENT_SOURCE_VERSION,
+                    DeploymentViewerView.Source.deployment(deploymentId,
+                            record.deployment().incarnationId(), record.deployment().graphVersion()),
+                    localDeploymentStatus(deploymentId, record).state(), digest, projection));
+        } catch (RuntimeException unprojectable) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    @Override
+    public DeploymentEventBatch localDeploymentEventsAfter(String tenantId, String deploymentId,
+                                                             String incarnationId, String graphVersion,
+                                                             long sequence) {
+        if (sequence < 0) throw new IllegalArgumentException("sequence must not be negative");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()) {
+            return DeploymentEventBatch.unavailable(DeploymentEventBatch.Status.UNAVAILABLE);
+        }
+        if (!record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return DeploymentEventBatch.unavailable(DeploymentEventBatch.Status.SOURCE_CHANGED);
+        }
+        var floor = monitor.oldestRetainedSequence();
+        if (sequence > 0 && floor.isPresent() && sequence < floor.getAsLong() - 1) {
+            return new DeploymentEventBatch(DeploymentEventBatch.Status.GAP, List.of(),
+                    floor.getAsLong(), floor.getAsLong());
+        }
+        List<ExecutionEvent> retained = monitor.eventsAfter(sequence);
+        long latest = retained.isEmpty() ? sequence : retained.getLast().sequence();
+        List<ExecutionEvent> filtered = retained.stream()
+                .filter(event -> tenantId.equals(event.tenantId()))
+                .filter(event -> record.lifecycleId().value().equals(event.deploymentId()))
+                .filter(event -> graphVersion.equals(event.graphVersion()))
+                .toList();
+        return new DeploymentEventBatch(DeploymentEventBatch.Status.AVAILABLE, filtered,
+                floor.orElse(0), latest);
+    }
+
+    @Override
+    public AutoCloseable subscribeToLocalDeploymentEvents(String tenantId, String deploymentId,
+                                                           String incarnationId, String graphVersion,
+                                                           Consumer<ExecutionEvent> listener) {
+        java.util.Objects.requireNonNull(listener, "listener");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return () -> { };
+        }
+        // Every predicate executes synchronously in the runtime publisher, before listener reaches
+        // an adapter queue. This is the isolation boundary, not a browser-side convenience filter.
+        return monitor.subscribe(event -> {
+            LocalDeploymentRecord current = localDeployments.get(key);
+            if (current == record
+                    && deployments.get(record.engineId()) == record.deployment()
+                    && record.deployment().incarnationId().equals(incarnationId)
+                    && record.deployment().graphVersion().equals(graphVersion)
+                    && tenantId.equals(event.tenantId())
+                    && record.lifecycleId().value().equals(event.deploymentId())
+                    && graphVersion.equals(event.graphVersion())) {
+                listener.accept(event);
+            }
+        });
     }
 
     @Override
@@ -2648,6 +2787,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * silently bringing it back.</p>
      */
     private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount) {
+        return register(key, graphBytes, sourceCount, DeploymentId.of(key.deploymentId()));
+    }
+
+    private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount,
+                                  DeploymentId lifecycleId) {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
@@ -2660,6 +2804,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 if (!existing.graphHash().equals(graphHash)) {
                     throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
                 }
+                if (!existing.lifecycleId().equals(lifecycleId)) {
+                    throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
+                }
                 return new Registration(existing, false);
             }
             DeploymentId engineId = localDeploymentId(key);
@@ -2669,8 +2816,10 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // behavior: its start path refuses on the *active* count, so a tenant whose sessions are all stopped
             // could always start another, and a per-record cap would have started answering 429 there.
             // A published route's limits are not something to tighten as a side effect.
-            var created = new LocalDeploymentRecord(graphHash, engineId, sourceCount);
-            registerDeployment(engineId, graphBytes, key.deploymentId());
+            var deployment = (DefaultGraphDeployment) registerDeployment(
+                    engineId, graphBytes, lifecycleId.value());
+            var created = new LocalDeploymentRecord(
+                    graphHash, engineId, lifecycleId, sourceCount, deployment);
             localDeployments.put(key, created);
             return new Registration(created, true);
         }
@@ -2936,7 +3085,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         }
     }
 
-    private record LocalDeploymentRecord(String graphHash, DeploymentId engineId, int sourceCount) { }
+    private record LocalDeploymentRecord(String graphHash, DeploymentId engineId,
+                                         DeploymentId lifecycleId, int sourceCount,
+                                         DefaultGraphDeployment deployment) { }
 
     /** A registration plus whether this call is the one that created it. */
     private record Registration(LocalDeploymentRecord record, boolean created) { }

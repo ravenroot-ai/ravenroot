@@ -30,7 +30,7 @@ describe('application command catalog', () => {
     const context = {
       hasDocument: true, editable: true, documentEditable: true, tenantAuthority: true,
       canModify: true, modifyEnabled: true,
-      documentMode: 'draft',
+      documentMode: 'draft', documentFormat: 'graphml',
       layoutBusy: false,
       connectArmed: true, hasSelection: true, layoutMode: 'cyto', renderMode: 'design', running: false,
       canUndo: true, canRedo: false, hasToken: true, leftCollapsed: false, rightCollapsed: true,
@@ -44,6 +44,8 @@ describe('application command catalog', () => {
       .toBe(true);
     expect(byId['file.fork'].isEnabled(context)).toBe(false);
     expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false, documentMode: 'test' })).toBe(true);
+    expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false,
+      documentMode: 'deployed', documentFormat: 'deployment' })).toBe(false);
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: true, documentMode: 'test' }))
       .toBe(false);
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false, documentMode: 'deployed' }))
@@ -173,13 +175,19 @@ describe('application command catalog', () => {
     })).map(command => command.id)).toEqual(['layout.design']);
     expect(byId['layout.monitoring'].isChecked({ hasDocument: false, renderMode: 'monitoring' }))
       .toBe(false);
-    expect(byId['layout.design'].help).toMatch(/Arrange every node/);
+    expect(byId['layout.design'].help).toMatch(/Restore the saved Design view/);
+    expect(byId['layout.render']).toMatchObject({ label: 'Render' });
+    expect(byId['layout.render']).not.toHaveProperty('kind');
+    expect(byId['layout.render'].placements).toEqual(expect.arrayContaining(['menu.layout', 'toolbar.layout']));
 
     const setRenderMode = vi.fn();
-    const spied = Object.fromEntries(createAppCommands({ setRenderMode }).map(command => [command.id, command]));
+    const render = vi.fn();
+    const spied = Object.fromEntries(createAppCommands({ setRenderMode, render }).map(command => [command.id, command]));
     spied['layout.design'].execute();
     spied['layout.monitoring'].execute();
+    spied['layout.render'].execute();
     expect(setRenderMode.mock.calls).toEqual([['design'], ['monitoring']]);
+    expect(render).toHaveBeenCalledOnce();
   });
 
   it('adds the layered arrangements as a sibling group after the established four', () => {
@@ -196,7 +204,7 @@ describe('application command catalog', () => {
     ]);
     expect(Math.min(...layered.map(command => command.order)))
       .toBeGreaterThan(Math.max(...established.map(command => command.order)));
-    expect(layered.every(command => command.kind == null
+    expect(layered.every(command => command.kind === 'radio'
       && command.placements.includes('menu.layout') && command.placements.includes('help'))).toBe(true);
     expect(layered.every(command => command.isEnabled({ hasDocument: true, renderMode: 'design' }))).toBe(true);
     expect(layered.some(command => command.isEnabled({ hasDocument: true, renderMode: 'monitoring' }))).toBe(false);
@@ -219,7 +227,7 @@ describe('application command catalog', () => {
     expect(arrangeCommands.map(command => command.label)).toEqual([
       'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
     ]);
-    expect(arrangeCommands.every(command => command.kind == null
+    expect(arrangeCommands.every(command => command.kind === 'radio'
       && command.placements.includes('menu.layout')
       && command.placements.includes('help'))).toBe(true);
     expect(arrangeCommands.every(command => command.isEnabled({
@@ -232,6 +240,12 @@ describe('application command catalog', () => {
       hasDocument: false, renderMode: 'design',
     }))).toBe(false);
     expect(byId['layout.arrange.keep'].help).toMatch(/fit the graph/i);
+    expect(byId['layout.arrange.flow'].isChecked({
+      hasDocument: true, renderMode: 'design', designArrangement: 'flow',
+    })).toBe(true);
+    expect(byId['layout.arrange.flow'].isChecked({
+      hasDocument: true, renderMode: 'monitoring', designArrangement: 'flow',
+    })).toBe(true);
 
     const arrange = vi.fn();
     const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));

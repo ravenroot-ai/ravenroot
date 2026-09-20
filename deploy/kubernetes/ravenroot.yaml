@@ -167,6 +167,10 @@ spec:
               value: ""
             - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
               value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_REVIEW_TEXT_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_REVIEW_TEXT_BYTES
+              value: ""
             - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
               value: ""
             - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
@@ -183,6 +187,68 @@ spec:
               value: ""
             - name: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS
               value: ""
+            - name: RAVENROOT_AI_DEFAULT_MAX_TURNS
+              value: " "
+            - name: RAVENROOT_AI_MAX_TURNS
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_SERVERS
+              value: " "
+            - name: RAVENROOT_AI_MAX_SKILL_PAYLOAD_BYTES
+              value: " "
+            - name: RAVENROOT_AI_MAX_SKILL_NAME_CHARS
+              value: " "
+            - name: RAVENROOT_AI_MAX_SKILL_DESCRIPTION_CHARS
+              value: " "
+            - name: RAVENROOT_AI_MAX_SKILL_INSTRUCTIONS_CHARS
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER
+              value: " "
+            - name: RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER
+              value: " "
+            - name: RAVENROOT_AI_MAX_LLM_PROFILE_BYTES
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_PROFILE_BYTES
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_LLM_TIMEOUT_MS
+              value: " "
+            - name: RAVENROOT_AI_MAX_LLM_TIMEOUT_MS
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_MCP_TIMEOUT_MS
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_TIMEOUT_MS
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_LLM_REQUEST_BYTES
+              value: " "
+            - name: RAVENROOT_AI_MAX_LLM_REQUEST_BYTES
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_LLM_RESPONSE_BYTES
+              value: " "
+            - name: RAVENROOT_AI_MAX_LLM_RESPONSE_BYTES
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_MCP_REQUEST_BYTES
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_REQUEST_BYTES
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_MCP_RESPONSE_BYTES
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_RESPONSE_BYTES
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_LLM_CONCURRENCY
+              value: " "
+            - name: RAVENROOT_AI_MAX_LLM_CONCURRENCY
+              value: " "
+            - name: RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY
+              value: " "
+            - name: RAVENROOT_AI_MAX_MCP_CONCURRENCY
+              value: " "
+            - name: RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS
+              value: " "
+            - name: RAVENROOT_AI_MAX_HTTP_DECOMPRESSION_RATIO
+              value: " "
+            - name: RAVENROOT_AI_MAX_MODEL_INPUT_PROVENANCE_ENTRIES
+              value: " "
             # Empty rate-limit values select the Java-owned defaults. Overlays provide quoted
             # integers; sibling relationships are validated together at server startup.
             - name: RAVENROOT_RATELIMIT_ADDRESS_RPS

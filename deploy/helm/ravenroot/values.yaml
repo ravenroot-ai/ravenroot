@@ -2,6 +2,34 @@
 # solely for Minikube after `minikube image load ravenroot:local`.
 replicaCount: 1
 
+# General authoring-server replication remains guarded. Runner coordinators and stable worker
+# pools are separate workloads; their replica counts never derive from replicaCount.
+runnerPlane:
+  enabled: false
+  configMap: ""
+  sharedEnvironmentSecret: ""
+  artifactClaim: ""
+  coordinatorReplicas: 2
+  coordinatorPort: 8080
+  coordinatorHttpThreads: 16
+  coordinatorHttpQueue: 64
+  coordinatorResources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  workerPools: []
+# Each pool: name, driver (docker or kubernetes), replicas, image (immutable digest), configMap,
+# identitySecret, modelSecret, nodeSelector, stateSize, storageClass,
+# resources. worker.json uses registration.runnerId="{instance}" and
+# tokenFile="/run/identities/{instance}". Secret keys and approved worker IDs equal pod names.
+# Docker pools require socketHostPath on dedicated quota-attested Linux hosts. Kubernetes pools
+# forbid socketHostPath and require the closed kubernetes namespace/admission/quota configuration.
+# See docs/examples/governed-runner/kubernetes-values.yaml. Workload namespaces are retained on
+# uninstall so Helm cannot erase evidence still owned by Ravenroot.
+
 image:
   repository: ravenroot
   tag: local
@@ -63,6 +91,40 @@ graph:
     maxCumulativePayloadBytes: ""
     maxRecoveryDeliveriesPerAttempt: ""
 
+# AI bundle defaults and admission ceilings. Blank values select the immutable Java defaults.
+ai:
+  defaultMaxTurns: ""
+  maxTurns: ""
+  maxMcpServers: ""
+  maxSkillPayloadBytes: ""
+  maxSkillNameChars: ""
+  maxSkillDescriptionChars: ""
+  maxSkillInstructionsChars: ""
+  maxMcpToolsPerServer: ""
+  defaultMaxDiscoveredMcpToolsPerServer: ""
+  maxDiscoveredMcpToolsPerServer: ""
+  maxLlmProfileBytes: ""
+  maxMcpProfileBytes: ""
+  defaultLlmTimeoutMs: ""
+  maxLlmTimeoutMs: ""
+  defaultMcpTimeoutMs: ""
+  maxMcpTimeoutMs: ""
+  defaultLlmRequestBytes: ""
+  maxLlmRequestBytes: ""
+  defaultLlmResponseBytes: ""
+  maxLlmResponseBytes: ""
+  defaultMcpRequestBytes: ""
+  maxMcpRequestBytes: ""
+  defaultMcpResponseBytes: ""
+  maxMcpResponseBytes: ""
+  defaultLlmConcurrency: ""
+  maxLlmConcurrency: ""
+  defaultMcpConcurrency: ""
+  maxMcpConcurrency: ""
+  maxSystemPreambleChars: ""
+  maxHttpDecompressionRatio: ""
+  maxModelInputProvenanceEntries: ""
+
 # Human Task operational policy. These values become environment variables in the pod and are read
 # once at startup. The chart intentionally carries no numeric defaults: an empty or whitespace-only
 # string makes the server resolve the documented Java-owned default, while an overlay may set a
@@ -90,6 +152,8 @@ humanTask:
   writeAttempts: ""
   maxConfirmationPromptBytes: ""
   maxConfirmationActionLabelBytes: ""
+  defaultReviewTextBytes: ""
+  maxReviewTextBytes: ""
   maxDecisionCommentBytes: ""
   attentionPollMillis: ""
   attentionPollBackoffMaxMillis: ""

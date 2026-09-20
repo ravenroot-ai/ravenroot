@@ -1,0 +1,57 @@
+services:
+  ravenroot:
+    environment:
+      RAVENROOT_AUTH_MODE: oidc
+      RAVENROOT_AUTH_ISSUER: ${RAVENROOT_AUTH_ISSUER:?set the operator-managed issuer}
+      RAVENROOT_AUTH_AUDIENCE: ${RAVENROOT_AUTH_AUDIENCE:?set the service audience}
+      RAVENROOT_RUNNER_CONFIG: /etc/ravenroot/runner-plane.json
+    volumes:
+      - type: bind
+        source: ${RAVENROOT_RUNNER_CONFIG_FILE:?set an operator-owned configuration file}
+        target: /etc/ravenroot/runner-plane.json
+        read_only: true
+# Keep artifactDirectory under /opt/ravenroot/data/runner-artifacts in the mounted file.
+# The base Compose data volume owns that directory; it is never mounted into a job container.
+  worker-a:
+    image: ${RAVENROOT_WORKER_IMAGE:?set the approved Worker.Dockerfile image digest}
+    restart: unless-stopped
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    env_file: ["${RAVENROOT_WORKER_MODEL_ENV_FILE:?set an operator-owned model credential environment file}"]
+    group_add: ["${RAVENROOT_DOCKER_SOCKET_GID:?set the dedicated daemon socket group}"]
+    depends_on:
+      ravenroot:
+        condition: service_healthy
+    environment:
+      RAVENROOT_RUNNER_INSTANCE: worker-a
+    volumes:
+      - ${RAVENROOT_WORKER_A_CONFIG:?set worker-a operator JSON}:/etc/ravenroot/worker.json:ro
+      - ${RAVENROOT_WORKER_A_TOKEN:?set worker-a owner-only workload token file}:/run/secrets/runner-token:ro
+      - ${RAVENROOT_DOCKER_SOCKET:?set a dedicated quota-attested daemon socket}:/var/run/docker.sock
+      - runner-worker-a:/var/lib/ravenroot-runner
+    tmpfs: [/tmp]
+  worker-b:
+    image: ${RAVENROOT_WORKER_IMAGE:?set the approved Worker.Dockerfile image digest}
+    restart: unless-stopped
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    env_file: ["${RAVENROOT_WORKER_MODEL_ENV_FILE:?set an operator-owned model credential environment file}"]
+    group_add: ["${RAVENROOT_DOCKER_SOCKET_GID:?set the dedicated daemon socket group}"]
+    depends_on:
+      ravenroot:
+        condition: service_healthy
+    environment:
+      RAVENROOT_RUNNER_INSTANCE: worker-b
+    volumes:
+      - ${RAVENROOT_WORKER_B_CONFIG:?set worker-b operator JSON}:/etc/ravenroot/worker.json:ro
+      - ${RAVENROOT_WORKER_B_TOKEN:?set worker-b owner-only workload token file}:/run/secrets/runner-token:ro
+      - ${RAVENROOT_DOCKER_SOCKET:?set a dedicated quota-attested daemon socket}:/var/run/docker.sock
+      - runner-worker-b:/var/lib/ravenroot-runner
+    tmpfs: [/tmp]
+volumes:
+  runner-worker-a: {}
+  runner-worker-b: {}
+# Only the authority-bearing supervisor sees the dedicated Docker socket; Workspace containers
+# never receive it. Configure each JSON endpoint as the TLS origin exposed by the deployment.

@@ -1,15 +1,17 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyGroupDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
-import ai.ravenroot.api.catalog.PropertyCondition;
 import ai.ravenroot.api.node.NodeConfiguration;
 
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * One skill declared by the author of a graph: a name, a short description, and a body of
@@ -34,16 +36,15 @@ import java.util.Set;
  * form buys is paid by the person least able to afford it, and one misplaced quote invalidates every
  * skill on the node at once instead of one field.</p>
  *
- * <p>The usual objection to numbered slots — a form cluttered with empty fields — does not apply
- * here, because {@code visibleWhen} already solves it: slot {@code n} is declared visible only
- * when slot {@code n-1} carries a name, so an agent node shows one empty skill and reveals the next
- * as each is filled. The editor's own disclosure is then the same idea as the feature's.</p>
+ * <p>The descriptor publishes the triple as a trusted dynamic additional-property group rather than
+ * enumerating a finite number of slots. An editor can therefore add and remove complete items
+ * without a baked-in count, while the runtime still type-checks every materialized field.</p>
  *
  * <h2>Slots are filled from one upward, with no gaps</h2>
  * <p>A hand-written graph could declare slot 3 while leaving slot 1 blank. That is refused rather
- * than compacted. Compacting would run a skill the Inspector cannot show — slot 3's controls stay
- * {@code hidden} while slot 1 is blank — and an active declaration the author cannot review is the
- * failure mode to avoid. Refusing costs a hand-writer one renumber;
+ * than compacted. Compacting would make stored identity depend on which items happen to be absent
+ * and could execute a declaration under an index different from the one an author reviewed.
+ * Refusing costs a hand-writer one renumber;
  * compacting costs every author the possibility of an active skill they cannot see.</p>
  *
  * @param name what the model passes to {@code load_skill}; matched case-insensitively
@@ -51,26 +52,6 @@ import java.util.Set;
  * @param instructions the body, handed over only on request
  */
 record AgentSkill(String name, String description, String instructions) {
-
-    /**
-     * Slots an author may declare.
-     *
-     * <p>Small on purpose, and the bound is load-bearing rather than cosmetic: together with
-     * {@link LoadSkillTool}'s no-duplicate rule it caps the body text one run can pull into its
-     * conversation at {@code MAX_SKILLS × MAX_INSTRUCTIONS_CHARS}, without depending on the endpoint
-     * reporting token usage. A node that wants more skills than this is describing a library, and a
-     * library requires a shared-skill surface that this bundle does not provide.</p>
-     */
-    static final int MAX_SKILLS = 8;
-
-    /** A name the model has to reproduce exactly enough to be matched. Long names invite typos. */
-    static final int MAX_NAME_CHARS = 64;
-
-    /** A description is the one line that is paid for on every single turn. */
-    static final int MAX_DESCRIPTION_CHARS = 512;
-
-    /** A body is paid for once, from the turn it is loaded onward. */
-    static final int MAX_INSTRUCTIONS_CHARS = 16_384;
 
     /** The property an author writes a skill's name into. */
     static String nameProperty(int slot) {
@@ -87,50 +68,18 @@ record AgentSkill(String name, String description, String instructions) {
         return "skills." + slot + ".instructions";
     }
 
-    /**
-     * The catalog properties for every slot, in order, for {@link AgentNodeBehavior#descriptor()}.
-     *
-     * <p>Built here rather than spelled out on the descriptor so the property names, the reader in
-     * {@link #declaredOn} and the Inspector's controls cannot drift apart: there is one spelling of
-     * {@code skills.<n>.name} in this bundle and every consumer goes through it.</p>
-     */
-    static List<NodePropertyDescriptor> propertyDescriptors() {
-        var declared = new ArrayList<NodePropertyDescriptor>(MAX_SKILLS * 3);
-        for (int slot = 1; slot <= MAX_SKILLS; slot++) {
-            // Slot 1 is unconditional; every later slot appears once the previous one is named. The
-            // chain is acyclic and never self-referential, which is what NodeTypeDescriptorValidator
-            // checks -- and it is a chain rather than "visible when any earlier slot is named"
-            // because a PropertyCondition names exactly one sibling, by design.
-            PropertyCondition visibleWhen = slot == 1
-                    ? null
-                    : PropertyCondition.present(nameProperty(slot - 1));
-            declared.add(optional(nameProperty(slot), "Skill " + slot + " name", NodePropertyType.STRING,
-                    "What the model passes to load_skill to read this skill. Matched ignoring case. "
-                            + "At most " + MAX_NAME_CHARS + " characters.",
-                    visibleWhen));
-            declared.add(optional(descriptionProperty(slot), "Skill " + slot + " description",
-                    NodePropertyType.STRING,
-                    "One line telling the model when this skill is worth loading. Shown on every "
-                            + "turn, so keep it short. At most " + MAX_DESCRIPTION_CHARS
-                            + " characters.",
-                    visibleWhen));
-            declared.add(optional(instructionsProperty(slot), "Skill " + slot + " instructions",
-                    NodePropertyType.TEXT,
-                    "The body. Sent only when the model calls load_skill for this name, and never "
-                            + "before. It grants no tool and no authority. At most "
-                            + MAX_INSTRUCTIONS_CHARS + " characters.",
-                    visibleWhen));
-        }
-        return List.copyOf(declared);
-    }
-
-    private static NodePropertyDescriptor optional(String name, String displayName, NodePropertyType type,
-                                                   String description, PropertyCondition visibleWhen) {
-        // The full canonical constructor because the `optional` factory takes no condition. Never
-        // `requiredWhen`: a skill is optional in every state, so the required-implies-visible rule
-        // has nothing to check and the conditionally-required-with-a-default rule cannot be tripped.
-        return new NodePropertyDescriptor(name, displayName, type, false, description, "", List.of(),
-                false, visibleWhen, null);
+    /** Trusted dynamic descriptor for complete numbered skill triples. */
+    static NodePropertyGroupDescriptor propertyGroup() {
+        return new NodePropertyGroupDescriptor("skills", "Skill",
+                "An ordered collection of complete name, description, and instructions groups. "
+                        + "The executing runtime applies its configured payload ceilings.",
+                List.of(
+                        NodePropertyDescriptor.required("name", "Name", NodePropertyType.STRING,
+                                "Name passed to load_skill; matched ignoring case."),
+                        NodePropertyDescriptor.required("description", "Description", NodePropertyType.STRING,
+                                "One line telling the model when the skill is worth loading."),
+                        NodePropertyDescriptor.required("instructions", "Instructions", NodePropertyType.TEXT,
+                                "Body returned only when the model calls load_skill.")));
     }
 
     /**
@@ -153,32 +102,54 @@ record AgentSkill(String name, String description, String instructions) {
      *     at fault
      */
     static List<AgentSkill> declaredOn(NodeConfiguration configuration) {
+        return declaredOn(configuration, AgentOperationalConfiguration.defaults());
+    }
+
+    static List<AgentSkill> declaredOn(NodeConfiguration configuration,
+                                       AgentOperationalConfiguration policy) {
         String nodeId = configuration.nodeId();
-        var skills = new ArrayList<AgentSkill>();
+        Map<Integer, Map<String, String>> items = new TreeMap<>();
+        for (var property : configuration.properties().entrySet()) {
+            AgentSkill.propertyGroup().match(property.getKey()).ifPresent(match ->
+                    items.computeIfAbsent(match.index(), ignored -> new java.util.LinkedHashMap<>())
+                            .put(match.field().name(), property.getValue() == null
+                                    ? "" : property.getValue().toString().strip()));
+        }
+        var skills = new java.util.ArrayList<AgentSkill>(items.size());
         var seen = new LinkedHashSet<String>();
-        for (int slot = 1; slot <= MAX_SKILLS; slot++) {
-            String name = configuration.property(nameProperty(slot), "").strip();
-            String description = configuration.property(descriptionProperty(slot), "").strip();
-            String instructions = configuration.property(instructionsProperty(slot), "").strip();
-            if (name.isEmpty() && description.isEmpty() && instructions.isEmpty()) {
-                // An empty slot ends the list. A later non-empty one is the gap this class refuses.
-                refuseGapAfter(configuration, nodeId, slot);
-                break;
+        long payloadBytes = 0;
+        int expected = 1;
+        for (var item : items.entrySet()) {
+            int slot = item.getKey();
+            if (slot != expected) {
+                throw invalid(nodeId, "skills." + slot, "is declared while slot " + expected
+                        + " is absent; indices must be contiguous from 1");
             }
-            skills.add(validated(nodeId, slot, name, description, instructions, seen));
+            String name = item.getValue().getOrDefault("name", "");
+            String description = item.getValue().getOrDefault("description", "");
+            String instructions = item.getValue().getOrDefault("instructions", "");
+            AgentSkill skill = validated(nodeId, slot, name, description, instructions, seen, policy);
+            payloadBytes += utf8Bytes(name) + utf8Bytes(description) + utf8Bytes(instructions);
+            if (payloadBytes > policy.maxSkillPayloadBytes()) {
+                throw tooLarge(nodeId, "skills", "combined UTF-8 payload", payloadBytes,
+                        policy.maxSkillPayloadBytes());
+            }
+            skills.add(skill);
+            expected++;
         }
         return List.copyOf(skills);
     }
 
     private static AgentSkill validated(String nodeId, int slot, String name, String description,
-                                        String instructions, Set<String> seen) {
+                                        String instructions, Set<String> seen,
+                                        AgentOperationalConfiguration policy) {
         String at = "skills." + slot;
         if (name.isEmpty()) {
             // Unreachable by name, so it would sit in the graph doing nothing while looking declared.
             throw invalid(nodeId, at + ".name", "declares a description or a body but no name");
         }
-        if (name.length() > MAX_NAME_CHARS) {
-            throw tooLarge(nodeId, at + ".name", "name", name.length(), MAX_NAME_CHARS);
+        if (name.length() > policy.maxSkillNameChars()) {
+            throw tooLarge(nodeId, at + ".name", "name", name.length(), policy.maxSkillNameChars());
         }
         if (name.chars().anyMatch(Character::isISOControl)) {
             // A name with a line break in it would break the one-entry-per-line listing the model
@@ -197,8 +168,9 @@ record AgentSkill(String name, String description, String instructions) {
             throw invalid(nodeId, name, "has no description, which is the only basis the model has "
                     + "for deciding whether to load it");
         }
-        if (description.length() > MAX_DESCRIPTION_CHARS) {
-            throw tooLarge(nodeId, name, "description", description.length(), MAX_DESCRIPTION_CHARS);
+        if (description.length() > policy.maxSkillDescriptionChars()) {
+            throw tooLarge(nodeId, name, "description", description.length(),
+                    policy.maxSkillDescriptionChars());
         }
         if (instructions.isEmpty()) {
             // AgentTool#invoke may never return an empty string: an empty tool message reads to a
@@ -207,29 +179,22 @@ record AgentSkill(String name, String description, String instructions) {
             throw invalid(nodeId, name, "has an empty body, and an empty tool result reads to a "
                     + "model as a call that succeeded and returned nothing");
         }
-        if (instructions.length() > MAX_INSTRUCTIONS_CHARS) {
-            throw tooLarge(nodeId, name, "body", instructions.length(), MAX_INSTRUCTIONS_CHARS);
+        if (instructions.length() > policy.maxSkillInstructionsChars()) {
+            throw tooLarge(nodeId, name, "body", instructions.length(),
+                    policy.maxSkillInstructionsChars());
         }
         return new AgentSkill(name, description, instructions);
     }
 
-    private static void refuseGapAfter(NodeConfiguration configuration, String nodeId, int emptySlot) {
-        for (int later = emptySlot + 1; later <= MAX_SKILLS; later++) {
-            if (!configuration.property(nameProperty(later), "").strip().isEmpty()
-                    || !configuration.property(descriptionProperty(later), "").strip().isEmpty()
-                    || !configuration.property(instructionsProperty(later), "").strip().isEmpty()) {
-                throw invalid(nodeId, "skills." + later, "is declared while slot " + emptySlot
-                        + " is blank; slots are filled from 1 upward, because the editor keeps a "
-                        + "slot hidden until the one before it is named");
-            }
-        }
+    private static int utf8Bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8).length;
     }
 
     private static AgentSkillException invalid(String nodeId, String skill, String detail) {
         return new AgentSkillException(AgentSkillException.Code.DECLARATION_INVALID, nodeId, skill, detail);
     }
 
-    private static AgentSkillException tooLarge(String nodeId, String skill, String field, int length,
+    private static AgentSkillException tooLarge(String nodeId, String skill, String field, long length,
                                                 int ceiling) {
         // The LENGTH and the ceiling, never the text itself: the numbers are what an author acts on,
         // and a body is graph content that must not travel in an exception message.

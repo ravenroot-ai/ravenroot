@@ -52,6 +52,18 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         if (!action.available()) {
             return deny("action is unavailable");
         }
+        if (action == AuthorizationAction.RUNNER_DISPATCH && context.principalType() != PrincipalType.WORKLOAD) {
+            return deny("runner dispatch requires a workload principal");
+        }
+        if ((action == AuthorizationAction.RUNNER_ADMIN || action == AuthorizationAction.RUNNER_CONTROL)
+                && context.principalType() != PrincipalType.USER) {
+            return deny("runner governance requires an operator principal");
+        }
+        if ((action == AuthorizationAction.RUNNER_READ || action == AuthorizationAction.RUNNER_ADMIN
+                || action == AuthorizationAction.RUNNER_CONTROL || action == AuthorizationAction.RUNNER_DISPATCH)
+                && !resource.tenantId().get().equals(context.tenantId())) {
+            return deny("runner access requires the exact tenant scope");
+        }
         if (action == AuthorizationAction.EMBED_SESSION_CREATE
                 && context.principalType() != PrincipalType.WORKLOAD) {
             return deny("embed sessions require a workload principal");
@@ -89,13 +101,16 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.GRAPH_READ, AuthorizationAction.EXECUTION_START);
         put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
-                AuthorizationAction.EMBED_GRAPH_READ, AuthorizationAction.EMBED_SESSION_CREATE);
-        // Deliberately narrower than the two actions above, which VIEWER holds. Deciding which
+                AuthorizationAction.EMBED_GRAPH_READ, AuthorizationAction.EMBED_SESSION_CREATE,
+                AuthorizationAction.DEPLOYMENT_OBSERVE);
+        // Deliberately narrower than the actions above, which VIEWER holds. Deciding which
         // snapshot an embed may ever expose is an operations decision, not a viewing one.
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.EMBED_REGISTRATION_ADMIN);
         put(matrix, EnumSet.of(Role.PLATFORM_ADMIN), AuthorizationAction.RUNTIME_OBSERVE);
         put(matrix, EnumSet.of(Role.PLATFORM_ADMIN), AuthorizationAction.AGENT_AUTHORITY_CONTROL);
+        put(matrix, EnumSet.of(Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.HUMAN_TASK_ADMIN);
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.EXECUTION_READ);
         // Same role set as EXECUTION_START/EXECUTION_READ -- the action is shared by cancel
@@ -117,6 +132,11 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         put(matrix, EnumSet.of(Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.AUDIT_READ, AuthorizationAction.AUDIT_EXPORT);
         put(matrix, EnumSet.of(Role.PLATFORM_ADMIN), AuthorizationAction.AUDIT_ADMIN);
+        put(matrix, EnumSet.of(Role.VIEWER, Role.OPERATOR, Role.DEVELOPER, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.RUNNER_READ);
+        put(matrix, EnumSet.of(Role.TENANT_ADMIN, Role.PLATFORM_ADMIN), AuthorizationAction.RUNNER_ADMIN);
+        put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
+                AuthorizationAction.RUNNER_CONTROL, AuthorizationAction.RUNNER_DISPATCH);
         return Map.copyOf(matrix);
     }
 

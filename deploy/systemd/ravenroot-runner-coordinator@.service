@@ -1,0 +1,24 @@
+[Unit]
+Description=Ravenroot shared runner coordinator %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ravenroot
+Group=ravenroot
+EnvironmentFile=/etc/ravenroot/coordinators/%i.environment
+ExecStart=/usr/bin/java -cp /opt/ravenroot/ravenroot.jar ai.ravenroot.server.RunnerCoordinatorMain
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ravenroot/runner-artifacts
+NoNewPrivileges=true
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

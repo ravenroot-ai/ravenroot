@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="definition" for="node" attr.name="agentDefinition" attr.type="string"/>
+  <key id="version" for="node" attr.name="agentVersion" attr.type="int"/>
+  <key id="runner" for="node" attr.name="workspaceRef" attr.type="string"/>
+  <key id="join" for="node" attr.name="joinPolicy" attr.type="string"/>
+  <key id="profile" for="node" attr.name="workspaceProfile" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="command" for="edge" attr.name="command" attr.type="string"/>
+  <graph id="governed-development-cycle" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="repository"><data key="kind">BEHAVIOR</data><data key="behavior">workspace</data><data key="profile">development</data><data key="join">any</data></node>
+    <node id="plan"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">polaris</data><data key="version">1</data><data key="runner">repository</data><data key="join">any</data></node>
+    <node id="read"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">polaris</data><data key="version">1</data><data key="runner">repository</data></node>
+    <node id="implement"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">betelgeuse</data><data key="version">1</data><data key="runner">repository</data></node>
+    <node id="test"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">tester</data><data key="version">1</data><data key="runner">repository</data><data key="join">any</data></node>
+    <node id="review"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">antares</data><data key="version">1</data><data key="runner">repository</data></node>
+    <node id="remediate"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">betelgeuse</data><data key="version">1</data><data key="runner">repository</data><data key="join">any</data></node>
+    <node id="handoff"><data key="kind">BEHAVIOR</data><data key="behavior">agent</data><data key="definition">coordinator</data><data key="version">1</data><data key="runner">repository</data></node>
+    <edge id="start-workspace" source="start" target="repository"><data key="command">open</data></edge>
+    <edge id="workspace-plan" source="repository" target="plan"><data key="outcome">ready</data><data key="command">plan</data></edge>
+    <edge id="plan-read" source="plan" target="read"><data key="outcome">answered</data><data key="command">read</data></edge>
+    <edge id="read-return" source="read" target="plan"><data key="outcome">answered</data><data key="command">resume</data></edge>
+    <edge id="resume-implement" source="plan" target="implement"><data key="outcome">completed</data><data key="command">implement</data></edge>
+    <edge id="implement-test" source="implement" target="test"><data key="outcome">completed</data><data key="command">test</data></edge>
+    <edge id="test-review" source="test" target="review"><data key="outcome">passed</data><data key="command">review</data></edge>
+    <edge id="test-remediate" source="test" target="remediate"><data key="outcome">failed</data><data key="command">remediate</data></edge>
+    <edge id="remediate-test" source="remediate" target="test"><data key="outcome">fixed</data><data key="command">test</data></edge>
+    <edge id="review-handoff" source="review" target="handoff"><data key="outcome">approved</data><data key="command">handoff</data></edge>
+    <edge id="review-remediate" source="review" target="remediate"><data key="outcome">changes-requested</data><data key="command">remediate</data></edge>
+    <edge id="handoff-close" source="handoff" target="repository"><data key="outcome">completed</data><data key="command">close</data></edge>
+    <edge id="workspace-end" source="repository" target="end"><data key="outcome">closed</data></edge>
+  </graph>
+</graphml>

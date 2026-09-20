@@ -21,6 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HumanTaskPolicyCatalogTest {
     @Test
+    void catalogDeclaresTheHumanTaskVisualIdentity() {
+        assertEquals("human-task",
+                new HumanTaskNodeBehaviorFactory(null, HumanTaskPolicy.DEFAULTS).descriptor().visualType());
+    }
+
+    @Test
     void catalogProjectsCustomDefaultsAndEveryAuthoringBound() {
         HumanTaskPolicy d = HumanTaskPolicy.DEFAULTS;
         var policy = new HumanTaskPolicy(300_000, 600_000, 17, 5_183_999,

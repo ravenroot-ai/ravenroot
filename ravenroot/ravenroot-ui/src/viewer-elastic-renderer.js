@@ -37,6 +37,7 @@ export function mountD3ElasticRenderer({
   isLive = () => true,
   onViewportChange = () => {},
   initialTransform = null,
+  startSimulation = true,
 }) {
   requiredElement(svg, 'Elastic SVG');
   if (tooltip !== null) requiredElement(tooltip, 'Elastic tooltip');
@@ -224,6 +225,8 @@ export function mountD3ElasticRenderer({
       paintGeometry();
       onViewportChange();
     });
+
+  if (!startSimulation) simulation.stop();
 
   // D3's timer owns later frames, but the first frame is ours: never leave circles at SVG defaults
   // or paths without geometry while the simulation waits for its first asynchronous tick.

@@ -17,9 +17,15 @@ import ai.ravenroot.api.embed.InMemoryEmbedRegistrationAuthority;
 import ai.ravenroot.api.embed.EmbedTheme;
 import ai.ravenroot.api.embed.VerifiedEmbedGraphGrant;
 import ai.ravenroot.api.embed.VerifiedEmbedSessionGrant;
+import ai.ravenroot.api.embed.EmbedRevokeCommand;
+import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.security.DefaultAuthorizationService;
+import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.Role;
+import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
+import ai.ravenroot.core.runtime.BehaviorEnvironment;
+import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
 import ai.ravenroot.server.embed.EmbedBrowserConfiguration;
@@ -33,6 +39,7 @@ import ai.ravenroot.server.spec.RouteTable;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.io.ByteArrayInputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -123,10 +130,133 @@ class EmbedBrowserHttpIntegrationTest {
     }
 
     @Test
+    void deploymentObservationRequiresExactBrowserBoundaryPopAndCurrentRegistration() throws Exception {
+        var registrations = new InMemoryEmbedRegistrationAuthority();
+        provision(registrations, EmbedProvisionCommand.deployment("live", 0, "issuer", "workload", "tenant",
+                PARENT, Optional.empty(), "orders"));
+        try (var engine = new PekkoExecutionEngine("embed-live-observation")) {
+            var environment = BehaviorEnvironment.safeDefaults();
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                    BehaviorRegistry.standard(environment), environment.artifacts(), environment.programRuntime(),
+                    ExecutionIdentitySource.randomUuids(), null, 8);
+            application.registerLocalDeployment(new SecurityContext("register", "tenant", "operator",
+                            PrincipalType.USER, "issuer"), "orders",
+                    new ByteArrayInputStream(LIVE_GRAPH.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            application.startLocalDeployment(new SecurityContext("start", "tenant", "operator",
+                            PrincipalType.USER, "issuer"), "orders")
+                    .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+            try (var server = server(engine, false, registrations, new AtomicInteger(), application)) {
+                server.start();
+                var client = HttpClient.newHttpClient();
+                String base = "http://127.0.0.1:" + server.port();
+
+                var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                        .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"registrationId\":\"live\"}")));
+                String launch = json(created.body(), "launchUrl");
+                URI launchUri = URI.create(launch);
+                var launched = send(client, request(base + launchUri.getRawPath() + "?" + launchUri.getRawQuery())
+                        .header("Sec-Fetch-Mode", "navigate").header("Sec-Fetch-Dest", "iframe").GET());
+                String exchangeId = json(launched.body(), "exchangeId");
+                String exchangeNonce = json(launched.body(), "challenge");
+                String acknowledgementId = json(launched.body(), "acknowledgementId");
+                String channelId = json(launched.body(), "channelId");
+                String correlation = "live-correlation";
+                String ack = "{\"registrationId\":\"live\",\"acknowledgementId\":\""
+                        + acknowledgementId + "\",\"channelId\":\"" + channelId
+                        + "\",\"correlationId\":\"" + correlation + "\"}";
+                assertEquals(200, send(client, s2sPost(base + EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH,
+                        "workload", ack)).statusCode());
+                KeyPair pair = keyPair();
+                ECPublicKey publicKey = (ECPublicKey) pair.getPublic();
+                Instant exchangeTime = Instant.now();
+                String exchange = "{\"exchangeId\":\"" + exchangeId + "\",\"channelId\":\""
+                        + channelId + "\",\"ackCorrelationId\":\"" + correlation + "\",\"keyX\":\""
+                        + coordinate(publicKey.getW().getAffineX()) + "\",\"keyY\":\""
+                        + coordinate(publicKey.getW().getAffineY()) + "\",\"nonce\":\"" + exchangeNonce
+                        + "\",\"jti\":\"live-exchange\",\"issuedAt\":\"" + exchangeTime
+                        + "\",\"signature\":\"" + exchangeSignature(pair, exchangeId, 1, exchangeNonce,
+                        channelId, correlation, "live-exchange", exchangeTime) + "\"}";
+                var exchanged = send(client, viewerPost(base + EmbedBrowserHttpHandler.EXCHANGE_PATH,
+                        VIEWER, exchange));
+                String bearer = json(exchanged.body(), "bearer");
+                String nonce = json(exchanged.body(), "challenge");
+
+                Instant projectionTime = Instant.now();
+                String projectionBody = proofBody(pair, bearer, nonce, "live-projection",
+                        EmbedBrowserHttpHandler.PROJECTION_PATH, projectionTime, false);
+                var projection = send(client, viewerPost(base + EmbedBrowserHttpHandler.PROJECTION_PATH,
+                        VIEWER, projectionBody).header("Authorization", "Bearer " + bearer));
+                assertEquals(200, projection.statusCode(), projection.body());
+                assertTrue(projection.body().contains("\"source\":{\"kind\":\"deployment\""));
+                assertFalse(projection.body().toLowerCase().contains("graphml"));
+
+                Instant observationTime = Instant.now();
+                String observation = proofBody(pair, bearer, nonce, "live-observation",
+                        EmbedBrowserHttpHandler.OBSERVATION_PATH, observationTime, true);
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        "https://forged.example", observation).header("Authorization", "Bearer " + bearer))
+                        .statusCode());
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        VIEWER, observation).header("Authorization", "Bearer " + bearer)
+                        .header("Cookie", "stolen=1")).statusCode());
+
+                KeyPair attacker = keyPair();
+                String forged = proofBody(attacker, bearer, nonce, "forged-key",
+                        EmbedBrowserHttpHandler.OBSERVATION_PATH, Instant.now(), true);
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        VIEWER, forged).header("Authorization", "Bearer " + bearer)).statusCode());
+
+                var firstRequest = viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH, VIEWER, observation)
+                        .header("Authorization", "Bearer " + bearer).build();
+                var firstStream = client.send(firstRequest, HttpResponse.BodyHandlers.ofInputStream());
+                assertEquals(200, firstStream.statusCode());
+                firstStream.body().close();
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        VIEWER, observation).header("Authorization", "Bearer " + bearer)).statusCode(),
+                        "the same observation jti must remain one-use");
+
+                Instant reconnectTime = Instant.now();
+                String reconnect = proofBody(pair, bearer, nonce, "live-observation-reconnect",
+                        EmbedBrowserHttpHandler.OBSERVATION_PATH, reconnectTime, true);
+                var reconnectRequest = viewerPost(base + EmbedBrowserHttpHandler.OBSERVATION_PATH,
+                        VIEWER, reconnect).header("Authorization", "Bearer " + bearer).build();
+                var stream = client.send(reconnectRequest, HttpResponse.BodyHandlers.ofInputStream());
+                assertEquals(200, stream.statusCode());
+                try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
+                    assertEquals("event: lifecycle", reader.readLine());
+                    String initial = reader.readLine();
+                    assertTrue(initial.contains("\"deploymentId\":\"orders\""), initial);
+                    reader.readLine();
+                    registrations.revoke(new EmbedRevokeCommand("live", "tenant", 1));
+                    String line;
+                    boolean invalidated = false;
+                    for (int index = 0; index < 12 && (line = reader.readLine()) != null; index++) {
+                        if (line.equals("event: source-invalidated")) invalidated = true;
+                        if (invalidated && line.startsWith("data: ")) {
+                            assertTrue(line.contains("\"reason\":\"AUTHORITY_CHANGED\""), line);
+                            break;
+                        }
+                    }
+                    assertTrue(invalidated, "registration revocation must terminate an attached observation");
+                }
+            }
+        }
+    }
+
+    private static String proofBody(KeyPair pair, String bearer, String nonce, String jti,
+                                    String path, Instant time, boolean cursor) throws Exception {
+        return "{\"nonce\":\"" + nonce + "\",\"jti\":\"" + jti + "\",\"issuedAt\":\"" + time
+                + "\",\"signature\":\"" + signature(pair, bearer, 1, nonce, jti, path, time) + "\""
+                + (cursor ? ",\"cursor\":\"\"" : "") + "}";
+    }
+
+    @Test
     void conditionalRouteTableSurfaceMatchesTheFiveLiveHandlerPaths() {
         var expected = Set.of(EmbedBrowserHttpHandler.CREATE_PATH,
                 EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH, EmbedBrowserHttpHandler.LAUNCH_PATH,
-                EmbedBrowserHttpHandler.EXCHANGE_PATH, EmbedBrowserHttpHandler.PROJECTION_PATH);
+                EmbedBrowserHttpHandler.EXCHANGE_PATH, EmbedBrowserHttpHandler.PROJECTION_PATH,
+                EmbedBrowserHttpHandler.OBSERVATION_PATH);
         var declared = RouteTable.ALL.stream().filter(route -> route.path().startsWith("/v1/embed/"))
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
                         ai.ravenroot.server.spec.RouteDescriptor::path,
@@ -302,6 +432,17 @@ class EmbedBrowserHttpIntegrationTest {
             var replay = send(client, viewerPost(base + EmbedBrowserHttpHandler.PROJECTION_PATH,
                     VIEWER, projectionBody).header("Authorization", "Bearer " + bearer));
             assertEquals(403, replay.statusCode());
+
+            Instant secondProjectionTime = Instant.now();
+            String secondProjectionBody = "{\"nonce\":\"" + projectionNonce
+                    + "\",\"jti\":\"projection-jti-second\",\"issuedAt\":\"" + secondProjectionTime
+                    + "\",\"signature\":\"" + signature(pair, bearer, 1, projectionNonce,
+                    "projection-jti-second", EmbedBrowserHttpHandler.PROJECTION_PATH,
+                    secondProjectionTime) + "\"}";
+            var secondProjection = send(client, viewerPost(base + EmbedBrowserHttpHandler.PROJECTION_PATH,
+                    VIEWER, secondProjectionBody).header("Authorization", "Bearer " + bearer));
+            assertEquals(403, secondProjection.statusCode(),
+                    "projection remains one-shot even when a fresh signed jti is supplied");
 
             var general = send(client, request(base + "/health").GET());
             assertEquals("DENY", general.headers().firstValue("X-Frame-Options").orElseThrow());
@@ -494,6 +635,14 @@ class EmbedBrowserHttpIntegrationTest {
     private static RavenrootServer server(PekkoExecutionEngine engine, boolean failingAudit,
                                            EmbedRegistrationAuthority registrations,
                                            AtomicInteger auditAllows) {
+        return server(engine, failingAudit, registrations, auditAllows,
+                new DefaultRavenrootApplication(engine, new ExecutionMonitor()));
+    }
+
+    private static RavenrootServer server(PekkoExecutionEngine engine, boolean failingAudit,
+                                           EmbedRegistrationAuthority registrations,
+                                           AtomicInteger auditAllows,
+                                           DefaultRavenrootApplication application) {
         var authorization = new DefaultAuthorizationService(event -> { });
         var projections = new AuthorizedEmbedGraphProjection(authorization, registrations);
         var config = new EmbedBrowserConfiguration(true, new EmbedViewerOrigin(VIEWER),
@@ -504,7 +653,6 @@ class EmbedBrowserHttpIntegrationTest {
                 },
                 Clock.systemUTC(), Duration.ofMinutes(1), Duration.ofMinutes(1), Duration.ofMinutes(2),
                 Duration.ofMinutes(1), 16, 16, 32, 1, true);
-        var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
         return new RavenrootServer(application,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
                 headers -> {
@@ -528,6 +676,18 @@ class EmbedBrowserHttpIntegrationTest {
                     };
                 }, authorization, config);
     }
+
+    private static final String LIVE_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <graph id="live" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge source="start" target="end"/>
+              </graph>
+            </graphml>
+            """;
 
     private static HttpRequest.Builder request(String uri) { return HttpRequest.newBuilder(URI.create(uri)); }
 

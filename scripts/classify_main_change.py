@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Classify a CI event without trusting mutable pull-request prose.
 
-`dev` is the verification point and `main` is a promotion. Every functional check therefore belongs
-on a pull request into `dev`, where a failure names the single pull request that caused it, and the
-`dev` to `main` promotion carries only the security gate and the two checks that make the release
-classification real. The tier this module returns is what encodes that: `full` runs the functional
-suite, `promotion` deliberately runs none of it, and `docs` covers a content-only push to `main`.
+The review commit gets a small, diagnostic `admission` tier. The merge queue then verifies the
+actual integration commit with the `full` tier. Once that exact commit reaches `dev`, `postmerge`
+deliberately repeats no functional test. `promotion` likewise reuses the full-tier evidence already
+bound to the commit, while `docs` covers a content-only push to `main`.
 """
 
 from __future__ import annotations
@@ -142,7 +141,7 @@ def classify(
         return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "dev":
-        return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
+        return {"tier": "admission", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":
         selected = sorted(RELEASE_LABELS.intersection(labels))
@@ -183,6 +182,12 @@ def classify(
 
     if event_name == "push" and ref_name == "main" and docs_only:
         return {"tier": "docs", "release_intent": "none", "docs_only": "true"}
+
+    # The merge queue has already run the full suite on the exact integration commit. Running it a
+    # third time after that commit advances `dev` adds latency and runner load without testing new
+    # code. Branch protection prevents an unqueued write, so this tier is intentionally nearly bare.
+    if event_name == "push" and ref_name == "dev":
+        return {"tier": "postmerge", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 

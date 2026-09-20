@@ -1055,7 +1055,89 @@ final class SqliteSchema {
                 )
                 """)),
                 new SchemaMigration(23, "execution manifest operational policy v2", List.of(
-                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")));
+                        "ALTER TABLE execution_manifest ADD COLUMN operational_policy TEXT")),
+                new SchemaMigration(24, "immutable human-task review presentation", List.of(
+                        "ALTER TABLE human_task ADD COLUMN review_version INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN review_content_type TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_text TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_digest TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN review_max_utf8_bytes INTEGER NOT NULL DEFAULT 1")),
+                new SchemaMigration(25, "deployment lifecycle command evidence", List.of(
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command TEXT",
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_epoch_second INTEGER",
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_command_at_nano INTEGER",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command TEXT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_epoch_second INTEGER",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_command_at_nano INTEGER")),
+                new SchemaMigration(26, "tenant-scoped session memory", List.of(
+                        "CREATE TABLE session_memory (tenant_id TEXT NOT NULL, session_id TEXT NOT NULL, "
+                                + "scope TEXT NOT NULL, process_instance_id TEXT NOT NULL, node_id TEXT NOT NULL, "
+                                + "revision INTEGER NOT NULL, value BLOB NOT NULL, content_type TEXT NOT NULL, "
+                                + "created_at_epoch_second INTEGER NOT NULL, created_at_nano INTEGER NOT NULL, "
+                                + "updated_at_epoch_second INTEGER NOT NULL, updated_at_nano INTEGER NOT NULL, "
+                                + "expires_at_epoch_second INTEGER NOT NULL, expires_at_nano INTEGER NOT NULL, "
+                                + "PRIMARY KEY (tenant_id, session_id, scope, process_instance_id, node_id))",
+                        "CREATE INDEX session_memory_expiry ON session_memory "
+                                + "(tenant_id, expires_at_epoch_second, expires_at_nano)",
+                        "CREATE TABLE session_memory_command (tenant_id TEXT NOT NULL, command_key TEXT NOT NULL, "
+                                + "digest TEXT NOT NULL, session_id TEXT NOT NULL, scope TEXT NOT NULL, "
+                                + "process_instance_id TEXT NOT NULL, node_id TEXT NOT NULL, revision INTEGER NOT NULL, "
+                                + "value BLOB NOT NULL, content_type TEXT NOT NULL, "
+                                + "created_at_epoch_second INTEGER NOT NULL, created_at_nano INTEGER NOT NULL, "
+                                + "updated_at_epoch_second INTEGER NOT NULL, updated_at_nano INTEGER NOT NULL, "
+                                + "expires_at_epoch_second INTEGER NOT NULL, expires_at_nano INTEGER NOT NULL, "
+                                + "PRIMARY KEY (tenant_id, command_key))")),
+                new SchemaMigration(27, "deployment lifecycle command reason", List.of(
+                        "ALTER TABLE deployment ADD COLUMN last_lifecycle_reason TEXT",
+                        "ALTER TABLE deployment_command ADD COLUMN recorded_last_lifecycle_reason TEXT")),
+                new SchemaMigration(28, "governed process runner workspaces", List.of(
+                        """
+                        CREATE TABLE runner_workspace (
+                            tenant_id TEXT NOT NULL,
+                            process_instance_id TEXT NOT NULL,
+                            state BLOB NOT NULL,
+                            PRIMARY KEY (tenant_id, process_instance_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                        )
+                        """,
+                        "CREATE TABLE runner_catalog_tenant (tenant_id TEXT PRIMARY KEY)",
+                        """
+                        CREATE TABLE runner_catalog (
+                            tenant_id TEXT NOT NULL,
+                            resource_key TEXT NOT NULL,
+                            document BLOB NOT NULL,
+                            PRIMARY KEY (tenant_id, resource_key),
+                            FOREIGN KEY (tenant_id) REFERENCES runner_catalog_tenant (tenant_id)
+                        )
+                        """)),
+                new SchemaMigration(29, "non-compactable process control authority", List.of(
+                        "ALTER TABLE process_instance ADD COLUMN control_state TEXT NOT NULL DEFAULT 'RECOVERY_REQUIRED'",
+                        """
+                        UPDATE process_instance SET control_state =
+                          CASE WHEN termination_reason = 'CANCELLED' THEN 'CANCELLED'
+                          ELSE COALESCE(
+                            (SELECT CASE event_type
+                              WHEN 'PROCESS_PAUSE' THEN 'PAUSED' WHEN 'PROCESS_STOP' THEN 'STOPPED'
+                              WHEN 'PROCESS_RESUME' THEN 'RUNNING' WHEN 'PROCESS_DRAIN' THEN 'DRAINING'
+                              WHEN 'PROCESS_CANCEL' THEN 'CANCELLED' END
+                             FROM event_journal j
+                             WHERE j.tenant_id = process_instance.tenant_id
+                               AND j.process_instance_id = process_instance.process_instance_id
+                               AND j.event_type IN ('PROCESS_PAUSE', 'PROCESS_STOP', 'PROCESS_RESUME',
+                                                    'PROCESS_DRAIN', 'PROCESS_CANCEL')
+                             ORDER BY journal_offset DESC LIMIT 1),
+                            CASE WHEN COALESCE((SELECT retained_from FROM journal_watermark w
+                              WHERE w.tenant_id = process_instance.tenant_id), 1) <= 1
+                              THEN 'RUNNING' ELSE 'RECOVERY_REQUIRED' END)
+                          END
+                        """)),
+                new SchemaMigration(30, "explicit Workspace fleet admission fence", List.of(
+                        "CREATE TABLE runner_fleet_guard (singleton INTEGER PRIMARY KEY CHECK (singleton = 1))",
+                        "INSERT INTO runner_fleet_guard (singleton) VALUES (1)",
+                        "CREATE TABLE runner_retention_guard (tenant_id TEXT NOT NULL, process_instance_id TEXT NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
+                        "INSERT INTO runner_retention_guard (tenant_id, process_instance_id) SELECT tenant_id, process_instance_id FROM runner_workspace",
+                        "CREATE TABLE runner_availability (tenant_id TEXT NOT NULL, runner_id TEXT NOT NULL, document BLOB NOT NULL, PRIMARY KEY (tenant_id, runner_id))")));
     }
 
     static int currentVersion() {

@@ -16,6 +16,20 @@ An operator may register an embedded projection only after explicitly attesting 
 
 Ravenroot records the attestations; it does not infer them from the graph, call an external policy evaluator, or continuously reinterpret them. Registration, show, audit, and revoke are operator actions.
 
+## Versioned viewer sources
+
+Every registration records `viewerSourceVersion: "1"` and exactly one source:
+
+| Source | Registration input | Runtime behavior |
+|---|---|---|
+| `snapshot` | GraphML, graph coordinates, deployment snapshot coordinates, lifecycle, policy revision, and seven explicit attestations | Serves the immutable minimized projection captured during provisioning |
+| `deployment` | A process-local deployment id | Resolves a safe projection and immutable graph-version/incarnation binding when the session is used, then permits read-only observation |
+
+For the CLI, the presence of `--graphml` selects snapshot provisioning. Its snapshot deployment
+coordinate may be supplied with the compatible `--deployment-id` spelling or the explicit
+`--snapshot-deployment-id` alias. Without `--graphml`, `--deployment-id` selects a live deployment
+source and all snapshot-only inputs are refused.
+
 ## Session sequence
 
 1. The operator registers the deployment and records every gate.
@@ -23,9 +37,17 @@ Ravenroot records the attestations; it does not infer them from the graph, call 
 3. The browser receives a one-time launch value.
 4. The embedded viewer exchanges it for a short-lived session.
 5. The viewer retrieves only the authorized read-only projection.
-6. Expiry, deployment revocation, or access revocation ends the session.
+6. If the source is a deployment, the viewer uses its proof key and bearer to request
+   `/v1/embed/observation`; the stream carries only allowlisted lifecycle and execution fields.
+7. Expiry, registration revocation, access revocation, undeploy, source replacement, or a replay gap
+   ends the attachment.
 
 The projection cannot mutate a graph, start execution, read credentials, install adapters, or expand its own scope. Exact origin and host checks apply at launch and exchange.
+
+The deployment observation cursor is opaque, bound to the registration revision, session, deployment,
+graph version, and incarnation, and valid only within the process-local replay window. A reconnect can
+resume within that window. A gap or mismatched binding clears observed state and requires a fresh
+projection/session; it never changes the registered source.
 
 ## Extension discovery
 

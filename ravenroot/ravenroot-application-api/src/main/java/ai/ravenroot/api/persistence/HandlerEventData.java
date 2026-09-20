@@ -64,6 +64,9 @@ public final class HandlerEventData {
     /** An authorized trigger supplied an outcome and the process re-entered. */
     public static final String HANDLER_RESOLVED = "HANDLER_RESOLVED";
 
+    /** The owning logical work was cancelled and the handler was closed without re-entry. */
+    public static final String HANDLER_CANCELLED = "HANDLER_CANCELLED";
+
     /** Media type used for the strict UTF-8 handler identity. */
     public static final String CONTENT_TYPE = "application/vnd.ravenroot.handler-id; charset=utf-8";
 
@@ -78,7 +81,7 @@ public final class HandlerEventData {
     public static boolean isHandlerEvent(String eventType) {
         return HANDLER_REGISTERED.equals(eventType) || HANDLER_ESCALATED.equals(eventType)
                 || HANDLER_EXPIRED.equals(eventType) || HANDLER_DENIED.equals(eventType)
-                || HANDLER_RESOLVED.equals(eventType);
+                || HANDLER_RESOLVED.equals(eventType) || HANDLER_CANCELLED.equals(eventType);
     }
 
     /**
@@ -93,6 +96,7 @@ public final class HandlerEventData {
             case EXPIRED -> HANDLER_EXPIRED;
             case DENIED -> HANDLER_DENIED;
             case RESOLVED -> HANDLER_RESOLVED;
+            case CANCELLED -> HANDLER_CANCELLED;
         };
     }
 

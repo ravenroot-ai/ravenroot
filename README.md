@@ -75,12 +75,12 @@ coordinates are:
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-core</artifactId>
-    <version>0.2.0-alpha.1</version>
+    <version>0.4.1-alpha.1</version>
   </dependency>
   <dependency>
     <groupId>ai.ravenroot</groupId>
     <artifactId>ravenroot-pekko</artifactId>
-    <version>0.2.0-alpha.1</version>
+    <version>0.4.1-alpha.1</version>
     <scope>runtime</scope>
   </dependency>
 </dependencies>
@@ -126,6 +126,7 @@ operational responsibilities and recovery paths.*
 - **Extension authors:** [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md)
   and [first-party bundle reference](docs/reference/bundles/index.md)
 - **Application developers:** [application, HTTP, SSE, and CLI integration](docs/integrator-guide/application-http.md),
+  [embedded read-only viewer](docs/integrator-guide/embed-viewer-quickstart.md),
   [HTTP API and CLI](docs/reference/api-cli.md), and [GraphML profile](docs/reference/graphml.md)
 - **Operators:** [deployment and startup](docs/operator-guide/deployment-startup.md),
   [plugin bundle lifecycle](docs/operator-guide/plugin-bundles.md),

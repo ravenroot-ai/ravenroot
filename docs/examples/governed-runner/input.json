@@ -1,0 +1,4 @@
+{
+  "objective": "Inspect the disposable Git repository, record a plan, observe the failing baseline, remediate the addition defect, run the approved tests, and obtain read-only review.",
+  "constraints": "Preserve the same repository and uncommitted changes through every handoff. Never claim a test passed without the test tool result. Do not commit changes."
+}

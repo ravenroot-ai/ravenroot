@@ -18,6 +18,7 @@ const activeView = page => page.evaluate(() => {
     renderMode: owner.renderMode,
     style: owner.visualStyle,
     layout: owner.layoutMode,
+    designArrangement: owner.designArrangement,
     renderer: owner.renderer?.kind ?? null,
     positions: Object.fromEntries(owner.cy.nodes().map(node => [node.id(), node.position()])),
     modelPositions: Object.fromEntries(owner.graph.nodes.map(node => [node.id, { x: node.ox, y: node.oy }])),
@@ -47,6 +48,12 @@ async function openGraphMl(page, name = 'loaded.graphml') {
     buffer: Buffer.from(graphMl),
   });
   await expect.poll(async () => (await activeView(page))?.style).toBe('cyto');
+}
+
+async function downloadGraphMl(page) {
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#btn-export').click();
+  return readFileSync(await (await downloadPromise).path(), 'utf8');
 }
 
 test.beforeEach(async ({ page }) => {
@@ -163,7 +170,8 @@ test('GraphML coordinates remain exact until explicit Design performs its comple
     timeout: 10_000,
   });
   await expect.poll(() => activeView(page)).toMatchObject({
-    renderMode: 'design', style: 'cyto', layout: 'cyto', renderer: 'cytoscape',
+    renderMode: 'design', style: 'cyto', layout: 'cyto', designArrangement: null,
+    renderer: 'cytoscape',
   });
   const before = await activeView(page);
 
@@ -182,17 +190,65 @@ test('GraphML coordinates remain exact until explicit Design performs its comple
   const exported = readFileSync(await download.path(), 'utf8');
   expect(coordinatePayload(exported)).toEqual(coordinatePayload(graphMl));
 
-  await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   await expect(page.locator('.doc-pane--active')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', {
     timeout: 10_000,
   });
   await expect.poll(async () => (await activeView(page)).positions).not.toEqual(before.positions);
-  expect(await activeView(page)).toMatchObject({
-    modelPositions: before.modelPositions,
-    history: before.history,
+  const rendered = await activeView(page);
+  expect(rendered).toMatchObject({
+    modelPositions: rendered.positions,
+    history: {
+      depth: before.history.depth + 1,
+      dirty: true,
+      canUndo: true,
+      undoLabel: 'Render graph',
+    },
     style: 'cyto',
     layout: 'cyto',
+  });
+
+  await page.locator('#btn-undo').click();
+  await expect.poll(async () => (await activeView(page)).positions).toEqual(before.positions);
+  expect(await activeView(page)).toMatchObject({
+    modelPositions: before.modelPositions,
+    history: {
+      depth: before.history.depth,
+      dirty: before.history.dirty,
+      canUndo: before.history.canUndo,
+    },
+  });
+});
+
+test('save and reopen retain Monitoring and a non-default Design arrangement', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#btn-monitoring').click();
+  await expect.poll(() => activeView(page)).toMatchObject({
+    renderMode: 'monitoring', layout: 'elastic', renderer: 'elastic',
+  });
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.graphProperties))
+    .toMatchObject({ 'ravenroot.renderMode': 'monitoring', 'ravenroot.layoutMode': 'elastic' });
+
+  const monitoring = await downloadGraphMl(page);
+  await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'monitoring.graphml'), monitoring);
+  await expect.poll(() => activeView(page)).toMatchObject({
+    renderMode: 'monitoring', layout: 'elastic', renderer: 'elastic',
+  });
+
+  await page.locator('#btn-design').click();
+  await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
+  await page.locator('#menu-layout').click();
+  await page.getByRole('menuitemradio', { name: 'Arrange — Flow', exact: true }).click();
+  await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 10_000 });
+  await expect.poll(() => activeView(page)).toMatchObject({ renderMode: 'design', layout: 'dagre' });
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.graphProperties))
+    .toMatchObject({ 'ravenroot.renderMode': 'design', 'ravenroot.layoutMode': 'dagre' });
+
+  const arranged = await downloadGraphMl(page);
+  await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'arranged.graphml'), arranged);
+  await expect.poll(() => activeView(page)).toMatchObject({
+    renderMode: 'design', layout: 'dagre', renderer: 'cytoscape',
   });
 });
 
@@ -209,7 +265,7 @@ test('replace retires Monitoring and restores the incoming graph with Design ren
     window.__replaceRetiredCy = owner.cy;
     window.__replaceRetiredRenderer = owner.renderer;
     return {
-      layoutGeneration: owner.layoutSessionToken.generation,
+      layoutGeneration: owner.layoutSessionToken?.generation ?? null,
       rendererGeneration: owner.renderer.token.generation,
     };
   }, target);
@@ -232,7 +288,9 @@ test('replace retires Monitoring and restores the incoming graph with Design ren
       oldCyDestroyed: window.__replaceRetiredCy.destroyed(),
       oldRendererRetired: window.__replaceRetiredRenderer.token.generation
         === previous.rendererGeneration && owner.renderer.token.generation !== previous.rendererGeneration,
-      oldLayoutRetired: owner.layoutSessionToken?.generation !== previous.layoutGeneration,
+      oldLayoutRetired: previous.layoutGeneration == null
+        ? owner.layoutSessionToken == null
+        : owner.layoutSessionToken?.generation !== previous.layoutGeneration,
     };
   }, [target, retired])).toEqual({
     hosts: 0,

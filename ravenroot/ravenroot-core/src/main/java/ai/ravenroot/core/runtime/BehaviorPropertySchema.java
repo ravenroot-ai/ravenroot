@@ -97,6 +97,15 @@ public final class BehaviorPropertySchema {
                 validateNode(node);
             }
         }
+        for (GraphNode node : graph.nodes()) {
+            if (!ai.ravenroot.core.runner.GovernedAgent.usesWorkspace(node)) continue;
+            String reference = Objects.toString(node.properties().get("workspaceRef"));
+            var matches = graph.nodes().stream().filter(value -> value.id().equals(reference)).toList();
+            if (matches.size() != 1 || !"workspace".equals(matches.getFirst().behavior())) {
+                throw new BehaviorPropertyException(node.id(), "workspaceRef", "must reference exactly one Workspace declared in this graph");
+            }
+            if (behaviors.runnerJobs() == null) throw new BehaviorPropertyException(node.id(), "workspaceRef", "governed runner plane is unavailable");
+        }
     }
 
     private void validateNode(GraphNode node) {
@@ -110,7 +119,10 @@ public final class BehaviorPropertySchema {
         if (node.kind() != NodeKind.BEHAVIOR) {
             return;
         }
-        Optional<NodeTypeDescriptor> catalogued = behaviors.descriptor(node.behavior());
+        if ("workspace-agent".equals(node.behavior())) {
+            throw new BehaviorPropertyException(node.id(), "behavior", "workspace-agent was removed; declare a Workspace and an Agent with workspaceRef");
+        }
+        Optional<NodeTypeDescriptor> catalogued = behaviors.descriptor(node);
         if (catalogued.isEmpty()) {
             // Unknown behavior. Separate from SEC-09 rules 1 and 2; the pass-through path is
             // unchanged and its fail-closed treatment belongs to rule 3.
@@ -121,6 +133,39 @@ public final class BehaviorPropertySchema {
         boolean unconfigured = namesNoAdapter(node, declared);
         for (NodePropertyDescriptor property : declared) {
             validateProperty(node, property, unconfigured, declared);
+        }
+        validateAdditionalProperties(node, catalogued.get().additionalProperties());
+    }
+
+    private void validateAdditionalProperties(
+            GraphNode node,
+            List<ai.ravenroot.api.catalog.NodePropertyGroupDescriptor> groups) {
+        for (ai.ravenroot.api.catalog.NodePropertyGroupDescriptor group : groups) {
+            Map<Integer, Map<String, NodePropertyDescriptor>> items = new java.util.TreeMap<>();
+            for (String key : node.properties().keySet()) {
+                if (!key.startsWith(group.name() + ".")) continue;
+                var match = group.match(key).orElseThrow(() -> new BehaviorPropertyException(
+                        node.id(), key, "does not match the dynamic '" + group.name()
+                                + ".<positive-index>.<field>' contract"));
+                items.computeIfAbsent(match.index(), ignored -> new LinkedHashMap<>())
+                        .put(match.field().name(), group.property(match.index(), match.field()));
+            }
+            int expected = 1;
+            for (var item : items.entrySet()) {
+                if (item.getKey() != expected) {
+                    throw new BehaviorPropertyException(node.id(), group.name() + "." + item.getKey(),
+                            "is not contiguous; dynamic collection indices must start at 1 and have no gaps");
+                }
+                for (NodePropertyDescriptor field : group.fields()) {
+                    NodePropertyDescriptor concrete = item.getValue().get(field.name());
+                    if (concrete == null) {
+                        throw new BehaviorPropertyException(node.id(), group.name() + "." + item.getKey(),
+                                "is incomplete; required field '" + field.name() + "' is missing");
+                    }
+                    validateProperty(node, concrete, false, List.of(concrete));
+                }
+                expected++;
+            }
         }
     }
 
@@ -273,8 +318,11 @@ public final class BehaviorPropertySchema {
         }
 
         requireType(node, property, value);
-        requireAllowedValue(node, property, value);
+        // Apply the declared text budget before an allowed-value failure includes the authored
+        // value. Otherwise a closed choice with a tiny vocabulary can reflect an entire untrusted
+        // GraphML document into one diagnostic before its own size bound gets a chance to run.
         requireBounds(node, property, value);
+        requireAllowedValue(node, property, value);
     }
 
     /**
@@ -355,7 +403,7 @@ public final class BehaviorPropertySchema {
                     throw typeFailure(node, property, value, "an absolute URI including a scheme");
                 }
             }
-            case SECRET_REFERENCE -> {
+            case SECRET_REFERENCE, WORKSPACE_REFERENCE -> {
                 // A reference names a server-side secret; it is never the secret. Whitespace and
                 // control characters are refused because a reference is an identifier, and a padded
                 // one is a typo the author would far rather meet here — with a node id and a property

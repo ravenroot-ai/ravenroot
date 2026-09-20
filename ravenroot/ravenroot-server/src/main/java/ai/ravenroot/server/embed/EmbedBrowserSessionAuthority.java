@@ -1,5 +1,6 @@
 package ai.ravenroot.server.embed;
 
+import ai.ravenroot.api.application.DeploymentViewerView;
 import ai.ravenroot.api.embed.EmbedRegistrationAggregate;
 import ai.ravenroot.api.embed.EmbedRegistrationAuthority;
 
@@ -9,6 +10,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -29,6 +32,7 @@ public final class EmbedBrowserSessionAuthority {
     private final ConcurrentHashMap<String, PendingExchange> pending = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> acknowledgementIndex = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ActiveSession> active = new ConcurrentHashMap<>();
+    private final Map<ActiveSession, DeploymentViewerView> deploymentBindings = new IdentityHashMap<>();
     private final Clock clock;
     private final Duration exchangeTtl;
     private final Duration bearerTtl;
@@ -161,7 +165,7 @@ public final class EmbedBrowserSessionAuthority {
         throw new IllegalStateException("secure bearer source repeatedly collided");
     }
 
-    public ActiveSession resolve(String bearer, EmbedRegistrationAuthority registrations) {
+    public synchronized ActiveSession resolve(String bearer, EmbedRegistrationAuthority registrations) {
         Objects.requireNonNull(registrations, "registrations");
         if (bearer == null || bearer.isBlank()) return null;
         String digest;
@@ -174,9 +178,34 @@ public final class EmbedBrowserSessionAuthority {
         if (state == null) return null;
         if (!clock.instant().isBefore(state.expiresAt()) || !registrations.isCurrent(state.registration())) {
             active.remove(digest, state);
+            deploymentBindings.remove(state);
             return null;
         }
         return state;
+    }
+
+    /** First resolution pins the immutable incarnation to the active session identity. */
+    public synchronized boolean bind(ActiveSession session, DeploymentViewerView candidate) {
+        Objects.requireNonNull(session, "session");
+        Objects.requireNonNull(candidate, "candidate");
+        if (active.values().stream().noneMatch(current -> current == session)) return false;
+        DeploymentViewerView bound = deploymentBindings.get(session);
+        if (bound == null) {
+            deploymentBindings.put(session, candidate);
+            bound = candidate;
+        }
+        return bound.source().equals(candidate.source())
+                && bound.canonicalDigest().equals(candidate.canonicalDigest());
+    }
+
+    /** Returns the immutable deployment view pinned to this exact active session identity. */
+    public synchronized DeploymentViewerView resolveBinding(ActiveSession session) {
+        Objects.requireNonNull(session, "session");
+        if (active.values().stream().noneMatch(current -> current == session)) {
+            deploymentBindings.remove(session);
+            return null;
+        }
+        return deploymentBindings.get(session);
     }
 
     synchronized int retainedEntries() {
@@ -188,6 +217,8 @@ public final class EmbedBrowserSessionAuthority {
         pending.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().expiresAt()));
         acknowledgementIndex.entrySet().removeIf(entry -> !pending.containsKey(entry.getValue()));
         active.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().expiresAt()));
+        deploymentBindings.keySet().removeIf(binding ->
+                active.values().stream().noneMatch(session -> session == binding));
     }
 
     private static Supplier<String> secureValues() {

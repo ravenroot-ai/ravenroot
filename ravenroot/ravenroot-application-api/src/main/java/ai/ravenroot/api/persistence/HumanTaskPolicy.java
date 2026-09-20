@@ -263,6 +263,12 @@ public record HumanTaskPolicy(
         } else if (!HumanTaskConfirmationLimits.CLASSIC.equals(registration.confirmationLimits())) {
             throw invalidRegistration("classic registration carries embedded confirmation limits");
         }
+        if (registration.reviewPresentation().present()) {
+            if (!registration.confirmationPresentation().embedded()) {
+                throw invalidRegistration("review presentation requires embedded confirmation");
+            }
+            confirmation.requireReviewPresentation(registration.reviewPresentation());
+        }
     }
 
     private void requireTokens(Set<String> tokens, String name) {
@@ -323,11 +329,14 @@ public record HumanTaskPolicy(
      * @param pollBackoffMaxMillis maximum attention refresh delay.
      * @param attentionDefaultPageSize default attention page size.
      * @param attentionMaxPageSize maximum attention page size.
+     * @param defaultReviewTextUtf8Bytes default graph-authored review-text ceiling.
+     * @param maxReviewTextUtf8Bytes maximum graph-authored review-text ceiling.
      */
     public record Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
                                int maxCommentUtf8Bytes, int pollAfterMillis,
                                int pollBackoffMaxMillis, int attentionDefaultPageSize,
-                               int attentionMaxPageSize) {
+                               int attentionMaxPageSize, int defaultReviewTextUtf8Bytes,
+                               int maxReviewTextUtf8Bytes) {
         public static final int HARD_MAX_PROMPT_UTF8_BYTES =
                 HumanTaskConfirmationPresentation.HARD_MAX_PROMPT_UTF8_BYTES;
         public static final int HARD_MAX_ACTION_LABEL_UTF8_BYTES =
@@ -338,6 +347,8 @@ public record HumanTaskPolicy(
         public static final int HARD_MAX_POLL_MILLIS = 300_000;
         /** A selected-node page carries presentation copy; cap it at 100 rows for a 6.4 MiB prompt bound. */
         public static final int HARD_MAX_ATTENTION_PAGE_SIZE = 100;
+        public static final int HARD_MAX_REVIEW_TEXT_UTF8_BYTES =
+                HumanTaskReviewPresentation.HARD_MAX_TEXT_UTF8_BYTES;
         /** Matches the GraphML parser's supported node ceiling. */
         public static final int HARD_MAX_ATTENTION_NODE_COUNTS = 1_000_000;
         /** Conservative bytes outside the comment in {@code {"schemaVersion":1,"comment":""}}. */
@@ -354,7 +365,27 @@ public record HumanTaskPolicy(
         public static final String DEFAULT_DENY_LABEL = "Deny";
         public static final String DEFAULT_CANCEL_LABEL = "Cancel";
         public static final Confirmation DEFAULTS = new Confirmation(4 * 1024, 64,
-                4 * 1024, 1_000, 10_000, 20, 100);
+                4 * 1024, 1_000, 10_000, 20, 100, 64 * 1024, 256 * 1024);
+
+        /**
+         * Compatibility constructor retaining the pre-review seven-field policy shape.
+         * @param maxPromptUtf8Bytes maximum confirmation prompt size.
+         * @param maxActionLabelUtf8Bytes maximum action-label size.
+         * @param maxCommentUtf8Bytes maximum responder-comment size.
+         * @param pollAfterMillis initial attention refresh delay.
+         * @param pollBackoffMaxMillis maximum attention refresh delay.
+         * @param attentionDefaultPageSize default attention page size.
+         * @param attentionMaxPageSize maximum attention page size.
+         */
+        public Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
+                            int maxCommentUtf8Bytes, int pollAfterMillis,
+                            int pollBackoffMaxMillis, int attentionDefaultPageSize,
+                            int attentionMaxPageSize) {
+            this(maxPromptUtf8Bytes, maxActionLabelUtf8Bytes, maxCommentUtf8Bytes,
+                    pollAfterMillis, pollBackoffMaxMillis, attentionDefaultPageSize,
+                    attentionMaxPageSize, DEFAULTS.defaultReviewTextUtf8Bytes(),
+                    DEFAULTS.maxReviewTextUtf8Bytes());
+        }
 
         /**
          * Compatibility constructor for the initial five confirmation controls.
@@ -370,7 +401,8 @@ public record HumanTaskPolicy(
                             int pollBackoffMaxMillis) {
             this(maxPromptUtf8Bytes, maxActionLabelUtf8Bytes, maxCommentUtf8Bytes,
                     pollAfterMillis, pollBackoffMaxMillis, DEFAULTS.attentionDefaultPageSize(),
-                    DEFAULTS.attentionMaxPageSize());
+                    DEFAULTS.attentionMaxPageSize(), DEFAULTS.defaultReviewTextUtf8Bytes(),
+                    DEFAULTS.maxReviewTextUtf8Bytes());
         }
 
         /** Validates technical ceilings and relationships between defaults and maxima. */
@@ -389,6 +421,14 @@ public record HumanTaskPolicy(
             if (attentionDefaultPageSize > attentionMaxPageSize) {
                 throw new IllegalArgumentException(
                         "attentionDefaultPageSize cannot exceed attentionMaxPageSize");
+            }
+            confirmationBounded(defaultReviewTextUtf8Bytes, 1,
+                    HARD_MAX_REVIEW_TEXT_UTF8_BYTES, "defaultReviewTextUtf8Bytes");
+            confirmationBounded(maxReviewTextUtf8Bytes, 1,
+                    HARD_MAX_REVIEW_TEXT_UTF8_BYTES, "maxReviewTextUtf8Bytes");
+            if (defaultReviewTextUtf8Bytes > maxReviewTextUtf8Bytes) {
+                throw new IllegalArgumentException(
+                        "defaultReviewTextUtf8Bytes cannot exceed maxReviewTextUtf8Bytes");
             }
         }
 
@@ -417,6 +457,19 @@ public record HumanTaskPolicy(
                     throw new IllegalArgumentException(
                             "active confirmation action labels must have distinct visible names");
                 }
+            }
+        }
+
+        /**
+         * Validates one immutable review value against the active admission policy.
+         * @param presentation immutable review presentation to validate.
+         */
+        public void requireReviewPresentation(HumanTaskReviewPresentation presentation) {
+            presentation = Objects.requireNonNull(presentation, "presentation");
+            if (!presentation.present()) return;
+            if (presentation.maxUtf8Bytes() > maxReviewTextUtf8Bytes) {
+                throw new IllegalArgumentException(
+                        "review text limit exceeds active policy byte limit");
             }
         }
 

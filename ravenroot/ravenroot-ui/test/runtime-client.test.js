@@ -6,13 +6,37 @@ import {
   RavenrootRuntimeClient,
   RuntimeAuthorizationError,
   RuntimeRequestError,
+  deploymentExecutionEvent,
   memoryTokenProvider,
   normalizeRuntimeEvent,
   parseEventFrame,
+  validateDeploymentViewEnvelope,
+  validateDeploymentViewFrame,
   validateLocalDeploymentStatus,
   validateRuntimeConfiguration,
   validateSourceSessionStatus,
 } from '../src/runtime-client.js';
+import {
+  applyDeploymentViewFrame,
+  applyDeploymentViewStateToRenderer,
+  createDeploymentViewState,
+} from '../src/deployment-view-state.js';
+
+it('requires an explicit revision and authenticates continuation resolution', async () => {
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ revision: 8, resolution: 'RESUME' }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'token' });
+  expect(() => client.resolveRunnerContinuation('process', 'job', 0, 'RESUME')).toThrow();
+  expect(() => client.resolveRunnerContinuation('process', 'job', 7, 'RETRY')).toThrow();
+  expect(fetchImpl).not.toHaveBeenCalled();
+  await client.resolveRunnerContinuation('process', 'job', 7, 'RESUME');
+  const [url, request] = fetchImpl.mock.calls[0];
+  expect(url).toBe('https://runtime.example/v1/runner-plane/workspaces/process/jobs/job/resolve-continuation');
+  expect(request.method).toBe('POST');
+  expect(request.headers.Authorization).toBe('Bearer token');
+  expect(request.headers['Content-Type']).toBe('application/json');
+  expect(JSON.parse(request.body)).toEqual({ expectedRevision: 7, resolution: 'RESUME' });
+});
 
 function versionedRingEvent(overrides = {}) {
   return {
@@ -266,6 +290,7 @@ describe('runtime configuration client', () => {
 
   it('retains the complete Human Task capability and rejects an incomplete one', () => {
     const humanTasks = { schemaVersion: 1, confirmationPresentationVersions: [1],
+      reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
       confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
       commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
       attentionPageSize: 25, attentionPageSizeMax: 1000 };
@@ -277,6 +302,7 @@ describe('runtime configuration client', () => {
 
 describe('embedded Human Task runtime client', () => {
   const capability = { schemaVersion: 1, confirmationPresentationVersions: [1],
+    reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
     confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
     commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
     attentionPageSize: 25, attentionPageSizeMax: 1000 };
@@ -434,6 +460,27 @@ describe('execution lifecycle client', () => {
     const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
 
     await expect(client.pauseExecution('execution-a')).rejects.toThrow(/invalid/);
+  });
+});
+
+describe('process lifecycle client', () => {
+  it('sends the durable process identity, command generation, and idempotency key', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ outcome: 'APPLIED', processInstanceId: 'process/one',
+        generation: 8, state: 'PAUSED', reason: 'inspect', traversals: [] }),
+    });
+    const client = new RavenrootRuntimeClient('https://runtime.example/', {
+      fetchImpl, accessToken: 'operator-token',
+    });
+    await client.controlProcess('process/one', 'pause', 7,
+      { idempotencyKey: 'pause-7', reason: 'inspect' });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://runtime.example/v1/processes/process%2Fone/pause?reason=inspect',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({
+        'Idempotency-Key': 'pause-7', 'X-Ravenroot-Expected-Generation': '7',
+      }) }),
+    );
   });
 });
 
@@ -1965,5 +2012,110 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(error.status).toBe(200);
     expect(error.message).toMatch(/could not be read/i);
     expect(error.message).not.toMatch(/not valid JSON/i);
+  });
+});
+
+describe('deployment viewer client', () => {
+  const view = {
+    viewerSourceVersion: '1',
+    source: { kind: 'deployment', deploymentId: 'orders-v3', graphVersion: 'sha256:graph',
+      incarnationId: 'incarnation-7' },
+    lifecycle: 'READY', canonicalDigest: 'sha256:graph',
+    projection: {
+      viewerContractVersion: '1.0', graphId: 'orders-v3', graphVersionId: 'sha256:graph',
+      canonicalDigest: 'sha256:graph', nodes: [], edges: [],
+    },
+  };
+
+  it('loads the immutable safe projection from the deployment authority', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200, text: async () => JSON.stringify(view),
+    });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'viewer-token' });
+
+    await expect(client.deploymentView('orders-v3')).resolves.toEqual(view);
+    expect(fetchImpl).toHaveBeenCalledWith('/v1/deployments/orders-v3/view', expect.objectContaining({
+      method: 'GET', credentials: 'omit', cache: 'no-store',
+      headers: expect.objectContaining({ Authorization: 'Bearer viewer-token' }),
+    }));
+  });
+
+  it('rejects source confusion and incomplete deployment bindings', () => {
+    expect(() => validateDeploymentViewEnvelope({ ...view, viewerSourceVersion: '2' }))
+      .toThrow(/immutable projection/);
+    expect(() => validateDeploymentViewEnvelope({ ...view,
+      source: { ...view.source, kind: 'snapshot' },
+    })).toThrow(/immutable projection/);
+    expect(() => validateDeploymentViewEnvelope(view, 'sibling')).toThrow(/does not match/);
+    expect(() => validateDeploymentViewFrame({
+      type: 'execution', deploymentId: 'orders-v3', graphVersion: 'sha256:graph',
+      incarnationId: 'incarnation-7', event: { type: 'NODE_STARTED' },
+    })).toThrow(/traversal id/);
+  });
+
+  it('allowlists a nested server runtime event and drops payload/detail sentinels', () => {
+    expect(deploymentExecutionEvent({ event: {
+      type: 'NODE_FAILED', traversalId: 'execution-1', nodeId: 'worker',
+      activeInstances: 2, publicReason: 'IllegalStateException',
+      payload: 'DO-NOT-LEAK', detail: 'DO-NOT-LEAK', secret: 'DO-NOT-LEAK',
+    } })).toEqual({
+      type: 'NODE_FAILED', executionId: 'execution-1', nodeId: 'worker', edgeId: null,
+      activeInstances: 2, inFlightArrivals: 0, fallback: false, occurredAt: null,
+      publicReason: 'IllegalStateException', description: '',
+    });
+  });
+
+  it('retains the server fallback bit in the closed execution projection', () => {
+    expect(deploymentExecutionEvent({ event: {
+      type: 'NODE_DEFAULTED', executionId: 'execution-fallback', nodeId: 'worker',
+      activeInstances: 1, inFlightArrivals: 2, fallback: true,
+    } })).toMatchObject({
+      type: 'NODE_DEFAULTED', executionId: 'execution-fallback', nodeId: 'worker',
+      activeInstances: 1, inFlightArrivals: 2, fallback: true,
+    });
+  });
+
+  it('streams only over a credentialed header-bound route and terminates truthfully on a gap', async () => {
+    const received = [];
+    const changes = [];
+    const state = createDeploymentViewState({ ...view.source, lifecycle: view.lifecycle });
+    const values = new Map([['id', 'start']]);
+    const node = { id: () => 'start',
+      data: (key, value) => value === undefined ? values.get(key) : values.set(key, value) };
+    let fallbackVisual = null;
+    const fetchImpl = vi.fn().mockResolvedValue(streamResponse([
+      'id: opaque-1\nevent: execution\ndata: {"deploymentId":"orders-v3","graphVersion":"sha256:graph","incarnationId":"incarnation-7","event":{"type":"NODE_DEFAULTED","executionId":"execution-1","nodeId":"start","activeInstances":1,"fallback":true}}\n\n',
+      'id: opaque-gap\nevent: source-gap\ndata: {"deploymentId":"orders-v3","graphVersion":"sha256:graph","incarnationId":"incarnation-7","reason":"cursor-unavailable"}\n\n',
+    ]));
+    const client = new RavenrootRuntimeClient('https://runtime.example', {
+      fetchImpl, accessToken: 'viewer-token', sleep: vi.fn(async () => {}),
+    });
+
+    const disconnect = client.connectDeploymentView(view, frame => {
+      received.push(frame);
+      applyDeploymentViewFrame(state, frame);
+      applyDeploymentViewStateToRenderer({ nodes: () => [node], edges: () => [] }, state);
+      if (frame.type === 'execution') fallbackVisual = Object.fromEntries(values);
+    }, (status, message) => changes.push([status, message]));
+    await vi.waitFor(() => expect(received).toHaveLength(2));
+    disconnect();
+
+    const [url, options] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://runtime.example/v1/deployments/orders-v3/events?graphVersion=sha256%3Agraph');
+    expect(url).not.toContain('viewer-token');
+    expect(options).toEqual(expect.objectContaining({ method: 'GET', credentials: 'omit' }));
+    expect(options.headers).toEqual(expect.objectContaining({
+      Authorization: 'Bearer viewer-token',
+      'X-Ravenroot-Deployment-Incarnation': 'incarnation-7',
+    }));
+    expect(received[0]).toMatchObject({ type: 'execution', cursor: 'opaque-1', event: {
+      type: 'NODE_DEFAULTED', fallback: true,
+    } });
+    expect(fallbackVisual).toMatchObject({
+      runtimeObserved: true, runtimeState: 'fallback', activeInstances: 1, fallback: true,
+    });
+    expect(received[1]).toMatchObject({ type: 'gap', cursor: 'opaque-gap' });
+    expect(changes.some(([status]) => status === 'connected')).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

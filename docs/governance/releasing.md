@@ -295,7 +295,9 @@ Portal API; publication never rebuilds or substitutes its contents.
 
 The GHCR tag is the SemVer value without `v`. The runtime image-manifest digest commits its config,
 layers, labels, version, and revision and is the content identity used for retry comparison. BuildKit
-predicate envelopes contain run-specific evidence, so their bytes may differ on a deterministic
+is selected by an immutable daemon-image digest and its expected version is checked before the
+release image is built. Its SPDX and SLSA predicates use the in-toto Statement v1 envelope. Predicate
+envelopes contain run-specific evidence, so their bytes may differ on a deterministic
 rebuild; a retry therefore also requires one subject-bound attestation manifest containing both the
 SPDX SBOM and SLSA provenance predicates. The retry downloads those predicate blobs by the published
 attestation-manifest digest, checks every descriptor digest and byte size, parses each in-toto
@@ -316,6 +318,10 @@ causes a refusal instead of an edit.
 Never delete, replace, or reuse a released version. Re-run **Publish immutable release** from the
 existing tag ref and provide that same tag as the input. The workflow rebuilds deterministic payloads
 from the tag, then follows these rules:
+
+If publication stops before the first external write because the tagged workflow itself is defective,
+preserve that tag as failed release evidence. Fix the pipeline through the normal `dev` and `main`
+review path and publish the next patch prerelease; never move the failed tag to the corrected commit.
 
 - if no Central component exists, it uploads and automatically publishes one complete signed bundle;
 - if every Central component exists, it rebuilds locally without uploading and compares every immutable

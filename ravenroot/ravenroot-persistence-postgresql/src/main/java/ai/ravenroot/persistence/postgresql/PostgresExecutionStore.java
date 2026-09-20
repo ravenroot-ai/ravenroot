@@ -57,6 +57,7 @@ import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -235,7 +236,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoreCapability.HUMAN_TASKS,
             StoreCapability.HUMAN_TASK_CONFIRMATIONS,
             StoreCapability.EXECUTION_PAUSES,
-            StoreCapability.AGENT_AUTHORITY_BUDGETS);
+            StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.RUNNER_JOBS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -378,7 +379,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     + "AND l.process_instance_id = p.process_instance_id ";
 
     private static final String META_COLUMNS =
-            "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, "
+            "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, control_state, "
                     + "updated_at_epoch_second, updated_at_nano, created_at_epoch_second, "
                     + "created_at_nano, lifecycle_generation, deployment_id, workload_id, "
                     + "correlation_id, retained_until_epoch_second, retained_until_nano "
@@ -658,6 +659,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         writeToolApprovals(connection, key, batch, folded, pin, revision, now);
         writeAgentAuthorityBudget(connection, key, batch, folded, now);
         writeExecutionPauses(connection, key, batch, folded, pin, revision);
+        writeRunnerWorkspace(connection, key, batch, folded, now);
         writeHumanTasks(connection, key, batch, folded, pin, revision, now);
         IdempotencyWrite idempotency = batch.idempotency().orElse(null);
         if (idempotency != null) {
@@ -2000,7 +2002,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                                 ProcessInstanceStatus status,
                                 ExecutionTerminationReason terminationReason, Instant updatedAt,
                                 Instant createdAt, long lifecycleGeneration, ExecutionOrigin origin,
-                                Instant retainedUntil) {
+                                Instant retainedUntil, String controlState) {
     }
 
     /** One instance the claim loop has locked, with the token its lease will be issued against. */
@@ -2038,7 +2040,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         rows.getLong("lifecycle_generation"),
                         ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
                                 rows.getString("correlation_id")),
-                        nullableInstant(rows, "retained_until"));
+                        nullableInstant(rows, "retained_until"), rows.getString("control_state"));
             }
         }
     }
@@ -2109,7 +2111,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
     private ProcessInstance readAggregate(Connection connection, ExecutionKey key, InstanceMeta meta)
             throws SQLException {
         try {
-            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason());
+            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason(),
+                    ai.ravenroot.api.application.ProcessControlState.valueOf(meta.controlState()));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             // Rows that no longer reconstruct into a legal aggregate must never escape into the runtime.
             throw new ExecutionStoreException(
@@ -2136,8 +2139,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "termination_reason, graph_version_pin, revision, fencing_token, "
                         + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
                         + "created_at_epoch_second, created_at_nano, updated_at_epoch_second, "
-                        + "updated_at_nano, retained_until_epoch_second, retained_until_nano) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "updated_at_nano, retained_until_epoch_second, retained_until_nano, control_state) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT DO NOTHING")) {
             statement.setString(1, key.tenantId());
             StoredUuid.bind(statement, 2, key.processInstanceId());
@@ -2153,6 +2156,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             int index = StoredInstant.bindValue(statement, 11, createdAt);
             index = StoredInstant.bindValue(statement, index, now);
             bindNullableInstant(statement, index, retainedUntil);
+            statement.setString(17, folded.controlState().name());
             inserted = statement.executeUpdate();
         }
         if (inserted == 0) {
@@ -2184,7 +2188,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "graph_version_pin = ?, revision = ?, lifecycle_generation = ?, "
                         + "deployment_id = ?, workload_id = ?, correlation_id = ?, "
                         + "updated_at_epoch_second = ?, updated_at_nano = ?, "
-                        + "retained_until_epoch_second = ?, retained_until_nano = ? "
+                        + "retained_until_epoch_second = ?, retained_until_nano = ?, control_state = ? "
                         + "WHERE tenant_id = ? AND process_instance_id = ? AND revision = ?")) {
             statement.setString(1, folded.status().name());
             // Assigned beside the status it qualifies and never apart from it: the pair is one fact, so
@@ -2199,6 +2203,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setString(8, origin.correlationId().orElse(null));
             int index = StoredInstant.bindValue(statement, 9, now);
             index = bindNullableInstant(statement, index, retainedUntil);
+            statement.setString(index++, folded.controlState().name());
             statement.setString(index++, key.tenantId());
             StoredUuid.bind(statement, index++, key.processInstanceId());
             statement.setLong(index, expectedRevision);
@@ -2741,7 +2746,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         String terminal = String.join(", ", terminalStatusNames().stream()
                 .map(name -> "'" + name + "'").toList());
         return "SELECT process_instance_id FROM process_instance WHERE tenant_id = ? AND status IN ("
-                + terminal + ") AND ("
+                + terminal + ") AND NOT EXISTS (SELECT 1 FROM runner_retention_guard g WHERE g.tenant_id = process_instance.tenant_id AND g.process_instance_id = process_instance.process_instance_id) AND ("
                 + "(retained_until_epoch_second IS NOT NULL AND "
                 + StoredInstant.atOrBefore("retained_until") + ") OR "
                 + "(retained_until_epoch_second IS NULL AND "
@@ -3655,7 +3660,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(readHandler(rows, key, null));
+                    DurableHandler handler = readHandler(rows, key, null);
+                    if (handler.status().resumesProcess()) ready.add(handler);
                 }
             }
         }
@@ -4231,6 +4237,185 @@ public final class PostgresExecutionStore implements ExecutionStore {
         }
     }
 
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.runner.RunnerWorkspaceState>> loadRunnerWorkspace(ExecutionKey key) {
+        return async(() -> read(key, connection ->
+                Optional.ofNullable(readRunnerWorkspace(connection, Objects.requireNonNull(key)))));
+    }
+
+@Override
+    public CompletionStage<List<ai.ravenroot.api.runner.GovernedRunnerResource>> runnerResources(String tenantId) {
+        Objects.requireNonNull(tenantId);
+        return async(() -> read(null, connection -> readRunnerResources(connection, tenantId)));
+    }
+
+    @Override public CompletionStage<List<ai.ravenroot.api.runner.RunnerAvailability>> runnerAvailability(String tenantId) {
+        Objects.requireNonNull(tenantId);
+        return async(() -> read(null, connection -> readRunnerAvailability(connection, tenantId)));
+    }
+    private List<ai.ravenroot.api.runner.RunnerAvailability> readRunnerAvailability(Connection connection, String tenantId) throws SQLException {
+        var result = new ArrayList<ai.ravenroot.api.runner.RunnerAvailability>();
+        try (var statement = connection.prepareStatement("SELECT runner_id, document FROM runner_availability WHERE tenant_id = ? ORDER BY runner_id")) {
+            statement.setString(1, tenantId);
+            try (var rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    var value = ai.ravenroot.api.runner.RunnerCodec.availability(rows.getBytes(2));
+                    if (!tenantId.equals(value.tenantId()) || !rows.getString(1).equals(value.runnerId()))
+                        throw new SQLException("corrupt worker availability identity");
+                    result.add(value);
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+    @Override public CompletionStage<ai.ravenroot.api.runner.RunnerAvailability> renewRunnerAvailability(
+            ai.ravenroot.api.runner.RunnerAvailability proposed, Duration ttl) {
+        Objects.requireNonNull(proposed); Objects.requireNonNull(ttl);
+        return async(() -> write(null, connection -> {
+            try (var statement = connection.prepareStatement("SELECT singleton FROM runner_fleet_guard WHERE singleton = 1 FOR UPDATE");
+                 var rows = statement.executeQuery()) { if (!rows.next()) throw new SQLException("fleet guard missing"); }
+
+            var existing = readRunnerAvailability(connection, proposed.tenantId()).stream()
+                    .filter(value -> value.runnerId().equals(proposed.runnerId())).findFirst().orElse(null);
+            var accepted = proposed.renew(existing, ttl, clock.instant());
+            try (var statement = connection.prepareStatement("INSERT INTO runner_availability (tenant_id, runner_id, document) VALUES (?, ?, ?) "
+                    + "ON CONFLICT (tenant_id, runner_id) DO UPDATE SET document = excluded.document")) {
+                statement.setString(1, accepted.tenantId()); statement.setString(2, accepted.runnerId());
+                statement.setBytes(3, ai.ravenroot.api.runner.RunnerCodec.availability(accepted)); statement.executeUpdate();
+            }
+            return accepted;
+        }));
+    }
+
+    private List<ai.ravenroot.api.runner.GovernedRunnerResource> readRunnerResources(
+            Connection connection, String tenantId) throws SQLException {
+        var resources = new ArrayList<ai.ravenroot.api.runner.GovernedRunnerResource>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT document FROM runner_catalog WHERE tenant_id = ? ORDER BY resource_key")) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    var value = ai.ravenroot.api.runner.RunnerCodec.resource(rows.getBytes(1));
+                    if (!tenantId.equals(value.tenantId())
+                            || resources.size() == ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                        throw failure(ExecutionStoreFailure.invalid("invalid runner catalog scope or size"));
+                    }
+                    resources.add(value);
+                }
+            }
+        }
+        return List.copyOf(resources);
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.runner.GovernedRunnerResource> saveRunnerResource(
+            ai.ravenroot.api.runner.GovernedRunnerResource resource, long expectedRevision) {
+        Objects.requireNonNull(resource);
+        return async(() -> write(null, connection -> {
+            try (PreparedStatement tenant = connection.prepareStatement(
+                    "INSERT INTO runner_catalog_tenant (tenant_id) VALUES (?) ON CONFLICT (tenant_id) DO NOTHING")) {
+                tenant.setString(1, resource.tenantId()); tenant.executeUpdate();
+            }
+            try (PreparedStatement lock = connection.prepareStatement(
+                    "SELECT tenant_id FROM runner_catalog_tenant WHERE tenant_id = ? FOR UPDATE")) {
+                lock.setString(1, resource.tenantId());
+                try (ResultSet ignored = lock.executeQuery()) { if (!ignored.next()) throw new SQLException("catalog lock missing"); }
+            }
+            var resources = readRunnerResources(connection, resource.tenantId());
+            var existing = resources.stream().filter(value -> value.key().equals(resource.key())).findFirst().orElse(null);
+            if (existing == null && resources.size() >= ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                throw failure(ExecutionStoreFailure.invalid("runner catalog quota exceeded"));
+            }
+            var accepted = resource.accepted(existing, expectedRevision, clock.instant());
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO runner_catalog (tenant_id, resource_key, document) VALUES (?, ?, ?) "
+                            + "ON CONFLICT (tenant_id, resource_key) DO UPDATE SET document = excluded.document")) {
+                statement.setString(1, accepted.tenantId()); statement.setString(2, accepted.key());
+                statement.setBytes(3, ai.ravenroot.api.runner.RunnerCodec.resource(accepted)); statement.executeUpdate();
+            }
+            return accepted;
+        }));
+    }
+
+    private ai.ravenroot.api.runner.RunnerWorkspaceState readRunnerWorkspace(Connection connection, ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state FROM runner_workspace WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return null;
+                try {
+                    var state = ai.ravenroot.api.runner.RunnerCodec.workspace(rows.getBytes(1));
+                    if (!key.equals(state.execution())) throw new IllegalArgumentException("runner scope mismatch");
+                    return state;
+                } catch (RuntimeException invalid) {
+                    throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                            "invalid governed runner workspace"));
+                }
+            }
+        }
+    }
+
+    private void writeRunnerWorkspace(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                      ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.runnerOperations().isEmpty() && !folded.status().terminal()) return;
+        // Serialize every reservation-changing runner transaction across process-row locks.
+        // Plain fleet reads below use READ COMMITTED after acquiring this singleton guard.
+        try (var guard = connection.prepareStatement("SELECT singleton FROM runner_fleet_guard WHERE singleton = 1 FOR UPDATE");
+             var rows = guard.executeQuery()) {
+            if (!rows.next()) throw new IllegalStateException("runner fleet admission guard is missing");
+        }
+        var state = readRunnerWorkspace(connection, key);
+        if (state == null && batch.runnerOperations().isEmpty()) return;
+        if (batch.runnerOperations().isEmpty() && state.processTerminalAt() != null) return;
+        byte[] bytes;
+        try {
+            for (var operation : batch.runnerOperations()) {
+                state = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(key, state, operation, folded, now);
+            }
+            state = state.observeProcess(folded, now);
+            var availability = readRunnerAvailability(connection, key.tenantId());
+            for (var operation : batch.runnerOperations()) ai.ravenroot.api.runner.RunnerFleetAdmission.verifyWorkerOperation(state, operation, availability, now);
+            if (batch.runnerOperations().stream().anyMatch(operation -> operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.Submit
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.Claim
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceRelease
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.WorkspacePlace)) {
+                var fleet = new ArrayList<ai.ravenroot.api.runner.RunnerWorkspaceState>();
+                try (var query = connection.prepareStatement("SELECT tenant_id, process_instance_id, state FROM runner_workspace");
+                     var rows = query.executeQuery()) {
+                    while (rows.next()) {
+                        var existing = ai.ravenroot.api.runner.RunnerCodec.workspace(rows.getBytes(3));
+                        if (!existing.execution().tenantId().equals(rows.getString(1))
+                                || !existing.execution().processInstanceId().equals(rows.getObject(2, UUID.class)))
+                            throw new IllegalArgumentException("corrupt fleet Workspace identity");
+                        if (!existing.execution().equals(key)) fleet.add(existing);
+                    }
+                }
+               fleet.add(state); ai.ravenroot.api.runner.RunnerFleetAdmission.validate(fleet);
+                            for (var operation : batch.runnerOperations()) ai.ravenroot.api.runner.RunnerFleetAdmission.verifyNamedAdmission(fleet, operation);
+                if (batch.runnerOperations().stream().anyMatch(value -> value instanceof ai.ravenroot.api.runner.RunnerJobOperation.Claim))
+                    ai.ravenroot.api.runner.RunnerFleetAdmission.verifyWorkerCapacity(fleet, availability);
+            }
+            bytes = ai.ravenroot.api.runner.RunnerCodec.workspace(state);
+        } catch (IllegalArgumentException | IllegalStateException invalid) {
+            throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO runner_workspace (tenant_id, process_instance_id, state) VALUES (?, ?, ?) "
+                        + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET state = excluded.state")) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            statement.setBytes(3, bytes);
+            statement.executeUpdate();
+        }
+        try (PreparedStatement guard = connection.prepareStatement(state.retentionSafe()
+                ? "DELETE FROM runner_retention_guard WHERE tenant_id = ? AND process_instance_id = ?"
+                : "INSERT INTO runner_retention_guard (tenant_id, process_instance_id) VALUES (?, ?) ON CONFLICT DO NOTHING")) {
+            guard.setString(1, key.tenantId()); StoredUuid.bind(guard, 2, key.processInstanceId()); guard.executeUpdate();
+        }
+    }
+
     // ---------------------------------------------------------------- durable execution pauses
 
     @Override
@@ -4706,6 +4891,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "WHERE t.tenant_id = ? AND t.task_id = ? AND t.generation = ? "
                         + "AND t.status IN " + LIVE_HUMAN_TASK_STATUSES + " "
                         + "AND t.confirmation_version > 0";
+                HumanTaskAttentionItem item;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, tenantId);
                     StoredUuid.bind(statement, 2, locator.taskId());
@@ -4714,12 +4900,45 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         if (!rows.next()) {
                             return Optional.empty();
                         }
-                        return Optional.ofNullable(
-                                readHumanTaskAttentionItem(rows, tenantId, authorization));
+                        item = readHumanTaskAttentionItem(rows, tenantId, authorization);
+                        if (item == null) return Optional.empty();
                     }
                 }
+                // Keep the content-bearing query physically after authorization and after the
+                // summary cursor is closed. This ordering is part of the non-disclosure contract.
+                return readHumanTaskReviewPresentation(connection, tenantId, locator)
+                        .map(review -> withReviewPresentation(item, review));
             });
         });
+    }
+
+    private static Optional<HumanTaskReviewPresentation> readHumanTaskReviewPresentation(
+            Connection connection, String tenantId, HumanTaskAttentionLocator locator)
+            throws SQLException {
+        String sql = "SELECT review_version, review_content_type, review_text, review_digest, "
+                + "review_max_utf8_bytes FROM human_task WHERE tenant_id = ? AND task_id = ? "
+                + "AND generation = ? AND status IN " + LIVE_HUMAN_TASK_STATUSES;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            StoredUuid.bind(statement, 2, locator.taskId());
+            statement.setLong(3, locator.generation());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                return Optional.of(new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                        rows.getString("review_content_type"), rows.getString("review_text"),
+                        rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
+            }
+        }
+    }
+
+    private static HumanTaskAttentionItem withReviewPresentation(
+            HumanTaskAttentionItem item, HumanTaskReviewPresentation review) {
+        return new HumanTaskAttentionItem(item.taskId(), item.generation(), item.status(),
+                item.graphVersion(), item.deploymentId(), item.processInstanceId(),
+                item.traversalId(), item.nodeId(), item.createdAt(), item.expiresAt(),
+                item.escalateAt(), item.presentation(), item.promptMaxUtf8Bytes(),
+                item.actionLabelMaxUtf8Bytes(), item.commentMaxUtf8Bytes(),
+                item.availableActions(), review.present() ? Optional.of(review) : Optional.empty());
     }
 
     /**
@@ -4943,10 +5162,11 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 + "confirmation_comment_requirement, confirmation_actions, "
                 + "confirmation_resolve_label, confirmation_deny_label, confirmation_cancel_label, "
                 + "confirmation_max_prompt_bytes, confirmation_max_action_label_bytes, "
-                + "confirmation_max_comment_bytes, created_at_epoch_second, created_at_nano, status, "
+                + "confirmation_max_comment_bytes, review_version, review_content_type, review_text, "
+                + "review_digest, review_max_utf8_bytes, created_at_epoch_second, created_at_nano, status, "
                 + "actor, decision_comment, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?, ".repeat(57) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?, ".repeat(62) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             StoredUuid.bind(statement, index++, task.key().processInstanceId());
@@ -5007,6 +5227,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
             statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            HumanTaskReviewPresentation review = request.reviewPresentation();
+            statement.setInt(index++, review.version());
+            statement.setString(index++, review.contentType());
+            statement.setString(index++, review.text());
+            statement.setString(index++, review.contentDigest());
+            statement.setInt(index++, review.maxUtf8Bytes());
             index = StoredInstant.bindValue(statement, index, task.createdAt());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
@@ -5131,7 +5357,10 @@ public final class PostgresExecutionStore implements ExecutionStore {
                             rows.getString("confirmation_cancel_label")),
                     new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
                             rows.getInt("confirmation_max_action_label_bytes"),
-                            rows.getInt("confirmation_max_comment_bytes")));
+                            rows.getInt("confirmation_max_comment_bytes")),
+                    new HumanTaskReviewPresentation(rows.getInt("review_version"),
+                            rows.getString("review_content_type"), rows.getString("review_text"),
+                            rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getString("decision_comment"), rows.getLong("generation"),

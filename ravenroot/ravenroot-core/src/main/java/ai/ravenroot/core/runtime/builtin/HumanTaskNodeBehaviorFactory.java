@@ -17,6 +17,7 @@ import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
 import ai.ravenroot.core.humantask.HumanTaskDefinition;
+import ai.ravenroot.core.humantask.HumanTaskReviewDefinition;
 import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.runtime.NodeBehaviorFactory;
 import ai.ravenroot.core.runtime.NodeHandler;
@@ -111,7 +112,20 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                             NodePropertyType.STRING, false,
                             "Plain-text label for CANCEL; enabled actions require distinct visible labels.",
                             HumanTaskPolicy.Confirmation.DEFAULT_CANCEL_LABEL,
-                            policy.confirmation().maxActionLabelUtf8Bytes(), 0, 0))));
+                            policy.confirmation().maxActionLabelUtf8Bytes(), 0, 0)),
+                    confirmation(new NodePropertyDescriptor("reviewPresentationVersion", "Review content",
+                            NodePropertyType.STRING, false,
+                            "Version one deliberately discloses selected inert plain text only on authorized exact-task detail.",
+                            "", List.of("1"), false)),
+                    review(NodePropertyDescriptor.boundedText("reviewTextSource", "Review text source",
+                            NodePropertyType.STRING, false,
+                            "Payload or a dotted payload path selecting the exact text to review; no interpolation or coercion.",
+                            "payload", 1024, 0, 0)),
+                    review(NodePropertyDescriptor.optionalBounded("reviewMaxUtf8Bytes",
+                            "Maximum review text bytes", NodePropertyType.INTEGER,
+                            "Inclusive UTF-8 byte ceiling; oversized content refuses task creation without truncation.",
+                            Integer.toString(policy.confirmation().defaultReviewTextUtf8Bytes()), 1,
+                            policy.confirmation().maxReviewTextUtf8Bytes()))));
         }
         properties.addAll(List.of(
                 NodePropertyDescriptor.boundedText("authorizedRoles", "Authorized roles", NodePropertyType.TEXT,
@@ -141,7 +155,7 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                         "Outcome selected after cancellation.", "cancelled")));
         return new NodeTypeDescriptor("human-task", "Human task", "Human workflow",
                 "Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.",
-                "flow", false, properties,
+                "human-task", false, properties,
                 Set.copyOf(capabilities))
                 .withOutcomes(
                         NodeOutcomeDescriptor.fromProperty("resolvedOutcome", "A responder supplied a valid response."),
@@ -235,6 +249,29 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
             presentation = presentation(node);
             policy.confirmation().requirePresentation(presentation);
         }
+        String reviewVersion = NodeProperties.string(node, "reviewPresentationVersion", "");
+        HumanTaskReviewDefinition review = HumanTaskReviewDefinition.none();
+        if (!reviewVersion.isBlank()) {
+            if (!"1".equals(reviewVersion)) {
+                throw invalid(node, "reviewPresentationVersion", "must be 1 when present");
+            }
+            if (!presentation.embedded()) {
+                throw invalid(node, "reviewPresentationVersion",
+                        "requires confirmationPresentationVersion 1");
+            }
+            int reviewMax = Math.toIntExact(NodeProperties.number(node, "reviewMaxUtf8Bytes",
+                    policy.confirmation().defaultReviewTextUtf8Bytes()));
+            if (reviewMax < 1 || reviewMax > policy.confirmation().maxReviewTextUtf8Bytes()) {
+                throw invalid(node, "reviewMaxUtf8Bytes", "must be between 1 and "
+                        + policy.confirmation().maxReviewTextUtf8Bytes());
+            }
+            String source = NodeProperties.string(node, "reviewTextSource", "payload");
+            try {
+                review = new HumanTaskReviewDefinition(1, source, reviewMax);
+            } catch (IllegalArgumentException invalid) {
+                throw invalid(node, "reviewTextSource", invalid.getMessage());
+            }
+        }
         return new HumanTaskDefinition(new HumanTaskMetadata(title, description),
                 new HumanTaskResponseSchema(responseContentType, responseSchema,
                         responseSchemaVersion, kind, maxBytes),
@@ -247,7 +284,7 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                         NodeProperties.string(node, "deniedOutcome", "denied"),
                         NodeProperties.string(node, "expiredOutcome", "expired"),
                         NodeProperties.string(node, "cancelledOutcome", "cancelled")),
-                policy.executionLimits(maxBytes), presentation);
+                policy.executionLimits(maxBytes), presentation, review);
     }
 
     private HumanTaskConfirmationPresentation presentation(GraphNode node) {
@@ -307,6 +344,15 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                 property.required(), property.description(), property.defaultValue(),
                 property.allowedValues(), property.adapterBinding(),
                 PropertyCondition.equalTo("confirmationPresentationVersion", "1"),
+                property.requiredWhen(), property.minimumValue(), property.maximumValue(),
+                property.maximumUtf8Bytes(), property.maximumItems(), property.maximumItemUtf8Bytes());
+    }
+
+    private static NodePropertyDescriptor review(NodePropertyDescriptor property) {
+        return new NodePropertyDescriptor(property.name(), property.displayName(), property.type(),
+                property.required(), property.description(), property.defaultValue(),
+                property.allowedValues(), property.adapterBinding(),
+                PropertyCondition.equalTo("reviewPresentationVersion", "1"),
                 property.requiredWhen(), property.minimumValue(), property.maximumValue(),
                 property.maximumUtf8Bytes(), property.maximumItems(), property.maximumItemUtf8Bytes());
     }

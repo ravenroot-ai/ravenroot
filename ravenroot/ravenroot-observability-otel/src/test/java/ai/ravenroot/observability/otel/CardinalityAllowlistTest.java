@@ -215,24 +215,25 @@ class CardinalityAllowlistTest {
     }
 
     /**
-     * The structural guard: the allowlist holds exactly the five bounded dimensions and nothing
+     * The structural guard: the allowlist holds exactly the six bounded dimensions and nothing
      * else, and every identifier that must never be a label is still refused.
      *
      * <p>The exact size is asserted rather than only the membership, and the number is meant to be
      * edited deliberately. Each entry costs a multiplicative factor on every metric's series count, so
      * an addition is a capacity decision; a test that only checked membership would let one arrive
-     * unnoticed inside an unrelated change. The five are: the event type, a fixed enum; the node
+     * unnoticed inside an unrelated change. The six are: the event type, a fixed enum; the node
      * type, bounded by the installed catalog; and the retry classification, a four-member enum fixed
-     * in source; plus the agent-budget dimension and outcome enums. None grows with traffic, which
+     * in source; plus the agent-budget dimension and outcome and runner observation enums. None grows with traffic, which
      * is the property this list encodes.</p>
      */
     @Test
     void theAllowlistHoldsExactlyItsBoundedEntriesAndStillRefusesInstanceIdentifiers() {
-        assertEquals(5, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
+        assertEquals(6, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
                 "the allowlist should carry event_type, node_type, retry_classification, and the two "
-                        + "fixed agent-budget enums and nothing "
+                        + "fixed agent-budget enums, the runner observation enum, and nothing "
                         + "else: " + TelemetryBridge.METRIC_LABEL_ALLOWLIST);
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(TelemetryBridge.METRIC_ATTR_NODE_TYPE));
+        assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(TelemetryBridge.METRIC_ATTR_RUNNER_COUNTER));
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
                 TelemetryBridge.METRIC_ATTR_RETRY_CLASSIFICATION));
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
@@ -246,6 +247,46 @@ class CardinalityAllowlistTest {
                 "the attempt identity is unbounded by construction -- one per attempt -- and the "
                         + "ordinal that DOES distinguish a retry is carried on the event, never as a "
                         + "metric label");
+    }
+
+    @Test
+    void runnerMetricsUseOnlyFixedEnumsAndUnlabelledConfiguredCapacityAndPageGauges() {
+        var relay = new ai.ravenroot.core.runner.RunnerTelemetry.Relay();
+        relay.install(bridge);
+        for (int i = 0; i < DISTINCT_VALUES; i++) {
+            for (var counter : ai.ravenroot.core.runner.RunnerTelemetry.Counter.values()) relay.increment(counter);
+        }
+        relay.activeJobs(17);
+        var counts = onlyMetric("ravenroot.runner.observations").getLongSumData().getPoints();
+        assertEquals(ai.ravenroot.core.runner.RunnerTelemetry.Counter.values().length, counts.size());
+        assertTrue(counts.stream().allMatch(point -> point.getValue() == DISTINCT_VALUES
+                && point.getAttributes().size() == 1
+                && point.getAttributes().get(TelemetryBridge.METRIC_ATTR_RUNNER_COUNTER) != null));
+        var active = onlyMetric("ravenroot.runner.worker.active").getLongGaugeData().getPoints();
+        assertEquals(1, active.size());
+        assertEquals(17, active.iterator().next().getValue());
+        assertTrue(active.iterator().next().getAttributes().isEmpty());
+        relay.activeJobs(0);
+        assertEquals(0, onlyMetric("ravenroot.runner.worker.active").getLongGaugeData().getPoints().iterator().next().getValue());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> relay.activeJobs(-1));
+        for (int configured : new int[]{2, 37}) {
+            relay.workerCapacity(configured, configured - 1);
+            assertEquals(configured, onlyMetric("ravenroot.runner.worker.capacity").getLongGaugeData().getPoints().iterator().next().getValue());
+            assertEquals(configured - 1, onlyMetric("ravenroot.runner.worker.available").getLongGaugeData().getPoints().iterator().next().getValue());
+        }
+        for (var gauge : ai.ravenroot.core.runner.RunnerTelemetry.PageGauge.values()) {
+            relay.recoveryPage(java.util.Map.of(gauge, 19L));
+            var point = onlyMetric("ravenroot.runner.recovery_page." + gauge.name().toLowerCase(java.util.Locale.ROOT))
+                    .getLongGaugeData().getPoints().iterator().next();
+            assertEquals(19, point.getValue()); assertTrue(point.getAttributes().isEmpty());
+        }
+        for (var operation : ai.ravenroot.core.runner.RunnerTelemetry.KubernetesOperation.values()) {
+            relay.kubernetesLatency(operation, 17);
+            var points = onlyMetric("ravenroot.runner.kubernetes." + operation.name().toLowerCase(java.util.Locale.ROOT)).getHistogramData().getPoints();
+            assertEquals(1, points.size()); assertEquals(17, points.iterator().next().getSum());
+            assertTrue(points.iterator().next().getAttributes().isEmpty());
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> relay.kubernetesLatency(operation, -1));
+        }
     }
 
     @Test

@@ -7,12 +7,12 @@
     <parent>
         <groupId>ai.ravenroot</groupId>
         <artifactId>ravenroot-parent</artifactId>
-        <version>0.2.0-alpha.1</version>
+        <version>0.4.1-alpha.1</version>
     </parent>
 
     <artifactId>ravenroot-persistence-postgresql</artifactId>
     <name>Ravenroot PostgreSQL Shared Execution Store</name>
-    <description>Durable multi-host PostgreSQL adapter for the execution-store, graph-definition and execution-manifest ports (ADR 0040). Not included in the standalone server or the default distribution; an adopter must add this module and supply it a DataSource explicitly to use it.</description>
+    <description>Durable multi-host PostgreSQL adapter for the execution-store, graph-definition and execution-manifest ports (ADR 0040). Included in the standalone server and the default distribution: a deployment selects it at startup with RAVENROOT_EXECUTION_STORE=postgresql, and the server supplies its pooled DataSource.</description>
 
     <dependencies>
         <dependency>

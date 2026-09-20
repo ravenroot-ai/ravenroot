@@ -65,6 +65,78 @@ public final class RouteTable {
             WireErrorCodes.LIMITER_CAPACITY_EXHAUSTED);
 
     public static final List<RouteDescriptor> ALL = List.of(
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/health",
+                    "Tenant-scoped cursor page of durable active-job health and pageMetrics gauges. Idle runner health is unknown, never inferred from registration.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/audit",
+                    "Bounded tenant journal page after afterOffset, projected to runner events with recorded revision, actor and fence. nextOffset advances across non-runner records too.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("GET", "PUT"), "/v1/runner-plane/catalog",
+                    "Bounded immutable definition/runner catalog and revisioned operator approval. PUT requires runner.admin, a user principal and expectedRevision.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/catalog/{key}",
+                    "Read one tenant-governed version, including its editable bounded JSON definition.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/register",
+                    "Authenticated designated workload advertisement. Registration creates a draft and never grants approval.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/assignments",
+                    "Cursor-paged work for the authenticated runner subject and issuer; no graph checkpoint is exposed.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("GET", "POST"), "/v1/runner-plane/availability",
+                    "GET inspects tenant-scoped worker leases and capacity. POST is approved-workload-only renewal of a store-clock fenced incarnation and installed runtimes.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/workspaces/{processId}",
+                    "Inspect the tenant-exact process workspace, durable job chain, authority and retained artifact references.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/workspaces/{processId}/worker-revision",
+                    "Pinned workload only: read the current process revision for fenced Workspace stop reporting.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/resources/{nodeId}/abort",
+                    "Operator-scoped sticky stop of one exact Workspace at expectedRevision; other process Workspaces remain independent.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/resources/{nodeId}/stopped",
+                    "Pinned workload only: report physical quiescence of the exact stopped Workspace at expectedRevision.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/resources/{nodeId}/release",
+                    "Pinned workload only: obtain cleanup authority for exactly one terminal Workspace after retention and quiescence.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/resources/{nodeId}/released",
+                    "Pinned workload only: acknowledge reserved physical cleanup at expectedRevision and release retained capacity.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}",
+                    "Designated runner only: bounded binary RunnerCodec protocol-v1 assignment, without graph continuations.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/release",
+                    "Designated runner only: obtain a scoped cleanup proof after terminal quiescence and retention; delete retained control-plane artifacts.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/artifacts",
+                    "Bounded streaming upload under a live X-Runner-Fence and X-Runner-Artifact-Kind. Returns durable digest metadata, never a host path.",
+                    true, false, 201, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/claim",
+                    "Designated runner execution claim; bounded ttlSeconds. Stale or conflicting claims return 409.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/heartbeat",
+                    "Designated runner heartbeat with live fence and bounded ttlSeconds; never revives expired work.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/reconcile-report",
+                    "Designated runner report-only reconciliation lease; unknown work is never re-executed.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/complete",
+                    "Designated runner binary v1 quiescence report under X-Runner-Fence; accepted duplicate reports are idempotent.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/cancel",
+                    "Tenant operator requests cancellation, never inferring that effects have stopped.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/reconcile",
+                    "Tenant operator reconciles lease/deadline liveness without retrying runner effects.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/resolve-continuation",
+                    "Tenant operator resolves uncertain graph delivery with expectedRevision and RESUME, ACKNOWLEDGE or ABANDON; no runner effect is replayed.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/runner-plane/workspaces/{processId}/jobs/{jobId}/artifacts/{artifactId}",
+                    "Authorized, digest-verified retained artifact. Accept application/json for a bounded 64-KiB text preview; otherwise attachment bytes.",
+                    true, false, 200, STANDARD_ERRORS, NEVER, true),
             new RouteDescriptor(Set.of("GET"), "/health", "Liveness probe.", false, false, 200, List.of(),
                     NEVER, true),
             new RouteDescriptor(Set.of("GET"), "/ready", "Readiness probe (PLAT-02).", false, false, 200,
@@ -209,6 +281,14 @@ public final class RouteTable {
                             WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
                             WireErrorCodes.EMBED_DATA_TOO_LARGE,
                             WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/embed/observation",
+                    "Streams bounded execution observations for the exact deployment incarnation pinned "
+                            + "by an opt-in embed registration and browser proof-of-possession session.",
+                    true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
+                            WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
+                            WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions",
                     "Starts a transient graph traversal. Default mode=test selects TEST_PASSTHROUGH and does not "
                             + "invoke behavior adapters; mode=run selects STANDARD and executes real node effects. "
@@ -278,6 +358,19 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/view",
+                    "Returns the versioned, allowlisted viewer projection for one exact local deployment "
+                            + "incarnation. Raw GraphML, node properties, credentials and payloads are absent.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/events",
+                    "Streams only execution observations matching the authenticated tenant, deployment, "
+                            + "required incarnation header and graphVersion query. Opaque Last-Event-ID "
+                            + "replay is process-local and gaps are terminal explicit events.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/start",
                     "Starts one process-local deployment and answers when it has reached READY, or with "
                             + "the truthful FAILED status if startup failed and rolled back. Idempotent: "
@@ -303,6 +396,33 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/pause",
+                    "Durably closes admission for one tenant-scoped deployment generation while "
+                            + "retaining accepted work for Resume. Requires Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation headers and a bounded X-Ravenroot-Reason.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/resume",
+                    "Durably reopens a paused deployment under a new fenced generation. Requires "
+                            + "Idempotency-Key and X-Ravenroot-Expected-Generation headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/cancel",
+                    "Commits a generation barrier that cooperatively ends work captured before it "
+                            + "without stopping the deployment domain. Requires Idempotency-Key, "
+                            + "X-Ravenroot-Expected-Generation, and X-Ravenroot-Reason headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/drain",
+                    "Durably closes admission and lets accepted work reach its ordinary terminal "
+                            + "state within the configured drain bound. Requires Idempotency-Key and "
+                            + "X-Ravenroot-Expected-Generation headers.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code()), NEVER, false),
             // Sub-routes under /v1/executions use registersContext=false:
             // the JDK HttpServer matches contexts by longest prefix, so "/v1/executions" already
             // receives both "/v1/executions/{id}" and "/v1/executions/{id}/cancel". Registering a
@@ -573,6 +693,18 @@ public final class RouteTable {
                             + "resume: none of them is the traversal running again.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/processes",
+                    "Authenticated dispatch context for process-instance lifecycle commands.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code()),
+                    NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/processes/{processInstanceId}/{command}",
+                    "Applies Pause, Resume, Cancel, Drain, or recoverable Stop to one durable process and all "
+                            + "contained traversals. Idempotency-Key and X-Ravenroot-Expected-Generation are "
+                            + "mandatory; outcomes distinguish replay, stale generation, partial settlement, "
+                            + "terminal state, and absence.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.CONFLICT.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"),
                     "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
                     "Approves, denies, or cancels one exact durable tool call. The authenticated "
@@ -591,7 +723,8 @@ public final class RouteTable {
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/human-tasks/attention",
                     "Lists authorized actionable embedded Human Tasks for an exact durable graph "
-                            + "context, or recovers one actionable task by its exact task and generation locator.",
+                            + "context without review content, or recovers one actionable task by its exact "
+                            + "task and generation locator with its immutable plain-text review presentation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
@@ -610,6 +743,18 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks",
+                    "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. "
+                            + "Filters cover task and execution identity, lifecycle, age, and actionable, terminal, "
+                            + "orphaned, or non-resumable classification.",
+                    true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/purge",
+                    "Dry-runs or applies a bounded, idempotent administrative reconciliation. CANCEL uses normal "
+                            + "task re-entry semantics; FORCE_ABANDON atomically closes inconsistent work without "
+                            + "re-entry. An unfiltered operation is refused.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/agent-authority",
                     "Dispatch context for the authenticated durable agent-authority trip/reset controls. "

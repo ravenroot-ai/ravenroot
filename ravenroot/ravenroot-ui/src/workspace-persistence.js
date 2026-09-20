@@ -1,4 +1,9 @@
-import { visualGroupPresentation } from './graph-view-state.js';
+import {
+  documentModeViewStates,
+  normalizeDesignArrangement,
+  normalizedMonitoringForces,
+  visualGroupPresentation,
+} from './graph-view-state.js';
 
 export const WORKSPACE_DATABASE_NAME = 'ravenroot-workspaces';
 export const WORKSPACE_DATABASE_VERSION = 1;
@@ -48,6 +53,9 @@ export function persistedDocument(document_) {
   if (!document_.graph || !Array.isArray(document_.graph.nodes) || !Array.isArray(document_.graph.edges)) {
     throw new TypeError('Workspace document graph is invalid');
   }
+  if (document_.graph.format === 'deployment') {
+    throw new TypeError('Live deployment attachments are session-only workspace documents');
+  }
   const graph = canonicalGraphSnapshot(document_.graph);
   return Object.freeze({
     documentId,
@@ -65,10 +73,17 @@ export function persistedDocument(document_) {
     graph,
     presentation: Object.freeze({
       ...visualGroupPresentation(document_),
+      viewStates: documentModeViewStates(document_),
+      monitoringForces: normalizedMonitoringForces(document_.monitoringForces
+        ?? document_.presentation?.monitoringForces),
       renderMode: (document_.renderMode ?? document_.presentation?.renderMode) === 'monitoring'
         ? 'monitoring' : 'design',
       layoutMode: typeof (document_.layoutMode ?? document_.presentation?.layoutMode) === 'string'
         ? (document_.layoutMode ?? document_.presentation.layoutMode) : 'cyto',
+      designArrangement: normalizeDesignArrangement(
+        document_.designArrangement ?? document_.presentation?.designArrangement,
+        document_.layoutMode ?? document_.presentation?.layoutMode,
+      ),
       visualStyle: typeof (document_.visualStyle ?? document_.presentation?.visualStyle) === 'string'
         ? (document_.visualStyle ?? document_.presentation.visualStyle) : 'cyto',
       fontSize: Number.isFinite(document_.fontSize ?? document_.presentation?.fontSize)
@@ -78,7 +93,8 @@ export function persistedDocument(document_) {
 }
 
 export function workspaceSnapshot(scope, documents, activeDocumentId) {
-  const storedDocuments = documents.filter(document_ => document_.tenantId === scope.tenantId)
+  const storedDocuments = documents.filter(document_ => document_.tenantId === scope.tenantId
+      && document_.graph?.format !== 'deployment')
     .map(persistedDocument);
   return Object.freeze({
     key: scope.key,

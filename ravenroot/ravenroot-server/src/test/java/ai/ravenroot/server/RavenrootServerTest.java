@@ -190,6 +190,15 @@ class RavenrootServerTest {
             assertTrue(catalog.body().contains("\"behavior\":\"cel-transform\""));
             assertTrue(catalog.body().contains("\"behavior\":\"human-task\""));
             assertTrue(catalog.body().contains("\"displayName\":\"Human task\""));
+            assertTrue(catalog.body().contains(
+                    "\"behavior\":\"human-task\",\"displayName\":\"Human task\""
+                            + ",\"category\":\"Human workflow\""), catalog.body());
+            assertTrue(catalog.body().matches(
+                    ".*\\\"behavior\\\":\\\"human-task\\\"[^}]*\\\"visualType\\\":\\\"human-task\\\".*"),
+                    catalog.body());
+            assertTrue(catalog.body().matches(
+                    ".*\\\"behavior\\\":\\\"log\\\"[^}]*\\\"visualType\\\":\\\"trace\\\".*"),
+                    catalog.body());
             assertTrue(catalog.body().contains("\"name\":\"title\""));
             assertTrue(catalog.body().contains("\"name\":\"responseKind\""));
             assertTrue(catalog.body().contains("\"fromProperty\":\"cancelledOutcome\""));

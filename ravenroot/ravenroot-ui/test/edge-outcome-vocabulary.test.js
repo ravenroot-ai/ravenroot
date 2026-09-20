@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { extname, join } from 'node:path';
 
 import { getRendererPalette } from '../src/theme-palette.js';
+import { createViewerStylesheet } from '../src/viewer-presentation.js';
 
 const APP_SOURCE = readFileSync('src/app.js', 'utf8');
 const FORBIDDEN_EDGE_WORD = String.fromCharCode(101, 115, 105, 116, 111);
@@ -18,9 +19,15 @@ function textFiles(directory) {
 
 describe('canonical outcome edge vocabulary', () => {
   it('keeps renderer style, legend and bypass semantics on the canonical edge type', () => {
-    expect(APP_SOURCE).toContain(`{ selector: 'edge[edgeType="outcome"]', style: {`);
-    expect(APP_SOURCE).toContain(`'line-color': edge.outcome, 'target-arrow-color': edge.outcome,`);
-    expect(APP_SOURCE).toContain(`width: 2.5, color: edge.outcome,`);
+    const palette = getRendererPalette('dark');
+    const outcome = createViewerStylesheet(palette)
+      .find(rule => rule.selector === 'edge[edgeType="outcome"]');
+    expect(outcome?.style).toMatchObject({
+      'line-color': palette.edgeType.outcome,
+      'target-arrow-color': palette.edgeType.outcome,
+      width: 2.5,
+      color: palette.edgeType.outcome,
+    });
     expect(APP_SOURCE).toContain(`{ type: 'outcome', label: '*_OUTCOME' }`);
     expect(APP_SOURCE).toContain(`if (state === 'bypassed') return rendererPalette.edgeType.outcome;`);
 

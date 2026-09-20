@@ -227,6 +227,7 @@ export class RavenrootRuntimeClient {
     this.retryDelayMs = options.retryDelayMs || DEFAULT_RETRY_DELAY_MS;
     this.sleep = options.sleep || (delay => new Promise(resolve => setTimeout(resolve, delay)));
     this.connection = null;
+    this.deploymentConnections = new Set();
     this.lastEventId = '';
   }
 
@@ -432,6 +433,134 @@ export class RavenrootRuntimeClient {
     return validateLocalDeploymentStatus(result, id);
   }
 
+  /** Resolves one immutable, tenant-scoped deployment presentation without returning raw GraphML. */
+  async deploymentView(deploymentId, { signal } = {}) {
+    const id = String(deploymentId || '');
+    if (!id) throw new Error('Deployment view requires an id');
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/view`, {
+      method: 'GET', headers: { Accept: 'application/json' }, signal,
+    });
+    return validateDeploymentViewEnvelope(result, id);
+  }
+
+  /**
+   * Opens the deployment/version/incarnation-scoped event stream with an Authorization header.
+   * Credentials never enter the URL and the server remains responsible for filtering before a
+   * frame is queued or serialized.
+   */
+  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}) {
+    const view = validateDeploymentViewEnvelope(envelope);
+    const controller = new AbortController();
+    this.deploymentConnections.add(controller);
+    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange)
+      .finally(() => this.deploymentConnections.delete(controller));
+    return () => controller.abort();
+  }
+
+  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange) {
+    let failures = 0;
+    let cursor = '';
+    while (!signal.aborted && failures <= this.maxRetries) {
+      const source = view.source;
+      const path = `/v1/deployments/${encodeURIComponent(source.deploymentId)}/events`
+        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`;
+      try {
+        const credential = await this.#requestCredential();
+        if (signal.aborted) return;
+        const headers = {
+          Accept: 'text/event-stream',
+          'X-Ravenroot-Deployment-Incarnation': source.incarnationId,
+        };
+        if (cursor) headers['Last-Event-ID'] = cursor;
+        const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+          method: 'GET', headers: this.#headers(headers, credential.accessToken), credentials: 'omit',
+          cache: 'no-store', signal,
+        });
+        if (response.status === 401 || response.status === 403) {
+          await this.#clearAccessTokenIfCurrent(credential);
+          throw new RuntimeAuthorizationError(response.status === 401
+            ? 'Authentication expired' : 'Deployment observation was revoked', response.status);
+        }
+        if (!response.ok || !response.body?.getReader) {
+          throw new RuntimeRequestError('Deployment event stream failed', {
+            status: response.status, method: 'GET', path,
+          });
+        }
+        onConnectionChange('connected', 'Deployment live observation connected');
+        const read = await this.#readDeploymentStream(response.body.getReader(), signal, source, frame => {
+          cursor = frame.cursor || cursor;
+          onFrame(frame);
+        });
+        if (signal.aborted || read.terminal) return;
+        failures += 1;
+        onConnectionChange('reconnecting', 'Deployment observation disconnected; reconnecting');
+        await this.sleep(read.retryDelay);
+      } catch (error) {
+        if (signal.aborted) return;
+        if (error instanceof RuntimeAuthorizationError) {
+          onConnectionChange('revoked', error.message);
+          return;
+        }
+        failures += 1;
+        if (failures > this.maxRetries) {
+          onConnectionChange('error', `Deployment observation stopped: ${error.message}`);
+          return;
+        }
+        onConnectionChange('reconnecting', error.message);
+        await this.sleep(this.retryDelayMs);
+      }
+    }
+  }
+
+  async #readDeploymentStream(reader, signal, source, onFrame) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let retryDelay = this.retryDelayMs;
+    let terminal = false;
+    while (!signal.aborted) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
+      if (buffer.length > this.maxFrameBytes && !buffer.includes('\n\n')) {
+        await reader.cancel?.();
+        throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
+      }
+      let boundary;
+      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (raw.length > this.maxFrameBytes) throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
+        const parsed = parseEventFrame(raw);
+        if (parsed.retry !== undefined) {
+          retryDelay = Math.min(MAX_RETRY_DELAY_MS, Math.max(MIN_RETRY_DELAY_MS, parsed.retry));
+        }
+        if (!parsed.data) continue;
+        const payload = JSON.parse(parsed.data);
+        const type = parsed.type === 'execution' ? 'execution'
+          : parsed.type === 'source-gap' ? 'gap'
+            : parsed.type === 'source-invalidated' ? 'invalidated' : parsed.type;
+        const frame = validateDeploymentViewFrame({
+          type,
+          deploymentId: payload.deploymentId ?? source.deploymentId,
+          graphVersion: payload.graphVersion ?? source.graphVersion,
+          incarnationId: payload.incarnationId ?? source.incarnationId,
+          cursor: parsed.id || payload.cursor,
+          ...(type === 'execution' ? { event: deploymentExecutionEvent(payload) } : {}),
+          ...(type === 'lifecycle' ? { lifecycle: payload.lifecycle } : {}),
+          ...(['gap', 'invalidated'].includes(type) ? { reason: payload.reason } : {}),
+        });
+        onFrame(frame);
+        if (frame.type === 'gap' || frame.type === 'invalidated'
+            || (frame.type === 'lifecycle' && frame.lifecycle === 'UNDEPLOYED')) {
+          terminal = true;
+          await reader.cancel?.();
+          return { retryDelay, terminal };
+        }
+      }
+      if (done) return { retryDelay, terminal };
+    }
+    return { retryDelay, terminal };
+  }
+
   /** Starts a registered deployment; the call answers only once it has reached READY, or the
    * truthful FAILED state if startup rolled back -- never merely "accepted". */
   async startDeployment(deploymentId) {
@@ -505,6 +634,29 @@ export class RavenrootRuntimeClient {
 
   async cancelExecution(executionId, options = {}) {
     return this.#controlExecution(executionId, 'cancel', options);
+  }
+
+  async controlProcess(processInstanceId, operation, expectedGeneration,
+    { idempotencyKey, reason = '', signal } = {}) {
+    const id = String(processInstanceId || '');
+    const allowed = new Set(['pause', 'resume', 'cancel', 'drain', 'stop']);
+    if (!id || !allowed.has(operation) || !Number.isSafeInteger(expectedGeneration)
+        || expectedGeneration < 1 || typeof idempotencyKey !== 'string' || !idempotencyKey) {
+      throw new Error('Process lifecycle command is invalid');
+    }
+    const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    const result = await this.#json(`/v1/processes/${encodeURIComponent(id)}/${operation}${query}`, {
+      method: 'POST', signal, headers: {
+        Accept: 'application/json', 'Idempotency-Key': idempotencyKey,
+        'X-Ravenroot-Expected-Generation': String(expectedGeneration),
+      },
+    });
+    if (!result || result.processInstanceId !== id || !Number.isSafeInteger(result.generation)
+        || typeof result.outcome !== 'string' || typeof result.state !== 'string'
+        || typeof result.reason !== 'string' || !Array.isArray(result.traversals)) {
+      throw new Error(`Process ${operation} response is invalid`);
+    }
+    return result;
   }
 
   /**
@@ -788,6 +940,63 @@ export class RavenrootRuntimeClient {
       { method: 'POST', ...request, headers: { Accept: 'application/json', ...(request.headers || {}) } });
   }
 
+  runnerCatalog() {
+    return this.#json('/v1/runner-plane/catalog', { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerHealth(cursor = null) {
+    return this.#json('/v1/runner-plane/health' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerAudit(afterOffset = 0) {
+    if (!Number.isSafeInteger(afterOffset) || afterOffset < 0) throw new Error('Invalid runner audit offset');
+    return this.#json('/v1/runner-plane/audit?afterOffset=' + afterOffset,
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerResource(key) {
+    return this.#json('/v1/runner-plane/catalog/' + encodeURIComponent(key),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  saveRunnerResource(resource) {
+    const body = JSON.stringify(resource);
+    if (new TextEncoder().encode(body).length > 1_048_576) throw new Error('Runner definition exceeds the document limit');
+    return this.#json('/v1/runner-plane/catalog', { method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body });
+  }
+  runnerWorkspace(processId) {
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId),
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  runnerAvailability() {
+    return this.#json('/v1/runner-plane/availability',
+      { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  stopRunnerWorkspace(processId, nodeId, expectedRevision) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !nodeId) throw new Error('Exact Workspace and revision required');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/resources/' + encodeURIComponent(nodeId) + '/abort',
+    { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision }) });
+  }
+  runnerOperation(processId, jobId, operation) {
+    if (!['cancel', 'reconcile'].includes(operation)) throw new Error('Unsupported operator runner action');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/' + operation,
+    { method: 'POST', headers: { Accept: 'application/json' } });
+  }
+  runnerArtifact(processId, jobId, artifactId) {
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodeURIComponent(artifactId),
+    { method: 'GET', headers: { Accept: 'application/json' } });
+  }
+  resolveRunnerContinuation(processId, jobId, expectedRevision, resolution) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1
+        || !['RESUME', 'ACKNOWLEDGE', 'ABANDON'].includes(resolution)) throw new Error('Explicit runner continuation revision and resolution required');
+    return this.#json('/v1/runner-plane/workspaces/' + encodeURIComponent(processId)
+      + '/jobs/' + encodeURIComponent(jobId) + '/resolve-continuation',
+    { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedRevision, resolution }) });
+  }
+
   async #json(path, options) {
     if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
     const credential = await this.#requestCredential();
@@ -891,7 +1100,55 @@ export class RavenrootRuntimeClient {
   disconnect() {
     this.connection?.abort();
     this.connection = null;
+    for (const connection of this.deploymentConnections) connection.abort();
+    this.deploymentConnections.clear();
   }
+}
+
+export function validateDeploymentViewEnvelope(value, expectedDeploymentId = '') {
+  const source = value?.source;
+  const projection = value?.projection;
+  if (!value || value.viewerSourceVersion !== '1' || source?.kind !== 'deployment'
+      || typeof source.deploymentId !== 'string' || !source.deploymentId
+      || typeof source.graphVersion !== 'string' || !source.graphVersion
+      || typeof source.incarnationId !== 'string' || !source.incarnationId
+      || typeof value.lifecycle !== 'string'
+      || projection?.viewerContractVersion !== '1.0'
+      || !Array.isArray(projection.nodes) || !Array.isArray(projection.edges)) {
+    throw new Error('Deployment view response is not a valid immutable projection');
+  }
+  if (expectedDeploymentId && source.deploymentId !== expectedDeploymentId) {
+    throw new Error(`Deployment view id ${source.deploymentId} does not match ${expectedDeploymentId}`);
+  }
+  return value;
+}
+
+export function validateDeploymentViewFrame(frame) {
+  if (!frame || !['execution', 'lifecycle', 'gap', 'invalidated'].includes(frame.type)
+      || typeof frame.deploymentId !== 'string' || !frame.deploymentId
+      || typeof frame.graphVersion !== 'string' || !frame.graphVersion
+      || typeof frame.incarnationId !== 'string' || !frame.incarnationId) {
+    throw new Error('Deployment observation frame is invalid');
+  }
+  if (frame.type === 'execution') frame = { ...frame, event: normalizeRuntimeEvent(frame.event) };
+  return frame;
+}
+
+/** Closed runtime projection: fields not required to draw truthful activity never reach UI state. */
+export function deploymentExecutionEvent(payload) {
+  const value = payload?.event && typeof payload.event === 'object' ? payload.event : payload;
+  return {
+    type: value?.type,
+    executionId: value?.executionId ?? value?.traversalId,
+    nodeId: value?.nodeId ?? null,
+    edgeId: value?.edgeId ?? null,
+    activeInstances: Number(value?.activeInstances) || 0,
+    inFlightArrivals: Number(value?.inFlightArrivals) || 0,
+    fallback: Boolean(value?.fallback),
+    occurredAt: typeof value?.occurredAt === 'string' ? value.occurredAt : null,
+    publicReason: typeof value?.publicReason === 'string' ? value.publicReason : null,
+    description: typeof value?.description === 'string' ? value.description : '',
+  };
 }
 
 // Versioned SSE data and legacy unversioned projections share the UI's type/executionId aliases.

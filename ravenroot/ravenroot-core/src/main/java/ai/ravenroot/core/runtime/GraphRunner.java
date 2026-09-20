@@ -939,10 +939,10 @@ public final class GraphRunner implements AutoCloseable {
         var residents = new LinkedHashMap<String, NodeRef>();
         graph.nodes().forEach(node -> {
             NodeRuntimeNature nature = NodeRuntimeNatureProperty.effectiveNature(
-                    node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node.behavior()).orElse(null) : null,
+                    node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node).orElse(null) : null,
                     node.properties());
             NodeTypeDescriptor descriptor = node.kind() == NodeKind.BEHAVIOR
-                    ? behaviors.descriptor(node.behavior()).orElse(null) : null;
+                    ? behaviors.descriptor(node).orElse(null) : null;
             int maxConcurrency = NodeRuntimeMaxConcurrencyProperty.effectiveValue(descriptor, node.properties());
             RavenNode runtime = runtimeNode(node);
             // Read once, here, from the same pinned definition every other precomputation reads, and
@@ -1012,7 +1012,7 @@ public final class GraphRunner implements AutoCloseable {
             if (node.kind() != NodeKind.BEHAVIOR || node.behavior() == null) {
                 return;
             }
-            behaviors.descriptor(node.behavior())
+            behaviors.descriptor(node)
                     .ifPresent(descriptor -> keys.put(node.id(), descriptor.behavior()));
         });
         return Map.copyOf(keys);
@@ -1199,7 +1199,7 @@ public final class GraphRunner implements AutoCloseable {
                     if (suspension instanceof VerifiedToolApprovalSuspension verified) {
                         return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
                     }
-                    if (suspension instanceof VerifiedHumanTaskSuspension verified) {
+                    if (suspension instanceof VerifiedExternalWorkSuspension verified) {
                         return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
                     }
                     if (outcome == null) {
@@ -1308,7 +1308,7 @@ public final class GraphRunner implements AutoCloseable {
                         }
                         if (cause instanceof DurableHumanTaskSuspension suspension
                                 && state.acceptsHumanTaskSuspension(suspension.taskId(), delivered)) {
-                            throw new CompletionException(new VerifiedHumanTaskSuspension(suspension));
+                            throw new CompletionException(new VerifiedExternalWorkSuspension(suspension));
                         }
                         state.nodeFailed(invocationId, attemptId, startedEventId);
                         throw new CompletionException(cause);
@@ -1346,7 +1346,7 @@ public final class GraphRunner implements AutoCloseable {
                     try {
                         if (failure == null) state.executionCompleted();
                         else if (!(outcome instanceof VerifiedToolApprovalSuspension)
-                                && !(outcome instanceof VerifiedHumanTaskSuspension)) {
+                                && !(outcome instanceof VerifiedExternalWorkSuspension)) {
                             state.executionFailed(ExecutionTermination.reasonOf(outcome));
                         }
                     } finally {
@@ -1355,7 +1355,7 @@ public final class GraphRunner implements AutoCloseable {
                     if (outcome instanceof VerifiedToolApprovalSuspension verified) {
                         throw new CompletionException(verified.signal());
                     }
-                    if (outcome instanceof VerifiedHumanTaskSuspension verified) {
+                    if (outcome instanceof VerifiedExternalWorkSuspension verified) {
                         throw new CompletionException(verified.signal());
                     }
                     if (failure != null) throw new CompletionException(outcome);
@@ -1415,6 +1415,34 @@ public final class GraphRunner implements AutoCloseable {
                                                        List<GraphExecutionContinuationCheckpoint.JoinState>
                                                                joinContinuation,
                                                        UUID suspendedInvocationId) {
+        return executeAfterExternalWork(security, processInstanceId, traversalId, nodeId, graphVersion,
+                recorder, result, budgetSnapshot, responseLimits, joinContinuation, suspendedInvocationId, null, null);
+    }
+
+    /** Resumes a terminal runner result on its exact waiting invocation and attempt, without re-execution. */
+    public CompletionStage<Void> executeAfterRunnerJob(SecurityContext security, String nodeId,
+                                                       String graphVersion, ExecutionRecorder recorder,
+                                                       ai.ravenroot.api.runner.RunnerJob job, NodeResult result,
+                                                       GraphExecutionContinuationCheckpoint.Decoded checkpoint,
+                                                       UUID terminalEventId) {
+        var id = job.identity();
+        if (!security.tenantId().equals(id.execution().tenantId()) || !recorder.confirmsRunnerTerminal(job)
+                || !recorder.storedState().traversals().get(id.traversalId()).invocations().get(id.invocationId()).nodeId().equals(nodeId)) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("runner result cannot resume this invocation"));
+        }
+        return executeAfterExternalWork(security, id.execution().processInstanceId(), id.traversalId(), nodeId,
+                graphVersion, recorder, result, checkpoint.budget(), null, checkpoint.joins(),
+                id.invocationId(), id.attemptId(), terminalEventId);
+    }
+
+    private CompletionStage<Void> executeAfterExternalWork(SecurityContext security, UUID processInstanceId,
+                                                       UUID traversalId, String nodeId, String graphVersion,
+                                                       ExecutionRecorder recorder, NodeResult result,
+                                                       GraphExecutionBudgetSnapshot budgetSnapshot,
+                                                       ai.ravenroot.api.payload.PayloadLimits responseLimits,
+                                                       List<GraphExecutionContinuationCheckpoint.JoinState> joinContinuation,
+                                                       UUID suspendedInvocationId, UUID existingAttemptId,
+                                                       UUID terminalEventId) {
         java.util.Objects.requireNonNull(result, "result");
         GraphNode node = graph.node(nodeId);
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
@@ -1422,9 +1450,14 @@ public final class GraphRunner implements AutoCloseable {
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
                 java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
-        var state = new ExecutionState(processInstanceId, traversalId, node.id(),
+        var storedLifecycle = recorder.storedState();
+        boolean runnerAlreadyCompleted = existingAttemptId != null && storedLifecycle.traversals().get(traversalId)
+                .invocations().get(suspendedInvocationId).attempts().stream()
+                .anyMatch(saved -> saved.attemptId().equals(existingAttemptId) && saved.status() == NodeAttemptStatus.COMPLETED);
+        var state = new ExecutionState(processInstanceId, traversalId,
+                existingAttemptId == null ? node.id() : storedLifecycle.traversals().get(traversalId).ingressNodeId(),
                 new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
-                recorder.storedState(), executionLimits, budget);
+                storedLifecycle, executionLimits, budget);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
                 joinSpecs, clock, timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
@@ -1442,7 +1475,7 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(refused);
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
-        UUID invocationId = identitySource.nextNodeInvocationId();
+        UUID invocationId = existingAttemptId == null ? identitySource.nextNodeInvocationId() : suspendedInvocationId;
         try {
             coordinator.restoreContinuation(joinContinuation, invocationId).toCompletableFuture().join();
         } catch (RuntimeException restorationFailure) {
@@ -1452,25 +1485,33 @@ public final class GraphRunner implements AutoCloseable {
             behaviors.releaseOperationalPolicy(traversalId);
             return CompletableFuture.failedFuture(unwrap(restorationFailure));
         }
-        state.reentryStarted();
+        if (existingAttemptId == null) state.reentryStarted();
+        else if (!runnerAlreadyCompleted) state.runnerResumed(suspendedInvocationId, existingAttemptId);
         monitor.executionStarted(identity);
         // The third entry path. A traversal resumed after a human task is as pausable as any other --
         // it is a live traversal with its own hop sequence -- so leaving it out would make it the one
         // path where a hold is real but silent.
         beginPublishing(traversalId, identity, coordinator);
-        UUID attemptId = identitySource.nextNodeAttemptId();
+        UUID attemptId = existingAttemptId == null ? identitySource.nextNodeAttemptId() : existingAttemptId;
         var reentryParents = new java.util.LinkedHashSet<UUID>();
-        if (suspendedInvocationId != null) reentryParents.add(suspendedInvocationId);
+        if (suspendedInvocationId != null && existingAttemptId == null) reentryParents.add(suspendedInvocationId);
+        if (existingAttemptId != null) reentryParents.addAll(
+                storedLifecycle.traversals().get(traversalId).invocations().get(invocationId).parentInvocationIds());
         joinContinuation.forEach(saved -> reentryParents.addAll(saved.parentInvocationIds()));
-        UUID startedEventId = state.nodeStarted(node.id(), Set.copyOf(reentryParents), invocationId, attemptId,
-                NodeCommand.PROCESS, state.traversalAcceptedEventId());
-        monitor.nodeStarted(identity, node.id(), invocationId, attemptId, 0);
-        UUID completedEventId = state.nodeCompleted(invocationId, attemptId, startedEventId, false, false);
+        UUID startedEventId = existingAttemptId == null
+                ? state.nodeStarted(node.id(), Set.copyOf(reentryParents), invocationId, attemptId,
+                    NodeCommand.PROCESS, state.traversalAcceptedEventId()) : terminalEventId;
+        if (existingAttemptId == null) monitor.nodeStarted(identity, node.id(), invocationId, attemptId, 0);
+        UUID runnerCompletedEventId = existingAttemptId == null ? null : UUID.nameUUIDFromBytes(
+                ("runner-node-completed:" + existingAttemptId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        UUID completedEventId = runnerAlreadyCompleted ? runnerCompletedEventId
+                : state.nodeCompleted(invocationId, attemptId, startedEventId, false, false, runnerCompletedEventId);
         monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false,
                 result.outcome(), 0, null);
         NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
                 invocationId, attemptId, Set.copyOf(reentryParents), node.id(), result.payload(), result.attributes(),
-                NodeCommand.PROCESS);
+                existingAttemptId == null ? NodeCommand.PROCESS
+                        : storedLifecycle.traversals().get(traversalId).invocations().get(invocationId).command());
         List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
         if (next.isEmpty() && !"continue".equals(result.outcome())) {
             next = graph.nextEdges(node.id(), "continue");
@@ -1497,7 +1538,7 @@ public final class GraphRunner implements AutoCloseable {
                         if (failure == null) {
                             state.executionCompleted();
                             monitor.executionCompleted(identity, state.handledFailureNodes());
-                        } else if (!(outcome instanceof VerifiedHumanTaskSuspension)
+                        } else if (!(outcome instanceof VerifiedExternalWorkSuspension)
                                 && !(outcome instanceof VerifiedToolApprovalSuspension)) {
                             state.executionFailed(ExecutionTermination.reasonOf(outcome));
                             publishTermination(identity, outcome);
@@ -1505,7 +1546,7 @@ public final class GraphRunner implements AutoCloseable {
                     } finally {
                         release(traversalId, coordinator).toCompletableFuture().join();
                     }
-                    if (outcome instanceof VerifiedHumanTaskSuspension verified) {
+                    if (outcome instanceof VerifiedExternalWorkSuspension verified) {
                         throw new CompletionException(verified.signal());
                     }
                     if (outcome instanceof VerifiedToolApprovalSuspension verified) {
@@ -1627,7 +1668,7 @@ public final class GraphRunner implements AutoCloseable {
                         if (failure == null) {
                             state.executionCompleted();
                             monitor.executionCompleted(identity, state.handledFailureNodes());
-                        } else if (!(outcome instanceof VerifiedHumanTaskSuspension)
+                        } else if (!(outcome instanceof VerifiedExternalWorkSuspension)
                                 && !(outcome instanceof VerifiedToolApprovalSuspension)) {
                             state.executionFailed(ExecutionTermination.reasonOf(outcome));
                             publishTermination(identity, outcome);
@@ -1635,7 +1676,7 @@ public final class GraphRunner implements AutoCloseable {
                     } finally {
                         release(traversalId, coordinator).toCompletableFuture().join();
                     }
-                    if (outcome instanceof VerifiedHumanTaskSuspension verified) {
+                    if (outcome instanceof VerifiedExternalWorkSuspension verified) {
                         throw new CompletionException(verified.signal());
                     }
                     if (outcome instanceof VerifiedToolApprovalSuspension verified) {
@@ -1665,6 +1706,7 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {
+        if (behaviors.runnerJobs() != null) behaviors.runnerJobs().releaseLive(traversalId, this);
         coordinators.remove(traversalId, coordinator);
         activeBudgets.remove(traversalId);
         cancelledTraversals.remove(traversalId);
@@ -2749,6 +2791,9 @@ public final class GraphRunner implements AutoCloseable {
         NodeMessage delivered = new NodeMessage(identity.security(), identity.processInstanceId(),
                 identity.traversalId(), invocationId, attemptId, parentInvocationIds, node.id(), payload, attributes,
                 command);
+        if (("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null) {
+            behaviors.runnerJobs().bindLive(attemptId, state.recorder, this, startedEventId);
+        }
         // ADR 0024 §3's dispatch sequence, and the one place demand-driven workers change each message:
         // create an instance for THIS invocation, deliver exactly one message, release. Two traversals
         // arriving here at the same time for the same node get two actors and run at the same time,
@@ -2854,7 +2899,11 @@ public final class GraphRunner implements AutoCloseable {
                         }
                         if (failure instanceof DurableHumanTaskSuspension suspension
                                 && state.acceptsHumanTaskSuspension(suspension.taskId(), delivered)) {
-                            throw new CompletionException(new VerifiedHumanTaskSuspension(suspension));
+                            throw new CompletionException(new VerifiedExternalWorkSuspension(suspension));
+                        }
+                        if (failure instanceof ai.ravenroot.core.runner.RunnerJobSuspension suspension
+                                && state.recorder != null && state.recorder.confirmsRunnerJob(suspension.jobId(), delivered)) {
+                            throw new CompletionException(new VerifiedExternalWorkSuspension(suspension));
                         }
                         // What the connector said about its own internal loop, read once and reported
                         // on whichever settlement this failure produces. Never inferred: a connector
@@ -3168,8 +3217,9 @@ public final class GraphRunner implements AutoCloseable {
      * @return whether it is an approval suspension, which is never a retryable failure
      */
     private static boolean isApprovalSuspension(Throwable error) {
-        return ai.ravenroot.api.execution.RetryClassifier.unwrap(error)
-                instanceof DurableToolApprovalSuspension;
+        Throwable cause = ai.ravenroot.api.execution.RetryClassifier.unwrap(error);
+        return cause instanceof DurableToolApprovalSuspension
+                || cause instanceof ai.ravenroot.core.runner.RunnerJobSuspension;
     }
 
     /**
@@ -3608,7 +3658,7 @@ public final class GraphRunner implements AutoCloseable {
                 // payload -- which is right, because a bypass does not change the payload and so
                 // cannot invalidate a claim made about it upstream.
                 && !authoredBypassNodes.contains(node.id())
-                ? behaviors.descriptor(node.behavior())
+                ? behaviors.descriptor(node)
                 : Optional.empty();
         Optional<Map<String, Object>> marker = descriptor
                 .flatMap(entry -> SyntheticProvenance.mint(node.id(), entry, result.payload()))
@@ -3769,7 +3819,7 @@ public final class GraphRunner implements AutoCloseable {
     private static Throwable suspensionIn(Throwable error) {
         Throwable current = error;
         while (current != null) {
-            if (current instanceof VerifiedHumanTaskSuspension
+            if (current instanceof VerifiedExternalWorkSuspension
                     || current instanceof VerifiedToolApprovalSuspension) return current;
             current = current.getCause();
         }
@@ -3792,16 +3842,16 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /** Marker created only after the recorder confirms this exact human-task wait. */
-    private static final class VerifiedHumanTaskSuspension extends RuntimeException {
+    private static final class VerifiedExternalWorkSuspension extends RuntimeException {
         private static final long serialVersionUID = 1L;
-        private final DurableHumanTaskSuspension signal;
+        private final RuntimeException signal;
 
-        private VerifiedHumanTaskSuspension(DurableHumanTaskSuspension signal) {
+        private VerifiedExternalWorkSuspension(RuntimeException signal) {
             super(null, null, false, false);
             this.signal = signal;
         }
 
-        private DurableHumanTaskSuspension signal() {
+        private RuntimeException signal() {
             return signal;
         }
     }
@@ -4255,7 +4305,9 @@ public final class GraphRunner implements AutoCloseable {
                             message.attributes()));
                 }
                 if (message.command().directive() == NodeDirective.APPLICATION) {
-                    boolean admitted = behaviors.descriptor(node.behavior())
+                    boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
+                            ? behaviors.runnerJobs().declaresCommand(message.security().tenantId(), node, message.command().name())
+                            : behaviors.descriptor(node)
                             .map(descriptor -> descriptor.commands().contains(message.command().name()))
                             .orElse(false);
                     if (!admitted) {
@@ -4370,7 +4422,9 @@ public final class GraphRunner implements AutoCloseable {
             GraphNode node = graph.node(current.nodeId());
             if (node.kind() == NodeKind.BEHAVIOR
                     && current.command().directive() == NodeDirective.APPLICATION) {
-                boolean admitted = behaviors.descriptor(node.behavior())
+                boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
+                        ? behaviors.runnerJobs().declaresCommand(null, node, current.command().name())
+                        : behaviors.descriptor(node)
                         .map(descriptor -> descriptor.commands().contains(current.command().name()))
                         .orElse(false);
                 if (!admitted) {
@@ -5482,6 +5536,23 @@ public final class GraphRunner implements AutoCloseable {
             lifecycle = fold(lifecycle, List.of(transition));
         }
 
+        private synchronized void runnerResumed(UUID invocationId, UUID attemptId) {
+            var transitions = new java.util.ArrayList<ExecutionTransition>();
+            var traversal = lifecycle.traversals().get(traversalId);
+            var invocation = traversal.invocations().get(invocationId);
+            if (lifecycle.status() != ProcessInstanceStatus.RUNNING)
+                transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING));
+            if (traversal.status() != TraversalStatus.RUNNING)
+                transitions.add(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING));
+            if (invocation.status() != NodeInvocationStatus.RUNNING)
+                transitions.add(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId, NodeInvocationStatus.RUNNING));
+            if (invocation.attempts().stream().noneMatch(value -> value.attemptId().equals(attemptId) && value.status() == NodeAttemptStatus.RUNNING))
+                transitions.add(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId, NodeAttemptStatus.RUNNING));
+            if (transitions.isEmpty()) return;
+            record(transitions, List.of());
+            lifecycle = fold(lifecycle, transitions);
+        }
+
         private UUID traversalAcceptedEventId() {
             return traversalAcceptedEventId;
         }
@@ -5724,6 +5795,11 @@ public final class GraphRunner implements AutoCloseable {
          */
         private synchronized UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
                                                 boolean bypassed, boolean defaulted) {
+            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, null);
+        }
+
+        private synchronized UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                                                boolean bypassed, boolean defaulted, UUID assignedEventId) {
             if (terminal) {
                 return null;
             }
@@ -5733,7 +5809,7 @@ public final class GraphRunner implements AutoCloseable {
                     new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
                             NodeInvocationStatus.COMPLETED));
             UUID defaultedEventId = defaulted ? eventId() : null;
-            UUID completedEventId = eventId();
+            UUID completedEventId = assignedEventId == null ? eventId() : assignedEventId;
             ExecutionEventType completionType = bypassed
                     ? ExecutionEventType.NODE_BYPASSED : ExecutionEventType.NODE_COMPLETED;
             var published = defaulted

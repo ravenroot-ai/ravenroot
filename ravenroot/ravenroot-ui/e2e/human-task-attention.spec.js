@@ -39,8 +39,16 @@ const HUMAN_TASK = { behavior: 'human-task', displayName: 'Human task', category
       visibleWhen: condition('confirmationPresentationVersion', '1') }),
     property('confirmationCancelLabel', 'Cancel label', 'Cancel', { maximumUtf8Bytes: 64,
       visibleWhen: condition('confirmationPresentationVersion', '1') }),
+    property('reviewPresentationVersion', 'Review content', '', { allowedValues: ['1'],
+      visibleWhen: condition('confirmationPresentationVersion', '1') }),
+    property('reviewTextSource', 'Review text source', 'payload', { maximumUtf8Bytes: 1024,
+      visibleWhen: condition('reviewPresentationVersion', '1') }),
+    property('reviewMaxUtf8Bytes', 'Maximum review text bytes', '65536', { type: 'INTEGER',
+      minimumValue: '1', maximumValue: '262144',
+      visibleWhen: condition('reviewPresentationVersion', '1') }),
   ] };
 const CAPABILITY = { schemaVersion: 1, confirmationPresentationVersions: [1],
+  reviewPresentationVersions: [1], reviewTextMaxUtf8Bytes: 262144,
   confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
   commentMaxUtf8Bytes: 4096, attentionPollMillis: 100, attentionBackoffMaxMillis: 400,
   attentionPageSize: 1, attentionPageSizeMax: 4 };
@@ -98,7 +106,10 @@ function startService() {
       if (nodeId) live = live.filter(entry => entry.nodeId === nodeId);
       const exactTask = url.searchParams.get('taskId');
       if (exactTask) live = live.filter(entry => entry.taskId === exactTask
-        && entry.generation === Number(url.searchParams.get('generation')));
+        && entry.generation === Number(url.searchParams.get('generation'))).map(entry => ({ ...entry,
+        reviewPresentation: { version: 1, contentType: 'text/plain',
+          text: '<script>alert("review")</script>\nmail body',
+          contentDigest: `sha256:${'a'.repeat(64)}`, maxUtf8Bytes: 128 } }));
       const offset = url.searchParams.get('cursor') === 'second' ? 1 : 0;
       const limit = Number(url.searchParams.get('limit'));
       const items = live.slice(offset, offset + limit);
@@ -350,6 +361,9 @@ test('two tasks page independently and explicit decisions remove the final non-c
 
   await page.locator('[data-human-task-id="task-1"]').click();
   await expect(page.locator('#human-task-dialog')).toBeVisible();
+  await expect(page.locator('[data-human-task-review-text]'))
+    .toHaveText('<script>alert("review")</script>\nmail body');
+  await expect(page.locator('[data-human-task-review-text] script')).toHaveCount(0);
   await page.locator('[data-human-task-action="RESOLVE"]').click();
   await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
   await expect(page.locator('[data-human-task-id="task-2"]')).toBeVisible();
@@ -512,7 +526,8 @@ for (const outcome of ['success', 'empty', 'error']) {
     await page.locator('[data-human-task-id="task-1"]').click();
     await expect(page.locator('#human-task-dialog')).toBeVisible();
     await page.locator('[data-human-task-close]').click();
-    expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+    // Selection retirement runs in the native dialog close event, after close() returns.
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
 
     await held.release();
     await expect(page.locator('#human-task-dialog')).toBeHidden();
@@ -610,6 +625,33 @@ test('a tighter current policy keeps an older task pinned to its presentation an
   await page.locator('[data-human-task-comment]').fill('🙂🙂🙂🙂');
   await page.locator('[data-human-task-action="RESOLVE"]').click();
   await expect(page.locator('.human-task-status')).toContainText('No actionable');
+});
+
+test('reconnecting after Escape preserves Inspector focus through loading and replacement', async ({ page }) => {
+  await connectAndCreate(page);
+  await runAndSelect(page);
+  const row = page.locator('[data-human-task-id="task-1"]');
+  await row.click();
+  await expect(page.locator('[data-human-task-action="RESOLVE"]')).toBeFocused();
+  let reconnect;
+  await page.route('**/v1/events*', route => { reconnect = route; });
+  await expect.poll(() => Boolean(reconnect)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+  await expect(row).toBeFocused();
+
+  let attention;
+  await page.route('**/v1/human-tasks/attention?**', route => {
+    if (new URL(route.request().url()).searchParams.has('nodeId')) attention = route;
+    else void route.continue();
+  });
+  await reconnect.continue();
+  const status = page.locator('[data-human-task-inspector] .human-task-status');
+  await expect(status).toContainText('Loading actionable tasks');
+  await expect(status).toBeFocused();
+  await expect.poll(() => Boolean(attention)).toBe(true);
+  await attention.continue();
+  await expect(row).toBeFocused();
 });
 
 test('keyboard focus, screen-reader structure and reduced motion remain usable', async ({ page }, testInfo) => {

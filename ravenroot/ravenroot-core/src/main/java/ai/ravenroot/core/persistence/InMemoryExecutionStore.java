@@ -110,6 +110,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class InMemoryExecutionStore implements ExecutionStore {
 
     private final Object monitor = new Object();
+    private final Map<String, Map<String, ai.ravenroot.api.runner.GovernedRunnerResource>> runnerCatalog =
+            new HashMap<>();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
     private final Map<IdempotencyKey, IdempotencyRecord> idempotency = new LinkedHashMap<>();
     /**
@@ -288,7 +290,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // medium, and this adapter honours every one of them exactly. What it
                 // cannot honour is survival of process death, which is what DURABLE
                 // says and what this adapter still does not say.
-                StoreCapability.EXECUTION_RESULTS);
+                StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS);
     }
 
     @Override
@@ -459,6 +461,34 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.executionPauses);
                 applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
 
+                var runnerWorkspace = existing == null ? null : existing.runnerWorkspace;
+                try {
+                    for (var operation : batch.runnerOperations()) {
+                        runnerWorkspace = ai.ravenroot.api.runner.RunnerWorkspaceState.apply(
+                                key, runnerWorkspace, operation, folded, now);
+                    }
+                    if (runnerWorkspace != null) {
+                        runnerWorkspace = runnerWorkspace.observeProcess(folded, now);
+                        var availability = runnerAvailability.getOrDefault(key.tenantId(), Map.of()).values();
+                        for (var operation : batch.runnerOperations()) ai.ravenroot.api.runner.RunnerFleetAdmission.verifyWorkerOperation(runnerWorkspace, operation, availability, now);
+                        if (batch.runnerOperations().stream().anyMatch(operation -> operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.Submit
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.Claim
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.WorkspaceRelease
+                                || operation instanceof ai.ravenroot.api.runner.RunnerJobOperation.WorkspacePlace)) {
+                            var fleet = new ArrayList<ai.ravenroot.api.runner.RunnerWorkspaceState>();
+                            instances.forEach((owner, value) -> { if (!owner.equals(key) && value.runnerWorkspace != null) fleet.add(value.runnerWorkspace); });
+                            fleet.add(runnerWorkspace);
+                           ai.ravenroot.api.runner.RunnerFleetAdmission.validate(fleet);
+                            for (var operation : batch.runnerOperations()) ai.ravenroot.api.runner.RunnerFleetAdmission.verifyNamedAdmission(fleet, operation);
+                            if (batch.runnerOperations().stream().anyMatch(value -> value instanceof ai.ravenroot.api.runner.RunnerJobOperation.Claim))
+                                ai.ravenroot.api.runner.RunnerFleetAdmission.verifyWorkerCapacity(fleet, availability);
+                        }
+                        ai.ravenroot.api.runner.RunnerCodec.workspace(runnerWorkspace);
+                    }
+                } catch (IllegalArgumentException | IllegalStateException invalid) {
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
@@ -468,6 +498,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         agentBudget,
                         humanTasks,
                         executionPauses,
+                        runnerWorkspace,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -1029,6 +1060,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     // field: a purge that decided eligibility differently from what findProcessInstance
                     // reports would remove a row whose own deadline said it was safe.
                     Optional<Instant> deadline = retainedUntilOf(entry);
+                    if (entry.runnerWorkspace != null && !entry.runnerWorkspace.retentionSafe()) continue;
                     if (deadline.isEmpty() || deadline.get().isAfter(now)) {
                         continue;
                     }
@@ -1687,6 +1719,59 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
     }
 
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.runner.RunnerWorkspaceState>> loadRunnerWorkspace(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key);
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.runnerWorkspace);
+            }
+        });
+    }
+    private final Map<String, Map<String, ai.ravenroot.api.runner.RunnerAvailability>> runnerAvailability = new LinkedHashMap<>();
+    @Override public CompletionStage<List<ai.ravenroot.api.runner.RunnerAvailability>> runnerAvailability(String tenantId) {
+        return complete(() -> { synchronized (monitor) {
+            return List.copyOf(runnerAvailability.getOrDefault(Objects.requireNonNull(tenantId), Map.of()).values());
+        }});
+    }
+    @Override public CompletionStage<ai.ravenroot.api.runner.RunnerAvailability> renewRunnerAvailability(
+            ai.ravenroot.api.runner.RunnerAvailability proposed, Duration ttl) {
+        return complete(() -> { synchronized (monitor) {
+            var workers = runnerAvailability.computeIfAbsent(proposed.tenantId(), ignored -> new LinkedHashMap<>());
+            var accepted = proposed.renew(workers.get(proposed.runnerId()), ttl, clock.instant());
+            workers.put(accepted.runnerId(), accepted); return accepted;
+        }});
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.runner.GovernedRunnerResource>> runnerResources(String tenantId) {
+        return complete(() -> {
+            Objects.requireNonNull(tenantId);
+            synchronized (monitor) {
+                return List.copyOf(runnerCatalog.getOrDefault(tenantId, Map.of()).values());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.runner.GovernedRunnerResource> saveRunnerResource(
+            ai.ravenroot.api.runner.GovernedRunnerResource resource, long expectedRevision) {
+        return complete(() -> {
+            Objects.requireNonNull(resource);
+            synchronized (monitor) {
+                var catalog = runnerCatalog.computeIfAbsent(resource.tenantId(), ignored -> new LinkedHashMap<>());
+                var existing = catalog.get(resource.key());
+                if (existing == null && catalog.size() >= ai.ravenroot.api.runner.GovernedRunnerResource.MAX_RESOURCES_PER_TENANT) {
+                    throw failure(ExecutionStoreFailure.invalid("runner catalog quota exceeded"));
+                }
+                var accepted = resource.accepted(existing, expectedRevision, clock.instant());
+                catalog.put(accepted.key(), accepted);
+                return accepted;
+            }
+        });
+    }
+
     // ---------------------------------------------------------------- durable execution pauses
 
     @Override
@@ -1958,7 +2043,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             .permittedActions(task.request());
                     if (actions.isEmpty()) return Optional.empty();
                     return Optional.of(attentionItem(new AuthorizedHumanTask(
-                            task, entry.origin.deploymentId(), actions)));
+                            task, entry.origin.deploymentId(), actions), true));
                 }
                 return Optional.empty();
             }
@@ -1976,6 +2061,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row) {
+        return attentionItem(row, false);
+    }
+
+    private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row,
+                                                         boolean includeReview) {
         DurableHumanTask task = row.task();
         HumanTaskRegistration request = task.request();
         return new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
@@ -1985,7 +2075,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 request.confirmationPresentation(), request.confirmationLimits().maxPromptUtf8Bytes(),
                 request.confirmationLimits().maxActionLabelUtf8Bytes(),
                 request.confirmationLimits().maxCommentUtf8Bytes(),
-                row.actions());
+                row.actions(), includeReview && request.reviewPresentation().present()
+                        ? Optional.of(request.reviewPresentation()) : Optional.empty());
     }
 
 
@@ -2820,6 +2911,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableHumanTask> humanTasks;
         /** Operator holds retained in commit order within this instance. */
         private final Map<UUID, DurableExecutionPause> executionPauses;
+        private final ai.ravenroot.api.runner.RunnerWorkspaceState runnerWorkspace;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -2835,6 +2927,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                       DurableAgentAuthorityBudget agentBudget,
                       Map<UUID, DurableHumanTask> humanTasks,
                       Map<UUID, DurableExecutionPause> executionPauses,
+                      ai.ravenroot.api.runner.RunnerWorkspaceState runnerWorkspace,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -2850,6 +2943,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.agentBudget = agentBudget;
             this.humanTasks = humanTasks;
             this.executionPauses = executionPauses;
+            this.runnerWorkspace = runnerWorkspace;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;
@@ -2876,7 +2970,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // that distinguishes a cancelled execution from a failed one -- a defence-in-depth
                 // check that quietly damaged what it was checking.
                 var revalidated = new ProcessInstance(state.processInstanceId(), state.status(),
-                        state.traversals(), state.terminationReason());
+                        state.traversals(), state.terminationReason(), state.controlState());
                 return new StoredProcessInstance(revalidated, revision, graphVersionPin, tenantId, updatedAt);
             } catch (IllegalArgumentException | IllegalStateException corrupted) {
                 throw new ExecutionStoreException(

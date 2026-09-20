@@ -1,0 +1,80 @@
+package ai.ravenroot.api.runner;
+
+import ai.ravenroot.api.persistence.OpaquePayload;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * Bounded terminal report. The authenticated runner supplies it only after descendants have stopped
+ * and workspace writes and referenced artifacts are durably flushed. The server validates the
+ * owning job, fence, outcome and effective byte ceilings before accepting it.
+ * @param outcome explicit graph routing classification
+ * @param payload bounded context
+ * @param artifacts durable references
+ * @param quiescenceId stable runner acknowledgement of the ownership barrier
+ * @param workspace independently verified physical identities, null only for legacy reports
+ */
+public record RunnerResult(String outcome, OpaquePayload payload, List<RunnerArtifact> artifacts,
+                            UUID quiescenceId, WorkspaceObservation workspace) {
+    /**
+     * Reconstructs a legacy report without asserting unobserved runtime identity.
+     * @param outcome accepted graph outcome
+     * @param payload bounded direct result
+     * @param artifacts retained evidence references
+     * @param quiescenceId stable acknowledgement of descendant quiescence
+     */
+    public RunnerResult(String outcome, OpaquePayload payload, List<RunnerArtifact> artifacts, UUID quiescenceId) {
+        this(outcome, payload, artifacts, quiescenceId, null);
+    }
+    /**
+     * Physical identities are evidence separate from the invocation's ownership-barrier acknowledgement.
+     * @param workspaceId filesystem identity assigned by the control plane
+     * @param runtimeId driver-observed container or VM identity, null when none is materialized
+     * @param checkpoint immutable snapshot digest, null before any checkpoint exists
+     * @param kubernetes native workload evidence, null for non-Kubernetes drivers
+     */
+    public record WorkspaceObservation(UUID workspaceId, String runtimeId, String checkpoint, KubernetesWorkload kubernetes) {
+        /**
+         * Reconstructs existing Docker/runtime evidence without inventing Kubernetes identity.
+         * @param workspaceId owned Workspace
+         * @param runtimeId physical runtime
+         * @param checkpoint immutable checkpoint
+         */
+        public WorkspaceObservation(UUID workspaceId, String runtimeId, String checkpoint) {
+            this(workspaceId, runtimeId, checkpoint, null);
+        }
+        /** Requires a filesystem identity and syntactically bounded runtime/checkpoint evidence. */
+        public WorkspaceObservation {
+            Objects.requireNonNull(workspaceId);
+            if (runtimeId != null && !runtimeId.matches("[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,255}"))
+                throw new IllegalArgumentException("invalid physical runtime identity");
+            if (checkpoint != null && !checkpoint.matches("sha256:[0-9a-f]{64}"))
+                throw new IllegalArgumentException("immutable checkpoint identity required");
+            if (kubernetes != null && kubernetes.podUid() != null && !kubernetes.podUid().toString().equals(runtimeId))
+                throw new IllegalArgumentException("Kubernetes runtime must identify the exact Pod UID");
+        }
+    }
+    /** Enforces protocol-wide bounds; admission applies the stricter effective policy. */
+    public RunnerResult {
+        outcome = RunnerPolicy.identifier(outcome);
+        Objects.requireNonNull(payload, "payload");
+        Objects.requireNonNull(quiescenceId, "quiescenceId");
+        artifacts = List.copyOf(Objects.requireNonNull(artifacts, "artifacts"));
+        if (payload.size() > RunnerCodec.MAX_PAYLOAD_BYTES || payload.contentType().length() > 128 || artifacts.size() > 128) {
+            throw new IllegalArgumentException("runner result exceeds protocol bounds");
+        }
+        var ids = new HashSet<UUID>();
+        if (artifacts.stream().anyMatch(artifact -> !ids.add(artifact.artifactId()))) {
+            throw new IllegalArgumentException("duplicate runner artifact identifier");
+        }
+    }
+
+    /** Payloads and references are not emitted into diagnostic logs. */
+    @Override public String toString() {
+        return "RunnerResult[outcome=" + outcome + ", payloadBytes=" + payload.size()
+                + ", artifacts=" + artifacts.size() + "]";
+    }
+}

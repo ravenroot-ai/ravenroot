@@ -2,6 +2,14 @@ package ai.ravenroot.api.security;
 
 /** Application actions evaluated by the single policy decision point. */
 public enum AuthorizationAction {
+    /** Inspect tenant-scoped runner inventory and retained evidence. */
+    RUNNER_READ("ravenroot.runner.read", true),
+    /** Publish immutable definitions and approve or retire runner profiles. */
+    RUNNER_ADMIN("ravenroot.runner.admin", true),
+    /** Cancel or reconcile governed runner work. */
+    RUNNER_CONTROL("ravenroot.runner.control", true),
+    /** Designated workload runner protocol, never operator governance. */
+    RUNNER_DISPATCH("ravenroot.runner.dispatch", true),
     /** Read the application status endpoint. */
     STATUS_READ("ravenroot.read", true),
     /** Observe runtime health and operational state. */
@@ -58,6 +66,9 @@ public enum AuthorizationAction {
      */
     EXECUTION_CONTROL("ravenroot.execution.control", true),
 
+    /** Inspect and reconcile durable Human Tasks through the guarded administrative surface. */
+    HUMAN_TASK_ADMIN("ravenroot.human-task.admin", true),
+
     /** Trip or reset the store-global first-party agent authority epoch. */
     AGENT_AUTHORITY_CONTROL("ravenroot.agent.authority.control", true),
 
@@ -67,7 +78,10 @@ public enum AuthorizationAction {
     /** Reserved tool-invocation permission, not exposed by this API version. */
     TOOL_INVOKE("ravenroot.tool.invoke", false),
     /** Reserved administrative permission, not exposed by this API version. */
-    ADMIN("ravenroot.admin", false);
+    ADMIN("ravenroot.admin", false),
+
+    /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
+    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true);
 
     private final String requiredScope;
     private final boolean available;

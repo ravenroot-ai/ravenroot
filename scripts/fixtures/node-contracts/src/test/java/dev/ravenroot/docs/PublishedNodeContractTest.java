@@ -1,6 +1,7 @@
 package dev.ravenroot.docs;
 
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyGroupDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeRuntimeConcurrency;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
@@ -67,7 +68,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Runtime-backed publication gate for the public 59-node catalog and its admission-ready examples. */
+/** Runtime-backed publication gate for the public 60-node catalog and its admission-ready examples. */
 final class PublishedNodeContractTest {
     private static final String UPDATE_PROPERTY = "ravenroot.docs.update";
     private static final Path REPOSITORY = repositoryRoot();
@@ -78,11 +79,38 @@ final class PublishedNodeContractTest {
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
         List<NodeTypeDescriptor> descriptors = descriptors();
-        assertEquals(59, descriptors.size(), "the documented baseline must classify every supported node");
+        assertEquals(60, descriptors.size(), "the documented baseline must classify every supported node");
         String actual = snapshot(descriptors);
         update(SNAPSHOT, actual);
         assertEquals(Files.readString(SNAPSHOT), actual,
                 "descriptor contract drifted; review it, then regenerate with -D" + UPDATE_PROPERTY + "=true");
+    }
+
+    @Test
+    void governedWorkspaceDescriptorVariantMatchesPublishedContract() throws Exception {
+        Path storeFile = Files.createTempFile("ravenroot-doc-runner-catalog-", ".db");
+        storeFile.toFile().deleteOnExit();
+        try (var store = new SqliteExecutionStore(storeFile, Clock.systemUTC())) {
+            var registry = registry().withRunnerJobs(new ai.ravenroot.core.runner.RunnerJobService(
+                    store, Clock.systemUTC(), List.of(), List.of(), Map.of()));
+            var descriptors = List.of(registry.descriptor("workspace").orElseThrow(),
+                    registry.descriptor("agent").orElseThrow());
+            assertTrue(registry.descriptor("workspace-agent").isEmpty());
+            var reference = descriptors.get(1).properties().stream()
+                    .filter(property -> property.name().equals("workspaceRef")).findFirst().orElseThrow();
+            assertEquals(NodePropertyType.WORKSPACE_REFERENCE, reference.type());
+            Path target = REPOSITORY.resolve("docs/reference/governed-node-descriptor-contracts.tsv");
+            String actual = snapshot(descriptors);
+            update(target, actual);
+            assertEquals(Files.readString(target), actual,
+                    "governed descriptor contract drifted; regenerate deliberately with -D" + UPDATE_PROPERTY + "=true");
+            for (String example : List.of("three-agents.graphml", "development-cycle.graphml")) {
+                try (var input = Files.newInputStream(REPOSITORY.resolve("docs/examples/governed-runner").resolve(example));
+                     var graph = GraphManager.readGraphMl(input)) {
+                    new BehaviorPropertySchema(registry).validate(graph.definition());
+                }
+            }
+        }
     }
 
     @Test
@@ -430,8 +458,19 @@ final class PublishedNodeContractTest {
                     .map(value -> (value.parameterized() ? "$" + value.fromProperty() : value.name())
                             + ": " + value.description())
                     .collect(java.util.stream.Collectors.joining("; "));
-            List<NodePropertyDescriptor> properties = descriptor.properties().isEmpty()
-                    ? List.of((NodePropertyDescriptor) null) : descriptor.properties();
+            var published = new ArrayList<NodePropertyDescriptor>(descriptor.properties());
+            for (NodePropertyGroupDescriptor group : descriptor.additionalProperties()) {
+                for (NodePropertyDescriptor field : group.fields()) {
+                    published.add(new NodePropertyDescriptor(
+                            group.name() + ".<N>." + field.name(),
+                            group.displayName() + " item " + field.displayName(), field.type(), true,
+                            group.description() + " " + field.description(), "", field.allowedValues(),
+                            false, null, null, field.minimumValue(), field.maximumValue(),
+                            field.maximumUtf8Bytes(), field.maximumItems(), field.maximumItemUtf8Bytes()));
+                }
+            }
+            List<NodePropertyDescriptor> properties = published.isEmpty()
+                    ? List.of((NodePropertyDescriptor) null) : List.copyOf(published);
             for (NodePropertyDescriptor property : properties) {
                 out.append(cell(descriptor.behavior())).append('\t')
                         .append(cell(descriptor.displayName())).append('\t')
@@ -477,7 +516,8 @@ final class PublishedNodeContractTest {
         return new NodeTypeDescriptor(descriptor.behavior(), descriptor.displayName(), descriptor.category(),
                 descriptor.description(), descriptor.visualType(), descriptor.agentic(), properties,
                 descriptor.capabilities(), descriptor.defaultNature(), descriptor.allowedNatures(),
-                descriptor.commands(), descriptor.outcomes(), descriptor.runtimeConcurrency());
+                descriptor.commands(), descriptor.outcomes(), descriptor.runtimeConcurrency(),
+                descriptor.additionalProperties());
     }
 
     private static NodeTypeDescriptor replaceProperty(NodeTypeDescriptor descriptor,
@@ -511,7 +551,7 @@ final class PublishedNodeContractTest {
 
     private static String graphMl(NodeTypeDescriptor descriptor) {
         Map<String, String> values = descriptor.properties().stream()
-                .filter(PublishedNodeContractTest::includeInExample)
+                .filter(property -> includeInExample(descriptor.behavior(), property))
                 .collect(java.util.stream.Collectors.toMap(
                 NodePropertyDescriptor::name, property -> exampleValue(descriptor.behavior(), property),
                 (left, right) -> left, java.util.LinkedHashMap::new));
@@ -555,11 +595,15 @@ final class PublishedNodeContractTest {
         return declared.isEmpty() ? Set.of("continue") : declared;
     }
 
-    private static boolean includeInExample(NodePropertyDescriptor property) {
-        return property.required();
+    private static boolean includeInExample(String behavior, NodePropertyDescriptor property) {
+        return property.required() || (behavior.equals("bigint-op") && property.name().equals("right"));
     }
 
     private static String exampleValue(String behavior, NodePropertyDescriptor property) {
+        if (behavior.equals("bigint-op") && property.name().equals("operation")) return "add";
+        if (behavior.equals("bigint-op") && property.name().equals("left")) return "literal:1";
+        if (behavior.equals("bigint-op") && property.name().equals("right")) return "literal:1";
+        if (behavior.equals("bigint-op") && property.name().equals("target")) return "result";
         if (!property.allowedValues().isEmpty()) return property.allowedValues().get(0);
         if (!property.defaultValue().isBlank()) return property.defaultValue();
         if (!property.minimumValue().isBlank()) return property.minimumValue();
@@ -589,6 +633,7 @@ final class PublishedNodeContractTest {
             case URI -> "https://example.com/resource";
             case CEL_EXPRESSION -> "true";
             case SECRET_REFERENCE -> "example-credential";
+            case WORKSPACE_REFERENCE -> "workspace";
             case TEXT, STRING -> property.name().equals("template") ? "Hello, {{payload}}" : "example-value";
         };
     }

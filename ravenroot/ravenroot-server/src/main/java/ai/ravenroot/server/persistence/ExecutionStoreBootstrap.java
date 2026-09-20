@@ -5,14 +5,18 @@ import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionManifestStore;
 import ai.ravenroot.api.persistence.GraphDefinitionStore;
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistry;
 import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.persistence.postgresql.PostgresExecutionManifestStore;
 import ai.ravenroot.persistence.postgresql.PostgresExecutionStore;
 import ai.ravenroot.persistence.postgresql.PostgresGraphDefinitionStore;
+import ai.ravenroot.persistence.postgresql.PostgresDeploymentRegistry;
 import ai.ravenroot.persistence.postgresql.PostgresStoreConfig;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
+import ai.ravenroot.persistence.sqlite.SqliteDeploymentRegistry;
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
 import ai.ravenroot.persistence.sqlite.SqliteStoreMaintenanceLock;
 
@@ -108,7 +112,7 @@ public final class ExecutionStoreBootstrap {
         try {
             SqliteStoreMaintenanceLock.requireNoPendingRecovery(location);
             if (!enabled) {
-                return new Opened(null, null, null, () -> { }, maintenanceLock::close);
+                return new Opened(null, null, null, null, () -> { }, maintenanceLock::close);
             }
             var store = new SqliteExecutionStore(location, clock,
                     ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), humanTaskPolicy);
@@ -144,8 +148,24 @@ public final class ExecutionStoreBootstrap {
                 }
                 throw failed;
             }
-            return new Opened(store, definitions, manifests,
-                    closeInOrder(store, definitions, manifests), maintenanceLock::close);
+            DeploymentRegistry deployments;
+            try {
+                deployments = new SqliteDeploymentRegistry(location.databaseFile(), clock,
+                        tenant -> DeploymentId.of(java.util.UUID.randomUUID().toString()));
+            } catch (RuntimeException failed) {
+                try {
+                    manifests.close();
+                } finally {
+                    try {
+                        definitions.close();
+                    } finally {
+                        store.close();
+                    }
+                }
+                throw failed;
+            }
+            return new Opened(store, definitions, manifests, deployments,
+                    closeInOrder(store, definitions, manifests, deployments), maintenanceLock::close);
         } catch (RuntimeException failed) {
             maintenanceLock.close();
             throw failed;
@@ -200,13 +220,29 @@ public final class ExecutionStoreBootstrap {
                 }
                 throw failed;
             }
+            DeploymentRegistry deployments;
+            try {
+                deployments = new PostgresDeploymentRegistry(pool.dataSource(), clock,
+                        tenant -> DeploymentId.of(java.util.UUID.randomUUID().toString()));
+            } catch (RuntimeException failed) {
+                try {
+                    manifests.close();
+                } finally {
+                    try {
+                        definitions.close();
+                    } finally {
+                        store.close();
+                    }
+                }
+                throw failed;
+            }
             // The pool takes the maintenance lease's slot in the owner, and for the same structural
             // reason that slot exists: it is the process-wide resource every store is built on, so it
             // must be released strictly after all three of them. It is not a maintenance lease and
             // excludes nobody — see this class's own explanation of why the shared store must not
             // have one.
-            return new Opened(store, definitions, manifests,
-                    closeInOrder(store, definitions, manifests), pool::close);
+            return new Opened(store, definitions, manifests, deployments,
+                    closeInOrder(store, definitions, manifests, deployments), pool::close);
         } catch (RuntimeException failed) {
             pool.close();
             throw failed;
@@ -215,15 +251,20 @@ public final class ExecutionStoreBootstrap {
 
     /** Manifests first, then definitions, then the execution store: nothing observes a released backing store. */
     private static Runnable closeInOrder(ExecutionStore store, GraphDefinitionStore definitions,
-                                         ExecutionManifestStore manifests) {
+                                         ExecutionManifestStore manifests,
+                                         DeploymentRegistry deployments) {
         return () -> {
             try {
-                manifests.close();
+                deployments.close();
             } finally {
                 try {
-                    definitions.close();
+                    manifests.close();
                 } finally {
-                    store.close();
+                    try {
+                        definitions.close();
+                    } finally {
+                        store.close();
+                    }
                 }
             }
         };
@@ -263,23 +304,26 @@ public final class ExecutionStoreBootstrap {
         private final ExecutionStore store;
         private final GraphDefinitionStore graphDefinitionStore;
         private final ExecutionManifestStore executionManifestStore;
+        private final DeploymentRegistry deploymentRegistry;
         private final Runnable closeStore;
         private final Runnable releaseBackingResource;
         private final AtomicBoolean closed = new AtomicBoolean();
 
         private Opened(ExecutionStore store, GraphDefinitionStore graphDefinitionStore,
                        ExecutionManifestStore executionManifestStore,
+                       DeploymentRegistry deploymentRegistry,
                        Runnable closeStore, Runnable releaseBackingResource) {
             this.store = store;
             this.graphDefinitionStore = graphDefinitionStore;
             this.executionManifestStore = executionManifestStore;
+            this.deploymentRegistry = deploymentRegistry;
             this.closeStore = Objects.requireNonNull(closeStore, "closeStore");
             this.releaseBackingResource = Objects.requireNonNull(
                     releaseBackingResource, "releaseBackingResource");
         }
 
         static Opened forTest(Runnable closeStore, Runnable releaseBackingResource) {
-            return new Opened(null, null, null, closeStore, releaseBackingResource);
+            return new Opened(null, null, null, null, closeStore, releaseBackingResource);
         }
 
         public ExecutionStore store() {
@@ -306,6 +350,11 @@ public final class ExecutionStoreBootstrap {
          */
         public ExecutionManifestStore executionManifestStore() {
             return executionManifestStore;
+        }
+
+        /** Shared durable lifecycle authority, absent only when persistence is disabled. */
+        public DeploymentRegistry deploymentRegistry() {
+            return deploymentRegistry;
         }
 
         /**

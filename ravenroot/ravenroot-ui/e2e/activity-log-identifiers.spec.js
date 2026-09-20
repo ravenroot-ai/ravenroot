@@ -280,7 +280,7 @@ test.afterEach(async () => {
   await new Promise(resolve => service.close(resolve));
 });
 
-test('Monitoring preserves the Design viewport and paints only authoritative edge flow', async ({ page }) => {
+test('Monitoring preserves its own viewport and paints only authoritative edge flow', async ({ page }) => {
   await submitAndAwaitBinding(page);
   const before = await page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();
@@ -352,7 +352,8 @@ test('Monitoring preserves the Design viewport and paints only authoritative edg
   });
   await page.locator('#btn-monitoring').click();
   await expect(page.locator('.doc-elastic-host.active .d3-zoom-group')).toHaveAttribute('transform',
-    `translate(${repeated.pan.x},${repeated.pan.y}) scale(${repeated.zoom})`);
+    `translate(${before.pan.x},${before.pan.y}) scale(${before.zoom})`);
+  expect(repeated).not.toEqual({ zoom: before.zoom, pan: before.pan });
 });
 
 test('a real invocation event carries process, traversal, invocation and attempt distinctly into the activity log', async ({ page }) => {

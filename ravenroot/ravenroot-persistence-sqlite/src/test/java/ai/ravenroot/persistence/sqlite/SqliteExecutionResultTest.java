@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -109,6 +110,24 @@ class SqliteExecutionResultTest {
                     "node sets are stored in their canonical order, not in the order they were offered");
             assertEquals(List.of("skipped"), read.nodes().bypassedNodes());
             assertEquals(recorded.retainedUntil(), read.retainedUntil());
+        }
+    }
+
+    @Test
+    void exactDecimalStringBeyondLongSurvivesDurableJsonAndDatabaseReopen(@TempDir Path directory) {
+        String exact = "922337203685477580812345678901234567891";
+        var clock = new MutableClock(START);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        try (SqliteExecutionStore store = store(directory, clock)) {
+            recordInstance(store, key, traversalId);
+            await(store.recordExecutionResult(completedResult(key, traversalId, Map.of("wide", exact),
+                    store.maxExecutionResultPayloadBytes())));
+        }
+        try (SqliteExecutionStore reopened = store(directory, clock)) {
+            byte[] json = await(reopened.loadExecutionResult(TENANT, traversalId)).orElseThrow()
+                    .payload().retained().bytes();
+            assertEquals("{\"wide\":\"" + exact + "\"}", new String(json, StandardCharsets.UTF_8));
         }
     }
 

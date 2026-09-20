@@ -352,6 +352,23 @@ public final class RemoteBackend implements CliBackend {
         return new DrainView(MinimalJson.asString(body.get("outcome")));
     }
 
+    @Override
+    public ProcessControlView processControl(String processInstanceId, String command, long generation,
+                                             String idempotencyKey, String reason) throws IOException {
+        String path = "/v1/processes/" + java.net.URLEncoder.encode(processInstanceId, StandardCharsets.UTF_8)
+                + "/" + java.net.URLEncoder.encode(command, StandardCharsets.UTF_8)
+                + (reason == null || reason.isBlank() ? "" : "?reason="
+                + java.net.URLEncoder.encode(reason, StandardCharsets.UTF_8));
+        String response = send(baseRequest(path).header("Content-Type", "application/json")
+                .header("Idempotency-Key", idempotencyKey)
+                .header("X-Ravenroot-Expected-Generation", Long.toString(generation))
+                .POST(HttpRequest.BodyPublishers.noBody()).build());
+        var body = MinimalJson.asObject(MinimalJson.parse(response));
+        return new ProcessControlView(MinimalJson.asString(body.get("outcome")),
+                MinimalJson.asString(body.get("processInstanceId")), MinimalJson.asLong(body.get("generation")),
+                MinimalJson.asString(body.get("state")), MinimalJson.asString(body.get("reason")));
+    }
+
     /** Reads {@code GET /v1/deployments}: the caller's own tenant's registrations, in the order
      * the server lists them. */
     @Override
@@ -467,6 +484,18 @@ public final class RemoteBackend implements CliBackend {
 
     private String get(String path) throws IOException {
         return send(baseRequest(path).GET().build());
+    }
+    /** Restricted runner-plane integration; the CLI validates every operator operation. */
+    public String runnerOperation(String method, String path, Map<String, Object> body) throws IOException {
+        if (path.startsWith("/") || path.contains("..") || path.contains("?") || path.contains("#"))
+            throw new IllegalArgumentException("relative runner resource required");
+        var request = baseRequest("/v1/runner-plane/" + path).header("Accept", "application/json");
+        return send(switch (method) {
+            case "GET" -> request.GET().build();
+            case "POST" -> request.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(MinimalJson.write(body))).build();
+            case "PUT" -> request.header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(MinimalJson.write(body))).build();
+            default -> throw new IllegalArgumentException("unsupported runner operator method");
+        });
     }
 
     private String post(String path, byte[] body, String contentType) throws IOException {

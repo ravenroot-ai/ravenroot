@@ -1,8 +1,7 @@
 name: Fast feedback
 
-# Quick feedback to whoever is working on a branch. This is advice, not a gate: the full tier in
-# ci.yml, dispatched on the review candidate and run again on the merge-group commit, is what
-# verifies a change before it reaches `dev`.
+# Ultralight feedback to whoever is working on a branch. This is advice, not a gate: the PR runs a
+# small admission suite and the merge group verifies the integration commit in full.
 #
 # This workflow must never publish a check context named `ci-required`, as a success or as a skipped
 # job. Check runs belong to the commit, and GitHub counts a skipped job as passed for a required
@@ -23,20 +22,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The policy, Python and shell contracts of the full tier, in one job: they are quick, and on a
-  # 20-runner ceiling a work-branch push should hold as few runners as it can. A test keeps these
-  # command lists equal to the full tier's, so the feedback cannot quietly diverge from the gate.
+  # Work-branch feedback intentionally checks only cheap invariants. Contract suites belong to the
+  # review candidate and regression suites to the merge group, so the same test is not paid for at
+  # every push.
   fast-policy:
     name: fast-policy
     runs-on: ubuntu-24.04
-    # The operational configuration audit alone takes about ten minutes.
-    timeout-minutes: 60
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history: the attribution check reads the branch's commits, and the operational
-          # inventory verifies committed migration and reconciliation evidence.
+          # Full history is needed only by the attribution check.
           fetch-depth: 0
       - name: Validate source bytes and Maven argLine composition
         run: |
@@ -52,31 +49,6 @@ jobs:
       # The defence that does not depend on any tool's settings, read from the commits themselves.
       - name: Refuse assistant attribution in the new commits
         run: python3 scripts/check_commit_attribution.py
-      - name: Verify Python tooling contracts
-        run: |
-          python3 -m unittest scripts.tests.test_check_argline
-          python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
-          python3 -m unittest scripts.tests.test_check_dependabot_routing
-          python3 -m unittest scripts.tests.test_check_public_docs
-          python3 -m unittest scripts.tests.test_classify_main_change
-          python3 -m unittest scripts.tests.test_ci_required
-          python3 -m unittest scripts.tests.test_check_commit_attribution
-          python3 -m unittest scripts.tests.test_ci_topology
-          python3 -m unittest scripts.tests.test_audit_operational_configuration
-          python3 -m unittest scripts.tests.test_extension_pack
-          python3 -m unittest scripts.tests.test_release_contract
-          python3 -m unittest scripts.tests.test_release_registries
-          python3 -m unittest scripts.tests.test_verify_api_docs
-          python3 scripts/audit_operational_configuration.py --check
-          python3 scripts/check_release_configuration.py
-      - name: Verify developer and platform shell contracts
-        run: |
-          ./scripts/tests/test_dev.sh
-          ./scripts/tests/test_plugin.sh
-          ./scripts/tests/test_service.sh
-          ./scripts/tests/test_execution_store_platform.sh
-          ./scripts/tests/test_execution_store_platform_regression.sh
-          ./scripts/tests/test_human_task_platform_configuration.sh
 
   fast-ui:
     name: fast-ui
@@ -94,9 +66,6 @@ jobs:
       - name: Install UI dependencies
         working-directory: ravenroot/ravenroot-ui
         run: npm ci
-      - name: Run the UI unit suite
-        working-directory: ravenroot/ravenroot-ui
-        run: npm test
       - name: Build the UI
         working-directory: ravenroot/ravenroot-ui
         run: npm run build
@@ -117,9 +86,9 @@ jobs:
           cache-dependency-path: |
             ravenroot/pom.xml
             ravenroot/**/pom.xml
-      - name: Compile the backend without executing tests
+      - name: Validate the backend reactor without compiling or testing it
         working-directory: ravenroot
-        run: mvn -B --no-transfer-progress -DskipTests clean install
+        run: mvn -B --no-transfer-progress validate
 
   ci-fast:
     name: ci-fast

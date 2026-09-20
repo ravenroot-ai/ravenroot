@@ -181,6 +181,21 @@ describe('registering from the active document', () => {
 });
 
 describe('row actions', () => {
+  it('opens a deployment in a separate read-only canvas without invoking lifecycle controls', async () => {
+    const client = stubClient({ deployments: vi.fn(async () => [READY]) });
+    const onOpenDeployment = vi.fn(async () => {});
+    const window_ = createDeploymentsWindow({ dialog, client, onOpenDeployment, pollMs: 0 });
+    await window_.refresh();
+
+    field('deployment-list').querySelector('[data-deployment-view="orders-v3"]').click();
+    await vi.waitFor(() => expect(onOpenDeployment).toHaveBeenCalledWith('orders-v3', client));
+
+    expect(client.startDeployment).not.toHaveBeenCalled();
+    expect(client.stopDeployment).not.toHaveBeenCalled();
+    expect(client.restartDeployment).not.toHaveBeenCalled();
+    expect(client.undeployDeployment).not.toHaveBeenCalled();
+  });
+
   it('publishes an explicit server-pinned deployment context for the active graph', async () => {
     const onDeploymentSelected = vi.fn();
     const client = stubClient({ deployments: vi.fn(async () => [READY]) });

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,60 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AgentNodeBehaviorTest {
 
     private static final String ENDPOINT = "https://model.example.test/v1/chat/completions";
+    private static String governedAnswer(String outcome) {
+        String answer = PayloadJson.write(PayloadValue.fromJava(Map.of("outcome", outcome,
+                "payload", Map.of("summary", "Reviewed")), PayloadLimits.DEFAULTS));
+        return PayloadJson.write(PayloadValue.fromJava(Map.of("choices", List.of(Map.of("finish_reason", "stop",
+                "message", Map.of("content", answer))), "usage", Map.of("prompt_tokens", 7, "completion_tokens", 11)), PayloadLimits.DEFAULTS));
+    }
+    private static String governedSkillRequest() {
+        String request = AiTestSupport.asksFor("s1", "load_skill", "{\"name\":\"rubric\"}");
+        return request.substring(0, request.length() - 1) + ",\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}";
+    }
+
+    private static ai.ravenroot.api.runner.AgentDefinition governed(int turns, int tools) {
+        var policy = new ai.ravenroot.api.runner.RunnerPolicy(java.util.Set.of(
+                ai.ravenroot.api.runner.RunnerPolicy.Capability.TOOL_CALL), java.util.Set.of("load-skill"),
+                java.util.Set.of(), java.util.Set.of(), java.util.Set.of(),
+                new ai.ravenroot.api.runner.RunnerPolicy.Limits(Duration.ofSeconds(20), 1024, 1, 1024, 1024, 1024, 16384));
+        var command = new ai.ravenroot.api.runner.AgentCommand("review", true, policy, java.util.Set.of("approved", "changes-requested"));
+        return new ai.ravenroot.api.runner.AgentDefinition(new ai.ravenroot.api.runner.AgentDefinition.Reference("tenant", "reviewer", 3),
+                "Use the approved review rubric.", "runtime", "local", Map.of("review", command), java.util.Set.of("rubric"),
+                java.util.Set.of(), policy, Duration.ZERO, "review-result",
+                new ai.ravenroot.api.runner.AgentDefinition.Budgets(turns, tools, 1000, 128), Map.of("rubric", "Check the stated invariant."));
+    }
+
+    @Test void namedAgentWithoutWorkspaceUsesManagedModelToolsAndDirectGovernedOutput() throws Exception {
+        var definition = governed(3, 2);
+        var http = new AiTestSupport.ScriptedHttp()
+                .then(governedSkillRequest())
+                .then(governedAnswer("approved"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+        var result = resultOf(behavior.createGoverned("agent", http, definition, definition.commands().get("review"), definition.policy()));
+        assertEquals("approved", result.outcome()); assertEquals(Map.of("summary", "Reviewed"), result.payload());
+        assertEquals("reviewer", result.attributes().get("agent.definition"));
+        assertEquals(3L, result.attributes().get("agent.definitionVersion"));
+        assertEquals(2, http.calls());
+        String first = new String(http.bodies().getFirst(), StandardCharsets.UTF_8);
+        assertTrue(first.contains("Use the approved review rubric."));
+        assertTrue(first.contains("No Workspace is attached")); assertTrue(first.contains("128"));
+        assertTrue(new String(http.bodies().getLast(), StandardCharsets.UTF_8).contains("Check the stated invariant."));
+    }
+
+    @Test void namedAgentRefusesWrongOutcomeAndEnforcesDefinitionToolBudget() {
+        var definition = governed(4, 1);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+        var wrong = new AiTestSupport.ScriptedHttp().then(governedAnswer("completed"));
+        assertThrows(ExecutionException.class, () -> resultOf(behavior.createGoverned("agent", wrong, definition,
+                definition.commands().get("review"), definition.policy())));
+        var loop = new AiTestSupport.ScriptedHttp().thenForever(governedSkillRequest());
+        assertThrows(ExecutionException.class, () -> resultOf(behavior.createGoverned("agent", loop, definition,
+                definition.commands().get("review"), definition.policy())));
+        assertEquals(2, loop.calls(), "the second requested tool is refused before a third model request");
+        var unaccounted = new AiTestSupport.ScriptedHttp().then(AiTestSupport.answers("unaccounted"));
+        assertEquals(AgentException.Code.RESPONSE_UNREADABLE, failureOf(behavior.createGoverned("agent", unaccounted,
+                definition, definition.commands().get("review"), definition.policy())).code());
+    }
 
     @Test
     @DisplayName("the descriptor declares both capabilities that make the runtime mark this output")
@@ -194,6 +249,27 @@ class AgentNodeBehaviorTest {
     }
 
     @Test
+    @DisplayName("an oversized local request releases a retryable attempt before dispatch")
+    void oversizedRequestNeverDispatchesOrSpendsTheReservation() {
+        var resources = new AiTestSupport.TrackingAgentResources();
+        var http = new AiTestSupport.ScriptedHttp().resources(resources)
+                .then(AiTestSupport.answers("must not be sent"));
+        var tiny = new LlmProfile("local", URI.create(ENDPOINT), "test", Optional.empty(),
+                1_000, 1, 1_024 * 1_024, 1, "");
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(tiny));
+
+        AgentException failure = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.REQUEST_TOO_LARGE, failure.code());
+        assertEquals(0, http.calls());
+        assertEquals(0, resources.modelDispatches.get());
+        assertEquals(1, resources.modelReleases.get());
+        assertEquals(0, resources.modelIndeterminate.get());
+        assertEquals(1, resources.failedAttempts.get(), "local preflight remains retryable");
+    }
+
+    @Test
     @DisplayName("a tool call is executed and its result comes back as a tool message on the next turn")
     void aToolCallRoundTrips() throws Exception {
         var http = new AiTestSupport.ScriptedHttp()
@@ -266,7 +342,7 @@ class AgentNodeBehaviorTest {
         failureOf(behavior.create(configuration(Map.of(
                 "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
 
-        assertEquals(AgentNodeBehavior.DEFAULT_MAX_TURNS, http.calls());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_TURNS, http.calls());
     }
 
     @Test
@@ -280,7 +356,7 @@ class AgentNodeBehaviorTest {
                 "provider", "local", "instructions", "be terse", "objective", "say hi",
                 "maxTurns", "100000")), http));
 
-        assertEquals(AgentNodeBehavior.MAX_TURNS_CEILING, http.calls());
+        assertEquals(AgentOperationalConfiguration.DEFAULT_MAX_TURNS_CEILING, http.calls());
     }
 
     @Test
@@ -575,7 +651,7 @@ class AgentNodeBehaviorTest {
     @DisplayName("a skill over the ceiling refuses when the node is built, not when a message arrives")
     void anOversizeSkillRefusesAtConstruction() {
         Map<String, Object> properties = AgentSkillTest.withSkills(1);
-        properties.put("skills.1.instructions", "x".repeat(AgentSkill.MAX_INSTRUCTIONS_CHARS + 1));
+        properties.put("skills.1.instructions", "x".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_INSTRUCTIONS_CHARS + 1));
         var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
 
         // create() and not handle(): NodeBehavior#create reserves a throw for a node the behavior can
@@ -667,7 +743,7 @@ class AgentNodeBehaviorTest {
         // cut at index MAX_NAME_CHARS lands exactly on a pair boundary -- 32 whole pairs of two UTF-16
         // units -- and no lone surrogate is ever produced, so the test would pass whether the hazard
         // were handled or not. Shifting by one puts a HIGH surrogate at the last kept index.
-        String astral = "n" + "\uD83D\uDE80".repeat(AgentSkill.MAX_NAME_CHARS);
+        String astral = "n" + "\uD83D\uDE80".repeat(AgentOperationalConfiguration.DEFAULT_MAX_SKILL_NAME_CHARS);
         var http = new AiTestSupport.ScriptedHttp()
                 .then(AiTestSupport.asksFor("call-1", LoadSkillTool.NAME,
                         "{\"name\":\"" + astral + "\"}"))

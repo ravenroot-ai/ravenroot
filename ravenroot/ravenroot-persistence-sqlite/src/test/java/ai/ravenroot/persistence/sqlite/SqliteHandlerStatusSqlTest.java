@@ -53,7 +53,7 @@ class SqliteHandlerStatusSqlTest {
         assertEquals(expected(false), SqliteExecutionStore.LIVE_HANDLER_STATUSES);
         assertEquals(expected(true), SqliteExecutionStore.TERMINAL_HANDLER_STATUSES);
         assertEquals(Set.of("WAITING", "ESCALATED"), namesIn(SqliteExecutionStore.LIVE_HANDLER_STATUSES));
-        assertEquals(Set.of("RESOLVED", "DENIED", "EXPIRED"),
+        assertEquals(Set.of("RESOLVED", "DENIED", "EXPIRED", "CANCELLED"),
                 namesIn(SqliteExecutionStore.TERMINAL_HANDLER_STATUSES));
     }
 

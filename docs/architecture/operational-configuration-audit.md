@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23571 |
+| Atomic operational candidates discovered | 23574 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23571 |
+| Reviewed | 23574 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 313 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1937 |
-| Retained protocol or format invariants | 9711 |
+| Retained protocol or format invariants | 9714 |
 | Retained published contract descriptions | 519 |
 | Retained presentation text | 663 |
 | Retained derived values | 1061 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 73.
+Checked source reconciliations: 74.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23571 candidates.
+zero-count or unclassified rows as needed and sums to 23574 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23571 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 21910 |
+| retained | 21913 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 23571 candidates.
 | derived | 1061 |
 | operator-configurable | 1661 |
 | presentation-text | 663 |
-| protocol-or-format-invariant | 9711 |
+| protocol-or-format-invariant | 9714 |
 | published-contract-description | 519 |
 | security-ceiling-or-default | 1937 |
 | test-fixture | 8019 |
@@ -101,7 +101,7 @@ zero-count or unclassified rows as needed and sums to 23571 candidates.
 | java | 7178 |
 | script | 2289 |
 | test-fixture | 8019 |
-| ui | 3207 |
+| ui | 3210 |
 
 ### Owning remediation counts
 
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1471 |
 | #321 | 8555 |
-| Retained; no remediation required | 12996 |
+| Retained; no remediation required | 12999 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23548 |
-| Unchanged identities | 22827 |
-| Approved identity migrations | 715 |
-| Approved retirements | 6 |
-| Semantically classified additions | 29 |
-| Current candidates | 23571 |
+| Source inventory candidates | 23571 |
+| Unchanged identities | 23571 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 3 |
+| Current candidates | 23574 |
 
 ## Final semantic review
 
@@ -13434,18 +13434,21 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e2c54216bd3a1e0006cf` | `ravenroot/ravenroot-ui/src/human-task-ui.js:155` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
 | `oc-a24f1798c7842209f721` | `ravenroot/ravenroot-ui/src/human-task-ui.js:159` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
 | `oc-f1ddc5f0a76b97481a16` | `ravenroot/ravenroot-ui/src/human-task-ui.js:159` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-d96c9648b35a6f844974` | `ravenroot/ravenroot-ui/src/human-task-ui.js:306` `launchRegisteredPresentation` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-9ab4790ac22d046bf9b1` | `ravenroot/ravenroot-ui/src/human-task-ui.js:380` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-a55e6676c487aea8f9a9` | `ravenroot/ravenroot-ui/src/human-task-ui.js:464` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-cb80d4d733243c98389f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:464` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-e73c05381ce598243274` | `ravenroot/ravenroot-ui/src/human-task-ui.js:467` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-49f6d9d6ddea6d719565` | `ravenroot/ravenroot-ui/src/human-task-ui.js:489` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-6d62dc511eabff44fdab` | `ravenroot/ravenroot-ui/src/human-task-ui.js:489` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-8c0f0a883dc682c5ce7a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:490` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-ec88fb54e3b6c641f2a5` | `ravenroot/ravenroot-ui/src/human-task-ui.js:490` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
-| `oc-8330c2a40a31c9c3afb2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:491` `for` | ui | retained | presentation-text | Issue #456 closed multiline and bounded-number Human Task presentation vocabulary rendered by the trusted Workbench host. |
-| `oc-dd3eb3660612d1780a4f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:491` `for` | ui | retained | presentation-text | Issue #456 closed multiline and bounded-number Human Task presentation vocabulary rendered by the trusted Workbench host. |
-| `oc-044137bad30468d4d500` | `ravenroot/ravenroot-ui/src/human-task-ui.js:492` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-10f7649cf88fb7beeca5` | `ravenroot/ravenroot-ui/src/human-task-ui.js:273` `for` | ui | retained | protocol-or-format-invariant | Issue #456 fixes the TEXT discriminator used by the closed Human Task form validation protocol; it is not operator configuration. |
+| `oc-db1dd8aaaf27a979f0de` | `ravenroot/ravenroot-ui/src/human-task-ui.js:273` `for` | ui | retained | protocol-or-format-invariant | Issue #456 fixes the MULTILINE_TEXT discriminator used by the closed Human Task form validation protocol; it is not operator configuration. |
+| `oc-096e76631c2568d30441` | `ravenroot/ravenroot-ui/src/human-task-ui.js:275` `utf8Length` | ui | retained | protocol-or-format-invariant | Issue #456 fixes the UTF-8 unit used by the closed Human Task form validation protocol; it is not operator configuration. |
+| `oc-d96c9648b35a6f844974` | `ravenroot/ravenroot-ui/src/human-task-ui.js:326` `launchRegisteredPresentation` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-9ab4790ac22d046bf9b1` | `ravenroot/ravenroot-ui/src/human-task-ui.js:399` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-a55e6676c487aea8f9a9` | `ravenroot/ravenroot-ui/src/human-task-ui.js:483` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-cb80d4d733243c98389f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:483` `if` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-e73c05381ce598243274` | `ravenroot/ravenroot-ui/src/human-task-ui.js:486` `if` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-49f6d9d6ddea6d719565` | `ravenroot/ravenroot-ui/src/human-task-ui.js:508` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-6d62dc511eabff44fdab` | `ravenroot/ravenroot-ui/src/human-task-ui.js:508` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-8c0f0a883dc682c5ce7a` | `ravenroot/ravenroot-ui/src/human-task-ui.js:509` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-ec88fb54e3b6c641f2a5` | `ravenroot/ravenroot-ui/src/human-task-ui.js:509` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
+| `oc-8330c2a40a31c9c3afb2` | `ravenroot/ravenroot-ui/src/human-task-ui.js:510` `for` | ui | retained | presentation-text | Issue #456 closed multiline and bounded-number Human Task presentation vocabulary rendered by the trusted Workbench host. |
+| `oc-dd3eb3660612d1780a4f` | `ravenroot/ravenroot-ui/src/human-task-ui.js:510` `for` | ui | retained | presentation-text | Issue #456 closed multiline and bounded-number Human Task presentation vocabulary rendered by the trusted Workbench host. |
+| `oc-044137bad30468d4d500` | `ravenroot/ravenroot-ui/src/human-task-ui.js:511` `for` | ui | retained | presentation-text | Issue #456 bounded Human Task operator presentation and accessibility text rendered by the trusted Workbench host. |
 | `oc-8ce7e269d717a5143c44` | `ravenroot/ravenroot-ui/src/inspector-autosave.js:1` `module` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-61d09981b80f71c89e4d` | `ravenroot/ravenroot-ui/src/layered-drawing.js:26` `module` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
 | `oc-941ef28dfdd8e3e1da35` | `ravenroot/ravenroot-ui/src/layered-drawing.js:28` `module` | ui | retained | derived | These numeric values derive geometry, layout, scale, color, or rendering projections and do not control backend operation. |

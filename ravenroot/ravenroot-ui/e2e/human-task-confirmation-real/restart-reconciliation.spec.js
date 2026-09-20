@@ -147,9 +147,10 @@ async function assertPinnedDialog(page, taskId) {
   expect(await page.locator('[data-human-task-prompt]').textContent()).toMatch(/^P{8192}$/);
   await expect(page.locator('[data-human-task-comment]')).toBeFocused();
   await expect(page.locator('[data-human-task-comment-hint]')).toContainText('/ 8192 UTF-8 bytes');
-  // The fixture tasks were requested by the durable ingress identity, not the browser workload.
-  // CANCEL remains pinned in the task but requester-only authorization keeps it out of this view.
-  await expect(page.locator('[data-human-task-action]')).toHaveText(['Resolve — Confirm', 'Deny']);
+  // Responder enforcement is disabled in this fixture, so any admitted same-tenant principal sees
+  // every pinned action even though the durable ingress identity requested the tasks.
+  await expect(page.locator('[data-human-task-action]')).toHaveText(
+    ['Resolve — Confirm', 'Deny', 'Cancel']);
 }
 
 test.describe('real SQLite Human Task confirmation recovery', () => {

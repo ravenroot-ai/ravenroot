@@ -77,6 +77,11 @@ export function createDocumentRecord({
     visualGroupState: {},
     visualGroupPresentationDirty: false,
     canvasState: null,
+    // Design and Monitoring are two views of one document, not two documents and not two graph
+    // coordinate authorities. These snapshots retain renderer-local geometry and interaction state;
+    // authored Design coordinates continue to live only on the canonical graph nodes.
+    viewStates: { design: null, monitoring: null },
+    monitoringForces: { repulsion: 320, attraction: .3, speed: .5 },
     visualGroupsRenderer: null,
     // The pane is built BEFORE the canvas and the canvas is created inside it, because moving a
     // `.doc-canvas` after the fact stops its Cytoscape instance painting for good (UI-03). Both are
@@ -216,6 +221,9 @@ export function forkDocumentRecord(source, { documentId = createDocumentIncarnat
   fork.visualGroupState = structuredClone(source.visualGroupState || {});
   fork.visualGroupPresentationDirty = Boolean(source.visualGroupPresentationDirty);
   fork.canvasState = source.canvasState ? structuredClone(source.canvasState) : null;
+  fork.viewStates = structuredClone(source.viewStates || { design: null, monitoring: null });
+  fork.monitoringForces = structuredClone(source.monitoringForces
+    || { repulsion: 320, attraction: .3, speed: .5 });
   fork.renderMode = source.renderMode;
   fork.layoutMode = source.layoutMode;
   fork.designArrangement = source.designArrangement;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectVisualGroups } from '../src/visual-group-projection.js';
+import { projectVisualGroups, visualGroupLayoutInput } from '../src/visual-group-projection.js';
 import { makeVisualGroupFixture } from './fixtures/visual-groups.js';
 
 describe('visual grouping projection', () => {
@@ -53,5 +53,20 @@ describe('visual grouping projection', () => {
     const valid = projectVisualGroups({ graph, groups, state: { 'section-a': { collapsed: true } } });
     expect(valid.representativeByNodeId.get('node-25')).toBe('node-25');
     expect(valid.representativeByNodeId.get('node-1')).toBe(valid.groups[0].summaryId);
+  });
+  it('exposes one authoritative visible topology for every Design layout', () => {
+    const { graph, groups } = makeVisualGroupFixture();
+    const projection = projectVisualGroups({ graph, groups,
+      state: { 'section-a': { collapsed: true }, 'section-b': { collapsed: false } } });
+    const input = visualGroupLayoutInput(projection);
+    const collapsed = projection.groups.find(group => group.id === 'section-a');
+    const expanded = projection.groups.find(group => group.id === 'section-b');
+    expect(input.nodeIds).toContain(collapsed.summaryId);
+    expect(input.nodeIds).not.toContain(expanded.headerId);
+    expect(collapsed.memberNodeIds.some(id => input.nodeIds.includes(id))).toBe(false);
+    expect(expanded.memberNodeIds.every(id => input.nodeIds.includes(id))).toBe(true);
+    expect(input.edgeIds).toEqual(projection.edges.map(edge => edge.id));
+    expect(input.collapsedGroups).toEqual([{ id: collapsed.id, summaryId: collapsed.summaryId,
+      memberNodeIds: collapsed.memberNodeIds }]);
   });
 });

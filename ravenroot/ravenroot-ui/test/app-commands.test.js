@@ -175,13 +175,19 @@ describe('application command catalog', () => {
     })).map(command => command.id)).toEqual(['layout.design']);
     expect(byId['layout.monitoring'].isChecked({ hasDocument: false, renderMode: 'monitoring' }))
       .toBe(false);
-    expect(byId['layout.design'].help).toMatch(/Arrange every node/);
+    expect(byId['layout.design'].help).toMatch(/Restore the saved Design view/);
+    expect(byId['layout.render']).toMatchObject({ label: 'Render' });
+    expect(byId['layout.render']).not.toHaveProperty('kind');
+    expect(byId['layout.render'].placements).toEqual(expect.arrayContaining(['menu.layout', 'toolbar.layout']));
 
     const setRenderMode = vi.fn();
-    const spied = Object.fromEntries(createAppCommands({ setRenderMode }).map(command => [command.id, command]));
+    const render = vi.fn();
+    const spied = Object.fromEntries(createAppCommands({ setRenderMode, render }).map(command => [command.id, command]));
     spied['layout.design'].execute();
     spied['layout.monitoring'].execute();
+    spied['layout.render'].execute();
     expect(setRenderMode.mock.calls).toEqual([['design'], ['monitoring']]);
+    expect(render).toHaveBeenCalledOnce();
   });
 
   it('adds the layered arrangements as a sibling group after the established four', () => {
@@ -239,7 +245,7 @@ describe('application command catalog', () => {
     })).toBe(true);
     expect(byId['layout.arrange.flow'].isChecked({
       hasDocument: true, renderMode: 'monitoring', designArrangement: 'flow',
-    })).toBe(false);
+    })).toBe(true);
 
     const arrange = vi.fn();
     const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));

@@ -112,6 +112,12 @@ export function clearLayeredDrawing(cy) {
   cy?.removeScratch(DRAWING_SCRATCH);
 }
 
+export function copyLayeredDrawing(source, target) {
+  const drawing = layeredDrawingOf(source);
+  if (drawing) target?.scratch(DRAWING_SCRATCH, drawing);
+  else clearLayeredDrawing(target);
+}
+
 function styleForRoute(route, width) {
   if (route.family === 'straight') {
     return {

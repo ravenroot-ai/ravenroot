@@ -91,7 +91,31 @@ public record HumanTaskPolicy(
             256 * 1_024, 50, 100,
             32, 1_024, 4_096, 16 * 1_024, 256, 3, Confirmation.DEFAULTS, false);
 
-    /** Compatibility constructor retaining the policy shape before responder enforcement. */
+    /**
+     * Compatibility constructor retaining the policy shape before responder enforcement.
+     *
+     * @param defaultResponseBytes default encoded response bytes
+     * @param maxResponseBytes maximum encoded response bytes
+     * @param defaultEscalationSeconds default escalation delay
+     * @param maxEscalationSeconds maximum escalation delay
+     * @param defaultExpirySeconds default expiry delay
+     * @param maxExpirySeconds maximum expiry delay
+     * @param maxTitleUtf8Bytes maximum title bytes
+     * @param maxDescriptionUtf8Bytes maximum description bytes
+     * @param maxResponseSchemaUtf8Bytes maximum response-schema bytes
+     * @param maxAuthorizationTokens maximum roles or scopes
+     * @param maxAuthorizationTokenUtf8Bytes maximum bytes in one role or scope
+     * @param decisionBodyMaxBytes maximum raw decision-body bytes
+     * @param inboxDefaultPageSize default classic inbox page size
+     * @param inboxMaxPageSize maximum classic inbox page size
+     * @param responseMaxDepth maximum structured-response depth
+     * @param responseMaxCollectionSize maximum collection members
+     * @param responseMaxValueCount maximum total structured values
+     * @param responseMaxTextLength maximum response text length
+     * @param responseMaxKeyLength maximum response key length
+     * @param writeAttempts maximum optimistic write attempts
+     * @param confirmation embedded confirmation presentation and attention controls
+     */
     public HumanTaskPolicy(int defaultResponseBytes, int maxResponseBytes,
                            long defaultEscalationSeconds, long maxEscalationSeconds,
                            long defaultExpirySeconds, long maxExpirySeconds,

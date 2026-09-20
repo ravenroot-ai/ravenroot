@@ -60,7 +60,32 @@ public record HumanTaskRegistration(
         HumanTaskReviewPresentation reviewPresentation,
         HumanTaskPresentation presentation) {
 
-    /** Compatibility constructor retaining the registration shape before presentation profiles. */
+    /**
+     * Compatibility constructor retaining the registration shape before presentation profiles.
+     *
+     * @param taskId deterministic task identity
+     * @param traversalId suspended traversal identity
+     * @param invocationId suspended node invocation identity
+     * @param attemptId suspended node attempt identity
+     * @param nodeId graph node awaiting the decision
+     * @param correlationKey generic handler correlation key
+     * @param deduplicationKey generic handler deduplication key
+     * @param metadata bounded graph-authored display copy
+     * @param responseSchema exact bounded response contract
+     * @param responderRequirements authorization required from a responder
+     * @param requester security context that created the task
+     * @param graphVersionPin immutable graph version used for re-entry
+     * @param escalateAt optional durable escalation deadline
+     * @param expiresAt required durable expiry deadline
+     * @param reentryMapping terminal status to graph-outcome mapping
+     * @param executionLimits recovery-sensitive response and store-retry limits
+     * @param continuationVersion version of the trusted graph continuation envelope
+     * @param continuation bounded opaque continuation bytes
+     * @param continuationDigest content binding for the continuation bytes
+     * @param confirmationPresentation immutable embedded presentation
+     * @param confirmationLimits effective presentation and comment bounds
+     * @param reviewPresentation immutable responder-visible review material
+     */
     public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
                                  String nodeId, String correlationKey, String deduplicationKey,
                                  HumanTaskMetadata metadata, HumanTaskResponseSchema responseSchema,

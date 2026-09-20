@@ -147,7 +147,9 @@ async function assertPinnedDialog(page, taskId) {
   expect(await page.locator('[data-human-task-prompt]').textContent()).toMatch(/^P{8192}$/);
   await expect(page.locator('[data-human-task-comment]')).toBeFocused();
   await expect(page.locator('[data-human-task-comment-hint]')).toContainText('/ 8192 UTF-8 bytes');
-  await expect(page.locator('[data-human-task-action]')).toHaveText(['Resolve — Confirm', 'Deny', 'Cancel']);
+  // The fixture tasks were requested by the durable ingress identity, not the browser workload.
+  // CANCEL remains pinned in the task but requester-only authorization keeps it out of this view.
+  await expect(page.locator('[data-human-task-action]')).toHaveText(['Resolve — Confirm', 'Deny']);
 }
 
 test.describe('real SQLite Human Task confirmation recovery', () => {
@@ -262,8 +264,13 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await assertPinnedDialog(page, storedLocator.taskId);
 
     const decisionUrl = `${recovery.serviceOrigin}/v1/human-tasks/${encodeURIComponent(storedLocator.taskId)}`
-      + `/confirmation/resolve?generation=${storedLocator.generation}`;
+      + `/settle?generation=${storedLocator.generation}`;
     const comment = 'R'.repeat(5_000);
+    const settlement = { schemaVersion: 1, action: 'RESOLVE', comment,
+      response: { contentType: 'application/json', payloadBase64: Buffer.from(JSON.stringify({
+        contract: 'ravenroot.payload/1', schema: 'ravenroot.human-task.confirmation',
+        schemaVersion: '1', kind: 'SCALAR', value: true,
+      })).toString('base64') } };
     let forwarded = 0;
     let committed;
     await page.route(decisionUrl, async route => {
@@ -276,17 +283,17 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await page.locator('[data-human-task-action="RESOLVE"]').click();
     await expect(page.locator('[data-human-task-error]')).toContainText('POST /v1/human-tasks');
     expect(forwarded).toBe(1);
-    expect(committed).toMatchObject({ schemaVersion: 1, outcome: 'APPLIED',
-      task: { taskId: storedLocator.taskId, status: 'RESOLVED', availableActions: [] } });
+    expect(committed).toMatchObject({ schemaVersion: 1, outcome: 'RESOLVED',
+      taskId: storedLocator.taskId });
     await page.unroute(decisionUrl);
 
     const replay = await request.post(decisionUrl, {
       headers: { Authorization: `Bearer ${FIXTURE_TOKEN}` },
-      data: { schemaVersion: 1, comment },
+      data: settlement,
     });
     expect(replay.status()).toBe(200);
     expect(await replay.json()).toMatchObject({ schemaVersion: 1, outcome: 'ALREADY_APPLIED',
-      task: { taskId: storedLocator.taskId, status: 'RESOLVED', availableActions: [] } });
+      taskId: storedLocator.taskId });
     await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
     await page.locator('[data-human-task-close]').click();
 

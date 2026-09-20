@@ -6,7 +6,16 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Objects;
 
-/** Immutable presentation choice pinned with one durable Human Task. */
+/**
+ * Immutable presentation choice pinned with one durable Human Task.
+ *
+ * @param kind closed presentation authority
+ * @param version presentation contract version, or zero for classic tasks
+ * @param profileId opaque registered profile identity, when applicable
+ * @param profileVersion pinned registered profile version, when applicable
+ * @param formSchema canonical closed form schema, when applicable
+ * @param schemaDigest digest binding the pinned schema bytes
+ */
 public record HumanTaskPresentation(HumanTaskPresentationKind kind, int version,
                                     String profileId, int profileVersion, String formSchema,
                                     String schemaDigest) {
@@ -14,6 +23,7 @@ public record HumanTaskPresentation(HumanTaskPresentationKind kind, int version,
     public static final int MAX_PROFILE_ID_UTF8_BYTES = 256;
     public static final int MAX_FORM_SCHEMA_UTF8_BYTES = 64 * 1024;
 
+    /** Validates and snapshots the immutable presentation choice. */
     public HumanTaskPresentation {
         kind = Objects.requireNonNull(kind, "kind");
         profileId = bounded(profileId, "profileId", MAX_PROFILE_ID_UTF8_BYTES);
@@ -46,21 +56,45 @@ public record HumanTaskPresentation(HumanTaskPresentationKind kind, int version,
         }
     }
 
+    /**
+     * Creates the compatibility presentation for a task without an interactive presentation.
+     *
+     * @return immutable classic presentation
+     */
     public static HumanTaskPresentation classic() {
         return new HumanTaskPresentation(HumanTaskPresentationKind.CLASSIC, 0, "", 0, "", "");
     }
 
+    /**
+     * Creates the version-one built-in confirmation presentation.
+     *
+     * @return immutable confirmation presentation
+     */
     public static HumanTaskPresentation confirmation() {
         return new HumanTaskPresentation(HumanTaskPresentationKind.CONFIRMATION, VERSION_1,
                 "", 0, "", digest(""));
     }
 
+    /**
+     * Pins a closed built-in form schema.
+     *
+     * @param schema validated closed form schema
+     * @return immutable form presentation
+     */
     public static HumanTaskPresentation form(HumanTaskFormSchema schema) {
         String encoded = Objects.requireNonNull(schema, "schema").encode();
         return new HumanTaskPresentation(HumanTaskPresentationKind.FORM, VERSION_1,
                 "", 0, encoded, digest(encoded));
     }
 
+    /**
+     * Pins an opaque operator-registered custom or external presentation profile.
+     *
+     * @param kind custom or external presentation authority
+     * @param profileId opaque registered profile identity
+     * @param profileVersion pinned allowed profile version
+     * @return immutable registered presentation
+     */
     public static HumanTaskPresentation registered(HumanTaskPresentationKind kind,
                                                    String profileId, int profileVersion) {
         if (kind != HumanTaskPresentationKind.CUSTOM && kind != HumanTaskPresentationKind.EXTERNAL) {
@@ -69,10 +103,22 @@ public record HumanTaskPresentation(HumanTaskPresentationKind kind, int version,
         return new HumanTaskPresentation(kind, VERSION_1, profileId, profileVersion, "", digest(""));
     }
 
+    /**
+     * Maps the pre-profile confirmation contract to its compatible presentation authority.
+     *
+     * @param confirmation legacy pinned confirmation presentation, possibly absent
+     * @return confirmation when embedded, otherwise classic
+     */
     public static HumanTaskPresentation compatibility(HumanTaskConfirmationPresentation confirmation) {
         return confirmation != null && confirmation.embedded() ? confirmation() : classic();
     }
 
+    /**
+     * Decodes the schema pinned by a form presentation.
+     *
+     * @return validated closed form schema
+     * @throws IllegalStateException when this is not a form presentation
+     */
     public HumanTaskFormSchema decodedFormSchema() {
         if (kind != HumanTaskPresentationKind.FORM) {
             throw new IllegalStateException("presentation is not a form");

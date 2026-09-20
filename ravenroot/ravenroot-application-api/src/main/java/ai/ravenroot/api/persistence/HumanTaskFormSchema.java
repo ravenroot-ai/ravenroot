@@ -15,7 +15,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** Closed, non-recursive built-in form schema. */
+/**
+ * Closed, non-recursive built-in form schema.
+ *
+ * @param version form-schema contract version
+ * @param fields ordered closed field definitions
+ */
 public record HumanTaskFormSchema(int version, List<Field> fields) {
     public static final int VERSION_1 = 1;
     public static final int MAX_FIELDS = 64;
@@ -24,11 +29,38 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
     private static final PayloadLimits SCHEMA_LIMITS = new PayloadLimits(
             HumanTaskPresentation.MAX_FORM_SCHEMA_UTF8_BYTES, 5, 512, 2_048, 16_384, 64);
 
-    public enum Type { TEXT, BOOLEAN, INTEGER, DECIMAL, ENUM, DATE, DATE_TIME }
+    /** Closed set of typed values supported by built-in forms. */
+    public enum Type {
+        /** UTF-8-bounded plain text. */
+        TEXT,
+        /** Boolean value. */
+        BOOLEAN,
+        /** Signed integer value. */
+        INTEGER,
+        /** Integer or decimal value. */
+        DECIMAL,
+        /** Plain text selected from the pinned allowed values. */
+        ENUM,
+        /** ISO-8601 calendar date. */
+        DATE,
+        /** ISO-8601 instant. */
+        DATE_TIME
+    }
 
-    /** One field in the closed schema. */
+    /**
+     * One field in the closed schema.
+     *
+     * @param name stable field key
+     * @param label responder-visible plain-text label
+     * @param help optional responder-visible plain-text help
+     * @param type closed typed-value contract
+     * @param required whether a non-null response member is required
+     * @param maxUtf8Bytes maximum encoded bytes for text-bearing values
+     * @param allowedValues pinned values accepted by an enum field
+     */
     public record Field(String name, String label, String help, Type type, boolean required,
                         int maxUtf8Bytes, List<String> allowedValues) {
+        /** Validates and snapshots the bounded field definition. */
         public Field {
             if (name == null || !NAME.matcher(name).matches()) {
                 throw new IllegalArgumentException("invalid human-task form field name");
@@ -53,6 +85,7 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
         }
     }
 
+    /** Validates and snapshots the ordered closed schema. */
     public HumanTaskFormSchema {
         if (version != VERSION_1) throw new IllegalArgumentException("unsupported form schema version");
         fields = List.copyOf(fields == null ? List.of() : fields);
@@ -64,7 +97,11 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
         }
     }
 
-    /** Validates the exact typed response map, rejecting unknown and missing members. */
+    /**
+     * Validates the exact typed response map, rejecting unknown and missing members.
+     *
+     * @param value response value to validate
+     */
     public void requireResponse(PayloadValue value) {
         if (!(value instanceof PayloadValue.MapValue map)) {
             throw new IllegalArgumentException("form response must be a map");
@@ -83,6 +120,11 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
         }
     }
 
+    /**
+     * Encodes the schema into its canonical bounded JSON representation.
+     *
+     * @return canonical closed schema document
+     */
     public String encode() {
         var encodedFields = new ArrayList<PayloadValue>();
         for (Field field : fields) {
@@ -103,6 +145,12 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
         return PayloadJson.write(PayloadValue.map(root));
     }
 
+    /**
+     * Decodes and validates one canonical closed schema document.
+     *
+     * @param encoded bounded schema document
+     * @return validated immutable schema
+     */
     public static HumanTaskFormSchema decode(String encoded) {
         if (encoded == null || encoded.isEmpty()) throw new IllegalArgumentException("form schema is required");
         PayloadValue value = PayloadJson.read(encoded.getBytes(StandardCharsets.UTF_8), SCHEMA_LIMITS);

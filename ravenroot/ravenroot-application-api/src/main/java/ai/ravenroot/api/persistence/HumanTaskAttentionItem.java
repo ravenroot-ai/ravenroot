@@ -52,7 +52,27 @@ public record HumanTaskAttentionItem(
         Optional<HumanTaskReviewPresentation> reviewPresentation,
         HumanTaskPresentation interactionPresentation) {
 
-    /** Compatibility constructor retaining the projection shape before presentation profiles. */
+    /**
+     * Compatibility constructor retaining the projection shape before presentation profiles.
+     *
+     * @param taskId exact task identity
+     * @param generation current optimistic decision fence
+     * @param status current lifecycle status
+     * @param graphVersion immutable graph-version pin
+     * @param deploymentId durable hosting deployment, when present
+     * @param processInstanceId exact owning process instance
+     * @param traversalId exact suspended traversal
+     * @param nodeId exact graph node
+     * @param createdAt immutable registration time
+     * @param expiresAt durable expiry deadline
+     * @param escalateAt optional durable escalation deadline
+     * @param presentation immutable pinned confirmation presentation
+     * @param promptMaxUtf8Bytes immutable pinned prompt limit
+     * @param actionLabelMaxUtf8Bytes immutable pinned action-label limit
+     * @param commentMaxUtf8Bytes immutable pinned comment limit
+     * @param availableActions pinned actions currently authorized for this caller
+     * @param reviewPresentation exact-detail review material, when authorized and present
+     */
     public HumanTaskAttentionItem(UUID taskId, long generation, HumanTaskStatus status,
                                   String graphVersion, Optional<String> deploymentId,
                                   UUID processInstanceId, UUID traversalId, String nodeId,

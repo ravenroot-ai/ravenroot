@@ -87,7 +87,7 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
             properties.addAll(List.of(
                     choice("presentationKind", "Presentation kind",
                             "Closed built-in presentation or an opaque registered profile; no HTML, URL, or credential is graph-authored.",
-                            "CLASSIC", "CLASSIC", "CONFIRMATION", "FORM", "CUSTOM", "EXTERNAL"),
+                            "", "CLASSIC", "CONFIRMATION", "FORM", "CUSTOM", "EXTERNAL"),
                     NodePropertyDescriptor.boundedText("presentationProfileId", "Presentation profile",
                             NodePropertyType.STRING, false,
                             "Opaque registered profile identifier for CUSTOM or EXTERNAL presentations.",

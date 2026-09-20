@@ -51,7 +51,9 @@ import sys
 
 source = open(sys.argv[1], encoding="utf-8").read()
 configured = set(re.findall(r'"(RAVENROOT_HUMAN_TASK_[A-Z_]+)"', source))
-expected = {line.strip() for line in open(sys.argv[2], encoding="utf-8") if line.strip()}
+expected = {line.strip() for line in open(sys.argv[2], encoding="utf-8") if line.strip()} | {
+    "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED"
+}
 if configured != expected:
     missing = sorted(configured - expected)
     stale = sorted(expected - configured)
@@ -72,13 +74,19 @@ if definitions.get("humanTaskBlank") != {
     raise SystemExit("Helm Human Task blank definition differs from the Java character contract")
 
 properties = schema["properties"]["humanTask"]["properties"]
-if len(properties) != 29:
-    raise SystemExit("Helm Human Task policy must expose exactly 29 fields")
+if len(properties) != 31:
+    raise SystemExit("Helm Human Task policy must expose exactly 31 fields")
 required = schema["properties"]["humanTask"].get("required", [])
 if len(required) != len(set(required)) or set(required) != set(properties):
     raise SystemExit("Every Helm Human Task policy field must be required")
+if properties["responderEnforcementEnabled"] != {"type": "boolean", "default": False}:
+    raise SystemExit("Helm responder enforcement must be an explicit default-off Boolean")
+if properties["interactionConfigSecret"] != {"type": "string", "maxLength": 253}:
+    raise SystemExit("Helm interaction registry must remain a bounded Secret name")
 used_definitions = set()
 for name, node in properties.items():
+    if name in {"responderEnforcementEnabled", "interactionConfigSecret"}:
+        continue
     reference = node.get("$ref", "")
     prefix = "#/definitions/"
     if not reference.startswith(prefix):
@@ -132,15 +140,28 @@ def helm_name(name):
     words = name.removeprefix("RAVENROOT_HUMAN_TASK_").lower().split("_")
     return words[0] + "".join(word.title() for word in words[1:])
 
-expected_values = {helm_name(name) for name in environment}
-if set(human_task) != expected_values or any(value != '\"\"' for value in human_task.values()):
-    raise SystemExit("Helm Human Task values must be the complete source-owned blank carrier set")
+expected_values = {helm_name(name) for name in environment} | {
+    "responderEnforcementEnabled", "interactionConfigSecret"
+}
+if set(human_task) != expected_values:
+    raise SystemExit("Helm Human Task values must be the complete source-owned carrier set")
+if any(human_task[helm_name(name)] != '\"\"' for name in environment):
+    raise SystemExit("Helm numeric Human Task values must remain blank Java-default carriers")
+if human_task["responderEnforcementEnabled"] != "false":
+    raise SystemExit("Helm responder enforcement must default off")
+if human_task["interactionConfigSecret"] != '\"\"':
+    raise SystemExit("Helm interaction registry must default disabled")
 
 raw_names = re.findall(r"^\s*- name: (RAVENROOT_HUMAN_TASK_[A-Z_]+)\s*$", kubernetes, re.MULTILINE)
-if len(raw_names) != len(set(raw_names)) or set(raw_names) != environment:
+expected_environment = environment | {
+    "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED",
+    "RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG",
+}
+if len(raw_names) != len(set(raw_names)) or set(raw_names) != expected_environment:
     raise SystemExit("Raw Kubernetes Human Task names must exactly match the source-owned set")
-for name in environment:
-    fragment = f'- name: {name}\n              value: ""'
+for name in expected_environment:
+    value = "false" if name == "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED" else ""
+    fragment = f'- name: {name}\n              value: "{value}"'
     if kubernetes.count(fragment) != 1:
         raise SystemExit(f"Raw Kubernetes does not carry exactly one blank {name}")
 PY

@@ -2,7 +2,12 @@ package ai.ravenroot.api.persistence;
 
 import java.nio.charset.StandardCharsets;
 
-/** Explicit, bounded operator intent to bypass one Human Task responder decision policy. */
+/**
+ * Explicit, bounded operator intent to bypass one Human Task responder decision policy.
+ *
+ * @param version override contract version
+ * @param reason printable audit explanation supplied by the operator
+ */
 public record HumanTaskOverride(int version, String reason) {
     public static final int VERSION_1 = 1;
     public static final int MAX_REASON_UTF8_BYTES = 1_024;
@@ -28,6 +33,11 @@ public record HumanTaskOverride(int version, String reason) {
         }
     }
 
+    /**
+     * Creates a version-one override.
+     *
+     * @param reason printable audit explanation supplied by the operator
+     */
     public HumanTaskOverride(String reason) {
         this(VERSION_1, reason);
     }

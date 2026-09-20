@@ -17,7 +17,13 @@ import java.util.Set;
  */
 public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes,
                                                boolean responderEnforcementEnabled) {
-    /** Compatibility constructor preserving the previously enforced behavior. */
+    /**
+     * Compatibility constructor preserving the previously enforced behavior.
+     *
+     * @param actor audit-stable qualified caller identity
+     * @param roles opaque role tokens currently held by the caller
+     * @param scopes opaque scope tokens currently held by the caller
+     */
     public HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes) {
         this(actor, roles, scopes, true);
     }

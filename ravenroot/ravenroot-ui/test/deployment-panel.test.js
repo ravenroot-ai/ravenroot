@@ -85,6 +85,16 @@ describe('what the window renders', () => {
     expect(field('deployment-list').textContent).toContain('LOCAL_PROCESS');
   });
 
+  it('shows the authoritative durable generation when the server supplies one', async () => {
+    const window_ = createDeploymentsWindow({
+      dialog, client: stubClient({ deployments: vi.fn(async () => [
+        { ...READY, deploymentGeneration: 9 },
+      ]) }), pollMs: 0,
+    });
+    await window_.refresh();
+    expect(field('deployment-list').textContent).toContain('generation 9');
+  });
+
   it('shows a diagnostic when the server sends one', async () => {
     const degraded = { ...READY, state: 'DEGRADED', diagnostic: 'One inbound source subscription failed.' };
     const window_ = createDeploymentsWindow({
@@ -250,6 +260,37 @@ describe('row actions', () => {
 
     field('deployment-list').querySelector('[data-deployment-action="stop"]').click();
     await vi.waitFor(() => expect(client.stopDeployment).toHaveBeenCalledWith('orders-v3'));
+  });
+
+  it('sends durable Stop with the displayed generation and an explicit reason', async () => {
+    const durable = { ...READY, deploymentGeneration: 6 };
+    const client = stubClient({ deployments: vi.fn(async () => [durable]) });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    vi.spyOn(window, 'prompt').mockReturnValue('operator maintenance');
+
+    field('deployment-list').querySelector('[data-deployment-action="stop"]').click();
+    await vi.waitFor(() => expect(client.stopDeployment).toHaveBeenCalledWith('orders-v3', {
+      expectedGeneration: 6, reason: 'operator maintenance',
+    }));
+    vi.restoreAllMocks();
+  });
+
+  it('requires an explicit durable Undeploy disposition and reason', async () => {
+    const durable = { ...READY, deploymentGeneration: 11 };
+    const client = stubClient({ deployments: vi.fn(async () => [durable]) });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(window, 'prompt')
+      .mockReturnValueOnce('CANCEL_IN_FLIGHT')
+      .mockReturnValueOnce('retired by operator');
+
+    field('deployment-list').querySelector('[data-deployment-action="undeploy"]').click();
+    await vi.waitFor(() => expect(client.undeployDeployment).toHaveBeenCalledWith('orders-v3', {
+      expectedGeneration: 11, disposition: 'CANCEL_IN_FLIGHT', reason: 'retired by operator',
+    }));
+    vi.restoreAllMocks();
   });
 });
 

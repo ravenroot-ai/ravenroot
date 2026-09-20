@@ -59,7 +59,8 @@ public final class OpenApiSpecGenerator {
         json.append("    },\n");
         String existingSchemas = humanTaskSchemas();
         json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\n    }"));
-        json.append(",\n").append(executionEventSchemas()).append("    }\n");
+        json.append(",\n").append(deploymentSchemas()).append(",\n")
+                .append(executionEventSchemas()).append("    }\n");
         json.append("  }\n");
         json.append("}\n");
         return json.toString();
@@ -180,6 +181,22 @@ public final class OpenApiSpecGenerator {
             parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
                     + "\"schema\": {\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1}}");
         }
+        if (isDeploymentCommand(route, method)) {
+            parameters.add(deploymentHeader("Idempotency-Key", "string",
+                    "Required for a durable deployment; one unique key per operator intent."));
+            parameters.add(deploymentHeader("X-Ravenroot-Expected-Generation", "integer",
+                    "Required for a durable deployment; exact authoritative generation."));
+            if (route.path().endsWith("/stop") || route.path().endsWith("/pause")
+                    || route.path().endsWith("/cancel") || ("DELETE".equals(method)
+                    && "/v1/deployments/{id}".equals(route.path()))) {
+                parameters.add(deploymentHeader("X-Ravenroot-Reason", "string",
+                        "Required for durable Pause, Cancel, Stop and Undeploy; bounded operator reason."));
+            }
+            if ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path())) {
+                parameters.add(deploymentHeader("X-Ravenroot-Undeploy-Disposition", "string",
+                        "Required for durable Undeploy: DRAIN_FIRST, CANCEL_IN_FLIGHT, or REFUSE_IF_BUSY."));
+            }
+        }
         return parameters.isEmpty() ? "" : parameters.stream()
                 .collect(Collectors.joining(",\n", "        \"parameters\": [\n", "\n        ],\n"));
     }
@@ -223,6 +240,18 @@ public final class OpenApiSpecGenerator {
         return "          {\"name\": \"" + name + "\", \"in\": \"query\", \"required\": false, "
                 + "\"description\": \"" + JsonStrings.escape(description) + "\", \"schema\": {\"type\": \""
                 + type + "\"}}";
+    }
+
+    private static String deploymentHeader(String name, String type, String description) {
+        return "          {\"name\": \"" + name + "\", \"in\": \"header\", \"required\": false, "
+                + "\"description\": \"" + JsonStrings.escape(description) + "\", \"schema\": {\"type\": \""
+                + type + "\"" + ("integer".equals(type) ? ", \"format\": \"int64\", \"minimum\": 0" : "")
+                + "}}";
+    }
+
+    private static boolean isDeploymentCommand(RouteDescriptor route, String method) {
+        return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/"))
+                || ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path()));
     }
 
     private static String successResponse(RouteDescriptor route, String method, int status) {
@@ -270,10 +299,27 @@ public final class OpenApiSpecGenerator {
             schema = "HumanTaskDecisionResult";
         } else if (isHumanTaskInteraction(route, method) && "POST".equals(method)) {
             schema = "HumanTaskInteractionLaunch";
+        } else if ("/v1/deployments".equals(route.path()) && "GET".equals(method)) {
+            schema = "LocalDeploymentStatusList";
+        } else if (("/v1/deployments".equals(route.path()) && "POST".equals(method))
+                || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))) {
+            schema = "LocalDeploymentStatus";
+        } else if (isDeploymentCommand(route, method)) {
+            schema = "DeploymentCommandResponse";
         }
         return "          \"" + status + "\": {\"description\": \"success\""
                 + (schema == null ? "}" : ", \"content\": {\"application/json\": "
                         + "{\"schema\": {\"$ref\": \"#/components/schemas/" + schema + "\"}}}}");
+    }
+
+    private static String deploymentSchemas() {
+        return "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\"],\"properties\":{"
+                + "\"deploymentId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"REGISTERED\",\"STARTING\",\"READY\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},"
+                + "\"sourceCount\":{\"type\":\"integer\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\",\"nullable\":true},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},"
+                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"}}},\n"
+                + "      \"LocalDeploymentStatusList\": {\"type\":\"object\",\"required\":[\"scope\",\"deployments\"],\"properties\":{\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"deployments\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"}}}},\n"
+                + "      \"DeploymentCommandOutcome\": {\"type\":\"object\",\"required\":[\"outcome\"],\"properties\":{\"outcome\":{\"type\":\"string\",\"enum\":[\"ACCEPTED\",\"CONVERGED\",\"REPLAYED\",\"IDEMPOTENCY_CONFLICT\",\"STALE_GENERATION\",\"SUPERSEDED\",\"REFUSED\",\"FAILED\",\"TERMINAL\"]},\"commandId\":{\"type\":\"string\"},\"fromGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"generation\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"expected\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"observed\":{\"type\":\"string\"},\"key\":{\"type\":\"string\"},\"by\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"cause\":{\"type\":\"string\"},\"original\":{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}}},\n"
+                + "      \"DeploymentCommandResponse\": {\"oneOf\":[{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"},{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}],\"description\":\"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome.\"}";
     }
 
     /** JSON data schemas for named SSE frames; unknown future members remain permitted. */

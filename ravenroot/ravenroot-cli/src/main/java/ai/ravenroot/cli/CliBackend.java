@@ -150,14 +150,25 @@ public interface CliBackend {
      */
     DeploymentView stopDeployment(String deploymentId) throws IOException;
 
+    /** Durable stop metadata; compatibility backends retain the legacy one-argument command. */
+    default DeploymentView stopDeployment(String deploymentId, String reason) throws IOException {
+        return stopDeployment(deploymentId);
+    }
+
     /** A completed stop followed by a start, never the two overlapping. */
     DeploymentView restartDeployment(String deploymentId) throws IOException;
 
     /**
-     * Stops the deployment and then removes its registration. A second undeploy of the same id,
-     * like every other lookup here, reports the same nondisclosing failure as an id never registered.
+     * Stops the deployment and then removes its registration. Legacy backends report a repeated
+     * undeploy like an unknown id; durable backends can instead replay the original terminal intent.
      */
     DeploymentView undeployDeployment(String deploymentId) throws IOException;
+
+    /** Durable undeploy metadata; disposition has deliberately no default. */
+    default DeploymentView undeployDeployment(String deploymentId, String disposition, String reason)
+            throws IOException {
+        return undeployDeployment(deploymentId);
+    }
 
     /**
      * The public credential-management contract requires the CLI and the interface to use the same
@@ -469,6 +480,11 @@ public interface CliBackend {
      *                    {@code DEGRADED} or {@code FAILED} deployment.
      */
     record DeploymentView(String deploymentId, String state, int sourceCount, String scope,
-                          String diagnostic) {
+                          String diagnostic, Long deploymentGeneration, String commandOutcome,
+                          String commandDetail) {
+        public DeploymentView(String deploymentId, String state, int sourceCount, String scope,
+                              String diagnostic) {
+            this(deploymentId, state, sourceCount, scope, diagnostic, null, null, null);
+        }
     }
 }

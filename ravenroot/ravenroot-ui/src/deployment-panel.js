@@ -29,8 +29,8 @@
 // STOPPED, FAILED. Never translated into a source-session word (`LISTENING`, etc.) -- that
 // translation existed only to let Run's now-reverted generalization reuse source-session chrome,
 // and reintroducing it here would create exactly that UI-invented approximation.
-// 2. EVERY ROW NAMES ITS SCOPE. `scope` is always `LOCAL_PROCESS` on the wire; this window never
-// implies durability, a lease, failover or cluster ownership by omitting it.
+// 2. EVERY ROW NAMES ITS SCOPE. `scope` is always `LOCAL_PROCESS` on the wire. A generation means
+// the command intent is durable; it still does not claim that this browser owns the runtime.
 // 3. UNDEPLOY IS A DISTINCT, CONFIRMED ACTION. It stops a deployment and then removes its
 // registration -- the operation that turns "registered and controlled as a local deployment" back
 // into nothing. Closing a document never reaches it (see `proceedToCloseDocument` in app.js); it
@@ -40,7 +40,9 @@
 // until that call resolves and a refresh has run, so a second click cannot race the first.
 
 export const DEPLOYMENT_SCOPE_TEXT = 'A deployment registered here runs inside your Ravenroot '
-  + 'service process (scope LOCAL_PROCESS): no durability, failover or cluster ownership is claimed. '
+  + 'service process (scope LOCAL_PROCESS). When a generation is shown, lifecycle intent is durable '
+  + 'and reconciled by the service; the runtime itself remains process-local and no cluster ownership '
+  + 'is claimed. '
   + 'It is addressed by the id below, in this window and in the CLI (`ravenroot deployments`), and '
   + 'keeps running after you close this window or the document that registered it -- Undeploy is the '
   + 'only action that removes it.';
@@ -178,6 +180,9 @@ export function createDeploymentsWindow({
         ? `${entry.sourceCount} inbound source node${entry.sourceCount === 1 ? '' : 's'}`
         : 'no inbound source';
       detail.textContent = `${sourceText} · scope ${entry.scope}`;
+      if (entry.deploymentGeneration !== undefined && entry.deploymentGeneration !== null) {
+        detail.textContent += ` · generation ${entry.deploymentGeneration}`;
+      }
 
       item.append(head, detail);
 
@@ -284,7 +289,11 @@ export function createDeploymentsWindow({
       const registered = await client.registerDeployment(check.id, source.graphMl);
       onRegistered(registered, source);
       if (disposed) return;
-      await client.startDeployment(check.id);
+      if (registered.deploymentGeneration === undefined || registered.deploymentGeneration === null) {
+        await client.startDeployment(check.id);
+      } else {
+        await client.startDeployment(check.id, { expectedGeneration: registered.deploymentGeneration });
+      }
       if (disposed) return;
       say(`“${check.id}” is registered and starting. It appears below once the server answers.`, 'ok');
       if (idInput) idInput.value = '';
@@ -299,19 +308,61 @@ export function createDeploymentsWindow({
 
   async function runRowAction(deploymentId, action) {
     if (!client || rowBusy.has(deploymentId)) return;
+    const entry = listing.deployments.find(candidate => candidate.deploymentId === deploymentId);
+    const durable = entry?.deploymentGeneration !== undefined && entry?.deploymentGeneration !== null;
+    const command = { expectedGeneration: entry?.deploymentGeneration };
+    if (durable && action === 'stop') {
+      const reason = doc.defaultView?.prompt?.(`Why should “${deploymentId}” stop?`);
+      if (reason === null) return;
+      if (!String(reason).trim()) {
+        say('Stop was not sent: a durable stop requires a reason.', 'error');
+        return;
+      }
+      command.reason = String(reason).trim();
+    }
     if (action === 'undeploy') {
       const confirmed = doc.defaultView?.confirm?.(
-        `Undeploy “${deploymentId}”? This stops it and removes its registration. It can be `
-        + 'registered again later under the same id, but this run stops now and cannot be resumed.');
+        `Undeploy “${deploymentId}”? This stops it and permanently retires its durable identity. `
+        + 'This run cannot be resumed and the same durable id cannot be reused.');
       if (!confirmed) return;
+      if (durable) {
+        const disposition = doc.defaultView?.prompt?.(
+          'Choose exactly one undeploy disposition: DRAIN_FIRST, CANCEL_IN_FLIGHT, or REFUSE_IF_BUSY');
+        if (disposition === null) return;
+        const normalized = String(disposition).trim().toUpperCase();
+        if (!['DRAIN_FIRST', 'CANCEL_IN_FLIGHT', 'REFUSE_IF_BUSY'].includes(normalized)) {
+          say('Undeploy was not sent: choose a supported disposition explicitly.', 'error');
+          return;
+        }
+        const reason = doc.defaultView?.prompt?.(`Why should “${deploymentId}” be undeployed?`);
+        if (reason === null) return;
+        if (!String(reason).trim()) {
+          say('Undeploy was not sent: a durable undeploy requires a reason.', 'error');
+          return;
+        }
+        command.disposition = normalized;
+        command.reason = String(reason).trim();
+      }
     }
     rowBusy.add(deploymentId);
     renderList();
     try {
-      if (action === 'start') await client.startDeployment(deploymentId);
-      else if (action === 'stop') await client.stopDeployment(deploymentId);
-      else if (action === 'restart') await client.restartDeployment(deploymentId);
-      else if (action === 'undeploy') await client.undeployDeployment(deploymentId);
+      let result;
+      if (action === 'start') result = durable
+        ? await client.startDeployment(deploymentId, command) : await client.startDeployment(deploymentId);
+      else if (action === 'stop') result = durable
+        ? await client.stopDeployment(deploymentId, command) : await client.stopDeployment(deploymentId);
+      else if (action === 'restart') result = durable
+        ? await client.restartDeployment(deploymentId, command) : await client.restartDeployment(deploymentId);
+      else if (action === 'undeploy') result = durable
+        ? await client.undeployDeployment(deploymentId, command) : await client.undeployDeployment(deploymentId);
+      if (result?.outcome) {
+        const outcome = result.outcome.outcome === 'REPLAYED'
+          ? `REPLAYED ${result.outcome.original.outcome}` : result.outcome.outcome;
+        say(`${ACTION_LABEL[action]} on “${deploymentId}”: ${outcome}.`,
+          ['REFUSED', 'FAILED', 'STALE_GENERATION', 'SUPERSEDED', 'IDEMPOTENCY_CONFLICT']
+            .includes(result.outcome.outcome) ? 'error' : 'ok');
+      }
     } catch (error) {
       if (!disposed) say(`${ACTION_LABEL[action]} on “${deploymentId}” failed: ${error?.message || error}`,
         'error');

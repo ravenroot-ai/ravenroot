@@ -173,10 +173,10 @@ listings. `--help` and `help` print usage.
 | `deployments list` | List process-local deployment registrations. |
 | `deployments register ID FILE` | Reserve an ID and validate its graph; does not start it. |
 | `deployments inspect ID` | Read one registration. |
-| `deployments start ID` | Start a registered deployment and wait for `READY` or truthful `FAILED`. |
-| `deployments stop ID` | Stop it but keep it registered. |
-| `deployments restart ID` | Stop and start the registration. |
-| `deployments undeploy ID` | Stop and remove the process-local registration. |
+| `deployments start ID` | Start a registered deployment. A durable remote target sends its displayed generation and a unique intent key, then reconciles the authoritative state. |
+| `deployments stop ID [--reason TEXT]` | Stop it but keep it registered. `--reason` is required when the inspected target exposes a durable generation. |
+| `deployments restart ID` | Stop and start the registration. Durable Restart has no reason option. |
+| `deployments undeploy ID [--disposition DRAIN_FIRST\|CANCEL_IN_FLIGHT\|REFUSE_IF_BUSY --reason TEXT]` | Stop and remove the process-local registration. Both options are required for a durable target; disposition is never defaulted. A durable tombstoned ID cannot be reused. |
 | `credentials list` | Remote-only metadata listing; secret values are never returned. |
 | `credentials add` | Remote-only creation with `--label TEXT --scheme api-key|basic|oauth-token [--username TEXT] --value-file PATH`. `basic` requires a username; other schemes reject one. `--value-file -` reads standard input. The rejected `--value` option never carries a secret. |
 | `backup DIRECTORY` | Create an offline recovery bundle from configured durable stores. |
@@ -190,6 +190,14 @@ remain strings. Complete input returns 0, malformed or incomplete input and I/O 
 argument misuse returns 2, and `stream-truncated` or `stream-overrun` is emitted before returning 3.
 Diagnostics go to standard error without raw input. See [Decoding execution streams](../integrator-guide/application-http.md)
 for framing limits, legacy compatibility and control-frame semantics.
+
+Deployment listings print `generation=` only for deployments governed by durable lifecycle authority.
+Commands against those rows also print `command-outcome=` and bounded outcome detail. Accepted,
+converged, replayed, and terminal outcomes return 0; stale, superseded, refused, failed, and
+idempotency-conflict outcomes return 1 after the CLI refreshes authoritative state. The client never
+automatically resubmits those decisions. Only an ambiguous transport delivery is retried once, with
+the identical key, generation, reason, and disposition. Rows without a generation retain the legacy
+process-local command behavior for embedded and source-session compatibility.
 
 `embed-registration show`, `embed-registration provision`, and `embed-registration revoke` operate a
 local registration store and never use `--server`. All take `--store-dir`, `--tenant`, and

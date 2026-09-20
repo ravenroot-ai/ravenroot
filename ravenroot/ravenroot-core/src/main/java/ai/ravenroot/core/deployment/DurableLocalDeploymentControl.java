@@ -65,13 +65,21 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
     public Registration register(SecurityContext security, String localId, byte[] canonicalGraphMl) {
         Objects.requireNonNull(security, "security");
         Objects.requireNonNull(canonicalGraphMl, "canonicalGraphMl");
+        Alias alias = new Alias(security.tenantId(), localId);
+        DeploymentId known = aliases.get(alias);
+        if (known != null && await(registry.get(security.tenantId(), known))
+                .map(existing -> existing.tombstone() != null).orElse(false)) {
+            throw new IllegalStateException("a removed durable deployment id cannot be reused");
+        }
         String digest = sha256(canonicalGraphMl);
         DeploymentRegistry.Record record = await(registry.create(
                 new GraphVersion.Content(1, canonicalGraphMl,
                         security.qualifiedIdentity(), clock.instant()),
                 new DeploymentRegistry.CreateCommand(security.tenantId(),
                         "local-deployment:" + localId, digest)));
-        Alias alias = new Alias(security.tenantId(), localId);
+        if (record.tombstone() != null) {
+            throw new IllegalStateException("a removed durable deployment id cannot be reused");
+        }
         DeploymentId prior = aliases.putIfAbsent(alias, record.deploymentId());
         if (prior != null && !prior.equals(record.deploymentId())) {
             throw new IllegalStateException("local deployment alias changed durable identity");
@@ -111,8 +119,21 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
                                                       LifecycleCommand command,
                                                       GenerationExpectation expectedGeneration) {
         DeploymentId id = aliases.get(new Alias(tenantId, localId));
-        return id == null ? Optional.empty() : Optional.of(
-                coordinator.submit(tenantId, id, command, expectedGeneration));
+        if (id == null) return Optional.empty();
+        DeploymentCommandOutcome outcome = coordinator.submit(
+                tenantId, id, command, expectedGeneration);
+        if (isTerminal(outcome)) {
+            // The registry tombstone remains authoritative and the alias remains resolvable so an
+            // identical retry can replay TERMINAL. Only the process-local runtime is removed.
+            await(application.undeployLocalDeployment(tenantId, localId));
+        }
+        return Optional.of(outcome);
+    }
+
+    private static boolean isTerminal(DeploymentCommandOutcome outcome) {
+        if (outcome instanceof DeploymentCommandOutcome.Terminal) return true;
+        return outcome instanceof DeploymentCommandOutcome.Replayed replayed
+                && replayed.original() instanceof DeploymentCommandOutcome.Terminal;
     }
 
     public record Registration(LocalDeploymentStatus local, DeploymentRegistry.Record durable) {

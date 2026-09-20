@@ -12,6 +12,7 @@ import {
   parseEventFrame,
   validateDeploymentViewEnvelope,
   validateDeploymentViewFrame,
+  validateDeploymentCommandOutcome,
   validateLocalDeploymentStatus,
   validateRuntimeConfiguration,
   validateSourceSessionStatus,
@@ -547,6 +548,88 @@ describe('process-local deployment client', () => {
   it('accepts sourceCount 0, unlike a source session', () => {
     expect(validateLocalDeploymentStatus(ready, 'deployment-1')).toEqual(ready);
     expect(validateLocalDeploymentStatus({ ...ready, sourceCount: 3 }, 'deployment-1').sourceCount).toBe(3);
+  });
+
+  it('accepts a safe authoritative generation and refuses one JavaScript would round', () => {
+    expect(validateLocalDeploymentStatus({ ...ready, deploymentGeneration: 7 }).deploymentGeneration).toBe(7);
+    expect(() => validateLocalDeploymentStatus({ ...ready,
+      deploymentGeneration: Number.MAX_SAFE_INTEGER + 1 })).toThrow(/process-local status/);
+  });
+
+  it('sends one durable Stop intent, parses its outcome, and reconciles authoritative state', async () => {
+    const accepted = { outcome: 'ACCEPTED', commandId: 'command-1', fromGeneration: 7, generation: 8 };
+    const stopped = { ...ready, state: 'STOPPED', deploymentGeneration: 8 };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(accepted) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(stopped) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    const result = await client.stopDeployment('deployment-1', {
+      expectedGeneration: 7, idempotencyKey: 'intent-7', reason: 'maintenance',
+    });
+
+    expect(result).toEqual({ outcome: accepted, status: stopped });
+    expect(fetchImpl.mock.calls[0][1].headers).toEqual(expect.objectContaining({
+      'Idempotency-Key': 'intent-7',
+      'X-Ravenroot-Expected-Generation': '7',
+      'X-Ravenroot-Reason': 'maintenance',
+    }));
+    expect(fetchImpl.mock.calls[1][0]).toBe('/v1/deployments/deployment-1');
+  });
+
+  it('retries an ambiguous durable delivery once with identical intent metadata', async () => {
+    const converged = { outcome: 'CONVERGED', commandId: 'command-2', generation: 4, observed: 'RUNNING' };
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection reset'))
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(converged) })
+      .mockResolvedValueOnce({ ok: true, status: 200,
+        text: async () => JSON.stringify({ ...ready, deploymentGeneration: 4 }) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await client.startDeployment('deployment-1', {
+      expectedGeneration: 4, idempotencyKey: 'same-intent',
+    });
+
+    expect(fetchImpl.mock.calls[0][1].headers['Idempotency-Key']).toBe('same-intent');
+    expect(fetchImpl.mock.calls[1][1].headers['Idempotency-Key']).toBe('same-intent');
+    expect(fetchImpl.mock.calls[1][1].headers['X-Ravenroot-Expected-Generation']).toBe('4');
+  });
+
+  it('refreshes stale state without automatically resubmitting the command', async () => {
+    const stale = { outcome: 'STALE_GENERATION', expected: 3, generation: 4 };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(stale) })
+      .mockResolvedValueOnce({ ok: true, status: 200,
+        text: async () => JSON.stringify({ ...ready, deploymentGeneration: 4 }) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    const result = await client.restartDeployment('deployment-1', {
+      expectedGeneration: 3, idempotencyKey: 'stale-intent',
+    });
+
+    expect(result.outcome).toEqual(stale);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.filter(([, request]) => request.method === 'POST')).toHaveLength(1);
+  });
+
+  it('parses every durable outcome and requires explicit undeploy metadata', async () => {
+    const outcomes = [
+      { outcome: 'ACCEPTED', commandId: 'c', fromGeneration: 0, generation: 1 },
+      { outcome: 'CONVERGED', commandId: 'c', generation: 1, observed: 'RUNNING' },
+      { outcome: 'REPLAYED', original: { outcome: 'TERMINAL', commandId: 'c', generation: 2 } },
+      { outcome: 'IDEMPOTENCY_CONFLICT', key: 'k' },
+      { outcome: 'STALE_GENERATION', expected: 1, generation: 2 },
+      { outcome: 'SUPERSEDED', by: 'g2/STOPPED', generation: 2 },
+      { outcome: 'REFUSED', reason: 'Tombstoned' },
+      { outcome: 'FAILED', cause: 'RuntimeFailure' },
+      { outcome: 'TERMINAL', commandId: 'c', generation: 2 },
+    ];
+    for (const outcome of outcomes) expect(validateDeploymentCommandOutcome(outcome)).toBe(outcome);
+
+    const client = new RavenrootRuntimeClient('', { fetchImpl: vi.fn(), accessToken: 'token' });
+    await expect(client.undeployDeployment('deployment-1', {
+      expectedGeneration: 1, reason: 'retire',
+    })).rejects.toThrow(/explicit supported disposition/);
   });
 
   it('accepts every LocalDeploymentState value, including REGISTERED which no source session has', () => {

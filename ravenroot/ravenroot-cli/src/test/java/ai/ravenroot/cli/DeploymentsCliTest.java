@@ -113,6 +113,29 @@ class DeploymentsCliTest {
     }
 
     @Test
+    void durableMetadataAndOutcomeArePrintedAndRefusedOutcomesFailTheCommand() {
+        var output = new ByteArrayOutputStream();
+        var backend = new StubBackend(List.of());
+        var cli = new RavenrootCli(backend, print(output), print(new ByteArrayOutputStream()));
+        backend.view = new CliBackend.DeploymentView("orders", "STOPPED", 0, "LOCAL_PROCESS", null,
+                8L, "ACCEPTED", "generation=8");
+
+        assertEquals(0, cli.run("deployments", "stop", "orders", "--reason", "maintenance"));
+        assertEquals("maintenance", backend.lastReason);
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains(
+                "generation=8\tcommand-outcome=ACCEPTED\tcommand-detail=generation=8"));
+
+        output.reset();
+        backend.view = new CliBackend.DeploymentView("orders", "READY", 0, "LOCAL_PROCESS", null,
+                9L, "STALE_GENERATION", "expected=8,current=9");
+        assertEquals(1, cli.run("deployments", "undeploy", "orders", "--disposition",
+                "REFUSE_IF_BUSY", "--reason", "retire"));
+        assertEquals("REFUSE_IF_BUSY", backend.lastDisposition);
+        assertEquals("retire", backend.lastReason);
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains("command-outcome=STALE_GENERATION"));
+    }
+
+    @Test
     void missingArgumentsAreRejectedRatherThanGuessed() {
         var errors = new ByteArrayOutputStream();
         var backend = new StubBackend(List.of());
@@ -135,6 +158,8 @@ class DeploymentsCliTest {
         private DeploymentView view;
         private String lastRegisteredId;
         private byte[] lastRegisteredGraph;
+        private String lastReason;
+        private String lastDisposition;
 
         private StubBackend(List<DeploymentView> listing) {
             this.listing = new ArrayList<>(listing);
@@ -171,6 +196,12 @@ class DeploymentsCliTest {
         }
 
         @Override
+        public DeploymentView stopDeployment(String deploymentId, String reason) {
+            lastReason = reason;
+            return stopDeployment(deploymentId);
+        }
+
+        @Override
         public DeploymentView restartDeployment(String deploymentId) {
             calls.add("restart:" + deploymentId);
             return view;
@@ -180,6 +211,14 @@ class DeploymentsCliTest {
         public DeploymentView undeployDeployment(String deploymentId) {
             calls.add("undeploy:" + deploymentId);
             return view;
+        }
+
+
+        @Override
+        public DeploymentView undeployDeployment(String deploymentId, String disposition, String reason) {
+            lastDisposition = disposition;
+            lastReason = reason;
+            return undeployDeployment(deploymentId);
         }
 
         @Override public StatusView status() throws IOException { throw new IOException("unused"); }

@@ -888,8 +888,8 @@
      listener session there, and every other graph still submits a real one-shot execution.
 
      STATES SHOWN ARE THE SERVER'S OWN WORDS -- REGISTERED, STARTING, READY, DEGRADED, STOPPING,
-     STOPPED, FAILED -- never a UI-invented approximation. Every row also names scope=LOCAL_PROCESS: no durability,
-     failover or cluster claim is made anywhere in this window. -->
+     STOPPED, FAILED -- never a UI-invented approximation. Every row also names scope=LOCAL_PROCESS;
+     durable generations describe reconciled command intent, not cluster-owned runtime execution. -->
 <dialog id="deployments-dialog" class="credentials-dialog deployments-dialog" aria-labelledby="deployments-title">
   <header class="credentials-hd">
     <h2 id="deployments-title">Deployments</h2>

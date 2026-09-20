@@ -172,6 +172,51 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
     }
 
     @Test
+    void durableUndeployRemovesTheLocalRuntimeButRetainsTerminalReplay() {
+        var clock = java.time.Clock.systemUTC();
+        var behavior = new ReleaseDistinguishingSourceBehavior();
+        var application = application(new SameThreadExecutionEngine(), new ExecutionMonitor(), behavior);
+        var registry = new ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry(
+                clock, tenant -> DeploymentId.of("authority-" + tenant));
+        var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(
+                registry, application.localDeploymentTargets(),
+                new ai.ravenroot.core.deployment.DeploymentSingleFlight(),
+                ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING, "owner",
+                Duration.ofMinutes(1), Duration.ofSeconds(1), clock);
+        var control = new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
+                application, registry, coordinator, clock);
+        try {
+            control.register(TENANT_A, "removed", SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8));
+            control.submit("tenant-a", "removed",
+                    new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Start(
+                            "start", 1, ai.ravenroot.api.deployment.registry.DeploymentRegistry
+                            .UpdateStrategy.STOP_FIRST),
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(0));
+
+            var command = new ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Undeploy(
+                    "remove", ai.ravenroot.api.deployment.lifecycle.LifecycleCommand.Undeploy
+                    .Disposition.CANCEL_IN_FLIGHT, "retired");
+            var removed = control.submit("tenant-a", "removed", command,
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(1)).orElseThrow();
+            assertTrue(removed instanceof ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Terminal);
+            assertTrue(application.localDeployment("tenant-a", "removed").isEmpty());
+            assertEquals(List.of("start", "stop", "shutdown"), behavior.lifecycle,
+                    "authority termination uses restartable stop, then local removal pays the terminal release");
+
+            var replay = control.submit("tenant-a", "removed", command,
+                    ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(1)).orElseThrow();
+            assertTrue(replay instanceof ai.ravenroot.api.deployment.lifecycle.DeploymentCommandOutcome.Replayed);
+            assertEquals(List.of("start", "stop", "shutdown"), behavior.lifecycle,
+                    "terminal replay must not release the local runtime twice");
+            assertThrows(IllegalStateException.class, () -> control.register(
+                    TENANT_A, "removed", SOURCE_GRAPH.getBytes(StandardCharsets.UTF_8)));
+        } finally {
+            control.close();
+            application.close();
+        }
+    }
+
+    @Test
     void missingDurableHumanTaskCapabilityRefusesLocalAdmissionBeforeRegistration() {
         var engine = new SameThreadExecutionEngine();
         var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),

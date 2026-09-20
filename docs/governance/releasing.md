@@ -72,13 +72,22 @@ boundary, the API documentation gate, and the runtime smoke tests. It runs on:
 
 - a review candidate, dispatched once on the exact commit about to be reviewed:
   `gh workflow run ci.yml --ref <branch> -f tier=full`. The dispatch offers `full` alone;
-- every pull request into `dev`;
 - every merge-group commit, when a merge queue is enabled on `dev`;
-- every push to `dev`.
+- a routed Dependabot pull request into `dev`, dispatched by `route-dependabot.yml` once its
+  Dependabot-into-`main` pull request has been authorized and retargeted. A later merge into `dev`
+  relies on that dispatch's result, so it earns the full suite rather than a lighter one.
 
-A push to a `feature/**` branch runs the fast feedback workflow instead: the policy, Python and shell
-contracts, the UI unit suite and build, and a backend compile. It is feedback for whoever is working,
-not a gate, and a newer push to the same branch cancels it.
+`ci.yml` does not trigger on a pull request into `dev` at all. It used to run a small `admission`
+diagnostic tier there, but a lighter tier able to publish `ci-required` on a commit headed for `dev`
+is exactly the defect this section exists to prevent: the review candidate is verified instead by the
+dispatch above, on the exact commit the pull request will carry, before the pull request is opened.
+A push to `dev` itself runs the intentionally bare `postmerge` tier — the merge queue, or an
+explicitly dispatched full run, already verified that exact commit in full, so nothing functional is
+repeated.
+
+A push to a `feature/**` branch runs the fast feedback workflow instead: the policy and CI-contract
+checks, the UI unit suite and build, and a backend compile. It is feedback for whoever is working, not
+a gate, and a newer push to the same branch cancels it.
 
 The `dev` to `main` promotion re-verifies none of it. By then the behaviour has already been
 verified, commit by commit, on the branch where a fix is cheap, so the promotion carries only:
@@ -88,11 +97,12 @@ verified, commit by commit, on the branch where a fix is cheap, so the promotion
   that is not `dev` or a protected `hotfix/*`;
 - `release-classification`, which produces the tier and enforces the mandatory `release:*` label;
 - `ci-required`, the single aggregating context both rulesets require. On a promotion it runs no
-  functional job, so it is green only when a complete `ci.yml` run on `dev` — its push, its merge
-  queue, or a dispatch on `dev` — has already passed on exactly the promoted commit. Its green is
-  borrowed from a run that verified this commit, never from whichever run happens to be green. A
-  dispatch may not redirect its checkout to another commit unless it is a validated Dependabot
-  routing, so such a run always tested the commit it is recorded on.
+  functional job, so it is green only when a complete `ci.yml` run on `dev` — its merge queue, or a
+  dispatch on `dev` — has already passed on exactly the promoted commit. The intentionally bare
+  `postmerge` push to `dev` is never that evidence. Its green is borrowed from a run that verified
+  this commit, never from whichever run happens to be green. A dispatch may not redirect its checkout
+  to another commit unless it is a validated Dependabot routing, so such a run always tested the
+  commit it is recorded on.
 
 Code scanning runs on `main` alone by deliberate decision. Static analysis costs time on every pull
 request and raises a genuine finding rarely, so it is analysed at the moment of a real release, where
@@ -110,6 +120,41 @@ tier has passed — in that run, or, for a promotion, in the full run on the sam
 check run belongs to the commit rather than to the event that produced it, and a skipped job counts
 as passed for a required check. The fast feedback workflow therefore publishes its own `ci-fast`
 context, and `scripts/ci_required.py` refuses any other workflow that defines `ci-required`.
+
+## Full-tier critical path and required checks
+
+Measured across several recent `merge_group` and dispatched `full` runs, `full-backend-tests` is the
+full tier's critical path by a wide margin: 20 to 30 minutes against a run whose other regression jobs
+finish inside roughly 15 minutes of `full-preflight`. `full-regression` and the container smoke test
+that follows it wait on `full-backend-tests` regardless of how quickly everything else finishes, so
+this job's duration is effectively the full tier's wall clock; shortening it is tracked separately and
+is not addressed here.
+
+The end-to-end suite is sharded across `E2E_SHARDS` (`scripts/ci_required.py`) parallel runners
+specifically so it does not add its own ~29-minute single-runner cost to that critical path. Sampled
+shard durations:
+
+| Run | Shard 1 | Shard 2 | Shard 3 | Shard 4 | Spread |
+|---|---|---|---|---|---|
+| `merge_group` pr-459 | 5.2m | 6.1m | 3.9m | 5.6m | 133s |
+| `merge_group` pr-450 | 5.2m | 5.4m | 4.4m | 5.8m | 82s |
+| `merge_group` pr-449 | 5.1m | 5.9m | 5.0m | 4.7m | 76s |
+| `merge_group` pr-447 | 5.1m | 6.2m | 4.9m | 5.8m | 76s |
+| dispatched, issue 455 | 4.9m | 6.1m | 5.1m | 4.6m | 89s |
+| dispatched, issue 446 | 4.4m | 5.9m | 5.2m | 5.9m | 94s |
+
+The spread between the fastest and slowest shard is consistently a minute or two on a roughly
+five-minute job, and the whole `full-ui-e2e` phase always completes well before `full-backend-tests`
+does. A duration-aware rebalance of the shards would not shorten a run that this job already
+dominates, so the even four-way split is kept as it is; this is reported as satisfied by the numbers
+above rather than changed.
+
+No repository ruleset needs to change for the work in this section. `dev`'s protected-branch ruleset
+requires the single `ci-required` context, which continues to be published by the merge queue (and,
+for the routed Dependabot path, by the dispatch) exactly as it always was; removing the retired
+`admission` tier's jobs does not remove or rename any context a ruleset names, because they were never
+individually required. `main`'s ruleset likewise keeps requiring code scanning, `main-source-policy`,
+and `ci-required`, whose promotion-tier evidence check is unaffected by this section.
 
 ## Integrating changes on `dev`
 

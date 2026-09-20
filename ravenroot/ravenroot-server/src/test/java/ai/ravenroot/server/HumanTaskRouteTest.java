@@ -205,7 +205,9 @@ class HumanTaskRouteTest {
             var oldTask = reopened.loadHumanTask("tenant-a", taskId).toCompletableFuture().join()
                     .orElseThrow();
             assertEquals(1_700_000, service.authorizedResponseBodyLimit(approver, taskId).orElseThrow());
-            assertTrue(service.authorizedResponseBodyLimit(unauthorized, taskId).isEmpty());
+            assertEquals(1_700_000,
+                    service.authorizedResponseBodyLimit(unauthorized, taskId).orElseThrow(),
+                    "default-off responder enforcement permits tenant-local settlement");
             assertTrue(service.authorizedResponseBodyLimit(new RequestContext("request", "approver",
                     PrincipalType.USER, "urn:ravenroot:test", "other", Set.of(Role.APPROVER),
                     Set.of()), taskId).isEmpty());
@@ -345,7 +347,7 @@ class HumanTaskRouteTest {
                         "deny", 1, "{\"schemaVersion\":1,\"comment\":\"No\"}").statusCode(),
                         "an authorized caller receives a rule refusal without task internals");
                 assertEquals(404, confirmation(server, required, "tenant-a", "viewer", false,
-                        "resolve", 1, "not-json").statusCode(),
+                        "cancel", 1, "not-json").statusCode(),
                         "authorization must precede task-dependent body parsing");
                 assertEquals(404, confirmation(server, new Fixture(resolve.service(), UUID.randomUUID(),
                                 resolve.processInstanceId()), "tenant-a", "approver", true,

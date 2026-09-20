@@ -127,6 +127,46 @@ describe('Human Task inspector and decision dialog', () => {
     expect(humanTaskActionName('DENY', '\ufeff')).toBe('Deny — \ufeff');
   });
 
+  it('runs a registered presentation in an origin-bound sandbox without exposing a bearer', async () => {
+    const doc = dialogDocument();
+    const custom = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
+      interactionPresentation: { kind: 'CUSTOM', version: 1, profileId: 'trusted-form',
+        profileVersion: 2 }, availableActions: ['RESOLVE'] };
+    const launch = { schemaVersion: 1, capability: 'signed-capability', capabilityId: 'cap-1',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(), launchUri: 'https://forms.example/task',
+      origin: 'https://forms.example', kind: 'CUSTOM', taskId: custom.taskId,
+      generation: custom.generation, actions: ['RESOLVE'], review: null,
+      responseSchema: { contentType: 'application/vnd.ravenroot.payload+json', schema: 'test',
+        schemaVersion: '1', kind: 'MAP', maxBytes: 4096 } };
+    const complete = vi.fn(async () => ({ outcome: 'RESOLVED' }));
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'),
+      onLaunch: async () => launch, onInteractionSubmit: complete });
+    controller.open(custom, capability);
+    doc.querySelector('.human-task-presentation-launch').click();
+    await vi.waitFor(() => expect(doc.querySelector('.human-task-presentation-frame')).not.toBeNull());
+    const frame = doc.querySelector('.human-task-presentation-frame');
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-same-origin');
+    expect(frame.src).toBe(launch.launchUri);
+    doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
+      origin: 'https://attacker.example', source: frame.contentWindow,
+      data: { protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
+        taskId: custom.taskId, generation: custom.generation, capabilityId: launch.capabilityId,
+        action: 'RESOLVE', comment: '', response: { contentType: launch.responseSchema.contentType,
+          payloadBase64: 'e30=' } },
+    }));
+    await Promise.resolve();
+    expect(complete).not.toHaveBeenCalled();
+    doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
+      origin: launch.origin, source: frame.contentWindow,
+      data: { protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
+        taskId: custom.taskId, generation: custom.generation, capabilityId: launch.capabilityId,
+        action: 'RESOLVE', comment: '', response: { contentType: launch.responseSchema.contentType,
+          payloadBase64: 'e30=' } },
+    }));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith(custom, launch, 'RESOLVE', '',
+      { contentType: launch.responseSchema.contentType, payloadBase64: 'e30=' }));
+  });
+
   it('suspends stale presentation during reauthentication without clearing the durable locator', () => {
     const doc = dialogDocument();
     const closed = vi.fn();

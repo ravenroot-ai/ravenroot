@@ -13,8 +13,14 @@ import java.util.Set;
  * @param actor audit-stable qualified caller identity.
  * @param roles opaque role tokens currently held by the caller.
  * @param scopes opaque scope tokens currently held by the caller.
+ * @param responderEnforcementEnabled whether task-authored requirements are active.
  */
-public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes) {
+public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes,
+                                               boolean responderEnforcementEnabled) {
+    /** Compatibility constructor preserving the previously enforced behavior. */
+    public HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes) {
+        this(actor, roles, scopes, true);
+    }
     /** Validates the actor and snapshots authority tokens. */
     public HumanTaskAttentionAuthorization {
         actor = HandlerRegistration.requireBoundedKey(actor, "actor");
@@ -64,11 +70,10 @@ public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, S
             List<HumanTaskConfirmationAction> pinnedActions) {
         if (requirements == null || requesterActor == null || pinnedActions == null
                 || pinnedActions.isEmpty()) return List.of();
-        boolean responder = requirements.satisfiedBy(roles, scopes);
+        boolean responder = !responderEnforcementEnabled || requirements.satisfiedBy(roles, scopes);
         boolean requester = actor.equals(requesterActor);
         return pinnedActions.stream()
-                .filter(action -> responder
-                        || action == HumanTaskConfirmationAction.CANCEL && requester)
+                .filter(action -> action == HumanTaskConfirmationAction.CANCEL ? requester : responder)
                 .toList();
     }
 }

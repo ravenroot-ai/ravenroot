@@ -15394,7 +15394,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // that browser step instead of returning to a detached opener.
     requestAnimationFrame(focusHumanTaskInspector);
   },
-  onSubmit: async ({ task, action, comment, isCurrent }) => {
+  onSubmit: async ({ task, action, comment, response, isCurrent }) => {
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     const owner = workspace.active;
@@ -15407,8 +15407,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       throw new Error('Reconnect to this document workspace before deciding this task.');
     }
     try {
-      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
-        { capability });
+      const result = await client.settleHumanTask(task, action, comment, response, { capability });
       if (!current()) return result;
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
@@ -15422,6 +15421,34 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       if (current()) void humanTaskController.refresh();
       throw error;
     }
+  },
+  onLaunch: async task => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect to this document workspace before opening this presentation.');
+    }
+    return client.issueHumanTaskInteraction(task, { capability });
+  },
+  onInteractionSubmit: async (task, launch, action, comment, response) => {
+    const client = runtimeClient;
+    if (!client || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect before completing this presentation.');
+    }
+    const result = await client.completeHumanTaskInteraction(launch, action, comment, response);
+    clearHumanTaskSelection();
+    addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+      'completed');
+    await humanTaskController.refresh();
+    return result;
+  },
+  onExternalReconcile: async task => {
+    await humanTaskController.refresh();
+    addActivityMessage('human task', `reconciled external response · task ${shortId(task.taskId)}`, 'completed');
+  },
+  onRevoke: async (task, launch) => {
+    const client = runtimeClient;
+    if (client) await client.revokeHumanTaskInteraction(task, launch);
   },
 });
 

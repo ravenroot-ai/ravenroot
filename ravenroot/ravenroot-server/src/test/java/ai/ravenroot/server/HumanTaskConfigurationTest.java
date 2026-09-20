@@ -28,6 +28,20 @@ class HumanTaskConfigurationTest {
     }
 
     @Test
+    void responderEnforcementIsOffByDefaultAndStrictlyConfigurable() {
+        assertFalse(HumanTaskConfiguration.fromEnvironment(Map.of()).responderEnforcementEnabled());
+        assertEquals(true, HumanTaskConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED", "true"))
+                .responderEnforcementEnabled());
+        assertEquals(false, HumanTaskConfiguration.fromSources(Map.of(
+                        "ravenroot.human-task.responder-enforcement-enabled", "false"),
+                Map.of("RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED", "true"))
+                .responderEnforcementEnabled());
+        assertThrows(IllegalArgumentException.class, () -> HumanTaskConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED", "yes")));
+    }
+
+    @Test
     void blankPropertyDefersToEnvironment() {
         var policy = HumanTaskConfiguration.fromSources(
                 Map.of("ravenroot.human-task.max-page-size", "\u00a0"),

@@ -30,6 +30,7 @@ import java.util.UUID;
  * @param commentMaxUtf8Bytes immutable pinned comment limit.
  * @param availableActions pinned actions currently authorized for this caller.
  * @param reviewPresentation review material present only on authorized exact-task detail.
+ * @param interactionPresentation bounded pinned presentation metadata; never executable content.
  */
 public record HumanTaskAttentionItem(
         UUID taskId,
@@ -48,7 +49,24 @@ public record HumanTaskAttentionItem(
         int actionLabelMaxUtf8Bytes,
         int commentMaxUtf8Bytes,
         List<HumanTaskConfirmationAction> availableActions,
-        Optional<HumanTaskReviewPresentation> reviewPresentation) {
+        Optional<HumanTaskReviewPresentation> reviewPresentation,
+        HumanTaskPresentation interactionPresentation) {
+
+    /** Compatibility constructor retaining the projection shape before presentation profiles. */
+    public HumanTaskAttentionItem(UUID taskId, long generation, HumanTaskStatus status,
+                                  String graphVersion, Optional<String> deploymentId,
+                                  UUID processInstanceId, UUID traversalId, String nodeId,
+                                  Instant createdAt, Instant expiresAt, Optional<Instant> escalateAt,
+                                  HumanTaskConfirmationPresentation presentation,
+                                  int promptMaxUtf8Bytes, int actionLabelMaxUtf8Bytes,
+                                  int commentMaxUtf8Bytes,
+                                  List<HumanTaskConfirmationAction> availableActions,
+                                  Optional<HumanTaskReviewPresentation> reviewPresentation) {
+        this(taskId, generation, status, graphVersion, deploymentId, processInstanceId, traversalId,
+                nodeId, createdAt, expiresAt, escalateAt, presentation, promptMaxUtf8Bytes,
+                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, reviewPresentation,
+                HumanTaskPresentation.compatibility(presentation));
+    }
 
     /**
      * Compatibility constructor for summary projections that deliberately omit review content.
@@ -79,7 +97,8 @@ public record HumanTaskAttentionItem(
                                   List<HumanTaskConfirmationAction> availableActions) {
         this(taskId, generation, status, graphVersion, deploymentId, processInstanceId, traversalId,
                 nodeId, createdAt, expiresAt, escalateAt, presentation, promptMaxUtf8Bytes,
-                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, Optional.empty());
+                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, Optional.empty(),
+                HumanTaskPresentation.compatibility(presentation));
     }
 
     /** Validates the bounded safe projection. */
@@ -105,6 +124,8 @@ public record HumanTaskAttentionItem(
         }
         availableActions = List.copyOf(availableActions == null ? List.of() : availableActions);
         reviewPresentation = reviewPresentation == null ? Optional.empty() : reviewPresentation;
+        interactionPresentation = interactionPresentation == null
+                ? HumanTaskPresentation.compatibility(presentation) : interactionPresentation;
         reviewPresentation.ifPresent(review -> {
             if (!review.present()) {
                 throw new IllegalArgumentException("detail review presentation must be present");

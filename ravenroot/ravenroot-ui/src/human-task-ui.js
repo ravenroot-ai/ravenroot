@@ -137,7 +137,9 @@ export function renderHumanTaskInspector(host, state, nodeId, {
   return section;
 }
 
-export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => ({}), onClose = () => {} } = {}) {
+export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => ({}),
+  onLaunch = async () => ({}), onInteractionSubmit = async () => ({}),
+  onExternalReconcile = async () => {}, onRevoke = async () => {}, onClose = () => {} } = {}) {
   if (!dialog) return { open() {}, close() {}, suspend() {}, selected: () => null };
   const prompt = dialog.querySelector('[data-human-task-prompt]');
   const identity = dialog.querySelector('[data-human-task-identity]');
@@ -150,11 +152,24 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   const commentHint = dialog.querySelector('[data-human-task-comment-hint]');
   const error = dialog.querySelector('[data-human-task-error]');
   const actions = dialog.querySelector('[data-human-task-actions]');
+  const formHost = element(dialog.ownerDocument, 'fieldset', 'human-task-form');
+  formHost.dataset.humanTaskForm = '';
+  formHost.hidden = true;
+  actions.parentNode.insertBefore(formHost, actions);
+  const interactionHost = element(dialog.ownerDocument, 'section', 'human-task-interaction-host');
+  interactionHost.dataset.humanTaskInteractionHost = '';
+  interactionHost.hidden = true;
+  interactionHost.setAttribute('aria-label', 'Registered Human Task presentation');
+  formHost.parentNode.insertBefore(interactionHost, formHost.nextSibling);
   let task = null;
   let capability = null;
   let submitting = false;
   let generation = 0;
   let notifyAfterNativeClose = false;
+  let interactionLaunch = null;
+  let interactionFrame = null;
+  let interactionTimer = null;
+  let interactionMessage = null;
 
   const taskKey = value => value && `${value.taskId}\u0000${value.generation}`;
   function advance() { generation += 1; }
@@ -181,6 +196,21 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     reviewDigest.textContent = '';
   }
 
+  function clearInteraction({ revoke = false } = {}) {
+    if (interactionTimer != null) clearTimeout(interactionTimer);
+    interactionTimer = null;
+    const view = dialog.ownerDocument.defaultView;
+    if (interactionMessage) view?.removeEventListener('message', interactionMessage);
+    interactionMessage = null;
+    interactionFrame?.remove();
+    interactionFrame = null;
+    interactionHost.replaceChildren();
+    interactionHost.hidden = true;
+    const expired = interactionLaunch;
+    interactionLaunch = null;
+    if (revoke && expired && task) void onRevoke(task, expired).catch(() => {});
+  }
+
   function identify(value) {
     prompt.textContent = value.presentation?.prompt || '';
     identity.textContent = `Task ${value.taskId} · process ${value.processInstanceId || 'pending'}`
@@ -192,6 +222,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   function close() {
     if (submitting) return;
     advance();
+    clearInteraction({ revoke: true });
     task = null;
     capability = null;
     comment.value = '';
@@ -210,6 +241,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     advance();
     submitting = false;
     dialog.removeAttribute('aria-busy');
+    clearInteraction({ revoke: true });
     task = null;
     capability = null;
     comment.value = '';
@@ -230,7 +262,23 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     say();
     setBusy(true);
     try {
-      await onSubmit({ task: sourceTask, action, comment: check.value,
+      let response = null;
+      if (action === 'RESOLVE' && sourceTask.interactionPresentation?.kind === 'FORM') {
+        const values = {};
+        for (const field of sourceTask.interactionPresentation.formSchema.fields) {
+          const input = [...formHost.querySelectorAll('[data-human-task-form-field]')]
+            .find(candidate => candidate.dataset.humanTaskFormField === field.name);
+          if (!input.checkValidity()) { input.reportValidity(); setBusy(false); return; }
+          if (!field.required && !input.value && field.type !== 'BOOLEAN') continue;
+          values[field.name] = field.type === 'BOOLEAN' ? input.checked
+            : field.type === 'INTEGER' ? Number.parseInt(input.value, 10)
+              : field.type === 'DECIMAL' ? Number.parseFloat(input.value)
+                : field.type === 'DATE_TIME' ? new Date(input.value).toISOString() : input.value;
+        }
+        response = { contract: 'ravenroot.payload/1', schema: 'ravenroot.human-task.form',
+          schemaVersion: '1', kind: 'MAP', value: values };
+      }
+      await onSubmit({ task: sourceTask, action, comment: check.value, response,
         isCurrent: () => isCurrent(token, sourceTask) });
     } catch (failure) {
       if (isCurrent(token, sourceTask)) {
@@ -242,6 +290,95 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     if (!isCurrent(token, sourceTask)) return;
     setBusy(false);
     close();
+  }
+
+  async function launchRegisteredPresentation() {
+    if (!task || submitting || !['CUSTOM', 'EXTERNAL'].includes(task.interactionPresentation?.kind)) return;
+    const sourceTask = task;
+    const token = generation;
+    setBusy(true); say();
+    try {
+      const launch = await onLaunch(sourceTask);
+      if (!isCurrent(token, sourceTask)) return;
+      interactionLaunch = launch;
+      interactionHost.hidden = false;
+      interactionHost.replaceChildren();
+      const frame = dialog.ownerDocument.createElement('iframe');
+      frame.className = 'human-task-presentation-frame';
+      frame.title = `${launch.kind === 'EXTERNAL' ? 'External' : 'Custom'} Human Task presentation`;
+      frame.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin');
+      frame.setAttribute('referrerpolicy', 'no-referrer');
+      frame.src = launch.launchUri;
+      interactionFrame = frame;
+      const view = dialog.ownerDocument.defaultView;
+      interactionMessage = event => {
+        if (!interactionLaunch || event.source !== frame.contentWindow || event.origin !== launch.origin) return;
+        const message = event.data;
+        if (!message || typeof message !== 'object' || Array.isArray(message)
+            || message.protocol !== 'ravenroot.human-task.presentation'
+            || message.version !== 1 || message.taskId !== sourceTask.taskId
+            || message.generation !== sourceTask.generation
+            || message.capabilityId !== launch.capabilityId
+            || !['complete', 'close', 'failure', 'reconcile'].includes(message.type)) return;
+        if (utf8Length(JSON.stringify(message)) > launch.responseSchema.maxBytes + 8_192) {
+          say('The registered presentation returned an oversized message. The task remains available.');
+          clearInteraction({ revoke: true });
+          setBusy(false);
+          return;
+        }
+        if (message.type === 'close' || message.type === 'failure') {
+          say(message.type === 'failure'
+            ? 'The registered presentation reported a failure. The task remains available.'
+            : 'The registered presentation closed. The task remains available.');
+          clearInteraction({ revoke: true }); setBusy(false); return;
+        }
+        if (launch.kind === 'EXTERNAL') {
+          void onExternalReconcile(sourceTask).finally(() => {
+            if (isCurrent(token, sourceTask)) { clearInteraction(); setBusy(false); }
+          });
+          return;
+        }
+        if (message.type !== 'complete' || !launch.actions.includes(message.action)
+            || typeof message.comment !== 'string'
+            || (message.action === 'RESOLVE' && (!message.response
+              || typeof message.response.contentType !== 'string'
+              || typeof message.response.payloadBase64 !== 'string'))) return;
+        void onInteractionSubmit(sourceTask, launch, message.action, message.comment,
+          message.response || null).then(() => {
+          if (isCurrent(token, sourceTask)) { clearInteraction(); setBusy(false); close(); }
+        }).catch(failure => {
+          if (isCurrent(token, sourceTask)) {
+            say(failure?.message || 'The interaction outcome is unknown. Refresh before retrying.');
+            setBusy(false);
+          }
+        });
+      };
+      view?.addEventListener('message', interactionMessage);
+      frame.addEventListener('load', () => {
+        if (!interactionLaunch || !isCurrent(token, sourceTask)) return;
+        frame.contentWindow?.postMessage(Object.freeze({
+          protocol: 'ravenroot.human-task.presentation', version: 1, type: 'initialize',
+          capability: launch.capability, capabilityId: launch.capabilityId,
+          taskId: launch.taskId, generation: launch.generation, actions: launch.actions,
+          responseSchema: launch.responseSchema, review: launch.review,
+          accessibility: { locale: dialog.ownerDocument.documentElement.lang || 'en',
+            reducedMotion: view?.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false },
+          theme: dialog.ownerDocument.documentElement.dataset.theme || 'system',
+        }), launch.origin);
+      }, { once: true });
+      interactionHost.append(frame);
+      const remaining = Math.max(0, new Date(launch.expiresAt).getTime() - Date.now());
+      interactionTimer = setTimeout(() => {
+        if (!isCurrent(token, sourceTask)) return;
+        clearInteraction(); setBusy(false);
+        say('The presentation capability expired. The task remains available and can be reopened.');
+      }, Math.min(remaining, 2_147_483_647));
+    } catch (failure) {
+      if (isCurrent(token, sourceTask)) {
+        say(failure?.message || 'The registered presentation could not be opened.');
+        setBusy(false);
+      }
+    }
   }
 
   actions.addEventListener('click', event => {
@@ -314,6 +451,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       commentHint.textContent = mode === 'REQUIRED'
         ? `Required · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`
         : `Optional · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`;
+      const registered = ['CUSTOM', 'EXTERNAL'].includes(task.interactionPresentation?.kind);
       actions.replaceChildren(...task.availableActions.map(action => {
         const actionName = humanTaskActionName(action, task.presentation.labels[action]);
         const button = element(dialog.ownerDocument, 'button',
@@ -324,6 +462,45 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         button.setAttribute('aria-label', actionName);
         return button;
       }));
+      if (registered) {
+        const launch = element(dialog.ownerDocument, 'button', 'btn human-task-presentation-launch',
+          task.interactionPresentation.kind === 'EXTERNAL'
+            ? 'Open external presentation' : 'Open custom presentation');
+        launch.type = 'button';
+        launch.addEventListener('click', () => void launchRegisteredPresentation());
+        actions.replaceChildren(launch);
+      }
+      formHost.replaceChildren();
+      formHost.hidden = task.interactionPresentation?.kind !== 'FORM';
+      if (!formHost.hidden) {
+        formHost.append(element(dialog.ownerDocument, 'legend', '', 'Response'));
+        for (const field of task.interactionPresentation.formSchema.fields) {
+          const wrapper = element(dialog.ownerDocument, 'div', 'human-task-form-field');
+          const label = element(dialog.ownerDocument, 'label', '', field.label);
+          const input = field.type === 'ENUM' ? dialog.ownerDocument.createElement('select')
+            : dialog.ownerDocument.createElement('input');
+          input.dataset.humanTaskFormField = field.name;
+          input.name = field.name;
+          input.required = field.required;
+          if (field.type === 'BOOLEAN') input.type = 'checkbox';
+          else if (field.type === 'INTEGER') input.type = 'number', input.step = '1';
+          else if (field.type === 'DECIMAL') input.type = 'number', input.step = 'any';
+          else if (field.type === 'DATE') input.type = 'date';
+          else if (field.type === 'DATE_TIME') input.type = 'datetime-local';
+          else if (field.type === 'TEXT') input.type = 'text';
+          if (field.type === 'ENUM') {
+            const addOption = value => {
+              const option = dialog.ownerDocument.createElement('option');
+              option.value = value; option.textContent = value; input.append(option);
+            };
+            if (!field.required) addOption('');
+            field.allowedValues.forEach(addOption);
+          }
+          label.append(input); wrapper.append(label);
+          if (field.help) wrapper.append(element(dialog.ownerDocument, 'small', '', field.help));
+          formHost.append(wrapper);
+        }
+      }
       say();
       if (!dialog.open) {
         dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');

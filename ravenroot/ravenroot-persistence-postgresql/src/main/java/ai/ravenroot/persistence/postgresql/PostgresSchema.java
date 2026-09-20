@@ -1052,6 +1052,16 @@ final class PostgresSchema {
                         "INSERT INTO runner_fleet_guard (singleton) VALUES (1)",
                         "CREATE TABLE runner_retention_guard (tenant_id TEXT NOT NULL, process_instance_id UUID NOT NULL, PRIMARY KEY (tenant_id, process_instance_id), FOREIGN KEY (tenant_id, process_instance_id) REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE)",
                         "INSERT INTO runner_retention_guard (tenant_id, process_instance_id) SELECT tenant_id, process_instance_id FROM runner_workspace",
-                        "CREATE TABLE runner_availability (tenant_id TEXT NOT NULL, runner_id TEXT NOT NULL, document BYTEA NOT NULL, PRIMARY KEY (tenant_id, runner_id))")));
+                        "CREATE TABLE runner_availability (tenant_id TEXT NOT NULL, runner_id TEXT NOT NULL, document BYTEA NOT NULL, PRIMARY KEY (tenant_id, runner_id))")),
+                new SchemaMigration(11, "pinned human-task presentation authority", List.of(
+                        "ALTER TABLE human_task ADD COLUMN presentation_kind TEXT NOT NULL DEFAULT 'CLASSIC'",
+                        "ALTER TABLE human_task ADD COLUMN presentation_version INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN presentation_profile_id TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN presentation_profile_version INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN presentation_form_schema TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN presentation_schema_digest TEXT NOT NULL DEFAULT ''")),
+                new SchemaMigration(12, "durable human-task interaction revocations", List.of(
+                        "CREATE TABLE human_task_interaction_revocation (tenant_id TEXT NOT NULL, capability_id UUID NOT NULL, task_id UUID NOT NULL, generation BIGINT NOT NULL, revoked_at_epoch_second BIGINT NOT NULL, revoked_at_nano INTEGER NOT NULL, expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, capability_id))",
+                        "CREATE INDEX human_task_interaction_revocation_expiry ON human_task_interaction_revocation (tenant_id, expires_at_epoch_second, expires_at_nano)")));
     }
 }

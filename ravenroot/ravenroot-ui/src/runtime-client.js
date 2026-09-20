@@ -773,6 +773,117 @@ export class RavenrootRuntimeClient {
       task: validateHumanTaskRow(result.task, policy) });
   }
 
+  /** Applies the canonical settlement document for confirmation, form, custom, or provider UI. */
+  async settleHumanTask(task, action, comment = '', response = null,
+    { signal, capability, overrideReason = null } = {}) {
+    validateHumanTaskCapability(capability);
+    const id = String(task?.taskId || '');
+    const normalizedAction = String(action || '').toUpperCase();
+    if (!id || !Number.isSafeInteger(task?.generation) || task.generation < 1
+        || !['RESOLVE', 'DENY', 'CANCEL'].includes(normalizedAction)) {
+      throw new Error('Human Task settlement requires task id, generation, and a permitted action');
+    }
+    const document = { schemaVersion: 1, action: normalizedAction, comment: String(comment ?? '') };
+    if (normalizedAction === 'RESOLVE') {
+      let envelope = response;
+      if (!envelope && task.interactionPresentation?.kind === 'CONFIRMATION') {
+        envelope = { contract: 'ravenroot.payload/1', schema: 'ravenroot.human-task.confirmation',
+          schemaVersion: '1', kind: 'SCALAR', value: true };
+      }
+      if (!envelope) throw new Error('Resolve requires a typed Human Task response');
+      const bytes = new TextEncoder().encode(JSON.stringify(envelope));
+      let binary = '';
+      bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+      document.response = { contentType: task.interactionPresentation?.kind === 'CONFIRMATION'
+        ? 'application/json' : 'application/vnd.ravenroot.payload+json', payloadBase64: btoa(binary) };
+    }
+    if (overrideReason) document.override = { version: 1, reason: String(overrideReason) };
+    const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/settle?generation=${task.generation}`, {
+      method: 'POST', headers: { Accept: 'application/json',
+        'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(document), signal,
+    });
+    if (!result || result.schemaVersion !== 1 || typeof result.outcome !== 'string'
+        || result.taskId !== id || !Number.isSafeInteger(result.generation)) {
+      throw new Error('Human Task settlement response is invalid');
+    }
+    return Object.freeze(result);
+  }
+
+  /** Issues a short-lived registered-presentation capability for one exact task generation. */
+  async issueHumanTaskInteraction(task, { signal, capability } = {}) {
+    validateHumanTaskCapability(capability);
+    const id = String(task?.taskId || '');
+    if (!id || !Number.isSafeInteger(task?.generation) || task.generation < 1
+        || !['CUSTOM', 'EXTERNAL'].includes(task?.interactionPresentation?.kind)) {
+      throw new Error('Registered Human Task interaction requires an exact custom or external task');
+    }
+    const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/interaction`
+      + `?generation=${task.generation}`, {
+      method: 'POST', headers: { Accept: 'application/json' }, signal,
+    });
+    if (!result || result.schemaVersion !== 1 || typeof result.capability !== 'string'
+        || typeof result.capabilityId !== 'string' || typeof result.launchUri !== 'string'
+        || typeof result.origin !== 'string' || result.taskId !== id
+        || result.generation !== task.generation || !Array.isArray(result.actions)
+        || !result.responseSchema || typeof result.responseSchema.maxBytes !== 'number') {
+      throw new Error('Human Task interaction launch response is invalid');
+    }
+    const launch = new URL(result.launchUri);
+    if (launch.origin !== result.origin || !['http:', 'https:'].includes(launch.protocol)) {
+      throw new Error('Human Task interaction launch origin is invalid');
+    }
+    return Object.freeze({ ...result, launchUri: launch.href });
+  }
+
+  /** Completes through the capability-only endpoint; no bearer or browser credentials are sent. */
+  async completeHumanTaskInteraction(launch, action, comment = '', response = null, { signal } = {}) {
+    if (!this.fetchImpl || !launch?.capability || !launch?.taskId) {
+      throw new Error('Human Task interaction capability is unavailable');
+    }
+    const normalizedAction = String(action || '').toUpperCase();
+    const document = { schemaVersion: 1, capability: launch.capability,
+      action: normalizedAction, comment: String(comment ?? '') };
+    if (normalizedAction === 'RESOLVE') {
+      if (!response || typeof response.contentType !== 'string'
+          || typeof response.payloadBase64 !== 'string') {
+        throw new Error('Registered Human Task resolve requires a bounded encoded response');
+      }
+      document.response = { contentType: response.contentType, payloadBase64: response.payloadBase64 };
+    }
+    const path = '/v1/human-task-interactions/complete';
+    let responseMessage;
+    try {
+      responseMessage = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: 'POST', headers: { Accept: 'application/json',
+          'Content-Type': 'application/json; charset=utf-8' },
+        credentials: 'omit', cache: 'no-store', body: JSON.stringify(document), signal,
+      });
+    } catch (failure) {
+      throw new RuntimeRequestError(failure?.message || 'Human Task interaction request failed',
+        { method: 'POST', path });
+    }
+    const parsed = await responseMessage.json().catch(() => null);
+    if (!responseMessage.ok) {
+      throw new RuntimeRequestError(parsed?.message || parsed?.error || 'Human Task interaction was refused',
+        { status: responseMessage.status, method: 'POST', path });
+    }
+    if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.outcome !== 'string'
+        || parsed.taskId !== launch.taskId || !Number.isSafeInteger(parsed.generation)) {
+      throw new Error('Human Task interaction completion response is invalid');
+    }
+    return Object.freeze(parsed);
+  }
+
+  async revokeHumanTaskInteraction(task, launch, { signal } = {}) {
+    if (!task?.taskId || !Number.isSafeInteger(task.generation) || !launch?.capability) return;
+    await this.#json(`/v1/human-tasks/${encodeURIComponent(task.taskId)}/interaction`
+      + `?generation=${task.generation}`, {
+      method: 'DELETE', headers: { Accept: 'application/json',
+        'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ schemaVersion: 1, capability: launch.capability }), signal,
+    });
+  }
+
   async nodeTypes() {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
     if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');

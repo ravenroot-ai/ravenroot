@@ -219,6 +219,8 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | Variable or family | Applicability and default boundary |
 |---|---|
 | `RAVENROOT_HUMAN_TASK_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED` | Strict boolean; defaults to `false`. Enables task-authored responder role/scope enforcement without weakening tenant isolation or requester-only cancel. |
+| `RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG` | Blank disables registered presentations; otherwise an operator-owned, read-only closed JSON registry path containing profile endpoints/origins and signing material. |
 | `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |

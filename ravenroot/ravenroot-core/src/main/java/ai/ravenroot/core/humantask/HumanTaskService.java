@@ -31,6 +31,7 @@ import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
 import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
 import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
+import ai.ravenroot.api.persistence.HumanTaskOverride;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
@@ -43,6 +44,7 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.security.RequestContext;
+import ai.ravenroot.api.security.AuthorizationAction;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
@@ -51,6 +53,8 @@ import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 import ai.ravenroot.core.runtime.GraphRunner;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -194,7 +198,7 @@ public final class HumanTaskService {
                 definition.confirmationPresentation(), definition.confirmationPresentation().embedded()
                         ? policy.confirmationLimits()
                         : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC,
-                reviewPresentation);
+                reviewPresentation, definition.presentation());
         if (existing != null) {
             // A deterministic retry reuses the first committed review bytes even when its
             // upstream payload has since changed. Nothing re-derives or overwrites the review.
@@ -607,7 +611,8 @@ public final class HumanTaskService {
         Set<String> roles = context.roles().stream().map(Role::name)
                 .collect(Collectors.toUnmodifiableSet());
         var authorization = new HumanTaskAttentionAuthorization(
-                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes(),
+                policy.responderEnforcementEnabled());
         return await(store.listHumanTaskAttention(context.tenantId(), query, authorization));
     }
 
@@ -625,8 +630,35 @@ public final class HumanTaskService {
         Set<String> roles = context.roles().stream().map(Role::name)
                 .collect(Collectors.toUnmodifiableSet());
         var authorization = new HumanTaskAttentionAuthorization(
-                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes(),
+                policy.responderEnforcementEnabled());
         return await(store.findHumanTaskAttention(context.tenantId(), locator, authorization));
+    }
+
+    /** Exact-detail projection for a registered interaction host after ordinary responder authorization. */
+    public record InteractionTask(HumanTaskAttentionItem attention,
+                                  ai.ravenroot.api.persistence.HumanTaskResponseSchema responseSchema) { }
+
+    public Optional<InteractionTask> interactionTask(RequestContext context,
+                                                     HumanTaskAttentionLocator locator) {
+        Optional<HumanTaskAttentionItem> authorized = attention(context, locator);
+        if (authorized.isEmpty()) return Optional.empty();
+        DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), locator.taskId())).orElse(null);
+        if (task == null || task.generation() != locator.generation() || task.status().terminal()) {
+            return Optional.empty();
+        }
+        return Optional.of(new InteractionTask(authorized.orElseThrow(), task.request().responseSchema()));
+    }
+
+    /** Persists a capability revocation without retaining the capability or responder payload. */
+    public void revokeInteractionCapability(String tenantId,
+            ai.ravenroot.api.persistence.HumanTaskInteractionRevocation revocation) {
+        await(store.revokeHumanTaskInteraction(tenantId, revocation));
+    }
+
+    /** Reads the shared durable revocation fence used by every replica. */
+    public boolean interactionCapabilityRevoked(String tenantId, UUID capabilityId, Instant now) {
+        return await(store.isHumanTaskInteractionRevoked(tenantId, capabilityId, now));
     }
 
     /**
@@ -659,6 +691,12 @@ public final class HumanTaskService {
      */
     public Optional<ConfirmationAuthority> confirmationAuthority(
             RequestContext context, UUID taskId, HumanTaskConfirmationAction action) {
+        return confirmationAuthority(context, taskId, action, false);
+    }
+
+    /** Returns task-pinned parser budgets for a normal or explicit override action. */
+    public Optional<ConfirmationAuthority> confirmationAuthority(
+            RequestContext context, UUID taskId, HumanTaskConfirmationAction action, boolean override) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(taskId, "taskId");
         Objects.requireNonNull(action, "action");
@@ -668,10 +706,7 @@ public final class HumanTaskService {
         String actor = SecurityContext.of(context).qualifiedIdentity();
         Set<String> roles = context.roles().stream().map(Role::name)
                 .collect(Collectors.toUnmodifiableSet());
-        boolean requesterCancellation = action == HumanTaskConfirmationAction.CANCEL
-                && actor.equals(task.request().requester().qualifiedIdentity());
-        if (!requesterCancellation
-                && !task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
+        if (!authorized(task, context, actionStatus(action), override)) {
             return Optional.empty();
         }
         return Optional.of(new ConfirmationAuthority(
@@ -708,7 +743,8 @@ public final class HumanTaskService {
                 process.graphVersionPin().reference(), process.deploymentId(), task.key().processInstanceId(),
                 request.traversalId(), request.nodeId(), task.createdAt(), request.expiresAt(),
                 request.escalateAt(), request.confirmationPresentation(), limits.maxPromptUtf8Bytes(),
-                limits.maxActionLabelUtf8Bytes(), limits.maxCommentUtf8Bytes(), List.of()));
+                limits.maxActionLabelUtf8Bytes(), limits.maxCommentUtf8Bytes(), List.of(),
+                Optional.empty(), request.presentation()));
     }
 
     /**
@@ -761,13 +797,17 @@ public final class HumanTaskService {
      * HTTP adapter cannot disclose either task existence or its pinned policy before settlement.
      */
     public OptionalInt authorizedResponseBodyLimit(RequestContext context, UUID taskId) {
+        return authorizedResponseBodyLimit(context, taskId, false);
+    }
+
+    /** Returns the response budget for a normal or explicit override resolve operation. */
+    public OptionalInt authorizedResponseBodyLimit(RequestContext context, UUID taskId,
+                                                   boolean override) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(taskId, "taskId");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return OptionalInt.empty();
-        Set<String> roles = context.roles().stream().map(Role::name)
-                .collect(Collectors.toUnmodifiableSet());
-        if (!task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
+        if (!authorized(task, context, HumanTaskStatus.RESOLVED, override)) {
             return OptionalInt.empty();
         }
         return OptionalInt.of(task.request().executionLimits().decisionBodyMaxBytes());
@@ -810,14 +850,26 @@ public final class HumanTaskService {
     /** Applies the canonical versioned action/response/comment settlement contract. */
     public HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
                                   HumanTaskSettlement settlement) {
+        return settle(context, taskId, expectedGeneration, settlement, null);
+    }
+
+    /** Applies an explicitly authorized and auditable policy override. */
+    public HumanTaskResult settleOverride(RequestContext context, UUID taskId, long expectedGeneration,
+                                          HumanTaskSettlement settlement, HumanTaskOverride override) {
+        return settle(context, taskId, expectedGeneration, settlement,
+                Objects.requireNonNull(override, "override"));
+    }
+
+    private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
+                                   HumanTaskSettlement settlement, HumanTaskOverride override) {
         Objects.requireNonNull(settlement, "settlement");
         return switch (settlement.action()) {
             case RESOLVE -> settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED,
-                    settlement.response().orElseThrow(), settlement.comment());
+                    settlement.response().orElseThrow(), settlement.comment(), override);
             case DENY -> settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED,
-                    null, settlement.comment());
+                    null, settlement.comment(), override);
             case CANCEL -> settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED,
-                    null, settlement.comment());
+                    null, settlement.comment(), override);
         };
     }
 
@@ -889,17 +941,15 @@ public final class HumanTaskService {
     }
 
     private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
-                                   HumanTaskStatus target, OpaquePayload response, String comment) {
+                                   HumanTaskStatus target, OpaquePayload response, String comment,
+                                   HumanTaskOverride override) {
         Objects.requireNonNull(context, "context");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
         String actor = SecurityContext.of(context).qualifiedIdentity();
-        Set<String> roles = context.roles().stream().map(Role::name).collect(Collectors.toUnmodifiableSet());
-        boolean requesterCancellation = target == HumanTaskStatus.CANCELLED
-                && actor.equals(task.request().requester().qualifiedIdentity());
-        if (!requesterCancellation
-                && !task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
-            auditOnly(task, "HUMAN_TASK_UNAUTHORIZED", context.requestId());
+        if (!authorized(task, context, target, override != null)) {
+            auditOnly(task, override == null ? "HUMAN_TASK_UNAUTHORIZED"
+                    : "HUMAN_TASK_OVERRIDE_UNAUTHORIZED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
         }
         if (!permitsDecision(task, target)) {
@@ -938,14 +988,40 @@ public final class HumanTaskService {
             return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
         }
         return commitTerminal(task, expectedGeneration, target, actor, response, comment,
-                context.requestId(), null);
+                context.requestId(), null, override);
     }
 
-    private static HumanTaskAttentionAuthorization attentionAuthorization(RequestContext context) {
+    private boolean authorized(DurableHumanTask task, RequestContext context,
+                               HumanTaskStatus target, boolean override) {
+        if (override) {
+            return context.scopes().contains(AuthorizationAction.HUMAN_TASK_OVERRIDE.requiredScope())
+                    && (context.roles().contains(Role.TENANT_ADMIN)
+                    || context.roles().contains(Role.PLATFORM_ADMIN));
+        }
+        String actor = SecurityContext.of(context).qualifiedIdentity();
+        if (target == HumanTaskStatus.CANCELLED) {
+            return actor.equals(task.request().requester().qualifiedIdentity());
+        }
+        if (!policy.responderEnforcementEnabled()) return true;
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        return task.request().responderRequirements().satisfiedBy(roles, context.scopes());
+    }
+
+    private static HumanTaskStatus actionStatus(HumanTaskConfirmationAction action) {
+        return switch (action) {
+            case RESOLVE -> HumanTaskStatus.RESOLVED;
+            case DENY -> HumanTaskStatus.DENIED;
+            case CANCEL -> HumanTaskStatus.CANCELLED;
+        };
+    }
+
+    private HumanTaskAttentionAuthorization attentionAuthorization(RequestContext context) {
         Set<String> roles = context.roles().stream().map(Role::name)
                 .collect(Collectors.toUnmodifiableSet());
         return new HumanTaskAttentionAuthorization(
-                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes(),
+                policy.responderEnforcementEnabled());
     }
 
     private boolean validResponse(DurableHumanTask task, OpaquePayload response) {
@@ -957,9 +1033,15 @@ public final class HumanTaskService {
         try {
             PayloadEnvelope envelope = PayloadJson.readEnvelope(response.bytes(),
                     task.request().executionLimits().responsePayload());
-            return schema.schema().equals(envelope.schema())
+            boolean contract = schema.schema().equals(envelope.schema())
                     && schema.schemaVersion().equals(envelope.schemaVersion())
                     && schema.kind() == envelope.kind();
+            if (!contract) return false;
+            if (task.request().presentation().kind()
+                    == ai.ravenroot.api.persistence.HumanTaskPresentationKind.FORM) {
+                task.request().presentation().decodedFormSchema().requireResponse(envelope.value());
+            }
+            return true;
         } catch (RuntimeException malformed) {
             return false;
         }
@@ -1006,6 +1088,14 @@ public final class HumanTaskService {
     private HumanTaskResult commitTerminal(DurableHumanTask original, long expectedGeneration,
                                            HumanTaskStatus target, String actor, OpaquePayload response,
                                            String comment, String correlationId, Long fencingToken) {
+        return commitTerminal(original, expectedGeneration, target, actor, response, comment,
+                correlationId, fencingToken, null);
+    }
+
+    private HumanTaskResult commitTerminal(DurableHumanTask original, long expectedGeneration,
+                                           HumanTaskStatus target, String actor, OpaquePayload response,
+                                           String comment, String correlationId, Long fencingToken,
+                                           HumanTaskOverride override) {
         int maxAttempts = original.request().executionLimits().writeAttempts();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
@@ -1050,7 +1140,7 @@ public final class HumanTaskService {
             var builder = ExecutionBatch.to(task.key())
                     .expecting(RevisionExpectation.exactly(stored.revision()));
             if (fencingToken != null) builder.fencedBy(fencingToken);
-            var batch = builder
+            builder
                     .apply(new ExecutionTransition.AttemptTransitioned(task.request().traversalId(),
                             task.request().invocationId(), task.request().attemptId(), NodeAttemptStatus.RUNNING))
                     .apply(new ExecutionTransition.AttemptTransitioned(task.request().traversalId(),
@@ -1071,8 +1161,16 @@ public final class HumanTaskService {
                     .cancelTimer(escalationTimerId(task.request().taskId()))
                     .cancelTimer(expiryTimerId(task.request().taskId()))
                     .publish(event(task.key(), stored, task.request(), "HUMAN_TASK_" + target.name(),
-                            correlationId, resumeTraversalId, target, expectedGeneration + 1))
-                    .build();
+                            correlationId, resumeTraversalId, target, expectedGeneration + 1));
+            if (override != null) {
+                builder.publish(EventEnvelope.of(UUID.randomUUID(), task.key().tenantId(),
+                        "HUMAN_TASK_OVERRIDE_APPLIED", task.key().processInstanceId(), resumeTraversalId,
+                        task.request().invocationId(), task.request().attemptId(), null, correlationId,
+                        stored.graphVersionPin().reference(), clock.instant(),
+                        overridePayload(task.request().taskId(), target, expectedGeneration + 1,
+                                actor, override.reason())));
+            }
+            var batch = builder.build();
             try {
                 await(store.apply(batch));
                 return new HumanTaskResult(HumanTaskResult.Code.valueOf(target.name()),
@@ -1195,6 +1293,28 @@ public final class HumanTaskService {
         String json = "{\"generation\":" + generation + ",\"status\":\"" + status.name()
                 + "\",\"taskId\":\"" + taskId + "\"}";
         return OpaquePayload.of(json.getBytes(StandardCharsets.UTF_8), EVENT_CONTENT_TYPE);
+    }
+
+    private static OpaquePayload overridePayload(UUID taskId, HumanTaskStatus status, long generation,
+                                                 String actor, String reason) {
+        String json = "{\"actor\":\"" + json(actor) + "\",\"generation\":" + generation
+                + ",\"override\":true,\"reasonDigest\":\"sha256:" + sha256(reason)
+                + "\",\"status\":\"" + status.name() + "\",\"taskId\":\"" + taskId + "\"}";
+        return OpaquePayload.of(json.getBytes(StandardCharsets.UTF_8), EVENT_CONTENT_TYPE);
+    }
+
+    private static String sha256(String value) {
+        try {
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
+    }
+
+    private static String json(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
     public static UUID taskId(NodeMessage message) {

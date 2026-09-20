@@ -4,6 +4,8 @@ const ACTIONS = new Set(['RESOLVE', 'DENY', 'CANCEL']);
 const COMMENT_MODES = new Set(['DISALLOWED', 'OPTIONAL', 'REQUIRED']);
 const REVIEW_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const BIDI_FORMATTING = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+const PRESENTATION_KINDS = new Set(['CLASSIC', 'CONFIRMATION', 'FORM', 'CUSTOM', 'EXTERNAL']);
+const FORM_TYPES = new Set(['TEXT', 'BOOLEAN', 'INTEGER', 'DECIMAL', 'ENUM', 'DATE', 'DATE_TIME']);
 
 function object(value, message) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(message);
@@ -78,7 +80,7 @@ export function validateHumanTaskCapability(value) {
   const capability = object(value, 'Human Task capability is missing');
   const versions = capability.confirmationPresentationVersions;
   const reviewVersions = capability.reviewPresentationVersions;
-  if (capability.schemaVersion !== 1 || !Array.isArray(versions) || versions.length !== 1
+  if (![1, 2].includes(capability.schemaVersion) || !Array.isArray(versions) || versions.length !== 1
       || versions[0] !== 1 || !Array.isArray(reviewVersions) || reviewVersions.length !== 1
       || reviewVersions[0] !== 1) {
     throw new Error('Human Task capability is not a valid schema version 1 document');
@@ -95,13 +97,31 @@ export function validateHumanTaskCapability(value) {
   const commentMaxUtf8Bytes = integer(capability.commentMaxUtf8Bytes, 'comment maximum', 1);
   const reviewTextMaxUtf8Bytes = integer(capability.reviewTextMaxUtf8Bytes,
     'review-text maximum', 1);
+  const formSchemaVersions = capability.schemaVersion >= 2 ? capability.formSchemaVersions : [];
+  const registeredPresentationProtocolVersions = capability.schemaVersion >= 2
+    ? capability.registeredPresentationProtocolVersions : [];
+  if (capability.schemaVersion >= 2
+      && (!Array.isArray(formSchemaVersions) || formSchemaVersions.length !== 1
+        || formSchemaVersions[0] !== 1 || !Array.isArray(registeredPresentationProtocolVersions)
+        || registeredPresentationProtocolVersions.length !== 1
+        || registeredPresentationProtocolVersions[0] !== 1
+        || typeof capability.registeredPresentationsEnabled !== 'boolean'
+        || capability.capabilityCompletionPath !== '/v1/human-task-interactions/complete')) {
+    throw new Error('Human Task registered-presentation capability is malformed');
+  }
   if (reviewTextMaxUtf8Bytes > 1024 * 1024) {
     throw new Error('Human Task review-text maximum exceeds the technical ceiling');
   }
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: capability.schemaVersion,
+    responderEnforcementEnabled: Boolean(capability.responderEnforcementEnabled),
+    overrideScope: capability.schemaVersion >= 2 ? text(capability.overrideScope, 'override scope') : null,
     confirmationPresentationVersions: Object.freeze([...new Set(versions)]),
     reviewPresentationVersions: Object.freeze([...new Set(reviewVersions)]),
+    formSchemaVersions: Object.freeze([...formSchemaVersions]),
+    registeredPresentationProtocolVersions: Object.freeze([...registeredPresentationProtocolVersions]),
+    registeredPresentationsEnabled: Boolean(capability.registeredPresentationsEnabled),
+    capabilityCompletionPath: capability.schemaVersion >= 2 ? capability.capabilityCompletionPath : null,
     attentionPollMillis,
     attentionBackoffMaxMillis,
     attentionPageSize,
@@ -111,6 +131,45 @@ export function validateHumanTaskCapability(value) {
     commentMaxUtf8Bytes,
     reviewTextMaxUtf8Bytes,
   });
+}
+
+function validateInteractionPresentation(value) {
+  const presentation = object(value, 'Human Task interaction presentation is missing');
+  if (!PRESENTATION_KINDS.has(presentation.kind)) {
+    throw new Error('Human Task interaction presentation kind is invalid');
+  }
+  const version = integer(presentation.version, 'interaction presentation version');
+  const profileId = typeof presentation.profileId === 'string' ? presentation.profileId : '';
+  const profileVersion = integer(presentation.profileVersion, 'profile version');
+  const schemaDigest = typeof presentation.schemaDigest === 'string' ? presentation.schemaDigest : '';
+  let formSchema = null;
+  if (presentation.kind === 'FORM') {
+    const schema = object(presentation.formSchema, 'Human Task form schema is missing');
+    if (schema.version !== 1 || !Array.isArray(schema.fields) || schema.fields.length < 1
+        || schema.fields.length > 64) throw new Error('Human Task form schema is invalid');
+    const names = new Set();
+    const fields = schema.fields.map(fieldValue => {
+      const field = object(fieldValue, 'Human Task form field is invalid');
+      const name = text(field.name, 'form field name');
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name) || names.has(name)
+          || !FORM_TYPES.has(field.type) || typeof field.required !== 'boolean') {
+        throw new Error('Human Task form field is invalid');
+      }
+      names.add(name);
+      const allowedValues = Array.isArray(field.allowedValues) ? field.allowedValues.map(value =>
+        displayText(value, 'form allowed value', { required: true })) : [];
+      if ((field.type === 'ENUM') !== (allowedValues.length > 0)) {
+        throw new Error('Human Task form enum values are invalid');
+      }
+      return Object.freeze({ name, label: displayText(field.label, 'form label', { required: true }),
+        help: displayText(field.help ?? '', 'form help'), type: field.type, required: field.required,
+        maxUtf8Bytes: integer(field.maxUtf8Bytes, 'form text maximum', 1),
+        allowedValues: Object.freeze(allowedValues) });
+    });
+    formSchema = Object.freeze({ version: 1, fields: Object.freeze(fields) });
+  }
+  return Object.freeze({ kind: presentation.kind, version, profileId, profileVersion,
+    formSchema, schemaDigest });
 }
 
 export function validateHumanTaskReviewPresentation(value, capability) {
@@ -203,6 +262,9 @@ export function validateHumanTaskRow(candidate, capability,
   }
   const reviewPresentation = item.reviewPresentation == null ? null
     : validateHumanTaskReviewPresentation(item.reviewPresentation, capability);
+  const interactionPresentation = validateInteractionPresentation(item.interactionPresentation
+    ?? { kind: 'CONFIRMATION', version: 1, profileId: '', profileVersion: 0,
+      formSchema: null, schemaDigest: '' });
   return Object.freeze({
     taskId: text(item.taskId, 'task id'), generation, status: item.status,
     graphVersion: text(item.graphVersion, 'graph version'),
@@ -213,7 +275,8 @@ export function validateHumanTaskRow(candidate, capability,
     createdAt: timestamp(item.createdAt, 'creation time'),
     expiresAt: timestamp(item.expiresAt, 'expiry time'),
     escalateAt: timestamp(item.escalateAt, 'escalation time', { optional: true }),
-    presentation, reviewPresentation, availableActions: Object.freeze([...new Set(item.availableActions)]),
+    presentation, interactionPresentation, reviewPresentation,
+    availableActions: Object.freeze([...new Set(item.availableActions)]),
     ...pinnedLimits,
   });
 }

@@ -884,6 +884,25 @@
         }
       }
     },
+    "/v1/human-task-interactions/complete": {
+      "post": {
+        "summary": "Completes one registered presentation using only its bounded signed capability. Ambient Authorization and Cookie credentials are refused; origin, provider signature, task generation, schema, action, expiry, and durable revocation are fenced.",
+        "x-assistant-posture": "NEVER",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskCapabilityCompletion"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskDecisionResult"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"}
+        }
+      }
+    },
     "/v1/human-tasks": {
       "get": {
         "summary": "Lists a bounded page of the authenticated tenant's outstanding durable human tasks. Terminal tasks are omitted unless includeTerminal=true; responses contain bounded display and schema metadata, never execution or response payloads.",
@@ -950,6 +969,78 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskConfirmationRequest"}}}},
         "responses": {
           "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskConfirmationResult"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/human-tasks/{taskId}/interaction": {
+      "delete": {
+        "summary": "Issues or durably revokes one expiring, task- and generation-bound capability for an operator-registered custom presentation or external provider. The response contains only the authorized review projection and pinned response contract.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskCapabilityRevocation"}}}},
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      },
+      "post": {
+        "summary": "Issues or durably revokes one expiring, task- and generation-bound capability for an operator-registered custom presentation or external provider. The response contains only the authorized review projection and pinned response contract.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskInteractionLaunch"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/human-tasks/{taskId}/settle": {
+      "post": {
+        "summary": "Applies the canonical generation-fenced Human Task settlement document used by HTTP, the interaction WebSocket, Workbench, and CLI. Typed response bytes remain separate from action and comment; an explicit override carries a bounded reason and requires Human Task override authority.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskSettlement"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskDecisionResult"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -1431,6 +1522,12 @@
       "HumanTaskNodeCount": {"allOf": [{"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, {"type": "object", "required": ["nodeId"], "properties": {"nodeId": {"type": "string"}}}]},
       "HumanTaskAttentionPage": {"type": "object", "required": ["schemaVersion", "items", "nextCursor", "counts", "nodeCounts"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}, "nextCursor": {"type": "string", "nullable": true}, "counts": {"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, "nodeCounts": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskNodeCount"}}}},
       "HumanTaskConfirmationResult": {"type": "object", "required": ["schemaVersion", "outcome", "task"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "outcome": {"type": "string", "enum": ["APPLIED", "ALREADY_APPLIED"]}, "task": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}},
+      "HumanTaskOpaqueResponse": {"type": "object", "additionalProperties": false, "required": ["contentType", "payloadBase64"], "properties": {"contentType": {"type": "string"}, "payloadBase64": {"type": "string", "format": "byte"}}},
+      "HumanTaskOverride": {"type": "object", "additionalProperties": false, "required": ["version", "reason"], "properties": {"version": {"type": "integer", "enum": [1]}, "reason": {"type": "string", "minLength": 1, "maxLength": 1024}}},
+      "HumanTaskSettlement": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "action"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "action": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}, "comment": {"type": "string"}, "response": {"$ref": "#/components/schemas/HumanTaskOpaqueResponse"}, "override": {"$ref": "#/components/schemas/HumanTaskOverride"}}},
+      "HumanTaskCapabilityCompletion": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "capability", "action"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "capability": {"type": "string"}, "action": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}, "comment": {"type": "string"}, "response": {"$ref": "#/components/schemas/HumanTaskOpaqueResponse"}}},
+      "HumanTaskCapabilityRevocation": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "capability"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "capability": {"type": "string"}}},
+      "HumanTaskInteractionLaunch": {"type": "object", "description": "Bounded registered-host launch data: capability metadata, exact task/generation/actions, authorized review presentation, and pinned response schema. It never contains a Ravenroot bearer token or provider signing credential."},
       "HumanTaskDecisionResult": {"type": "object", "required": ["outcome", "taskId", "generation"], "properties": {"outcome": {"type": "string"}, "taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "resumeTraversalId": {"type": "string", "format": "uuid"}}},
       "ExecutionStreamEventBase": {"type":"object","description":"Version 1 JSON data of an execution SSE frame, not the whole SSE response. Compare id only within the authenticated tenant and source; RING also requires the same process-local continuity domain. Unknown fields and event classifiers are allowed. A conflicting type alias is invalid. IDs and aliases require semantic equality checks outside OpenAPI 3.0.3.","required":["schemaVersion","source","id","eventType","occurredAt","processInstanceId","traversalId"],"additionalProperties":true,"properties":{"schemaVersion":{"type":"integer","enum":[1]},"source":{"type":"string","enum":["RING","DURABLE"]},"id":{"type":"string","pattern":"^(0|-?[1-9][0-9]*)$","maxLength":20,"description":"Canonical signed decimal long string equal to the SSE id and native cursor. Not a globally unique event UUID. Use exact integer arithmetic; never compare against a rounded floating-point cursor."},"eventType":{"type":"string","minLength":1,"description":"Canonical classifier. Unknown values remain readable."},"occurredAt":{"type":"string","description":"Producer occurrence time in Java Instant text form, including supported extended years. Diagnostic time, not an ordering axis."},"processInstanceId":{"type":"string","format":"uuid"},"traversalId":{"type":"string","format":"uuid"},"deploymentId":{"type":"string","description":"Owning long-lived deployment; null for a one-shot submission that opened no deployment domain. The only identity a client can hold before a source-produced traversal exists. Emitted on RING frames; the durable journal does not retain it, so a DURABLE frame omits it rather than reporting null.","nullable":true},"graphVersion":{"type":"string"},"description":{"type":"string"},"invocationId":{"type":"string","format":"uuid","nullable":true},"attemptId":{"type":"string","format":"uuid","nullable":true},"nodeId":{"type":"string","nullable":true},"edgeId":{"type":"string","description":"Stable edge identity; unchanged 8192 UTF-8 byte limit and shared traversal wire budget.","nullable":true},"type":{"type":"string","deprecated":true,"description":"Readers accept this compatibility alias on either source when equal to eventType. RING writers retain it; DURABLE writers need not emit it. No removal date is scheduled."}}},
       "ExecutionStreamEvent": {"oneOf":[{"$ref":"#/components/schemas/RingExecutionStreamEvent"},{"$ref":"#/components/schemas/DurableExecutionStreamEvent"}],"discriminator":{"propertyName":"source","mapping":{"RING":"#/components/schemas/RingExecutionStreamEvent","DURABLE":"#/components/schemas/DurableExecutionStreamEvent"}}},

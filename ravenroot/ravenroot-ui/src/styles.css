@@ -1943,6 +1943,9 @@
     .human-task-dialog-identity { margin: 0; color: var(--tx-2); font: 10px/1.45 'SFMono-Regular', Consolas, monospace; overflow-wrap: anywhere; }
     .human-task-dialog textarea { width: 100%; min-height: 96px; resize: vertical; }
     .human-task-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .human-task-interaction-host { min-height: 240px; border: 1px solid var(--border); border-radius: 6px;
+      overflow: hidden; background: var(--bg-1); }
+    .human-task-presentation-frame { display: block; width: 100%; min-height: 320px; border: 0; }
     .human-task-decision-deny, .human-task-decision-cancel { color: var(--outcome-error-text); }
 
     .d3-nodes circle.human-task-attention {

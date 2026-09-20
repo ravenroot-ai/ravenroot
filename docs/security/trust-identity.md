@@ -17,3 +17,10 @@ The residual boundary is explicit: Ravenroot enforces configured identity and ow
 
 - [Definitions and limits](../reference/configuration.md)
 - [Operator procedure or recovery](../operator-guide/identity-browser.md)
+## Human Task authority
+
+Human Task responder enforcement consumes the authenticated tenant, subject, roles, and scopes from
+this boundary. Disabling responder requirements does not disable authentication or tenant isolation,
+and cancel remains requester-only. Explicit override is separately scoped and audited. Ravenroot is
+not an identity manager: it does not create principals, assign roles/scopes, or synchronize an
+external directory.

@@ -12,6 +12,9 @@ import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
 import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
+import ai.ravenroot.api.persistence.HumanTaskFormSchema;
+import ai.ravenroot.api.persistence.HumanTaskPresentation;
+import ai.ravenroot.api.persistence.HumanTaskPresentationKind;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.core.graph.GraphNode;
@@ -33,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
 final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
     static final String RESPONSE_CONTENT_TYPE = "application/vnd.ravenroot.payload+json";
     private static final String CLASSIC_RESPONSE_SCHEMA = "ravenroot.human-task.response";
+    private static final String FORM_RESPONSE_SCHEMA = "ravenroot.human-task.form";
 
     private final HumanTaskService tasks;
     private final HumanTaskPolicy policy;
@@ -78,7 +82,24 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                         NodePropertyType.INTEGER, "Inclusive encoded-envelope byte bound owned by the server.",
                         Integer.toString(policy.defaultResponseBytes()), 1, policy.maxResponseBytes())));
         if (confirmationAdmission) {
+            capabilities.add("built-in-form-v1");
+            capabilities.add("registered-presentation-v1");
             properties.addAll(List.of(
+                    choice("presentationKind", "Presentation kind",
+                            "Closed built-in presentation or an opaque registered profile; no HTML, URL, or credential is graph-authored.",
+                            "CLASSIC", "CLASSIC", "CONFIRMATION", "FORM", "CUSTOM", "EXTERNAL"),
+                    NodePropertyDescriptor.boundedText("presentationProfileId", "Presentation profile",
+                            NodePropertyType.STRING, false,
+                            "Opaque registered profile identifier for CUSTOM or EXTERNAL presentations.",
+                            "", HumanTaskPresentation.MAX_PROFILE_ID_UTF8_BYTES, 0, 0),
+                    NodePropertyDescriptor.optionalBounded("presentationProfileVersion",
+                            "Presentation profile version", NodePropertyType.INTEGER,
+                            "Pinned allowed profile version for CUSTOM or EXTERNAL presentations.",
+                            "1", 1, Integer.MAX_VALUE),
+                    NodePropertyDescriptor.boundedText("formSchema", "Form schema",
+                            NodePropertyType.TEXT, false,
+                            "Closed version-one form schema JSON; nested values and executable content are not supported.",
+                            "", HumanTaskPresentation.MAX_FORM_SCHEMA_UTF8_BYTES, 0, 0),
                     new NodePropertyDescriptor("confirmationPresentationVersion", "Confirmation presentation",
                             NodePropertyType.STRING, false,
                             "Version one enables the built-in embedded simple confirmation.", "",
@@ -222,10 +243,19 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
         }
         String responseContentType = NodeProperties.string(node, "responseContentType", RESPONSE_CONTENT_TYPE);
         String presentationVersion = NodeProperties.string(node, "confirmationPresentationVersion", "");
+        HumanTaskPresentationKind presentationKind;
+        try {
+            presentationKind = HumanTaskPresentationKind.valueOf(NodeProperties.string(
+                    node, "presentationKind", presentationVersion.isBlank() ? "CLASSIC" : "CONFIRMATION"));
+        } catch (IllegalArgumentException unknown) {
+            throw invalid(node, "presentationKind", "is unsupported");
+        }
         HumanTaskConfirmationPresentation presentation = HumanTaskConfirmationPresentation.none();
-        if (!presentationVersion.isBlank()) {
+        if (!presentationVersion.isBlank() || presentationKind != HumanTaskPresentationKind.CLASSIC) {
             if (!"1".equals(presentationVersion)) {
-                throw invalid(node, "confirmationPresentationVersion", "must be 1 when present");
+                if (!presentationVersion.isBlank()) {
+                    throw invalid(node, "confirmationPresentationVersion", "must be 1 when present");
+                }
             }
             boolean placeholder = RESPONSE_CONTENT_TYPE.equals(responseContentType)
                     && CLASSIC_RESPONSE_SCHEMA.equals(responseSchema)
@@ -235,20 +265,52 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                     && HumanTaskService.CONFIRMATION_SCHEMA.equals(responseSchema)
                     && HumanTaskService.CONFIRMATION_SCHEMA_VERSION.equals(responseSchemaVersion)
                     && kind == PayloadKind.SCALAR && maxBytes == policy.defaultResponseBytes();
-            if (!placeholder && !explicit) {
+            boolean typedForm = presentationKind == HumanTaskPresentationKind.FORM;
+            if (!placeholder && !explicit && !typedForm
+                    && presentationKind == HumanTaskPresentationKind.CONFIRMATION) {
                 throw invalid(node, "confirmationPresentationVersion",
                         "requires the complete default response tuple or the built-in confirmation tuple");
             }
-            if (HumanTaskService.confirmationResponse().size() > maxBytes) {
+            if (presentationKind == HumanTaskPresentationKind.CONFIRMATION
+                    && HumanTaskService.confirmationResponse().size() > maxBytes) {
                 throw invalid(node, "maxResponseBytes", "cannot carry the built-in confirmation response");
             }
-            responseContentType = HumanTaskService.CONFIRMATION_CONTENT_TYPE;
-            responseSchema = HumanTaskService.CONFIRMATION_SCHEMA;
-            responseSchemaVersion = HumanTaskService.CONFIRMATION_SCHEMA_VERSION;
-            kind = PayloadKind.SCALAR;
+            if (presentationKind == HumanTaskPresentationKind.CONFIRMATION) {
+                responseContentType = HumanTaskService.CONFIRMATION_CONTENT_TYPE;
+                responseSchema = HumanTaskService.CONFIRMATION_SCHEMA;
+                responseSchemaVersion = HumanTaskService.CONFIRMATION_SCHEMA_VERSION;
+                kind = PayloadKind.SCALAR;
+            } else if (presentationKind == HumanTaskPresentationKind.FORM) {
+                responseContentType = RESPONSE_CONTENT_TYPE;
+                responseSchema = FORM_RESPONSE_SCHEMA;
+                responseSchemaVersion = "1";
+                kind = PayloadKind.MAP;
+            }
             presentation = presentation(node);
             policy.confirmation().requirePresentation(presentation);
         }
+        HumanTaskPresentation interactionPresentation = switch (presentationKind) {
+            case CLASSIC -> HumanTaskPresentation.classic();
+            case CONFIRMATION -> HumanTaskPresentation.confirmation();
+            case FORM -> {
+                try {
+                    yield HumanTaskPresentation.form(HumanTaskFormSchema.decode(
+                            NodeProperties.required(node, "formSchema")));
+                } catch (IllegalArgumentException invalid) {
+                    throw invalid(node, "formSchema", invalid.getMessage());
+                }
+            }
+            case CUSTOM, EXTERNAL -> {
+                String profileId = NodeProperties.required(node, "presentationProfileId");
+                int profileVersion = Math.toIntExact(NodeProperties.number(
+                        node, "presentationProfileVersion", 1));
+                try {
+                    yield HumanTaskPresentation.registered(presentationKind, profileId, profileVersion);
+                } catch (IllegalArgumentException invalid) {
+                    throw invalid(node, "presentationProfileId", invalid.getMessage());
+                }
+            }
+        };
         String reviewVersion = NodeProperties.string(node, "reviewPresentationVersion", "");
         HumanTaskReviewDefinition review = HumanTaskReviewDefinition.none();
         if (!reviewVersion.isBlank()) {
@@ -284,7 +346,7 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                         NodeProperties.string(node, "deniedOutcome", "denied"),
                         NodeProperties.string(node, "expiredOutcome", "expired"),
                         NodeProperties.string(node, "cancelledOutcome", "cancelled")),
-                policy.executionLimits(maxBytes), presentation, review);
+                policy.executionLimits(maxBytes), presentation, review, interactionPresentation);
     }
 
     private HumanTaskConfirmationPresentation presentation(GraphNode node) {

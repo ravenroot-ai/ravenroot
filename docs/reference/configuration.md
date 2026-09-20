@@ -150,6 +150,7 @@ the default below. Values are read at process startup and require a restart to c
 
 | Server property / environment variable | Default | Valid range | Scope |
 |---|---:|---|---|
+| `ravenroot.human-task.responder-enforcement-enabled` / `RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED` | `false` | strict `true` or `false` | enforce graph-authored responder roles/scopes; tenant/auth boundaries and requester-only cancel are always enforced |
 | `ravenroot.human-task.default-response-bytes` / `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | 65,536 | 1–67,108,864; no greater than `max-response-bytes` | default graph response ceiling |
 | `ravenroot.human-task.max-response-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | 262,144 | 1–67,108,864; no greater than `max-decision-body-bytes` | largest graph response ceiling |
 | `ravenroot.human-task.default-escalation-seconds` / `RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS` | 0 | 0–2,147,483,646; zero or below `default-expiry-seconds`; no greater than `max-escalation-seconds` | default escalation delay; zero disables it |
@@ -189,6 +190,15 @@ individual technical ranges, while the server validates the relational constrain
 listener. A malformed, overflowed, or inconsistent non-blank value refuses startup without echoing
 the supplied value. The direct `ravenroot/scripts/server.sh` launcher inherits the same environment;
 Ravenroot ships no tracked environment-file template or environment generator.
+
+`RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG` is separate from the numeric policy. Blank disables
+registered custom/external presentations. Otherwise it must name a readable operator-owned JSON file
+no larger than 65,536 bytes; malformed files refuse startup. The file contains capability/provider
+signing secrets and must be mounted read-only from a secret facility, never committed with a graph or
+placed in a public ConfigMap. Compose overlays must mount the file and set its container path. The
+Helm chart accepts `humanTask.interactionConfigSecret`; the named Secret must have a `config.json`
+key and is mounted read-only. The raw Kubernetes manifest leaves the path blank for a Kustomize
+overlay to pair with its own Secret mount.
 
 The UTF-8 unit applies only to fields named `*-bytes`. Response text and key lengths instead count
 UTF-16 code units, including two units for one supplementary Unicode code point. The resource caps

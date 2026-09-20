@@ -101,6 +101,15 @@ public final class OpenApiSpecGenerator {
                     + "{\"application/json\": {\"schema\": {\"$ref\": "
                     + "\"#/components/schemas/HumanTaskConfirmationRequest\"}}}},\n");
         }
+        if (isHumanTaskSettlement(route, method)) {
+            entry.append(jsonRequestBody("HumanTaskSettlement"));
+        }
+        if (isHumanTaskInteractionRevocation(route, method)) {
+            entry.append(jsonRequestBody("HumanTaskCapabilityRevocation"));
+        }
+        if (isHumanTaskCapabilityCompletion(route, method)) {
+            entry.append(jsonRequestBody("HumanTaskCapabilityCompletion"));
+        }
         entry.append("        \"responses\": {\n");
         var responses = new java.util.ArrayList<String>();
         route.successStatuses().stream().sorted().forEach(status ->
@@ -166,7 +175,8 @@ public final class OpenApiSpecGenerator {
                     + HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_PAGE_SIZE + ", \"default\": "
                     + HumanTaskPolicy.Confirmation.DEFAULTS.attentionDefaultPageSize() + "}}");
         }
-        if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)) {
+        if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)
+                || isHumanTaskSettlement(route, method) || isHumanTaskInteraction(route, method)) {
             parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
                     + "\"schema\": {\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1}}");
         }
@@ -185,6 +195,28 @@ public final class OpenApiSpecGenerator {
     private static boolean isHumanTaskConfirmation(RouteDescriptor route, String method) {
         return "/v1/human-tasks/{taskId}/confirmation/{action}".equals(route.path())
                 && "POST".equals(method);
+    }
+
+    private static boolean isHumanTaskSettlement(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/{taskId}/settle".equals(route.path()) && "POST".equals(method);
+    }
+
+    private static boolean isHumanTaskInteraction(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/{taskId}/interaction".equals(route.path());
+    }
+
+    private static boolean isHumanTaskInteractionRevocation(RouteDescriptor route, String method) {
+        return isHumanTaskInteraction(route, method) && "DELETE".equals(method);
+    }
+
+    private static boolean isHumanTaskCapabilityCompletion(RouteDescriptor route, String method) {
+        return "/v1/human-task-interactions/complete".equals(route.path()) && "POST".equals(method);
+    }
+
+    private static String jsonRequestBody(String schema) {
+        return "        \"requestBody\": {\"required\": true, \"content\": "
+                + "{\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/"
+                + schema + "\"}}}},\n";
     }
 
     private static String queryParameter(String name, String type, String description) {
@@ -234,6 +266,10 @@ public final class OpenApiSpecGenerator {
             schema = "HumanTaskAttentionPage";
         } else if (isHumanTaskConfirmation(route, method)) {
             schema = "HumanTaskConfirmationResult";
+        } else if (isHumanTaskSettlement(route, method) || isHumanTaskCapabilityCompletion(route, method)) {
+            schema = "HumanTaskDecisionResult";
+        } else if (isHumanTaskInteraction(route, method) && "POST".equals(method)) {
+            schema = "HumanTaskInteractionLaunch";
         }
         return "          \"" + status + "\": {\"description\": \"success\""
                 + (schema == null ? "}" : ", \"content\": {\"application/json\": "
@@ -376,6 +412,12 @@ public final class OpenApiSpecGenerator {
                 + "\"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, "
                 + "\"outcome\": {\"type\": \"string\", \"enum\": [\"APPLIED\", \"ALREADY_APPLIED\"]}, "
                 + "\"task\": {\"$ref\": \"#/components/schemas/HumanTaskAttentionItem\"}}},\n"
+                + "      \"HumanTaskOpaqueResponse\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"contentType\", \"payloadBase64\"], \"properties\": {\"contentType\": {\"type\": \"string\"}, \"payloadBase64\": {\"type\": \"string\", \"format\": \"byte\"}}},\n"
+                + "      \"HumanTaskOverride\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"version\", \"reason\"], \"properties\": {\"version\": {\"type\": \"integer\", \"enum\": [1]}, \"reason\": {\"type\": \"string\", \"minLength\": 1, \"maxLength\": 1024}}},\n"
+                + "      \"HumanTaskSettlement\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"schemaVersion\", \"action\"], \"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"action\": {\"type\": \"string\", \"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}, \"comment\": {\"type\": \"string\"}, \"response\": {\"$ref\": \"#/components/schemas/HumanTaskOpaqueResponse\"}, \"override\": {\"$ref\": \"#/components/schemas/HumanTaskOverride\"}}},\n"
+                + "      \"HumanTaskCapabilityCompletion\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"schemaVersion\", \"capability\", \"action\"], \"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"capability\": {\"type\": \"string\"}, \"action\": {\"type\": \"string\", \"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}, \"comment\": {\"type\": \"string\"}, \"response\": {\"$ref\": \"#/components/schemas/HumanTaskOpaqueResponse\"}}},\n"
+                + "      \"HumanTaskCapabilityRevocation\": {\"type\": \"object\", \"additionalProperties\": false, \"required\": [\"schemaVersion\", \"capability\"], \"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"capability\": {\"type\": \"string\"}}},\n"
+                + "      \"HumanTaskInteractionLaunch\": {\"type\": \"object\", \"description\": \"Bounded registered-host launch data: capability metadata, exact task/generation/actions, authorized review presentation, and pinned response schema. It never contains a Ravenroot bearer token or provider signing credential.\"},\n"
                 + "      \"HumanTaskDecisionResult\": {\"type\": \"object\", \"required\": [\"outcome\", "
                 + "\"taskId\", \"generation\"], \"properties\": {\"outcome\": {\"type\": \"string\"}, "
                 + "\"taskId\": {\"type\": \"string\", \"format\": \"uuid\"}, \"generation\": "

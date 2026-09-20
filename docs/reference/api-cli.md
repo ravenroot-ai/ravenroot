@@ -36,6 +36,22 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 
 ## Governed resources
 
+### Human Tasks
+
+| Method and path | Contract |
+|---|---|
+| `GET /v1/human-tasks` | Tenant-scoped payload-free summary inbox. |
+| `GET /v1/human-tasks/attention` | Summary attention page, or exact authorized task/generation detail with bounded review content. |
+| `POST /v1/human-tasks/{taskId}/settle?generation=N` | Canonical strict JSON settlement with separate action, comment, typed response, and optional explicitly authorized override. |
+| `POST /v1/human-tasks/{taskId}/interaction?generation=N` | Issue one registered custom/external capability after ordinary responder authorization. |
+| `DELETE /v1/human-tasks/{taskId}/interaction?generation=N` | Durably revoke that capability across restart/replicas. |
+| `POST /v1/human-task-interactions/complete` | Capability-only callback; refuses bearer/cookie and fences origin/signature/expiry/revocation/generation/schema/action. |
+| `GET /v1/admin/human-tasks` | Authorized bounded payload-free consistency inventory. |
+| `POST /v1/admin/human-tasks/purge` | Dry-run or atomic bounded reconciliation with a required idempotency key. |
+
+All settlement transports return deterministic typed outcomes from the same durable service. See the
+[complete Human Task contract](human-tasks.md) for request schemas and disclosure boundaries.
+
 | Method and path | Contract |
 |---|---|
 | `GET, POST /v1/credentials` | List caller-owned metadata or write a secret and mint its reference |

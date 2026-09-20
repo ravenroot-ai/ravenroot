@@ -35,6 +35,7 @@ import java.util.Set;
  * @param responseMaxKeyLength inclusive maximum UTF-16 code units in a response object key
  * @param writeAttempts inclusive maximum optimistic persistence attempts for one task transition
  * @param confirmation embedded confirmation presentation and attention controls
+ * @param responderEnforcementEnabled whether task-authored responder roles and scopes are enforced
  */
 public record HumanTaskPolicy(
         int defaultResponseBytes,
@@ -57,7 +58,8 @@ public record HumanTaskPolicy(
         int responseMaxTextLength,
         int responseMaxKeyLength,
         int writeAttempts,
-        Confirmation confirmation) {
+        Confirmation confirmation,
+        boolean responderEnforcementEnabled) {
 
     public static final int HARD_MAX_RESPONSE_BYTES = PayloadLimits.HARD_MAX_ENCODED_BYTES;
     /** Timer seconds stay in the positive signed 32-bit range used by catalog and deployment tooling. */
@@ -87,7 +89,27 @@ public record HumanTaskPolicy(
             256, 4 * 1_024, HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES,
             16, HandlerRegistration.MAX_KEY_UTF8_BYTES,
             256 * 1_024, 50, 100,
-            32, 1_024, 4_096, 16 * 1_024, 256, 3, Confirmation.DEFAULTS);
+            32, 1_024, 4_096, 16 * 1_024, 256, 3, Confirmation.DEFAULTS, false);
+
+    /** Compatibility constructor retaining the policy shape before responder enforcement. */
+    public HumanTaskPolicy(int defaultResponseBytes, int maxResponseBytes,
+                           long defaultEscalationSeconds, long maxEscalationSeconds,
+                           long defaultExpirySeconds, long maxExpirySeconds,
+                           int maxTitleUtf8Bytes, int maxDescriptionUtf8Bytes,
+                           int maxResponseSchemaUtf8Bytes, int maxAuthorizationTokens,
+                           int maxAuthorizationTokenUtf8Bytes, int decisionBodyMaxBytes,
+                           int inboxDefaultPageSize, int inboxMaxPageSize, int responseMaxDepth,
+                           int responseMaxCollectionSize, int responseMaxValueCount,
+                           int responseMaxTextLength, int responseMaxKeyLength, int writeAttempts,
+                           Confirmation confirmation) {
+        this(defaultResponseBytes, maxResponseBytes, defaultEscalationSeconds,
+                maxEscalationSeconds, defaultExpirySeconds, maxExpirySeconds, maxTitleUtf8Bytes,
+                maxDescriptionUtf8Bytes, maxResponseSchemaUtf8Bytes, maxAuthorizationTokens,
+                maxAuthorizationTokenUtf8Bytes, decisionBodyMaxBytes, inboxDefaultPageSize,
+                inboxMaxPageSize, responseMaxDepth, responseMaxCollectionSize,
+                responseMaxValueCount, responseMaxTextLength, responseMaxKeyLength, writeAttempts,
+                confirmation, false);
+    }
 
     /**
      * Compatibility constructor retaining the established operational-policy shape.
@@ -131,7 +153,7 @@ public record HumanTaskPolicy(
                 maxAuthorizationTokenUtf8Bytes, decisionBodyMaxBytes, inboxDefaultPageSize,
                 inboxMaxPageSize, responseMaxDepth, responseMaxCollectionSize,
                 responseMaxValueCount, responseMaxTextLength, responseMaxKeyLength, writeAttempts,
-                Confirmation.DEFAULTS);
+                Confirmation.DEFAULTS, false);
     }
 
     /**
@@ -248,14 +270,19 @@ public record HumanTaskPolicy(
         if (registration.confirmationPresentation().embedded()) {
             confirmation.requirePresentation(registration.confirmationPresentation());
             HumanTaskResponseSchema response = registration.responseSchema();
-            if (!HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE.equals(response.contentType())
+            boolean fixedConfirmation = registration.presentation().kind()
+                    == HumanTaskPresentationKind.CONFIRMATION;
+            if (fixedConfirmation
+                    && (!HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE.equals(response.contentType())
                     || !HumanTaskConfirmationPresentation.RESPONSE_SCHEMA.equals(response.schema())
                     || !HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION.equals(response.schemaVersion())
                     || response.kind() != ai.ravenroot.api.payload.PayloadKind.SCALAR
-                    || response.maxBytes() < HumanTaskConfirmationPresentation.responseBytes().length
-                    || confirmation.maximumJsonBodyBytes() > registration.executionLimits()
-                    .decisionBodyMaxBytes()) {
+                    || response.maxBytes() < HumanTaskConfirmationPresentation.responseBytes().length)) {
                 throw invalidRegistration("embedded confirmation contract exceeds its pinned transport budgets");
+            }
+            if (confirmation.maximumJsonBodyBytes() > registration.executionLimits()
+                    .decisionBodyMaxBytes()) {
+                throw invalidRegistration("interactive presentation exceeds its pinned transport budgets");
             }
             if (!confirmationLimits().equals(registration.confirmationLimits())) {
                 throw invalidRegistration("pinned confirmation limits do not match active policy");
@@ -268,6 +295,16 @@ public record HumanTaskPolicy(
                 throw invalidRegistration("review presentation requires embedded confirmation");
             }
             confirmation.requireReviewPresentation(registration.reviewPresentation());
+        }
+        if (registration.presentation().kind() == HumanTaskPresentationKind.FORM) {
+            HumanTaskResponseSchema response = registration.responseSchema();
+            if (!"application/vnd.ravenroot.payload+json".equals(response.contentType())
+                    || !"ravenroot.human-task.form".equals(response.schema())
+                    || !"1".equals(response.schemaVersion())
+                    || response.kind() != ai.ravenroot.api.payload.PayloadKind.MAP) {
+                throw invalidRegistration("built-in form response contract is not canonical");
+            }
+            registration.presentation().decodedFormSchema();
         }
     }
 

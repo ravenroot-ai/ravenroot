@@ -369,6 +369,49 @@ public final class RemoteBackend implements CliBackend {
                 MinimalJson.asString(body.get("state")), MinimalJson.asString(body.get("reason")));
     }
 
+    @Override
+    public List<HumanTaskView> humanTasks() throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(
+                get("/v1/human-tasks?includeTerminal=false&limit=100")));
+        return MinimalJson.asArray(body.get("items")).stream().map(entry -> {
+            var item = MinimalJson.asObject(entry);
+            return new HumanTaskView(MinimalJson.asString(item.get("taskId")),
+                    MinimalJson.asLong(item.get("generation")), MinimalJson.asString(item.get("status")),
+                    MinimalJson.asString(item.get("title")), MinimalJson.asString(item.get("nodeId")),
+                    MinimalJson.asString(item.get("presentationKind")),
+                    MinimalJson.asString(item.get("responseContentType")),
+                    MinimalJson.asString(item.get("responseSchema")),
+                    MinimalJson.asString(item.get("responseSchemaVersion")));
+        }).toList();
+    }
+
+    @Override
+    public HumanTaskDecisionView settleHumanTask(String taskId, long generation, String action,
+                                                 byte[] response, String contentType, String comment,
+                                                 String overrideReason) throws IOException {
+        var document = new LinkedHashMap<String, Object>();
+        document.put("schemaVersion", 1L);
+        document.put("action", action.toUpperCase(java.util.Locale.ROOT));
+        document.put("comment", comment == null ? "" : comment);
+        if (response != null) {
+            var encoded = new LinkedHashMap<String, Object>();
+            encoded.put("contentType", contentType == null || contentType.isBlank()
+                    ? "application/octet-stream" : contentType);
+            encoded.put("payloadBase64", java.util.Base64.getEncoder().encodeToString(response));
+            document.put("response", encoded);
+        }
+        if (overrideReason != null && !overrideReason.isBlank()) {
+            document.put("override", Map.of("version", 1L, "reason", overrideReason));
+        }
+        String path = "/v1/human-tasks/" + java.net.URLEncoder.encode(taskId, StandardCharsets.UTF_8)
+                + "/settle?generation=" + generation;
+        var body = MinimalJson.asObject(MinimalJson.parse(post(path,
+                MinimalJson.write(document).getBytes(StandardCharsets.UTF_8), "application/json")));
+        return new HumanTaskDecisionView(MinimalJson.asString(body.get("outcome")),
+                MinimalJson.asString(body.get("taskId")), MinimalJson.asLong(body.get("generation")),
+                MinimalJson.asStringOrNull(body.get("resumeTraversalId")));
+    }
+
     /** Reads {@code GET /v1/deployments}: the caller's own tenant's registrations, in the order
      * the server lists them. */
     @Override

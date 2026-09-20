@@ -351,6 +351,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "responderEnforcementEnabled", "interactionConfigSecret",
         "defaultResponseBytes", "maxResponseBytes", "defaultEscalationSeconds",
         "maxEscalationSeconds", "defaultExpirySeconds", "maxExpirySeconds", "maxTitleBytes",
         "maxDescriptionBytes", "maxResponseSchemaBytes", "maxAuthorizationTokens",
@@ -364,6 +365,8 @@
         "maxAttentionPageSize"
       ],
       "properties": {
+        "responderEnforcementEnabled": { "type": "boolean", "default": false },
+        "interactionConfigSecret": { "type": "string", "maxLength": 253 },
         "defaultResponseBytes": { "$ref": "#/definitions/positiveInt64MiB" },
         "maxResponseBytes": { "$ref": "#/definitions/positiveInt64MiB" },
         "defaultEscalationSeconds": { "$ref": "#/definitions/nonNegativeEscalationSeconds" },

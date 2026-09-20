@@ -377,7 +377,7 @@ export class RavenrootRuntimeClient {
     const id = String(sessionId || '');
     if (!id) throw new Error('Source session observation requires an id');
     const result = await this.#json(`/v1/source-sessions/${encodeURIComponent(id)}`, {
-      method: 'GET', headers: { Accept: "application/json" }, signal,
+      method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
     return validateSourceSessionStatus(result, id);
   }
@@ -939,7 +939,7 @@ export class RavenrootRuntimeClient {
     const id = String(buildId ?? '');
     if (!id) throw new Error('Program build observation requires a build id');
     const result = await this.#json(`/v1/program-artifacts/builds/${encodeURIComponent(id)}`, {
-      method: 'GET', headers: { Accept: 'application/json' }, signal,
+      method: 'GET', headers: { Accept: "application/json" }, signal,
     });
     return validateProgramBuildSnapshot(result, id);
   }

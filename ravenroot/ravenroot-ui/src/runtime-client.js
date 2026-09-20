@@ -182,6 +182,12 @@ function safeGeneration(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function ambiguousDeploymentDelivery(error) {
+  return error instanceof RuntimeRequestError
+    && (error.status == null || (error.status === 200
+      && /could not be read|not valid JSON/i.test(error.message)));
+}
+
 export function validateDeploymentCommandOutcome(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || !DEPLOYMENT_COMMAND_OUTCOMES.has(value.outcome)) {
@@ -674,12 +680,27 @@ export class RavenrootRuntimeClient {
     try {
       result = await this.#json(path, { method, headers });
     } catch (error) {
-      const ambiguous = error instanceof RuntimeRequestError
-        && (error.status == null || (error.status === 200
-          && /could not be read|not valid JSON/i.test(error.message)));
-      if (!ambiguous) throw error;
+      if (!ambiguousDeploymentDelivery(error)) throw error;
       // A single transport retry is the only automatic resubmission, and it reuses the exact intent.
-      result = await this.#json(path, { method, headers });
+      try {
+        result = await this.#json(path, { method, headers });
+      } catch (secondError) {
+        if (!ambiguousDeploymentDelivery(secondError)) throw secondError;
+        try {
+          const status = await this.deployment(id);
+          return { outcome: null, status, reconciliation: {
+            delivery: 'AMBIGUOUS', authoritative: 'STATE',
+          } };
+        } catch (readError) {
+          if (action === 'undeploy' && readError instanceof RuntimeRequestError
+              && readError.status === 404) {
+            return { outcome: null, status: null, reconciliation: {
+              delivery: 'AMBIGUOUS', authoritative: 'NOT_FOUND',
+            } };
+          }
+          throw readError;
+        }
+      }
     }
     const outcome = validateDeploymentCommandOutcome(result);
     const terminal = outcome.outcome === 'TERMINAL'

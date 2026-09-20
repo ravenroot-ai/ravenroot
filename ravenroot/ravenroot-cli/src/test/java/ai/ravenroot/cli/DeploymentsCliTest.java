@@ -133,6 +133,15 @@ class DeploymentsCliTest {
         assertEquals("REFUSE_IF_BUSY", backend.lastDisposition);
         assertEquals("retire", backend.lastReason);
         assertTrue(output.toString(StandardCharsets.UTF_8).contains("command-outcome=STALE_GENERATION"));
+
+        output.reset();
+        backend.view = new CliBackend.DeploymentView("orders", "STOPPED", 0, "LOCAL_PROCESS", null,
+                10L, null, "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_STATE");
+        assertEquals(1, cli.run("deployments", "stop", "orders", "--reason", "maintenance"));
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains(
+                "command-detail=delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_STATE"));
+        assertTrue(!output.toString(StandardCharsets.UTF_8).contains("command-outcome="),
+                "the CLI must not invent a server outcome for an ambiguous delivery");
     }
 
     @Test

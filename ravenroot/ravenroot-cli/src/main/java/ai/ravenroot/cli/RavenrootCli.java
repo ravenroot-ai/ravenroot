@@ -533,7 +533,9 @@ public final class RavenrootCli {
 
     private int printDeployment(CliBackend.DeploymentView deployment) {
         printDeploymentLine(deployment);
-        return deployment.commandOutcome() != null && java.util.Set.of(
+        return deployment.commandDetail() != null
+                && deployment.commandDetail().startsWith("delivery=AMBIGUOUS") ? 1
+                : deployment.commandOutcome() != null && java.util.Set.of(
                 "IDEMPOTENCY_CONFLICT", "STALE_GENERATION", "SUPERSEDED", "REFUSED", "FAILED")
                 .contains(deployment.commandOutcome()) ? 1 : 0;
     }

@@ -595,6 +595,47 @@ describe('process-local deployment client', () => {
     expect(fetchImpl.mock.calls[1][1].headers['X-Ravenroot-Expected-Generation']).toBe('4');
   });
 
+  it('reconciles authoritative state after both durable delivery responses are lost', async () => {
+    const observed = { ...ready, state: 'STOPPED', deploymentGeneration: 8 };
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('first response lost'))
+      .mockRejectedValueOnce(new TypeError('second response lost'))
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(observed) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.stopDeployment('deployment-1', {
+      expectedGeneration: 7, idempotencyKey: 'one-intent', reason: 'maintenance',
+    })).resolves.toEqual({
+      outcome: null, status: observed,
+      reconciliation: { delivery: 'AMBIGUOUS', authoritative: 'STATE' },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls.slice(0, 2).map(([, request]) =>
+      request.headers['Idempotency-Key'])).toEqual(['one-intent', 'one-intent']);
+    expect(fetchImpl.mock.calls.filter(([, request]) => request.method === 'POST')).toHaveLength(2);
+    expect(fetchImpl.mock.calls[2][1].method).toBe('GET');
+  });
+
+  it('reconciles terminal Undeploy 404 after both delivery responses are lost', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('first response lost'))
+      .mockRejectedValueOnce(new TypeError('second response lost'))
+      .mockResolvedValueOnce({ ok: false, status: 404,
+        text: async () => JSON.stringify({ error: 'deployment not found' }) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.undeployDeployment('deployment-1', {
+      expectedGeneration: 8, idempotencyKey: 'remove-once',
+      disposition: 'CANCEL_IN_FLIGHT', reason: 'retired',
+    })).resolves.toEqual({
+      outcome: null, status: null,
+      reconciliation: { delivery: 'AMBIGUOUS', authoritative: 'NOT_FOUND' },
+    });
+    expect(fetchImpl.mock.calls.filter(([, request]) => request.method === 'DELETE')).toHaveLength(2);
+    expect(fetchImpl.mock.calls[2][1].method).toBe('GET');
+  });
+
   it('refreshes stale state without automatically resubmitting the command', async () => {
     const stale = { outcome: 'STALE_GENERATION', expected: 3, generation: 4 };
     const fetchImpl = vi.fn()

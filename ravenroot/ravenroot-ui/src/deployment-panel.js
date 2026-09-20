@@ -321,9 +321,12 @@ export function createDeploymentsWindow({
       command.reason = String(reason).trim();
     }
     if (action === 'undeploy') {
-      const confirmed = doc.defaultView?.confirm?.(
-        `Undeploy “${deploymentId}”? This stops it and permanently retires its durable identity. `
-        + 'This run cannot be resumed and the same durable id cannot be reused.');
+      const warning = durable
+        ? `Undeploy “${deploymentId}”? This stops it and permanently retires its durable identity. `
+          + 'Its tombstone remains authoritative and the same durable id cannot be reused.'
+        : `Undeploy “${deploymentId}”? This stops and removes this process-local registration. `
+          + 'The same local id can be registered again later.';
+      const confirmed = doc.defaultView?.confirm?.(warning);
       if (!confirmed) return;
       if (durable) {
         const disposition = doc.defaultView?.prompt?.(
@@ -362,6 +365,12 @@ export function createDeploymentsWindow({
         say(`${ACTION_LABEL[action]} on “${deploymentId}”: ${outcome}.`,
           ['REFUSED', 'FAILED', 'STALE_GENERATION', 'SUPERSEDED', 'IDEMPOTENCY_CONFLICT']
             .includes(result.outcome.outcome) ? 'error' : 'ok');
+      } else if (result?.reconciliation?.delivery === 'AMBIGUOUS') {
+        const evidence = result.reconciliation.authoritative === 'NOT_FOUND'
+          ? 'the deployment is no longer registered'
+          : `the deployment is now ${String(result.status?.state || 'present').toLowerCase()}`;
+        say(`${ACTION_LABEL[action]} on “${deploymentId}” lost both command responses; `
+          + `authoritative reconciliation shows ${evidence}, but the command outcome is unknown.`, 'error');
       }
     } catch (error) {
       if (!disposed) say(`${ACTION_LABEL[action]} on “${deploymentId}” failed: ${error?.message || error}`,

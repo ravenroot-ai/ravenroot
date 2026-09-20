@@ -69,16 +69,25 @@ import java.util.Objects;
  * this client could not establish, which would provide false reassurance.</p>
  */
 public final class RemoteBackend implements CliBackend {
-    private final HttpClient client;
+    private final RequestSender sender;
     private final URI baseUri;
     private final String token;
     private final Duration timeout;
 
     public RemoteBackend(URI baseUri, String token, Duration timeout) {
+        this(baseUri, token, timeout, defaultSender(timeout));
+    }
+
+    RemoteBackend(URI baseUri, String token, Duration timeout, RequestSender sender) {
         this.baseUri = Objects.requireNonNull(baseUri, "baseUri");
         this.token = Objects.requireNonNull(token, "token");
         this.timeout = Objects.requireNonNull(timeout, "timeout");
-        this.client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        this.sender = Objects.requireNonNull(sender, "sender");
+    }
+
+    private static RequestSender defaultSender(Duration timeout) {
+        HttpClient client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        return request -> client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     @Override
@@ -492,7 +501,12 @@ public final class RemoteBackend implements CliBackend {
         if (disposition != null) request.header("X-Ravenroot-Undeploy-Disposition", disposition);
         HttpRequest built = "undeploy".equals(command)
                 ? request.DELETE().build() : request.POST(HttpRequest.BodyPublishers.noBody()).build();
-        Map<String, Object> outcome = MinimalJson.asObject(MinimalJson.parse(sendWithTransportRetry(built)));
+        Map<String, Object> outcome;
+        try {
+            outcome = MinimalJson.asObject(MinimalJson.parse(sendWithTransportRetry(built)));
+        } catch (AmbiguousDeliveryException ambiguous) {
+            return reconcileAmbiguousDeploymentCommand(deploymentId, command, before);
+        }
         String outcomeName = deploymentOutcome(outcome);
         String detail = deploymentOutcomeDetail(outcome);
         boolean terminal = "TERMINAL".equals(outcomeName)
@@ -529,6 +543,24 @@ public final class RemoteBackend implements CliBackend {
         }
         return new DeploymentView(observed.deploymentId(), observed.state(), observed.sourceCount(),
                 observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), outcomeName, detail);
+    }
+
+    private DeploymentView reconcileAmbiguousDeploymentCommand(String deploymentId, String command,
+                                                                DeploymentView before) throws IOException {
+        try {
+            DeploymentView observed = deployment(deploymentId);
+            return new DeploymentView(observed.deploymentId(), observed.state(), observed.sourceCount(),
+                    observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), null,
+                    "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_STATE");
+        } catch (IOException missing) {
+            if ("undeploy".equals(command) && missing.getMessage() != null
+                    && missing.getMessage().startsWith("404 ")) {
+                return new DeploymentView(deploymentId, "REMOVED", 0, before.scope(), null,
+                        before.deploymentGeneration(), null,
+                        "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_NOT_FOUND");
+            }
+            throw missing;
+        }
     }
 
     /** {@code DELETE /v1/deployments/{id}}: stops the deployment and then removes its
@@ -645,12 +677,14 @@ public final class RemoteBackend implements CliBackend {
     private String sendWithTransportRetry(HttpRequest request) throws IOException {
         HttpResponse<String> response;
         try {
-            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            response = sender.send(request);
         } catch (IOException ambiguous) {
             // Reuse the exact immutable request (key, generation and body) once. HTTP responses
             // never enter this catch and are not retried automatically.
             try {
-                response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                response = sender.send(request);
+            } catch (IOException secondAmbiguous) {
+                throw new AmbiguousDeliveryException(secondAmbiguous);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted waiting for " + baseUri, interrupted);
@@ -661,6 +695,17 @@ public final class RemoteBackend implements CliBackend {
         }
         if (response.statusCode() >= 400) throw renderError(response);
         return response.body();
+    }
+
+    private static final class AmbiguousDeliveryException extends IOException {
+        private AmbiguousDeliveryException(IOException cause) {
+            super("both delivery attempts lost their responses", cause);
+        }
+    }
+
+    @FunctionalInterface
+    interface RequestSender {
+        HttpResponse<String> send(HttpRequest request) throws IOException, InterruptedException;
     }
 
     /**
@@ -742,7 +787,7 @@ public final class RemoteBackend implements CliBackend {
     private String send(HttpRequest request) throws IOException {
         HttpResponse<String> response;
         try {
-            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            response = sender.send(request);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted waiting for " + baseUri, interrupted);

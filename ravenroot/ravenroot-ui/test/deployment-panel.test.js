@@ -237,6 +237,9 @@ describe('row actions', () => {
       await Promise.resolve();
 
       expect(confirmSpy).toHaveBeenCalled();
+      expect(confirmSpy.mock.calls[0][0]).toMatch(/process-local registration/);
+      expect(confirmSpy.mock.calls[0][0]).toMatch(/same local id can be registered again/);
+      expect(confirmSpy.mock.calls[0][0]).not.toMatch(/permanently retires/);
       expect(client.undeployDeployment).not.toHaveBeenCalled();
       confirmSpy.mockRestore();
     });
@@ -276,12 +279,34 @@ describe('row actions', () => {
     vi.restoreAllMocks();
   });
 
+  it('surfaces reconciled state without inventing an outcome after both command responses are lost',
+    async () => {
+      const durable = { ...READY, deploymentGeneration: 6 };
+      const client = stubClient({
+        deployments: vi.fn(async () => [durable]),
+        stopDeployment: vi.fn(async () => ({
+          outcome: null, status: { ...durable, state: 'STOPPED', deploymentGeneration: 7 },
+          reconciliation: { delivery: 'AMBIGUOUS', authoritative: 'STATE' },
+        })),
+      });
+      const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+      await window_.refresh();
+      vi.spyOn(window, 'prompt').mockReturnValue('maintenance');
+
+      field('deployment-list').querySelector('[data-deployment-action="stop"]').click();
+      await vi.waitFor(() => expect(field('deployment-status').textContent).toMatch(/lost both command responses/i));
+
+      expect(field('deployment-status').textContent).toMatch(/command outcome is unknown/i);
+      expect(field('deployment-status').textContent).toMatch(/authoritative reconciliation/i);
+      vi.restoreAllMocks();
+    });
+
   it('requires an explicit durable Undeploy disposition and reason', async () => {
     const durable = { ...READY, deploymentGeneration: 11 };
     const client = stubClient({ deployments: vi.fn(async () => [durable]) });
     const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
     await window_.refresh();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.spyOn(window, 'prompt')
       .mockReturnValueOnce('CANCEL_IN_FLIGHT')
       .mockReturnValueOnce('retired by operator');
@@ -290,6 +315,44 @@ describe('row actions', () => {
     await vi.waitFor(() => expect(client.undeployDeployment).toHaveBeenCalledWith('orders-v3', {
       expectedGeneration: 11, disposition: 'CANCEL_IN_FLIGHT', reason: 'retired by operator',
     }));
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/permanently retires its durable identity/);
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/tombstone remains authoritative/);
+    expect(confirmSpy.mock.calls[0][0]).not.toMatch(/registered again/);
+    vi.restoreAllMocks();
+  });
+
+  it('does not collect disposition or reason when durable Undeploy confirmation is cancelled', async () => {
+    const durable = { ...READY, deploymentGeneration: 11 };
+    const client = stubClient({ deployments: vi.fn(async () => [durable]) });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const promptSpy = vi.spyOn(window, 'prompt');
+
+    field('deployment-list').querySelector('[data-deployment-action="undeploy"]').click();
+    await Promise.resolve();
+
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(client.undeployDeployment).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['disposition', [null]],
+    ['reason', ['DRAIN_FIRST', null]],
+  ])('does not send durable Undeploy when %s collection is cancelled', async (_field, answers) => {
+    const durable = { ...READY, deploymentGeneration: 11 };
+    const client = stubClient({ deployments: vi.fn(async () => [durable]) });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0 });
+    await window_.refresh();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const promptSpy = vi.spyOn(window, 'prompt');
+    answers.forEach(answer => promptSpy.mockReturnValueOnce(answer));
+
+    field('deployment-list').querySelector('[data-deployment-action="undeploy"]').click();
+    await Promise.resolve();
+
+    expect(client.undeployDeployment).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 });

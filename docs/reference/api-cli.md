@@ -20,7 +20,7 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | Method and path | Result |
 |---|---|
 | `GET /v1/deployments` | List only the authenticated tenant's registrations. `deploymentGeneration` is present when a row is governed by durable lifecycle authority and absent for legacy/source-session compatibility rows. `scope=LOCAL_PROCESS` describes runtime placement; a generation describes durable command intent, not cluster ownership. |
-| `POST /v1/deployments?id=ID` | Register immutable GraphML. With durable deployment control, the response includes authoritative generation 0. A tombstoned durable ID cannot be reused. |
+| `POST /v1/deployments?id=ID` | Register immutable GraphML. With durable deployment control, the tenant and local ID acquire a non-expiring identity binding: reopening the same store returns the current aggregate and authoritative generation, while a tombstoned durable ID is refused before a local runtime is published. The binding survives command-ledger expiry and purge. |
 | `GET /v1/deployments/{id}` | Read status and its current authoritative generation when durable. Unknown, sibling-tenant, and removed IDs remain the same nondisclosing 404. |
 | `POST /v1/deployments/{id}/start` | Legacy rows return status. Durable rows require `Idempotency-Key` and `X-Ravenroot-Expected-Generation` and return a `DeploymentCommandOutcome`. |
 | `POST /v1/deployments/{id}/stop` | As Start, plus a required bounded `X-Ravenroot-Reason` for durable rows. Stop leaves the registration reusable. |
@@ -31,7 +31,9 @@ Durable command outcomes are `ACCEPTED`, `CONVERGED`, `REPLAYED`, `IDEMPOTENCY_C
 `STALE_GENERATION`, `SUPERSEDED`, `REFUSED`, `FAILED`, and `TERMINAL`. Clients reconcile the
 authoritative status after a response. Stale, superseded, and refused decisions are shown without
 automatic resubmission; an ambiguous transport delivery may be retried only with the identical intent
-key and metadata.
+key and metadata. If that retry also loses its response, clients issue an authoritative GET without a
+third command delivery. They expose the observed state (or Undeploy's authoritative 404) separately
+from the still-unknown command outcome.
 
 ## Execution and events
 

@@ -76,7 +76,7 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
                 new GraphVersion.Content(1, canonicalGraphMl,
                         security.qualifiedIdentity(), clock.instant()),
                 new DeploymentRegistry.CreateCommand(security.tenantId(),
-                        "local-deployment:" + localId, digest)));
+                        "local-deployment:" + localId, digest, true)));
         if (record.tombstone() != null) {
             throw new IllegalStateException("a removed durable deployment id cannot be reused");
         }
@@ -111,14 +111,14 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
     }
 
     public Optional<DeploymentRegistry.Record> get(String tenantId, String localId) {
-        DeploymentId id = aliases.get(new Alias(tenantId, localId));
+        DeploymentId id = resolveAlias(tenantId, localId);
         return id == null ? Optional.empty() : await(registry.get(tenantId, id));
     }
 
     public Optional<DeploymentCommandOutcome> submit(String tenantId, String localId,
                                                       LifecycleCommand command,
                                                       GenerationExpectation expectedGeneration) {
-        DeploymentId id = aliases.get(new Alias(tenantId, localId));
+        DeploymentId id = resolveAlias(tenantId, localId);
         if (id == null) return Optional.empty();
         DeploymentCommandOutcome outcome = coordinator.submit(
                 tenantId, id, command, expectedGeneration);
@@ -128,6 +128,21 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
             await(application.undeployLocalDeployment(tenantId, localId));
         }
         return Optional.of(outcome);
+    }
+
+    private DeploymentId resolveAlias(String tenantId, String localId) {
+        Alias alias = new Alias(tenantId, localId);
+        DeploymentId known = aliases.get(alias);
+        if (known != null) return known;
+        Optional<DeploymentRegistry.Record> retained = await(registry.retainedIdentity(
+                tenantId, "local-deployment:" + localId));
+        if (retained.isEmpty()) return null;
+        DeploymentId resolved = retained.orElseThrow().deploymentId();
+        DeploymentId raced = aliases.putIfAbsent(alias, resolved);
+        if (raced != null && !raced.equals(resolved)) {
+            throw new IllegalStateException("local deployment alias changed durable identity");
+        }
+        return raced == null ? resolved : raced;
     }
 
     private static boolean isTerminal(DeploymentCommandOutcome outcome) {

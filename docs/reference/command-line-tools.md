@@ -196,8 +196,12 @@ Commands against those rows also print `command-outcome=` and bounded outcome de
 converged, replayed, and terminal outcomes return 0; stale, superseded, refused, failed, and
 idempotency-conflict outcomes return 1 after the CLI refreshes authoritative state. The client never
 automatically resubmits those decisions. Only an ambiguous transport delivery is retried once, with
-the identical key, generation, reason, and disposition. Rows without a generation retain the legacy
-process-local command behavior for embedded and source-session compatibility.
+the identical key, generation, reason, and disposition. If both responses are lost, the CLI performs
+one authoritative read, prints `command-detail=delivery=AMBIGUOUS,reconciliation=...` without
+inventing `command-outcome=`, and returns 1. Rows without a generation retain the legacy process-local
+command behavior for embedded and source-session compatibility; their Undeploy confirmation says the
+local ID can be registered again, while a durable row warns that its tombstone and identity are
+permanent.
 
 `embed-registration show`, `embed-registration provision`, and `embed-registration revoke` operate a
 local registration store and never use `--server`. All take `--store-dir`, `--tenant`, and

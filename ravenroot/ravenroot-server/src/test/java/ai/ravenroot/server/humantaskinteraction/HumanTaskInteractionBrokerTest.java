@@ -132,6 +132,8 @@ class HumanTaskInteractionBrokerTest {
                     "external", "https://provider.example/task", "https://provider.example",
                     PROVIDER_SECRET);
             var broker = new HumanTaskInteractionBroker(configuration, service, clock);
+            assertFailure(HumanTaskInteractionBroker.Code.ORIGIN_REFUSED,
+                    () -> broker.issue(responder(), taskId, 1, "https://provider.example"));
             var launch = broker.issue(responder(), taskId, 1, "https://workbench.example");
             byte[] exactBody = "{\"providerDecision\":\"deny\"}".getBytes(StandardCharsets.UTF_8);
 

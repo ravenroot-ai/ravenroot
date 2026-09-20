@@ -268,6 +268,20 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         for (const field of sourceTask.interactionPresentation.formSchema.fields) {
           const input = [...formHost.querySelectorAll('[data-human-task-form-field]')]
             .find(candidate => candidate.dataset.humanTaskFormField === field.name);
+          input.setCustomValidity('');
+          input.removeAttribute('aria-invalid');
+          if (['TEXT', 'MULTILINE_TEXT'].includes(field.type)
+              && utf8Length(input.value) > field.maxUtf8Bytes) {
+            const message = `${field.label} must be at most ${field.maxUtf8Bytes} UTF-8 bytes.`;
+            input.setCustomValidity(message);
+            input.setAttribute('aria-invalid', 'true');
+            say(message);
+            comment.removeAttribute('aria-invalid');
+            input.focus();
+            input.reportValidity();
+            setBusy(false);
+            return;
+          }
           if (!input.checkValidity()) { input.reportValidity(); setBusy(false); return; }
           if (!field.required && !input.value && field.type !== 'BOOLEAN') continue;
           values[field.name] = field.type === 'BOOLEAN' ? input.checked
@@ -300,6 +314,12 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     try {
       const launch = await onLaunch(sourceTask);
       if (!isCurrent(token, sourceTask)) return;
+      const view = dialog.ownerDocument.defaultView;
+      const launchOrigin = new URL(launch.launchUri).origin;
+      if (launchOrigin !== launch.origin
+          || (launch.kind === 'EXTERNAL' && launch.origin === view?.location?.origin)) {
+        throw new Error('The registered presentation origin is not isolated from the Workbench.');
+      }
       interactionLaunch = launch;
       interactionHost.hidden = false;
       interactionHost.replaceChildren();
@@ -315,7 +335,6 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       frame.setAttribute('referrerpolicy', 'no-referrer');
       frame.src = launch.launchUri;
       interactionFrame = frame;
-      const view = dialog.ownerDocument.defaultView;
       interactionMessage = event => {
         const expectedOrigin = launch.kind === 'CUSTOM' ? 'null' : launch.origin;
         if (!interactionLaunch || event.source !== frame.contentWindow
@@ -492,7 +511,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
               : dialog.ownerDocument.createElement('input');
           input.dataset.humanTaskFormField = field.name;
           input.name = field.name;
-          input.required = field.required;
+          // A required Boolean is a required typed member, not a required truthy choice. The
+          // checkbox is always serialized below, so unchecked is the valid Boolean value false.
+          input.required = field.required && field.type !== 'BOOLEAN';
           if (field.type === 'BOOLEAN') input.type = 'checkbox';
           else if (field.type === 'INTEGER') input.type = 'number', input.step = '1';
           else if (field.type === 'DECIMAL') input.type = 'number', input.step = 'any';
@@ -509,6 +530,12 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
             if (!field.required) addOption('');
             field.allowedValues.forEach(addOption);
           }
+          input.addEventListener('input', () => {
+            input.setCustomValidity('');
+            input.removeAttribute('aria-invalid');
+            say();
+          });
+          if (error.id) input.setAttribute('aria-describedby', error.id);
           label.append(input); wrapper.append(label);
           if (field.help) wrapper.append(element(dialog.ownerDocument, 'small', '', field.help));
           formHost.append(wrapper);

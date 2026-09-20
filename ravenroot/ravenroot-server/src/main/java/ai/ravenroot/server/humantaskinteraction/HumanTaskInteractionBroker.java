@@ -65,8 +65,10 @@ public final class HumanTaskInteractionBroker {
         }
         var profile = configuration.requireProfile(presentation.profileId(),
                 presentation.profileVersion(), presentation.kind());
-        if (profile.kind() == HumanTaskInteractionConfiguration.Kind.CUSTOM
-                && profile.origin().toString().equals(returnOrigin)) {
+        // CUSTOM frames are opaque-origin, while EXTERNAL frames deliberately retain the provider
+        // origin for the exact-origin postMessage and callback protocol. Neither may share the
+        // Workbench origin: a same-origin EXTERNAL frame with scripts could reach the parent DOM.
+        if (profile.origin().toString().equals(returnOrigin)) {
             throw new CapabilityFailure(Code.ORIGIN_REFUSED);
         }
         Instant now = clock.instant();

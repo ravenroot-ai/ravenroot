@@ -52,6 +52,30 @@ class HumanTaskFormSchemaTest {
     }
 
     @Test
+    void requiredBooleanFalseAndExactUtf8TextBoundariesAreValid() {
+        var schema = new HumanTaskFormSchema(1, List.of(
+                new HumanTaskFormSchema.Field("approved", "Approved", "",
+                        HumanTaskFormSchema.Type.BOOLEAN, true, 1, List.of()),
+                new HumanTaskFormSchema.Field("title", "Title", "",
+                        HumanTaskFormSchema.Type.TEXT, true, 4, List.of()),
+                new HumanTaskFormSchema.Field("notes", "Notes", "",
+                        HumanTaskFormSchema.Type.MULTILINE_TEXT, true, 4, List.of())));
+
+        schema.requireResponse(PayloadValue.map(Map.of(
+                "approved", PayloadValue.of(false),
+                "title", PayloadValue.of("abcd"),
+                "notes", PayloadValue.of("éé"))));
+        assertThrows(IllegalArgumentException.class, () -> schema.requireResponse(PayloadValue.map(Map.of(
+                "approved", PayloadValue.of(false),
+                "title", PayloadValue.of("ééx"),
+                "notes", PayloadValue.of("🙂")))));
+        assertThrows(IllegalArgumentException.class, () -> schema.requireResponse(PayloadValue.map(Map.of(
+                "approved", PayloadValue.of(false),
+                "title", PayloadValue.of("abc"),
+                "notes", PayloadValue.of("🙂x")))));
+    }
+
+    @Test
     void schemaRejectsExecutableShapesAndBounds() {
         assertThrows(IllegalArgumentException.class, () -> HumanTaskFormSchema.decode(
                 "{\"version\":1,\"fields\":[],\"script\":\"alert(1)\"}"));

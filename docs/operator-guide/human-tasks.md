@@ -37,12 +37,14 @@ all replicas together; existing capabilities then fail safely and tasks remain r
 ```
 
 Never put the file or its secrets in GraphML, a public ConfigMap, served configuration, logs, or an
-external host's launch data. A custom profile origin must differ from the Workbench origin. Register
-only origins you operate or contractually trust. The custom iframe permits forms and scripts but not
+external host's launch data. Every custom or external profile origin must differ from the Workbench
+origin. Register only origins you operate or contractually trust. The custom iframe permits forms and scripts but not
 `allow-same-origin`, so navigation cannot make it same-origin with the parent. The custom component
 receives only its opaque capability ID and bounded presentation document; the parent retains the signed capability and current
 authenticated authority. The configured external provider receives the identity-free delegated
-capability needed for its signed callback. External
+capability needed for its signed callback. Its frame retains `allow-same-origin` so the exact
+registered provider origin remains available to the message protocol; launch issuance and the
+Workbench both refuse that frame when its origin equals the Workbench origin. External
 providers must sign the exact callback body and preserve the capability unchanged.
 
 ## Inventory and reconciliation

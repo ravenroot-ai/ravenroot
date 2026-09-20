@@ -266,9 +266,12 @@ return origin. It contains no subject, issuer, roles, scopes, Ravenroot bearer, 
 capability across restart and replicas.
 
 The Workbench host is a sandboxed iframe with forms/scripts only: no popup, top-navigation, ambient
-credentials, bearer, or `allow-same-origin`. The browser therefore assigns a custom component an
+credentials, or bearer. A custom frame also omits `allow-same-origin`, so the browser assigns it an
 opaque origin even if it navigates; it cannot become same-origin with or escape into the parent DOM.
-The server separately validates that the launch URI has the exact registered scheme/host/port, while
+An external frame retains `allow-same-origin` because its message and callback protocol uses the exact
+registered provider origin, but both server issuance and the Workbench refuse an external provider
+origin equal to the Workbench return origin. The server separately validates that the launch URI has
+the exact registered scheme/host/port, while
 the version-one `postMessage` exchange requires the exact frame source and opaque sandbox origin plus
 the task, generation, opaque capability ID, schema, action, lifecycle, and message-size fences. A
 custom component never receives the signed capability. Custom

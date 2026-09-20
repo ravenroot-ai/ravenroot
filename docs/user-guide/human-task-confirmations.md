@@ -44,7 +44,9 @@ For a multi-field response, select `FORM` and author the closed version-one form
 catalog controls. The Workbench uses native labelled single- and multiline text, checkbox, bounded
 number, select, date, and
 date-time controls, preserves keyboard/focus behavior and reduced-motion preferences, and sends a
-typed map only after browser and server validation. Unknown fields, markup, nested schemas, and
+typed map only after browser and server validation. A required checkbox is a present Boolean member,
+so unchecked submits `false`; it is not a requirement to choose `true`. Text and multiline controls
+enforce the pinned UTF-8 byte limit locally (including non-ASCII input) before transport. Unknown fields, markup, nested schemas, and
 executable content are not accepted.
 
 `CUSTOM` and `EXTERNAL` are available only when the configuration response says
@@ -52,7 +54,9 @@ executable content are not accepted.
 do not paste a URL or credential into the graph. The dialog loads that registered host in an
 isolated sandbox and supplies the exact task, schema, allowed actions, bounded review content, theme,
 and accessibility settings through the versioned host protocol. The host receives no Ravenroot
-bearer. Closing or timing out leaves the task open for recovery.
+bearer. Custom frames have an opaque origin. External frames retain their configured provider origin
+for the exact-origin protocol, so that origin must differ from the Workbench and a same-origin launch
+is refused. Closing or timing out leaves the task open for recovery.
 
 ## Choose the active execution context
 

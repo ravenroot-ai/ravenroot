@@ -102,6 +102,22 @@ class HumanTaskExternalProviderProcessIntegrationTest {
         }
     }
 
+    @Test
+    void publicLaunchRefusesAnExternalProviderAtTheWorkbenchOrigin() throws Exception {
+        int backendPort = freePort();
+        String workbenchOrigin = "http://127.0.0.1:" + backendPort;
+        Path ui = Files.createDirectories(directory.resolve("same-origin-ui"));
+        Files.writeString(ui.resolve("index.html"), "<!doctype html><title>fixture</title>");
+        Path configuration = interactionConfiguration(workbenchOrigin);
+        try (Child child = start("first", backendPort, workbenchOrigin,
+                directory.resolve("same-origin.db"), ui, configuration)) {
+            String locator = child.awaitReady(HumanTaskConfirmationWorkbenchProcess.TASKS_READY)
+                    .locators().getFirst();
+            assertEquals(403, issueResponse(backendPort, workbenchOrigin, locator).statusCode(),
+                    "a script-capable external frame must never share the Workbench origin");
+        }
+    }
+
     private Path interactionConfiguration(String providerOrigin) throws Exception {
         Path path = directory.resolve("interactions.json");
         String json = "{\"schemaVersion\":1,\"capabilityTtlSeconds\":8,"
@@ -138,14 +154,20 @@ class HumanTaskExternalProviderProcessIntegrationTest {
     }
 
     private static Launch issue(int port, String origin, String locator) throws Exception {
+        HttpResponse<String> response = issueResponse(port, origin, locator);
+        assertEquals(200, response.statusCode(), response.body());
         String[] parts = locator.split(":", 2);
-        HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+        return new Launch(jsonText(response.body(), "capability"), UUID.fromString(parts[0]),
+                Long.parseLong(parts[1]), java.time.Instant.parse(jsonText(response.body(), "expiresAt")));
+    }
+
+    private static HttpResponse<String> issueResponse(int port, String origin, String locator)
+            throws Exception {
+        String[] parts = locator.split(":", 2);
+        return send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + port + "/v1/human-tasks/" + parts[0] + "/interaction?generation=" + parts[1]))
                 .POST(HttpRequest.BodyPublishers.noBody()).header("Authorization", "Bearer " + TOKEN)
                 .header("Origin", origin).build());
-        assertEquals(200, response.statusCode(), response.body());
-        return new Launch(jsonText(response.body(), "capability"), UUID.fromString(parts[0]),
-                Long.parseLong(parts[1]), java.time.Instant.parse(jsonText(response.body(), "expiresAt")));
     }
 
     private static void revoke(int port, Launch launch) throws Exception {

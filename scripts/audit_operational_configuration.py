@@ -68,11 +68,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59"
+    "0ccbe7b03753d46d6e79c095c64851b421c54ff0fbd390f6392932603abd8e31"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d"
+    "f5fdc3fcef88d3a331285a2866f1a510bba4466321510512a85995e36727d8bd"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -193,7 +193,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "04870af805696a017bb9738294e1f4ac05b776330fc1ae83c17fa721a8064659",
     EMBED_STARTUP_CHECK_PATH: "5667bba56fec45d8592429014f676d5a92108ee557daec9ac43b747c26cf3bfe",
-    EMBED_MAIN_PATH: "a6dff8a2501880db8fb7d9747f0e02b95bb508cc0224fbaeb67134978f8f9c3d",
+    EMBED_MAIN_PATH: "f5fdc3fcef88d3a331285a2866f1a510bba4466321510512a85995e36727d8bd",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "b29b830b414629451f84c3d33efb46685013d78bfaea5f6aa118602817254edf",
     EMBED_MAIN_TEST_PATH: "a18e6ba2c1c412a0522a04336de1556065495cad12e40d838eba2bfb56a169cc",
@@ -209,7 +209,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "60a13454321273b46b39a3b06f36eba7afb5146860ccd2f48f2f48b929442811",
     "RavenrootServerMain.run":
-        "fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59",
+        "0ccbe7b03753d46d6e79c095c64851b421c54ff0fbd390f6392932603abd8e31",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -7789,7 +7789,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  'fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59',
+  '0ccbe7b03753d46d6e79c095c64851b421c54ff0fbd390f6392932603abd8e31',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -12612,17 +12612,17 @@ INTERACTION_WEBSOCKET_MAIN_PATH = 'ravenroot/ravenroot-server/src/main/java/ai/r
 INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environment_reference.py'
 
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
- 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': '985fdd47ed0ec14b9dc86c21f6ba1640685c1049acb78c8c1ea13edf86eb2477',
- 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': 'ce887cce0236f0a415a881980888c04cb3d82749a86c7f8de1d948404e512962',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
  'scripts/publish_environment_reference.py': '205ce879d0b12403796b3f127734268b99fa47741c73a9632460d4854af15573',
  'scripts/tests/test_publish_environment_reference.py': '214afdefb159e7419e39b39b59c7d014f2f106ed077df0fcd6c7a31c4010a175',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
-  'RavenrootServerMain',
-  'run',
-  'fe5e8256f0ce69ed50c9aa04b834f92aeaf692da5fb6be6a98b375bed7133a59'),
+ 'RavenrootServerMain',
+ 'run',
+  '0ccbe7b03753d46d6e79c095c64851b421c54ff0fbd390f6392932603abd8e31'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',

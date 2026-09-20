@@ -127,6 +127,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * cannot silently answer for another one.
      */
     private final Map<String, TenantJournal> journals = new LinkedHashMap<>();
+    private final Map<String, Map<UUID, ai.ravenroot.api.persistence.HumanTaskInteractionRevocation>>
+            humanTaskInteractionRevocations = new LinkedHashMap<>();
     /**
      * Per-instance event counters, held outside {@link #journals} so that compaction cannot reset
      * them. A stream sequence that restarted after its records were discarded would make two
@@ -1889,6 +1891,39 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public CompletionStage<Void> revokeHumanTaskInteraction(String tenantId,
+            ai.ravenroot.api.persistence.HumanTaskInteractionRevocation revocation) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(revocation, "revocation");
+            synchronized (monitor) {
+                Map<UUID, ai.ravenroot.api.persistence.HumanTaskInteractionRevocation> tenant =
+                        humanTaskInteractionRevocations.computeIfAbsent(tenantId, ignored -> new LinkedHashMap<>());
+                tenant.values().removeIf(value -> !clock.instant().isBefore(value.expiresAt()));
+                var existing = tenant.putIfAbsent(revocation.capabilityId(), revocation);
+                if (existing != null && !existing.equals(revocation)) {
+                    throw failure(ExecutionStoreFailure.invalid("conflicting human-task capability revocation"));
+                }
+                return null;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Boolean> isHumanTaskInteractionRevoked(
+            String tenantId, UUID capabilityId, Instant now) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(capabilityId, "capabilityId");
+            Objects.requireNonNull(now, "now");
+            synchronized (monitor) {
+                var value = humanTaskInteractionRevocations.getOrDefault(tenantId, Map.of()).get(capabilityId);
+                return value != null && now.isBefore(value.expiresAt());
+            }
+        });
+    }
+
+    @Override
     public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
         return complete(() -> {
             requireTenantId(tenantId);
@@ -2043,7 +2078,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             .permittedActions(task.request());
                     if (actions.isEmpty()) return Optional.empty();
                     return Optional.of(attentionItem(new AuthorizedHumanTask(
-                            task, entry.origin.deploymentId(), actions), true));
+                            task, entry.origin.deploymentId(), actions),
+                            authorization.mayReview(task.request().responderRequirements(),
+                                    task.request().requester().qualifiedIdentity())));
                 }
                 return Optional.empty();
             }
@@ -2076,7 +2113,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 request.confirmationLimits().maxActionLabelUtf8Bytes(),
                 request.confirmationLimits().maxCommentUtf8Bytes(),
                 row.actions(), includeReview && request.reviewPresentation().present()
-                        ? Optional.of(request.reviewPresentation()) : Optional.empty());
+                        ? Optional.of(request.reviewPresentation()) : Optional.empty(),
+                request.presentation());
     }
 
 

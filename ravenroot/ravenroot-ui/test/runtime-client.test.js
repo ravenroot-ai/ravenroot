@@ -375,6 +375,32 @@ describe('embedded Human Task runtime client', () => {
     await expect(unknownClient.confirmHumanTask('task-1', 2, 'resolve', 'Reviewed', { capability }))
       .rejects.toThrow(/confirmation response is invalid/);
   });
+
+  it('issues a registered capability with bearer auth but completes and replays without it', async () => {
+    const registeredTask = { ...task, interactionPresentation: { kind: 'CUSTOM', version: 1,
+      profileId: 'registered', profileVersion: 1 } };
+    const launch = { schemaVersion: 1, capability: 'signed', capabilityId: 'cap-1',
+      expiresAt: '2026-09-07T08:00:00Z', launchUri: 'https://forms.example/task',
+      origin: 'https://forms.example', kind: 'CUSTOM', taskId: task.taskId,
+      generation: task.generation, actions: ['RESOLVE'], review: null,
+      responseSchema: { contentType: 'application/vnd.ravenroot.payload+json', schema: 'test',
+        schemaVersion: '1', kind: 'MAP', maxBytes: 4096 } };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(launch) })
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ schemaVersion: 1,
+        outcome: 'ALREADY_APPLIED', taskId: task.taskId, generation: task.generation + 1 }) });
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'bearer' });
+    const issued = await client.issueHumanTaskInteraction(registeredTask, { capability });
+    const encoded = { contentType: launch.responseSchema.contentType, payloadBase64: 'e30=' };
+    await client.completeHumanTaskInteraction(issued, 'RESOLVE', '', encoded);
+    await client.completeHumanTaskInteraction(issued, 'RESOLVE', '', encoded);
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer bearer');
+    for (const [, request] of fetchImpl.mock.calls.slice(1)) {
+      expect(request.credentials).toBe('omit');
+      expect(request.headers).not.toHaveProperty('Authorization');
+      expect(JSON.parse(request.body).capability).toBe('signed');
+    }
+  });
 });
 
 describe('process-local source session client', () => {

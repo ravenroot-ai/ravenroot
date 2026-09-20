@@ -176,6 +176,10 @@ spec:
               value: {{ include "ravenroot.aiLimitValue" .Values.ai.maxModelInputProvenanceEntries }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultResponseBytes }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED
+              value: {{ .Values.humanTask.responderEnforcementEnabled | quote }}
+            - name: RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG
+              value: {{ ternary "/etc/ravenroot/human-task-interactions/config.json" "" (ne .Values.humanTask.interactionConfigSecret "") | quote }}
             - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxResponseBytes }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS
@@ -336,6 +340,11 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
+            {{- if ne .Values.humanTask.interactionConfigSecret "" }}
+            - name: human-task-interactions
+              mountPath: /etc/ravenroot/human-task-interactions
+              readOnly: true
+            {{- end }}
             {{- if .Values.runnerPlane.enabled }}
             - name: runner-plane-config
               mountPath: /etc/ravenroot/runner-plane
@@ -353,6 +362,14 @@ spec:
                 name: {{ required "runnerPlane.sharedEnvironmentSecret is required" .Values.runnerPlane.sharedEnvironmentSecret }}
           {{- end }}
       volumes:
+        {{- if ne .Values.humanTask.interactionConfigSecret "" }}
+        - name: human-task-interactions
+          secret:
+            secretName: {{ .Values.humanTask.interactionConfigSecret | quote }}
+            items:
+              - key: config.json
+                path: config.json
+        {{- end }}
         {{- if .Values.runnerPlane.enabled }}
         - name: runner-plane-config
           configMap:

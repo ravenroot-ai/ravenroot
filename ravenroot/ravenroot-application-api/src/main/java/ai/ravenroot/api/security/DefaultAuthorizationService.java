@@ -110,7 +110,7 @@ public final class DefaultAuthorizationService implements AuthorizationService {
         put(matrix, EnumSet.of(Role.PLATFORM_ADMIN), AuthorizationAction.RUNTIME_OBSERVE);
         put(matrix, EnumSet.of(Role.PLATFORM_ADMIN), AuthorizationAction.AGENT_AUTHORITY_CONTROL);
         put(matrix, EnumSet.of(Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
-                AuthorizationAction.HUMAN_TASK_ADMIN);
+                AuthorizationAction.HUMAN_TASK_ADMIN, AuthorizationAction.HUMAN_TASK_OVERRIDE);
         put(matrix, EnumSet.of(Role.OPERATOR, Role.TENANT_ADMIN, Role.PLATFORM_ADMIN),
                 AuthorizationAction.EXECUTION_READ);
         // Same role set as EXECUTION_START/EXECUTION_READ -- the action is shared by cancel

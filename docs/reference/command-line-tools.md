@@ -168,6 +168,8 @@ listings. `--help` and `help` print usage.
 | `cancel TRAVERSAL-ID` | Request cancellation and print the recorded outcome and note. |
 | `drain` | Stop new admission and begin controlled drain. |
 | `process PROCESS-INSTANCE-ID pause\|resume\|cancel\|drain\|stop EXPECTED-GENERATION IDEMPOTENCY-KEY [REASON]` | Remote-only durable process control across every traversal in the instance. Use the inventory `revision` as the expected generation; the result reports the typed outcome, current generation, state, and retained reason. |
+| `human-tasks list` | List the authenticated tenant's outstanding task summaries without review or response content. |
+| `human-tasks settle TASK-ID GENERATION resolve\|deny\|cancel [--response-file PATH] [--content-type TYPE] [--comment TEXT] [--override-reason TEXT]` | Use the canonical settlement model. Resolve requires the pinned typed response; override requires the server-side admin role/scope and records its reason. |
 | `deployments list` | List process-local deployment registrations. |
 | `deployments register ID FILE` | Reserve an ID and validate its graph; does not start it. |
 | `deployments inspect ID` | Read one registration. |

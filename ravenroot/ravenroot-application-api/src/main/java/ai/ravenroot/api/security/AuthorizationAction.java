@@ -81,7 +81,10 @@ public enum AuthorizationAction {
     ADMIN("ravenroot.admin", false),
 
     /** Read one exact tenant-owned deployment incarnation and its bounded event projection. */
-    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true);
+    DEPLOYMENT_OBSERVE("ravenroot.deployment.observe", true),
+
+    /** Explicitly override one Human Task decision policy with attributable operator intent. */
+    HUMAN_TASK_OVERRIDE("ravenroot.human-task.override", true);
 
     private final String requiredScope;
     private final boolean available;

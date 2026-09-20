@@ -99,6 +99,18 @@ public interface CliBackend {
         throw new IOException("durable process lifecycle requires --server");
     }
 
+    /** Lists this tenant's durable Human Tasks without response or review content. */
+    default List<HumanTaskView> humanTasks() throws IOException {
+        throw new IOException("human-task operations require --server");
+    }
+
+    /** Applies the same version-one settlement command used by HTTP, WebSocket, and Workbench. */
+    default HumanTaskDecisionView settleHumanTask(String taskId, long generation, String action,
+                                                  byte[] response, String contentType, String comment,
+                                                  String overrideReason) throws IOException {
+        throw new IOException("human-task operations require --server");
+    }
+
     /**
      * This tenant's process-local deployments, in the same order the API returns them (id
      * order). Empty for a tenant that has registered none -- there is no distinguishable "you have
@@ -432,6 +444,13 @@ public interface CliBackend {
 
     record ProcessControlView(String outcome, String processInstanceId, long generation,
                               String state, String reason) { }
+
+    record HumanTaskView(String taskId, long generation, String status, String title,
+                         String nodeId, String presentationKind, String responseContentType,
+                         String responseSchema, String responseSchemaVersion) { }
+
+    record HumanTaskDecisionView(String outcome, String taskId, long generation,
+                                 String resumeTraversalId) { }
 
     /**
      * Mirrors {@code ai.ravenroot.api.application.LocalDeploymentStatus} -- a separate

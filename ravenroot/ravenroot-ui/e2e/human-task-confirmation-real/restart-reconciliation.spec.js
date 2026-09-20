@@ -147,7 +147,10 @@ async function assertPinnedDialog(page, taskId) {
   expect(await page.locator('[data-human-task-prompt]').textContent()).toMatch(/^P{8192}$/);
   await expect(page.locator('[data-human-task-comment]')).toBeFocused();
   await expect(page.locator('[data-human-task-comment-hint]')).toContainText('/ 8192 UTF-8 bytes');
-  await expect(page.locator('[data-human-task-action]')).toHaveText(['Resolve — Confirm', 'Deny', 'Cancel']);
+  // Responder enforcement is disabled in this fixture, so any admitted same-tenant principal sees
+  // every pinned action even though the durable ingress identity requested the tasks.
+  await expect(page.locator('[data-human-task-action]')).toHaveText(
+    ['Resolve — Confirm', 'Deny', 'Cancel']);
 }
 
 test.describe('real SQLite Human Task confirmation recovery', () => {
@@ -262,8 +265,13 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await assertPinnedDialog(page, storedLocator.taskId);
 
     const decisionUrl = `${recovery.serviceOrigin}/v1/human-tasks/${encodeURIComponent(storedLocator.taskId)}`
-      + `/confirmation/resolve?generation=${storedLocator.generation}`;
+      + `/settle?generation=${storedLocator.generation}`;
     const comment = 'R'.repeat(5_000);
+    const settlement = { schemaVersion: 1, action: 'RESOLVE', comment,
+      response: { contentType: 'application/json', payloadBase64: Buffer.from(JSON.stringify({
+        contract: 'ravenroot.payload/1', schema: 'ravenroot.human-task.confirmation',
+        schemaVersion: '1', kind: 'SCALAR', value: true,
+      })).toString('base64') } };
     let forwarded = 0;
     let committed;
     await page.route(decisionUrl, async route => {
@@ -276,17 +284,17 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await page.locator('[data-human-task-action="RESOLVE"]').click();
     await expect(page.locator('[data-human-task-error]')).toContainText('POST /v1/human-tasks');
     expect(forwarded).toBe(1);
-    expect(committed).toMatchObject({ schemaVersion: 1, outcome: 'APPLIED',
-      task: { taskId: storedLocator.taskId, status: 'RESOLVED', availableActions: [] } });
+    expect(committed).toMatchObject({ schemaVersion: 1, outcome: 'RESOLVED',
+      taskId: storedLocator.taskId });
     await page.unroute(decisionUrl);
 
     const replay = await request.post(decisionUrl, {
       headers: { Authorization: `Bearer ${FIXTURE_TOKEN}` },
-      data: { schemaVersion: 1, comment },
+      data: settlement,
     });
     expect(replay.status()).toBe(200);
     expect(await replay.json()).toMatchObject({ schemaVersion: 1, outcome: 'ALREADY_APPLIED',
-      task: { taskId: storedLocator.taskId, status: 'RESOLVED', availableActions: [] } });
+      taskId: storedLocator.taskId });
     await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
     await page.locator('[data-human-task-close]').click();
 
@@ -317,4 +325,35 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
 
     await stopPhase(request);
   });
+
+  test('registered custom presentation loads and completes under the served Workbench CSP',
+    async ({ page, request }) => {
+      test.setTimeout(90_000);
+      const first = await startPhase(request, 'first');
+      const navigation = await page.goto(`${first.serviceOrigin}/`);
+      expect(navigation?.status()).toBe(200);
+      const csp = navigation?.headers()['content-security-policy'];
+      expect(csp).toBeTruthy();
+      const frameSources = csp.match(/(?:^|; )frame-src ([^;]+)/)?.[1];
+      expect(frameSources).toBe(CONTROL_ORIGIN);
+      expect(frameSources).not.toContain("'self'");
+      expect(frameSources).not.toContain('*');
+
+      await authenticate(page);
+      await openFixtureGraph(page, request);
+      await selectDeploymentContext(page, first);
+      await selectHumanTaskNode(page);
+      const selected = page.locator('[data-human-task-id]').first();
+      await selected.click();
+      await expect(page.locator('#human-task-dialog')).toBeVisible();
+      await page.locator('.human-task-presentation-launch').click();
+
+      const custom = page.frameLocator('iframe[title="Custom Human Task presentation"]');
+      await expect(custom.locator('#custom-ready')).toHaveText('Initialized registered presentation');
+      await expect(page.locator('.human-task-status')).toContainText('1 actionable task',
+        { timeout: 20_000 });
+      await expect(page.locator('[data-human-task-id]')).toHaveCount(1);
+      await expect(page.locator('#human-task-dialog')).toBeHidden();
+      await stopPhase(request);
+    });
 });

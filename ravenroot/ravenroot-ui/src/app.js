@@ -15394,7 +15394,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
     // that browser step instead of returning to a detached opener.
     requestAnimationFrame(focusHumanTaskInspector);
   },
-  onSubmit: async ({ task, action, comment, isCurrent }) => {
+  onSubmit: async ({ task, action, comment, response, isCurrent }) => {
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
     const owner = workspace.active;
@@ -15407,8 +15407,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       throw new Error('Reconnect to this document workspace before deciding this task.');
     }
     try {
-      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
-        { capability });
+      const result = await client.settleHumanTask(task, action, comment, response, { capability });
       if (!current()) return result;
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
@@ -15422,6 +15421,52 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
       if (current()) void humanTaskController.refresh();
       throw error;
     }
+  },
+  onLaunch: async task => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect to this document workspace before opening this presentation.');
+    }
+    return client.issueHumanTaskInteraction(task, { capability });
+  },
+  onInteractionSubmit: async (task, launch, action, comment, response) => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
+      throw new Error('Reconnect before completing this presentation.');
+    }
+    let typedResponse = null;
+    if (action === 'RESOLVE') {
+      if (response?.contentType !== 'application/vnd.ravenroot.payload+json'
+          || typeof response?.payloadBase64 !== 'string') {
+        throw new Error('The custom presentation returned an invalid typed response.');
+      }
+      try {
+        const binary = atob(response.payloadBase64);
+        const bytes = Uint8Array.from(binary, unit => unit.charCodeAt(0));
+        typedResponse = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      } catch {
+        throw new Error('The custom presentation returned malformed response bytes.');
+      }
+    }
+    // Custom hosts never receive or consume the delegated external-provider capability. The
+    // parent settles through its current authenticated session, so authorization loss is checked
+    // at completion instead of replaying issuance-time identity claims.
+    const result = await client.settleHumanTask(task, action, comment, typedResponse, { capability });
+    clearHumanTaskSelection();
+    addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+      'completed');
+    await humanTaskController.refresh();
+    return result;
+  },
+  onExternalReconcile: async task => {
+    await humanTaskController.refresh();
+    addActivityMessage('human task', `reconciled external response · task ${shortId(task.taskId)}`, 'completed');
+  },
+  onRevoke: async (task, launch) => {
+    const client = runtimeClient;
+    if (client) await client.revokeHumanTaskInteraction(task, launch);
   },
 });
 

@@ -65,6 +65,7 @@ import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskReviewPresentation;
+import ai.ravenroot.api.persistence.HumanTaskInteractionRevocation;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HumanTaskTransition;
@@ -224,6 +225,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * tenant that lost no record.</p>
  */
 public abstract class ExecutionStoreContract {
+
+    @Test
+    final void humanTaskInteractionRevocationIsTenantScopedIdempotentAndExpires() {
+        UUID capabilityId = UUID.randomUUID();
+        Instant revokedAt = clock().instant();
+        Instant expiresAt = revokedAt.plus(Duration.ofMinutes(5));
+        var revocation = new HumanTaskInteractionRevocation(
+                capabilityId, UUID.randomUUID(), 3, revokedAt, expiresAt);
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, revokedAt)));
+        await(store().revokeHumanTaskInteraction("tenant-a", revocation));
+        await(store().revokeHumanTaskInteraction("tenant-a", revocation));
+        assertTrue(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, revokedAt)));
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-b", capabilityId, revokedAt)),
+                "a capability identifier must not become a cross-tenant revocation oracle");
+        assertFalse(await(store().isHumanTaskInteractionRevoked("tenant-a", capabilityId, expiresAt)),
+                "expiry is exclusive so an old revocation cannot grow without bound");
+    }
 
     @Test
     final void runnerWorkspaceSurvivesLaterTraversalWhileIndependentProcessesStayIsolated() {
@@ -3957,8 +3975,10 @@ public abstract class ExecutionStoreContract {
                 .mapToLong(count -> count.pending()).sum(),
                 "aggregate per-node counts must be complete rather than truncated");
         assertEquals(first.registration().taskId(), page.items().getFirst().taskId());
-        assertEquals(orderedActions, page.items().getFirst().availableActions(),
-                "the safe projection must preserve pinned authored action order");
+        assertEquals(List.of(HumanTaskConfirmationAction.DENY,
+                        HumanTaskConfirmationAction.RESOLVE),
+                page.items().getFirst().availableActions(),
+                "the safe projection must preserve authored order while keeping cancel requester-only");
         assertTrue(page.items().getFirst().reviewPresentation().isEmpty(),
                 "collection projections must never disclose review content");
         assertEquals(4096, page.items().getFirst().promptMaxUtf8Bytes());
@@ -4025,9 +4045,26 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.of("deployment-c"), recovered.deploymentId());
         assertEquals(fixture.key().processInstanceId(), recovered.processInstanceId());
         assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), recovered.availableActions());
-        assertEquals("Mail body\nsecond line", recovered.reviewPresentation().orElseThrow().text());
+        assertTrue(recovered.reviewPresentation().isEmpty(),
+                "requester-only cancellation must not disclose review content in enforced mode");
+
+        var permissive = new HumanTaskAttentionAuthorization("issuer|USER|other",
+                Set.of(), Set.of(), false);
+        var permissiveDetail = await(store().findHumanTaskAttention(tenant, locator, permissive))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), permissiveDetail.availableActions());
+        assertEquals("Mail body\nsecond line",
+                permissiveDetail.reviewPresentation().orElseThrow().text());
+
+        var override = new HumanTaskAttentionAuthorization("issuer|USER|administrator",
+                Set.of(), Set.of(), true, true);
+        var overrideDetail = await(store().findHumanTaskAttention(tenant, locator, override))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), overrideDetail.availableActions());
         assertEquals(HumanTaskReviewPresentation.TEXT_PLAIN,
-                recovered.reviewPresentation().orElseThrow().contentType());
+                overrideDetail.reviewPresentation().orElseThrow().contentType());
         assertTrue(await(store().findHumanTaskAttention(tenant,
                 new HumanTaskAttentionLocator(fixture.registration().taskId(), 2L), requester)).isEmpty(),
                 "a stale generation must be indistinguishable from an absent task");

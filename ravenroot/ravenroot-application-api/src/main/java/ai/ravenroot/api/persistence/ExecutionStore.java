@@ -772,6 +772,31 @@ public interface ExecutionStore extends AutoCloseable {
         return humanTaskConfirmationsUnsupported();
     }
 
+    /**
+     * Persists one payload-free task capability revocation across restart and replicas.
+     *
+     * @param tenantId authenticated tenant boundary
+     * @param revocation immutable task-bound revocation
+     * @return stage completing after the revocation is durable
+     */
+    default CompletionStage<Void> revokeHumanTaskInteraction(
+            String tenantId, HumanTaskInteractionRevocation revocation) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
+    /**
+     * Checks an unexpired task capability revocation inside the tenant boundary.
+     *
+     * @param tenantId authenticated tenant boundary
+     * @param capabilityId signed capability identity
+     * @param now authoritative instant used to fence expiry
+     * @return stage yielding whether the capability remains revoked
+     */
+    default CompletionStage<Boolean> isHumanTaskInteractionRevoked(
+            String tenantId, UUID capabilityId, java.time.Instant now) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
     // ---------------------------------------------------------------- durable execution pauses
 
     /**

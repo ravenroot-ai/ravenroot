@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23316 |
+| Atomic operational candidates discovered | 23315 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23316 |
+| Reviewed | 23315 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 311 |
@@ -49,12 +49,12 @@ semantic review and focused source inventories remain required for those boundar
 | Retained security ceilings or defaults | 1878 |
 | Retained protocol or format invariants | 9620 |
 | Retained published contract descriptions | 504 |
-| Retained presentation text | 605 |
+| Retained presentation text | 604 |
 | Retained derived values | 1053 |
 | Test fixtures | 8005 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 1940.
+Retired source candidates preserved in inventory history: 1941.
 
 Approved normalized-identity reappearances: 21. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 67.
+Checked source reconciliations: 68.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23316 candidates.
+zero-count or unclassified rows as needed and sums to 23315 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23316 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 21665 |
+| retained | 21664 |
 
 ### Classification counts
 
@@ -85,7 +85,7 @@ zero-count or unclassified rows as needed and sums to 23316 candidates.
 |---|---:|
 | derived | 1053 |
 | operator-configurable | 1651 |
-| presentation-text | 605 |
+| presentation-text | 604 |
 | protocol-or-format-invariant | 9620 |
 | published-contract-description | 504 |
 | security-ceiling-or-default | 1878 |
@@ -99,7 +99,7 @@ zero-count or unclassified rows as needed and sums to 23316 candidates.
 | deployment | 2835 |
 | deployment-example | 20 |
 | java | 7086 |
-| script | 2231 |
+| script | 2230 |
 | test-fixture | 8005 |
 | ui | 3139 |
 
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1469 |
 | #321 | 8564 |
-| Retained; no remediation required | 12734 |
+| Retained; no remediation required | 12733 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23320 |
-| Unchanged identities | 23291 |
-| Approved identity migrations | 18 |
-| Approved retirements | 11 |
-| Semantically classified additions | 7 |
-| Current candidates | 23316 |
+| Source inventory candidates | 23316 |
+| Unchanged identities | 23315 |
+| Approved identity migrations | 0 |
+| Approved retirements | 1 |
+| Semantically classified additions | 0 |
+| Current candidates | 23315 |
 
 ## Final semantic review
 
@@ -14982,45 +14982,44 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-d424d0763c03a5f3549f` | `scripts/ci_required.py:254` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-405e4c474c59e8aac9cc` | `scripts/ci_required.py:256` `verify_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-f1af02053f059de3fe5c` | `scripts/ci_required.py:257` `verify_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-99d7e1197ecf41d5e2f1` | `scripts/ci_required.py:277` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-2770af690a0e8df8db83` | `scripts/ci_required.py:296` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-23076d0658cab6721861` | `scripts/ci_required.py:300` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-fbc67589b4458f5b289c` | `scripts/ci_required.py:301` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-1ccce383369bc8a09589` | `scripts/ci_required.py:306` `verify_triggers` | script | retained | presentation-text | This is the second half of verify_triggers's new diagnostic message for the feature/** absence check added by issue #310; it is human-readable failure output, not an operator setting. |
-| `oc-3477bb4f63594a7bd981` | `scripts/ci_required.py:338` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-e65bebc61dfff9f66663` | `scripts/ci_required.py:369` `verify_dispatch_routing` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-78909ca61d36d8616d1d` | `scripts/ci_required.py:387` `verify_full_coverage_on_dev_pull_requests` | script | retained | presentation-text | This numeral appears only in verify_full_coverage_on_dev_pull_requests's docstring, added by issue #310, cross-referencing point 4 of the CI design; it is documentation prose, not a runtime magic number or operator setting. |
-| `oc-1827edf3f502604ed2f6` | `scripts/ci_required.py:417` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-9b35b701cccc9e09b4c7` | `scripts/ci_required.py:420` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-709c27d3bca30978cb69` | `scripts/ci_required.py:427` `verify_single_publisher` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-07606031b92659b3f526` | `scripts/ci_required.py:434` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-0db5f5a4decbb4d4bad1` | `scripts/ci_required.py:434` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-21850a8eb8fabc6e507a` | `scripts/ci_required.py:434` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-da23fd05937505d3c982` | `scripts/ci_required.py:442` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-f41fc0a184e4a9cc3d28` | `scripts/ci_required.py:467` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-1f8986c3d45866ff786e` | `scripts/ci_required.py:469` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-e497f5198d92d97ed017` | `scripts/ci_required.py:508` `verify_event` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-8e12ef72dc395e961547` | `scripts/ci_required.py:516` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-b63bbbeaccde92949c63` | `scripts/ci_required.py:516` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-29d1b27ccdaddccf18ec` | `scripts/ci_required.py:520` `is_integration_branch` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-83232e0e16e8023d482b` | `scripts/ci_required.py:520` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-dede11e5349e15615e7f` | `scripts/ci_required.py:520` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-4aabe968069f28664f3f` | `scripts/ci_required.py:521` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-60c8733896bdb048bb3f` | `scripts/ci_required.py:521` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-574fbb0a7e8ec76cb03e` | `scripts/ci_required.py:537` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-ab44e9bdd31c9265b862` | `scripts/ci_required.py:537` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-b250f8de640badb859f1` | `scripts/ci_required.py:542` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
-| `oc-0ea7b8566f13c0077a02` | `scripts/ci_required.py:549` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-1f91d39a504e86fd6ec2` | `scripts/ci_required.py:549` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-71ed7787c03546857f1f` | `scripts/ci_required.py:549` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-1d7fe94c43b39292ecb7` | `scripts/ci_required.py:562` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-320faf02c16a2e550bc3` | `scripts/ci_required.py:564` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-b043510bab79b528a28c` | `scripts/ci_required.py:570` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-657dd527d31fb1f76aa7` | `scripts/ci_required.py:580` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-f7be0bb34ed61a8898ac` | `scripts/ci_required.py:581` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-02bd04eabf710a86cfa0` | `scripts/ci_required.py:655` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-8ce131af2c47c7f9de66` | `scripts/ci_required.py:655` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
-| `oc-ceea0f32943929f0ac23` | `scripts/ci_required.py:655` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-99d7e1197ecf41d5e2f1` | `scripts/ci_required.py:288` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-2770af690a0e8df8db83` | `scripts/ci_required.py:308` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-23076d0658cab6721861` | `scripts/ci_required.py:312` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-fbc67589b4458f5b289c` | `scripts/ci_required.py:313` `verify_triggers` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-1ccce383369bc8a09589` | `scripts/ci_required.py:318` `verify_triggers` | script | retained | presentation-text | This is the second half of verify_triggers's new diagnostic message for the feature/** absence check added by issue #310; it is human-readable failure output, not an operator setting. |
+| `oc-3477bb4f63594a7bd981` | `scripts/ci_required.py:350` `verify_triggers` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-e65bebc61dfff9f66663` | `scripts/ci_required.py:381` `verify_dispatch_routing` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-1827edf3f502604ed2f6` | `scripts/ci_required.py:432` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-9b35b701cccc9e09b4c7` | `scripts/ci_required.py:435` `verify_single_publisher` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-709c27d3bca30978cb69` | `scripts/ci_required.py:442` `verify_single_publisher` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-07606031b92659b3f526` | `scripts/ci_required.py:449` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-0db5f5a4decbb4d4bad1` | `scripts/ci_required.py:449` `verify_fast_workflow` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-21850a8eb8fabc6e507a` | `scripts/ci_required.py:449` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-da23fd05937505d3c982` | `scripts/ci_required.py:457` `verify_fast_workflow` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-f41fc0a184e4a9cc3d28` | `scripts/ci_required.py:482` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-1f8986c3d45866ff786e` | `scripts/ci_required.py:484` `verify_fast_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-e497f5198d92d97ed017` | `scripts/ci_required.py:523` `verify_event` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-8e12ef72dc395e961547` | `scripts/ci_required.py:531` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-b63bbbeaccde92949c63` | `scripts/ci_required.py:531` `verify_event` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-29d1b27ccdaddccf18ec` | `scripts/ci_required.py:535` `is_integration_branch` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-83232e0e16e8023d482b` | `scripts/ci_required.py:535` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-dede11e5349e15615e7f` | `scripts/ci_required.py:535` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-4aabe968069f28664f3f` | `scripts/ci_required.py:536` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-60c8733896bdb048bb3f` | `scripts/ci_required.py:536` `is_integration_branch` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-574fbb0a7e8ec76cb03e` | `scripts/ci_required.py:552` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-ab44e9bdd31c9265b862` | `scripts/ci_required.py:552` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-b250f8de640badb859f1` | `scripts/ci_required.py:557` `verify_promotion_evidence` | script | retained | protocol-or-format-invariant | This is fixed CI event/tier control vocabulary, not an operator-configurable runtime setting. |
+| `oc-0ea7b8566f13c0077a02` | `scripts/ci_required.py:564` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-1f91d39a504e86fd6ec2` | `scripts/ci_required.py:564` `verify_results` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-71ed7787c03546857f1f` | `scripts/ci_required.py:564` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-1d7fe94c43b39292ecb7` | `scripts/ci_required.py:577` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-320faf02c16a2e550bc3` | `scripts/ci_required.py:579` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-b043510bab79b528a28c` | `scripts/ci_required.py:585` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-657dd527d31fb1f76aa7` | `scripts/ci_required.py:595` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-f7be0bb34ed61a8898ac` | `scripts/ci_required.py:596` `verify_results` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
+| `oc-02bd04eabf710a86cfa0` | `scripts/ci_required.py:670` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-8ce131af2c47c7f9de66` | `scripts/ci_required.py:670` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
+| `oc-ceea0f32943929f0ac23` | `scripts/ci_required.py:670` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-f33c4d396e1b61e7b4eb` | `scripts/classify_main_change.py:26` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-14f2d3aaab6a4516e8db` | `scripts/classify_main_change.py:27` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-803370b155b15a32eb96` | `scripts/classify_main_change.py:28` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |

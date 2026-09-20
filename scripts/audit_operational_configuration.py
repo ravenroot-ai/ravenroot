@@ -14835,9 +14835,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 101, "path": 91, "summary": 412, "successStatuses": 92}
-    if len(details) != 91 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 91/696 positional shape")
+    expected_counts = {"methods": 103, "path": 93, "summary": 417, "successStatuses": 94}
+    if len(details) != 93 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 93/707 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

@@ -256,6 +256,9 @@ secret of at least 32 bytes, and one to 64 profiles. Each profile fixes an opaqu
 `version`, `kind` (`CUSTOM` or `EXTERNAL`), safe `launchUri`, and exact scheme/host/port `origin`.
 Only HTTPS is accepted, except loopback HTTP for local development. External profiles additionally
 require their own base64 completion signing secret; custom profiles forbid provider credentials.
+The server's effective Workbench CSP emits `frame-src 'none'` when this registry is absent and otherwise
+emits only the registry's exact origin set; neither GraphML nor an incoming `Origin` header contributes a
+frame source.
 
 `POST /v1/human-tasks/{taskId}/interaction?generation=N` authenticates the responder and returns a
 short-lived single-task launch capability plus only the exact authorized review presentation, pinned

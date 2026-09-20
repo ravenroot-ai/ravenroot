@@ -750,6 +750,20 @@ public final class HumanTaskService {
      */
     public Optional<HumanTaskAttentionItem> confirmationProjection(
             RequestContext context, HumanTaskResult result, HumanTaskConfirmationAction action) {
+        return confirmationProjection(context, result, action, false);
+    }
+
+    /**
+     * Projects a completed embedded decision through ordinary or explicit override authority.
+     * @param context authenticated caller
+     * @param result authoritative settlement result
+     * @param action action applied or exactly replayed
+     * @param override whether this projection belongs to an explicit override settlement
+     * @return terminal safe projection, or empty if its context or current authority cannot be verified
+     */
+    public Optional<HumanTaskAttentionItem> confirmationProjection(
+            RequestContext context, HumanTaskResult result, HumanTaskConfirmationAction action,
+            boolean override) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(result, "result");
         Objects.requireNonNull(action, "action");
@@ -757,7 +771,7 @@ public final class HumanTaskService {
         DurableHumanTask task = result.task();
         if (task == null || !task.status().terminal()
                 || !context.tenantId().equals(task.key().tenantId())
-                || !attentionAuthorization(context).permittedActions(task.request()).contains(action)) {
+                || !authorized(task, context, actionStatus(action), override)) {
             return Optional.empty();
         }
         var process = await(store.findProcessInstance(task.key())).orElse(null);

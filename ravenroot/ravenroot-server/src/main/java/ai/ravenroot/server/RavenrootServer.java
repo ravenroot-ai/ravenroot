@@ -314,6 +314,8 @@ public final class RavenrootServer implements AutoCloseable {
     private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
     private ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker humanTaskInteractions;
     private ai.ravenroot.server.security.BrowserOriginPolicy humanTaskInteractionOrigins;
+    /** Immutable before start; never derived from a request, task, or authored graph. */
+    private java.util.Set<java.net.URI> humanTaskFrameOrigins = java.util.Set.of();
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
     /** Installed only by the packaged composition when durable agent authority is enabled. */
     /**
@@ -957,7 +959,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     private com.sun.net.httpserver.HttpHandler secured(HttpRequestContext.Handler handler) {
         return exchange -> {
-            httpSecurity.responseHeaders().apply(exchange.getResponseHeaders());
+            httpSecurity.responseHeaders().apply(exchange.getResponseHeaders(), humanTaskFrameOrigins);
             handler.handle(exchange, HttpRequestContext.create());
         };
     }
@@ -1094,6 +1096,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (humanTasks == null) throw new IllegalStateException("human-task interactions require durable tasks");
         humanTaskInteractions = new ai.ravenroot.server.humantaskinteraction.HumanTaskInteractionBroker(
                 java.util.Objects.requireNonNull(configuration, "configuration"), humanTasks, clock);
+        humanTaskFrameOrigins = configuration.presentationOrigins();
         var capabilityOrigins = new java.util.LinkedHashSet<>(httpSecurity.browserOrigins().allowedOrigins());
         configuration.profiles().values().stream().map(profile -> profile.origin().toString())
                 .forEach(capabilityOrigins::add);
@@ -3528,7 +3531,7 @@ public final class RavenrootServer implements AutoCloseable {
             case PAYLOAD_REFUSED -> fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             case STALE_GENERATION, ALREADY_SETTLED -> fail(exchange, httpContext, ErrorCode.CONFLICT);
             case RESOLVED, DENIED, CANCELLED, ALREADY_APPLIED -> {
-                var task = service.confirmationProjection(context, result, action);
+                var task = service.confirmationProjection(context, result, action, override != null);
                 if (task.isEmpty()) {
                     fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
                     return;

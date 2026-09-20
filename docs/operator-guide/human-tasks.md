@@ -38,7 +38,9 @@ all replicas together; existing capabilities then fail safely and tasks remain r
 
 Never put the file or its secrets in GraphML, a public ConfigMap, served configuration, logs, or an
 external host's launch data. Every custom or external profile origin must differ from the Workbench
-origin. Register only origins you operate or contractually trust. The custom iframe permits forms and scripts but not
+origin. Register only origins you operate or contractually trust. At startup the served Workbench CSP
+derives its complete `frame-src` list from these registered origins only; an absent registry produces
+`frame-src 'none'`, and browser-caller or request origins never widen it. The custom iframe permits forms and scripts but not
 `allow-same-origin`, so navigation cannot make it same-origin with the parent. The custom component
 receives only its opaque capability ID and bounded presentation document; the parent retains the signed capability and current
 authenticated authority. The configured external provider receives the identity-free delegated

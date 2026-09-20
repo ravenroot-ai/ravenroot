@@ -325,4 +325,35 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
 
     await stopPhase(request);
   });
+
+  test('registered custom presentation loads and completes under the served Workbench CSP',
+    async ({ page, request }) => {
+      test.setTimeout(90_000);
+      const first = await startPhase(request, 'first');
+      const navigation = await page.goto(`${first.serviceOrigin}/`);
+      expect(navigation?.status()).toBe(200);
+      const csp = navigation?.headers()['content-security-policy'];
+      expect(csp).toBeTruthy();
+      const frameSources = csp.match(/(?:^|; )frame-src ([^;]+)/)?.[1];
+      expect(frameSources).toBe(CONTROL_ORIGIN);
+      expect(frameSources).not.toContain("'self'");
+      expect(frameSources).not.toContain('*');
+
+      await authenticate(page);
+      await openFixtureGraph(page, request);
+      await selectDeploymentContext(page, first);
+      await selectHumanTaskNode(page);
+      const selected = page.locator('[data-human-task-id]').first();
+      await selected.click();
+      await expect(page.locator('#human-task-dialog')).toBeVisible();
+      await page.locator('.human-task-presentation-launch').click();
+
+      const custom = page.frameLocator('iframe[title="Custom Human Task presentation"]');
+      await expect(custom.locator('#custom-ready')).toHaveText('Initialized registered presentation');
+      await expect(page.locator('.human-task-status')).toContainText('1 actionable task',
+        { timeout: 20_000 });
+      await expect(page.locator('[data-human-task-id]')).toHaveCount(1);
+      await expect(page.locator('#human-task-dialog')).toBeHidden();
+      await stopPhase(request);
+    });
 });

@@ -413,6 +413,26 @@ class HumanTaskRouteTest {
                                 .header("X-Test-Admin", "true").GET().build(),
                         HttpResponse.BodyHandlers.ofString());
                 assertEquals(403, tenantAdminCrossTenant.statusCode(), tenantAdminCrossTenant.body());
+
+                HttpResponse<String> crossTenantSettlement = confirmationOverride(server, fixture,
+                        "other", "administrator", "resolve", 1, "incident-45");
+                assertEquals(404, crossTenantSettlement.statusCode(), crossTenantSettlement.body());
+
+                HttpResponse<String> applied = confirmationOverride(server, fixture,
+                        "tenant-a", "administrator", "resolve", 1, "incident-45");
+                assertEquals(200, applied.statusCode(), applied.body());
+                assertTrue(applied.body().contains("\"outcome\":\"APPLIED\""), applied.body());
+                assertTrue(applied.body().contains("\"status\":\"RESOLVED\""), applied.body());
+                assertFalse(applied.body().contains("private-input"), applied.body());
+                assertFalse(applied.body().contains("reviewPresentation"), applied.body());
+
+                // The first response may be lost after the durable CAS. The exact administrative
+                // retry must still project the safe terminal row through current override authority.
+                HttpResponse<String> replay = confirmationOverride(server, fixture,
+                        "tenant-a", "administrator", "resolve", 1, "incident-45");
+                assertEquals(200, replay.statusCode(), replay.body());
+                assertTrue(replay.body().contains("\"outcome\":\"ALREADY_APPLIED\""), replay.body());
+                assertFalse(replay.body().contains("private-input"), replay.body());
             }
         }
     }
@@ -626,6 +646,21 @@ class HumanTaskRouteTest {
                         .header("Content-Type", "application/json; charset=utf-8")
                         .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
                 HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<String> confirmationOverride(
+            RavenrootServer server, Fixture fixture, String tenant, String subject,
+            String action, long generation, String reason) throws Exception {
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                        + server.port() + "/v1/human-tasks/" + fixture.taskId()
+                        + "/confirmation/" + action + "?generation=" + generation
+                        + "&override=true&reason=" + reason))
+                        .header("X-Test-Tenant", tenant).header("X-Test-Subject", subject)
+                        .header("X-Test-Approver", "false").header("X-Test-Admin", "true")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .POST(HttpRequest.BodyPublishers.ofString(
+                                "{\"schemaVersion\":1,\"comment\":\"override reviewed\"}"))
+                        .build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private record Fixture(HumanTaskService service, UUID taskId, UUID processInstanceId) { }

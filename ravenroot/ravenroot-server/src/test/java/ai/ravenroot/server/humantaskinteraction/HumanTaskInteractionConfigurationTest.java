@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -28,6 +29,8 @@ class HumanTaskInteractionConfigurationTest {
         var profile = configuration.requireProfile("expense", 3, HumanTaskPresentationKind.CUSTOM);
         assertEquals("https://forms.example/presenter", profile.launchUri().toString());
         assertEquals(0, profile.completionSecret().length);
+        assertEquals(java.util.Set.of(URI.create("https://forms.example")),
+                configuration.presentationOrigins());
     }
 
     @Test

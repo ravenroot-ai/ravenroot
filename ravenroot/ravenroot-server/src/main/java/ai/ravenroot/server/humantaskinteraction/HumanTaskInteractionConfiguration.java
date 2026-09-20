@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Operator-owned immutable registry for trusted Human Task presentation providers. */
 public record HumanTaskInteractionConfiguration(Duration capabilityTtl, int maxCompletionBytes,
@@ -78,6 +79,15 @@ public record HumanTaskInteractionConfiguration(Duration capabilityTtl, int maxC
     }
 
     @Override public byte[] capabilitySecret() { return capabilitySecret.clone(); }
+
+    /**
+     * Origins admitted by the Workbench frame policy, derived only from this operator registry.
+     * @return immutable registered origin set
+     */
+    public Set<URI> presentationOrigins() {
+        return profiles.values().stream().map(Profile::origin)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
 
     public static HumanTaskInteractionConfiguration fromEnvironment(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");

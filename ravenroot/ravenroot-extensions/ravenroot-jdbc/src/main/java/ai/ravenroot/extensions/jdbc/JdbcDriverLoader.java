@@ -131,7 +131,16 @@ interface JdbcDriverLoader {
      * <p>A multi-release jar is resolved here, once, into one flat image: for each name the entry of
      * the highest release not above {@link #TARGET_RELEASE}, else the base entry. The running JVM's
      * version plays no part, so the bytes a class is defined from are fixed by the verified digest
-     * alone. A jar whose versioned entries admit more than one reading is refused as ambiguous.
+     * alone.
+     *
+     * <p><b>What ambiguity means here.</b> A jar is ambiguous when <em>this</em> resolution is not
+     * well defined: when the jar admits more than one reading of what its image contains. It is not
+     * ambiguous merely because a reader at another release would select other entries, since a
+     * classpath JVM at any release above the target always would; that disagreement is the reason
+     * the resolution is pinned rather than a reason to refuse. Nor is a versioned entry that
+     * differs from what the pinned digest covered ambiguous: the digest already refuses it as
+     * {@link JdbcFailure.Code#DRIVER_REFUSED}, because substituted bytes are tampering, not a
+     * second reading.
      */
     final class PrivateDriverClassLoader extends ClassLoader {
         /** The product's Java release (maven.compiler.release), never the release of the running JVM. */
@@ -188,11 +197,14 @@ interface JdbcDriverLoader {
                     || !"true".equalsIgnoreCase(mainAttributes.getValue(Attributes.Name.MULTI_RELEASE))) {
                 throw ambiguous();
             }
+            // Two versioned entries cannot collide at one release: a surviving entry name is
+            // exactly VERSIONS + release + '/' + name in one canonical spelling, so equal release
+            // and name mean an equal entry name, which the duplicate-name bound above already
+            // refused. Higher releases simply win, up to the target.
             Map<String, Integer> selectedRelease = new java.util.HashMap<>();
             for (Versioned entry : versioned) {
                 if (entry.release() > TARGET_RELEASE) continue;
                 Integer selected = selectedRelease.get(entry.name());
-                if (selected != null && selected == entry.release()) throw ambiguous();
                 if (selected == null || entry.release() > selected) {
                     selectedRelease.put(entry.name(), entry.release());
                     copied.put(entry.name(), entry.value());
@@ -202,9 +214,16 @@ interface JdbcDriverLoader {
         }
 
         /**
-         * Accepts only {@code META-INF/versions/<release>/<name>} spelled exactly as the JDK reads it:
-         * a canonical decimal release of at least 9 and a normalized name outside META-INF. Every
-         * other spelling of that namespace is read differently by different tools.
+         * Accepts only {@code META-INF/versions/<release>/<name>} spelled exactly as the JDK reads
+         * it: a canonical decimal release of at least 9 and a normalized name outside META-INF.
+         *
+         * <p>Every other spelling is content that some readers incorporate into the image and
+         * others discard, so the jar admits more than one reading of what its image contains. That
+         * holds for a release below 9 and for a versioned {@code META-INF/} entry as much as for a
+         * miscased namespace: the JDK discards all three, other tooling does not, and in a jar that
+         * declares {@code Multi-Release: true} they are entries meant to be selected. Copying them
+         * in under their literal names instead would ship an image whose content depends on who
+         * read the jar, which is what the pinned digest exists to rule out.
          */
         private static Versioned versionedEntry(String entryName, byte[] value) {
             if (!entryName.startsWith(VERSIONS) || entryName.indexOf('\\') >= 0) throw ambiguous();

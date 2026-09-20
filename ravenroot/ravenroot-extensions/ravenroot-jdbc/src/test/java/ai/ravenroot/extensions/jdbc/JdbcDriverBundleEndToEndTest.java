@@ -28,9 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcDriverBundleEndToEndTest {
-    private static final String POSTGRESQL_ID = "postgresql-42.7.7";
+    private static final String POSTGRESQL_ID = "postgresql-42.7.12";
     private static final String POSTGRESQL_SHA256 =
-            "157963d60ae66d607e09466e8c0cdf8087e9cb20d0159899ffca96bca2528460";
+            "31fbf6f06b2217fb51d5100cee51b22625cc81640da0679b47914e54c1e6377c";
     private static final String MYSQL_ID = "mysql-connector-j-9.5.0";
     private static final String MYSQL_SHA256 =
             "f2ca3dfaf00d4aa311470db7ea3051962944ba0cb60005a2f75467549c39f425";

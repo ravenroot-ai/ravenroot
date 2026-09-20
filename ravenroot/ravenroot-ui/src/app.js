@@ -203,6 +203,10 @@ import {
 } from './execution-reconciliation.js';
 import { publicExecutionDescription } from './execution-event-description.js';
 import { runtimeActivityMessage, runtimeActivityOutput } from './runtime-activity-data.js';
+import {
+  DEFAULT_ACTIVITY_MODE, activityEventVisible, isLogEmission, logEmissionPresentation,
+  normalizeActivityMode, usesConciseLogRendering,
+} from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
 import {
@@ -12595,12 +12599,67 @@ function activityIdentifiersHtml(event) {
   ).join('');
 }
 
+// ── OBSERVATION LEVEL ───────────────────────────────────────────────────────────────────────────
+//
+// How much of the event stream the panel renders. Module state, never persisted and never
+// serialized: it is an observer preference, not an execution input, and a reload deliberately starts
+// quiet again. `setActivityMode` is the only writer, and the level is consulted on the ONE path that
+// appends a row to `#activity-log` — after the same event has already been offered to the monitoring
+// projection that paints nodes and edges (`observeNodeActivity`/`observeEdgeTraversal` in
+// `handleRuntimeEvent`). A quieter panel therefore cannot make the graph's runtime state untrue.
+// The classification itself, and why it is catalog semantics rather than a guess, lives in
+// `src/activity-visibility.js`.
+let activityMode = DEFAULT_ACTIVITY_MODE;
+
+function activityModeRadios() {
+  return [...document.querySelectorAll('.activity-modes[role="radiogroup"] > [role="radio"]')];
+}
+
+// One Tab stop for the whole group: the selected level, or the first level when nothing is selected.
+// Roving tabindex is what keeps a radiogroup from multiplying the panel's tab stops while leaving
+// every level arrow-reachable.
+function syncActivityModeChrome() {
+  const radios = activityModeRadios();
+  const tabStop = radios.find(control => control.dataset.mode === activityMode) || radios[0];
+  radios.forEach(control => {
+    const checked = control.dataset.mode === activityMode;
+    control.setAttribute('aria-checked', checked ? 'true' : 'false');
+    control.classList.toggle('active', checked);
+    control.tabIndex = control === tabStop ? 0 : -1;
+  });
+}
+
+function setActivityMode(mode) {
+  const next = normalizeActivityMode(mode);
+  if (next === activityMode) return;
+  activityMode = next;
+  syncActivityModeChrome();
+  // Deliberately no re-render and no replay. The panel shows the events that ARRIVE while a level is
+  // selected: buffering what a quieter level hid would put those rows back inside the 400-row budget
+  // the filter exists to protect, and rebuilding the list would re-announce the entire live region
+  // to assistive technology. The choice changes what arrives next, which is what an observer
+  // preference means. (Four rows are not removed either — nothing already shown is taken away.)
+}
+
 function appendActivityEvent(event) {
+  // FIRST, before any per-row work exists to do. A hidden event must not consume one of the panel's
+  // 400 rows, must not build a row, and must not move the scroll position; classification plus this
+  // return is the entire cost it pays.
+  if (!activityEventVisible(event, activityMode)) return;
+
   const type = String(event.type || 'EVENT');
   const css = type.includes('FAILED') ? 'failed'
     : type.includes('DEFAULTED') ? 'fallback'
     : type.includes('BYPASSED') ? 'bypassed'
     : type.includes('COMPLETED') ? 'completed' : '';
+  // `isLogEmission` is exactly the old `Object.hasOwn(event, 'output')` test, named for what the
+  // member means: the trusted typed author projection, present only for a `log`-catalog completion.
+  const output = isLogEmission(event) ? runtimeActivityOutput(event.output, {
+    redacted: event.outputRedacted,
+    truncated: event.outputTruncated,
+  }) : null;
+  if (appendLogEmissionRow(event, css, output)) return;
+
   const title = event.nodeId ? `${type} · ${event.nodeId}` : type;
   // Named for what each number is. `active=` was the old label and it named neither.
   const counts = event.nodeId
@@ -12612,16 +12671,33 @@ function appendActivityEvent(event) {
     redacted: event.messageRedacted,
     truncated: event.messageTruncated,
   });
-  const output = Object.hasOwn(event, 'output') ? runtimeActivityOutput(event.output, {
-    redacted: event.outputRedacted,
-    truncated: event.outputTruncated,
-  }) : null;
   const diagnosticFlags = projection => [projection.redacted ? 'redacted' : '', projection.truncated ? 'truncated' : '']
     .filter(Boolean).join(', ');
   const detail = `${publicExecutionDescription(event.description, type, event.publicReason)}${counts}`
     + (message.value ? ` · ${message.value}${diagnosticFlags(message) ? ` (${diagnosticFlags(message)})` : ''}` : '')
     + (output ? ` · output=${output.displayValue}${diagnosticFlags(output) ? ` (${diagnosticFlags(output)})` : ''}` : '');
   appendActivity(title, detail, css, event.occurredAt, activityIdentifiersHtml(event));
+  noteActivitySummary(event);
+}
+
+// A successful log emission reads as the workflow output the author asked for: the emitted value is
+// the row. The generic `NODE_COMPLETED · <node-id>` title, the instance counts and the
+// process/traversal/invocation/attempt identifiers are exactly what made the value hard to find, so
+// Output and Nodes drop all three; Trace keeps them, because preserving the full technical rendering
+// is what Trace is for. Returns whether it drew the row, so the caller keeps one path.
+function appendLogEmissionRow(event, css, output) {
+  if (!output || !usesConciseLogRendering(event, activityMode)) return false;
+  const presentation = logEmissionPresentation(output);
+  appendActivity(presentation.title, presentation.detail, `${css} output-value`.trim(), event.occurredAt);
+  noteActivitySummary(event);
+  return true;
+}
+
+// The header's one-line "which execution am I looking at", written only for a row that was actually
+// shown, so it always names an event the reader can find. It stays put under Output mode during a
+// stretch that shows nothing (a long arithmetic loop), which is the accepted cost of doing no DOM
+// work at all for a hidden event.
+function noteActivitySummary(event) {
   document.getElementById('activity-summary').textContent =
     `${event.engineId || 'engine'} · execution ${shortId(event.executionId)}`;
   if (activeExecutionReconciliation === 'unknown') syncExecutionReconciliationChrome(true);
@@ -15291,6 +15367,7 @@ document.addEventListener('click', event => {
   else if (action === 'zoom') zoomBy(Number(control.dataset.value));
   else if (action === 'close-info') closeInfo();
   else if (action === 'clear-activity') clearActivity();
+  else if (action === 'activity-mode') setActivityMode(control.dataset.mode);
   else if (action === 'clear-assistant') clearAssistantConversation();
   else if (action === 'confirm-assistant-proposal') confirmAssistantProposal(control.dataset.proposalId);
   else if (action === 'reject-assistant-proposal') rejectAssistantProposal(control.dataset.proposalId);
@@ -15374,6 +15451,30 @@ document.querySelector('.layout-mirrors[role="radiogroup"]')?.addEventListener('
 // files, which is how a floor drifts away from the measurement that produced it.
 document.documentElement.style.setProperty('--stage-min-h', `${STAGE_MIN_HEIGHT}px`);
 document.documentElement.style.setProperty('--stage-min-w', `${PANE_MIN_WIDTH}px`);
+
+// The observation-level group uses the topbar view control's own keyboard model rather than a second
+// convention: arrows move between levels and select as they go, Home/End jump to the ends, and the
+// group stays a single Tab stop. `stopPropagation` keeps these keys away from the canvas/panel
+// shortcuts, which is why the handler is bound here rather than delegated globally.
+document.querySelector('.activity-modes[role="radiogroup"]')?.addEventListener('keydown', event => {
+  const current = event.target.closest('[role="radio"]');
+  if (!current) return;
+  const radios = activityModeRadios();
+  const currentIndex = radios.indexOf(current);
+  if (currentIndex < 0) return;
+  let nextIndex = currentIndex;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % radios.length;
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + radios.length) % radios.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = radios.length - 1;
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+  const next = radios[nextIndex];
+  next.focus();
+  next.click();
+});
+syncActivityModeChrome();
 
 document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter => {
   splitter.addEventListener('keydown', onLayoutSplitterKeydown);

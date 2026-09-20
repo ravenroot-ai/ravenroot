@@ -21,7 +21,8 @@ making its source, dependencies and compatibility contracts independently testab
 - load the installed node catalog from the service and create nodes through its typed palette/forms;
 - preserve unedited complex XML extension blocks while serializing executable GraphML;
 - validate and start the active graph through `ravenroot-server`;
-- receive correlated Server-Sent Events in the runtime activity log;
+- receive correlated Server-Sent Events in the runtime activity log, at a chosen Output, Nodes or
+  Trace observation level;
 - project active, completed, fallback and failed nodes in Cytoscape and Elastic D3 rendering.
 
 Both formats use the same visualization pipeline after parsing. Small interactive examples live in
@@ -198,6 +199,14 @@ to publish `dist` as static assets.
   clear or refresh methods are never called for a response that may belong to an older credential.
   A 403 is terminal and exposes a revoked state;
 - `src/app.js` owns Cytoscape rendering and the existing interactions;
+- `src/activity-visibility.js` owns the Activity panel's three observation levels (issue #458) as a
+  pure, DOM-free classification: which level a runtime event belongs to, whether a selected level
+  shows it, and the concise row a `log` node's emission renders as. It is deliberately a separate
+  module rather than a branch inside `app.js` so the classification matrix can be unit-tested
+  directly. The level is an observer preference: it never reaches GraphML, the graph, the execution
+  or the monitoring projection that paints nodes and edges, and `app.js` consults it on the single
+  path that appends a row to the Activity panel — after the event has already been offered to that
+  projection, so a quieter panel cannot make the graph's runtime state untrue;
 - `public/examples` contains small, real, server-executable examples: every GraphML file here is
   admitted by `POST /v1/executions` and names only behaviors the standard catalog registers, checked
   by `ravenroot-server`'s `ShippedExampleCorpusTest` and this module's `shipped-examples.test.js`.

@@ -88,17 +88,21 @@ class HumanTaskInteractionBrokerTest {
                     HumanTaskConfirmationAction.DENY), launch.task().availableActions());
             assertFailure(HumanTaskInteractionBroker.Code.UNAVAILABLE,
                     () -> broker.issue(responder, taskId, 2, "https://workbench.example"));
-            assertFailure(HumanTaskInteractionBroker.Code.ORIGIN_REFUSED,
+            assertFailure(HumanTaskInteractionBroker.Code.UNAVAILABLE,
                     () -> broker.complete(launch.capability(), "https://wrong.example", new byte[0],
                             null, HumanTaskSettlement.resolve(response("approved"), "checked")));
 
             HumanTaskSettlement settlement = HumanTaskSettlement.resolve(response("approved"), "checked");
             assertEquals(HumanTaskResult.Code.RESOLVED,
-                    broker.complete(launch.capability(), "https://workbench.example", new byte[0],
-                            null, settlement).code());
+                    service.settle(responder, taskId, 1, settlement).code(),
+                    "custom completion uses current authenticated responder authority");
             assertEquals(HumanTaskResult.Code.ALREADY_APPLIED,
-                    broker.complete(launch.capability(), "https://workbench.example", new byte[0],
-                            null, settlement).code());
+                    service.settle(responder, taskId, 1, settlement).code());
+
+            assertFailure(HumanTaskInteractionBroker.Code.ORIGIN_REFUSED,
+                    () -> broker.issue(responder, request(store, service,
+                                    HumanTaskPresentationKind.CUSTOM, "custom"), 1,
+                            "https://custom.example"));
 
             UUID revokedTask = request(store, service, HumanTaskPresentationKind.CUSTOM, "custom");
             var revoked = broker.issue(responder, revokedTask, 1, "https://workbench.example");

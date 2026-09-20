@@ -5,7 +5,7 @@ import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
 import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
 import ai.ravenroot.api.persistence.HumanTaskPresentationKind;
 import ai.ravenroot.api.persistence.HumanTaskSettlement;
-import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.AuthorizationAction;
 import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.core.humantask.HumanTaskResult;
@@ -32,7 +32,7 @@ import java.util.UUID;
 
 /** Issues and consumes bounded, expiring, single-task interaction capabilities. */
 public final class HumanTaskInteractionBroker {
-    private static final int CAPABILITY_VERSION = 1;
+    private static final int CAPABILITY_VERSION = 2;
     private static final int MAX_TOKEN_BYTES = 32_768;
     private final HumanTaskInteractionConfiguration configuration;
     private final HumanTaskService tasks;
@@ -65,6 +65,10 @@ public final class HumanTaskInteractionBroker {
         }
         var profile = configuration.requireProfile(presentation.profileId(),
                 presentation.profileVersion(), presentation.kind());
+        if (profile.kind() == HumanTaskInteractionConfiguration.Kind.CUSTOM
+                && profile.origin().toString().equals(returnOrigin)) {
+            throw new CapabilityFailure(Code.ORIGIN_REFUSED);
+        }
         Instant now = clock.instant();
         Instant expiresAt = now.plus(configuration.capabilityTtl());
         if (task.expiresAt().isBefore(expiresAt)) expiresAt = task.expiresAt();
@@ -72,8 +76,7 @@ public final class HumanTaskInteractionBroker {
         UUID capabilityId = UUID.randomUUID();
         Claims claims = new Claims(capabilityId, expiresAt, context.tenantId(), task.taskId(),
                 task.generation(), profile.key().id(), profile.key().version(), profile.kind(),
-                responseSchemaDigest(interaction.responseSchema()), Set.copyOf(task.availableActions()), returnOrigin,
-                context.subject(), context.principalType(), context.issuer(), context.roles(), context.scopes());
+                responseSchemaDigest(interaction.responseSchema()), Set.copyOf(task.availableActions()), returnOrigin);
         return new Launch(sign(claims), capabilityId, expiresAt, profile, task,
                 interaction.responseSchema(), returnOrigin);
     }
@@ -88,33 +91,33 @@ public final class HumanTaskInteractionBroker {
         var profile = configuration.requireProfile(claims.profileId(), claims.profileVersion(),
                 claims.kind() == HumanTaskInteractionConfiguration.Kind.CUSTOM
                         ? HumanTaskPresentationKind.CUSTOM : HumanTaskPresentationKind.EXTERNAL);
-        String expectedOrigin = claims.kind() == HumanTaskInteractionConfiguration.Kind.CUSTOM
-                ? claims.returnOrigin() : profile.origin().toString();
+        if (claims.kind() != HumanTaskInteractionConfiguration.Kind.EXTERNAL) {
+            throw new CapabilityFailure(Code.UNAVAILABLE);
+        }
+        String expectedOrigin = profile.origin().toString();
         if (!expectedOrigin.equals(origin)) throw new CapabilityFailure(Code.ORIGIN_REFUSED);
-        if (claims.kind() == HumanTaskInteractionConfiguration.Kind.EXTERNAL) {
-            if (providerSignature == null || !constantTime(signature(profile.completionSecret(), exactBody),
-                    providerSignature)) {
-                throw new CapabilityFailure(Code.SIGNATURE_REFUSED);
-            }
-        } else if (providerSignature != null) {
+        if (providerSignature == null || !constantTime(signature(profile.completionSecret(), exactBody),
+                providerSignature)) {
             throw new CapabilityFailure(Code.SIGNATURE_REFUSED);
         }
         if (!claims.actions().contains(settlement.action())) {
             throw new CapabilityFailure(Code.ACTION_REFUSED);
         }
-        RequestContext context = new RequestContext("human-task-capability:" + claims.capabilityId(),
-                claims.subject(), claims.principalType(), claims.issuer(), claims.tenantId(),
-                claims.roles(), claims.scopes());
-        return tasks.settle(context, claims.taskId(), claims.generation(), settlement);
+        return tasks.settleInteractionCapability(claims.tenantId(), claims.capabilityId(),
+                claims.taskId(), claims.generation(), claims.profileId(), claims.profileVersion(),
+                claims.schemaDigest(), settlement);
     }
 
     public void revoke(RequestContext context, String capability, UUID taskId, long generation) {
         Claims claims = verify(capability);
         if (!claims.tenantId().equals(context.tenantId()) || !claims.taskId().equals(taskId)
                 || claims.generation() != generation) throw new CapabilityFailure(Code.UNAVAILABLE);
-        boolean owner = claims.subject().equals(context.subject()) && claims.issuer().equals(context.issuer());
-        boolean admin = context.roles().contains(Role.TENANT_ADMIN) || context.roles().contains(Role.PLATFORM_ADMIN);
-        if (!owner && !admin) throw new CapabilityFailure(Code.UNAVAILABLE);
+        boolean responder = tasks.interactionTask(context,
+                new HumanTaskAttentionLocator(taskId, generation)).isPresent();
+        boolean admin = context.scopes().contains(AuthorizationAction.HUMAN_TASK_OVERRIDE.requiredScope())
+                && (context.roles().contains(Role.TENANT_ADMIN)
+                || context.roles().contains(Role.PLATFORM_ADMIN));
+        if (!responder && !admin) throw new CapabilityFailure(Code.UNAVAILABLE);
         Instant now = clock.instant();
         if (!now.isBefore(claims.expiresAt())) throw new CapabilityFailure(Code.EXPIRED);
         tasks.revokeInteractionCapability(context.tenantId(),
@@ -136,9 +139,7 @@ public final class HumanTaskInteractionBroker {
     private record Claims(UUID capabilityId, Instant expiresAt, String tenantId, UUID taskId,
                           long generation, String profileId, int profileVersion,
                           HumanTaskInteractionConfiguration.Kind kind, String schemaDigest,
-                          Set<HumanTaskConfirmationAction> actions, String returnOrigin,
-                          String subject, PrincipalType principalType, String issuer,
-                          Set<Role> roles, Set<String> scopes) { }
+                          Set<HumanTaskConfirmationAction> actions, String returnOrigin) { }
 
     private String sign(Claims claims) {
         byte[] body = encode(claims);
@@ -186,11 +187,6 @@ public final class HumanTaskInteractionBroker {
             write(output, claims.schemaDigest());
             writeEnums(output, claims.actions());
             write(output, claims.returnOrigin());
-            write(output, claims.subject());
-            write(output, claims.principalType().name());
-            write(output, claims.issuer());
-            writeEnums(output, claims.roles());
-            writeStrings(output, claims.scopes());
             output.flush();
             if (bytes.size() > MAX_TOKEN_BYTES) throw new IllegalArgumentException("capability is too large");
             return bytes.toByteArray();
@@ -216,15 +212,9 @@ public final class HumanTaskInteractionBroker {
             Set<HumanTaskConfirmationAction> actions = readEnums(input, HumanTaskConfirmationAction.class);
             String returnOrigin = read(input);
             requireOrigin(returnOrigin);
-            String subject = read(input);
-            PrincipalType principalType = PrincipalType.valueOf(read(input));
-            String issuer = read(input);
-            Set<Role> roles = readEnums(input, Role.class);
-            Set<String> scopes = readStrings(input);
             if (input.read() != -1 || actions.isEmpty()) throw new IllegalArgumentException();
             return new Claims(capabilityId, expiresAt, tenant, taskId, generation, profileId,
-                    profileVersion, kind, schemaDigest, actions, returnOrigin, subject,
-                    principalType, issuer, roles, scopes);
+                    profileVersion, kind, schemaDigest, actions, returnOrigin);
         } catch (IOException | RuntimeException invalid) {
             throw new IllegalArgumentException("invalid capability", invalid);
         }

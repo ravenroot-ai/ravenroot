@@ -413,8 +413,8 @@ class HumanTaskServiceTest {
             assertEquals(HumanTaskResult.Code.PAYLOAD_REFUSED,
                     service.resolve(responder(), suspended.task().request().taskId(), 1, wrongSchema).code());
             assertEquals(HumanTaskResult.Code.CANCELLED,
-                    service.cancel(requester(), suspended.task().request().taskId(), 1).code(),
-                    "the original requester may cancel without holding responder roles");
+                    service.cancel(responder(), suspended.task().request().taskId(), 1).code(),
+                    "default-off enforcement permits any admitted same-tenant principal to cancel");
         }
     }
 

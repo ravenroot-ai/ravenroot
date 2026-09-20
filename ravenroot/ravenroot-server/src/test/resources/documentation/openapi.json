@@ -60,6 +60,51 @@
         }
       }
     },
+    "/v1/admin/human-tasks/{taskId}/attention": {
+      "get": {
+        "summary": "Returns exact tenant-explicit Human Task review through an authorized override. Tenant administrators remain tenant-local; platform administrators may select another tenant. Audit evidence excludes review and response content.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/admin/human-tasks/{taskId}/settle": {
+      "post": {
+        "summary": "Applies the tenant-explicit canonical Human Task override settlement with a bounded reason and payload-free audit outcome.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/agent-authority": {
       "post": {
         "summary": "Dispatch context for the authenticated durable agent-authority trip/reset controls. Bare and unknown operations are nondisclosing 404 responses.",
@@ -886,7 +931,7 @@
     },
     "/v1/human-task-interactions/complete": {
       "post": {
-        "summary": "Completes one registered presentation using only its bounded signed capability. Ambient Authorization and Cookie credentials are refused; origin, provider signature, task generation, schema, action, expiry, and durable revocation are fenced.",
+        "summary": "Completes one configured external-provider interaction using only its bounded signed capability. Ambient Authorization and Cookie credentials are refused; origin, provider signature, task generation, schema, action, expiry, and durable revocation are fenced.",
         "x-assistant-posture": "NEVER",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskCapabilityCompletion"}}}},
         "responses": {

@@ -306,13 +306,20 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       const frame = dialog.ownerDocument.createElement('iframe');
       frame.className = 'human-task-presentation-frame';
       frame.title = `${launch.kind === 'EXTERNAL' ? 'External' : 'Custom'} Human Task presentation`;
-      frame.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin');
+      // A custom component is deliberately assigned an opaque origin. Combining scripts with
+      // allow-same-origin would let a component navigate to the Workbench origin, remove its own
+      // sandbox, and reach the parent DOM. External providers retain their registered origin so
+      // their callback/reconciliation protocol can enforce it exactly.
+      frame.setAttribute('sandbox', launch.kind === 'CUSTOM'
+        ? 'allow-scripts allow-forms' : 'allow-scripts allow-forms allow-same-origin');
       frame.setAttribute('referrerpolicy', 'no-referrer');
       frame.src = launch.launchUri;
       interactionFrame = frame;
       const view = dialog.ownerDocument.defaultView;
       interactionMessage = event => {
-        if (!interactionLaunch || event.source !== frame.contentWindow || event.origin !== launch.origin) return;
+        const expectedOrigin = launch.kind === 'CUSTOM' ? 'null' : launch.origin;
+        if (!interactionLaunch || event.source !== frame.contentWindow
+            || event.origin !== expectedOrigin) return;
         const message = event.data;
         if (!message || typeof message !== 'object' || Array.isArray(message)
             || message.protocol !== 'ravenroot.human-task.presentation'
@@ -358,13 +365,16 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         if (!interactionLaunch || !isCurrent(token, sourceTask)) return;
         frame.contentWindow?.postMessage(Object.freeze({
           protocol: 'ravenroot.human-task.presentation', version: 1, type: 'initialize',
-          capability: launch.capability, capabilityId: launch.capabilityId,
+          capabilityId: launch.capabilityId,
           taskId: launch.taskId, generation: launch.generation, actions: launch.actions,
           responseSchema: launch.responseSchema, review: launch.review,
           accessibility: { locale: dialog.ownerDocument.documentElement.lang || 'en',
             reducedMotion: view?.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false },
           theme: dialog.ownerDocument.documentElement.dataset.theme || 'system',
-        }), launch.origin);
+          // Only the configured external provider receives its identity-free delegated callback
+          // capability. A custom component always completes through the authenticated parent.
+          ...(launch.kind === 'EXTERNAL' ? { capability: launch.capability } : {}),
+        }), launch.kind === 'CUSTOM' ? '*' : launch.origin);
       }, { once: true });
       interactionHost.append(frame);
       const remaining = Math.max(0, new Date(launch.expiresAt).getTime() - Date.now());
@@ -478,7 +488,8 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           const wrapper = element(dialog.ownerDocument, 'div', 'human-task-form-field');
           const label = element(dialog.ownerDocument, 'label', '', field.label);
           const input = field.type === 'ENUM' ? dialog.ownerDocument.createElement('select')
-            : dialog.ownerDocument.createElement('input');
+            : field.type === 'MULTILINE_TEXT' ? dialog.ownerDocument.createElement('textarea')
+              : dialog.ownerDocument.createElement('input');
           input.dataset.humanTaskFormField = field.name;
           input.name = field.name;
           input.required = field.required;
@@ -488,6 +499,8 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
           else if (field.type === 'DATE') input.type = 'date';
           else if (field.type === 'DATE_TIME') input.type = 'datetime-local';
           else if (field.type === 'TEXT') input.type = 'text';
+          if (field.minimum != null) input.min = String(field.minimum);
+          if (field.maximum != null) input.max = String(field.maximum);
           if (field.type === 'ENUM') {
             const addOption = value => {
               const option = dialog.ownerDocument.createElement('option');

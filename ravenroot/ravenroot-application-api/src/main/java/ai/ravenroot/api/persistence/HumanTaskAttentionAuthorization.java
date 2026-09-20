@@ -6,17 +6,30 @@ import java.util.Set;
 /**
  * Minimum caller authority required by the persistence port to project Human Task attention.
  *
- * <p>The actor is the same qualified identity used by decision settlement. It permits requester
- * cancellation without exposing the stored requester or returning a task that has no action this
- * caller can take.</p>
+ * <p>The actor is the same qualified identity used by decision settlement. In enforced mode it
+ * permits requester cancellation without exposing the stored requester or returning a task that
+ * has no action this caller can take.</p>
  *
  * @param actor audit-stable qualified caller identity.
  * @param roles opaque role tokens currently held by the caller.
  * @param scopes opaque scope tokens currently held by the caller.
  * @param responderEnforcementEnabled whether task-authored requirements are active.
+ * @param overrideAuthorized whether an explicitly authorized administrative override is active.
  */
 public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes,
-                                               boolean responderEnforcementEnabled) {
+                                               boolean responderEnforcementEnabled,
+                                               boolean overrideAuthorized) {
+    /**
+     * Creates ordinary (non-override) authority with an explicit enforcement mode.
+     * @param actor audit-stable qualified caller identity
+     * @param roles opaque role tokens currently held by the caller
+     * @param scopes opaque scope tokens currently held by the caller
+     * @param responderEnforcementEnabled whether task-authored requirements are active
+     */
+    public HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes,
+                                           boolean responderEnforcementEnabled) {
+        this(actor, roles, scopes, responderEnforcementEnabled, false);
+    }
     /**
      * Compatibility constructor preserving the previously enforced behavior.
      *
@@ -25,7 +38,7 @@ public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, S
      * @param scopes opaque scope tokens currently held by the caller
      */
     public HumanTaskAttentionAuthorization(String actor, Set<String> roles, Set<String> scopes) {
-        this(actor, roles, scopes, true);
+        this(actor, roles, scopes, true, false);
     }
     /** Validates the actor and snapshots authority tokens. */
     public HumanTaskAttentionAuthorization {
@@ -76,10 +89,25 @@ public record HumanTaskAttentionAuthorization(String actor, Set<String> roles, S
             List<HumanTaskConfirmationAction> pinnedActions) {
         if (requirements == null || requesterActor == null || pinnedActions == null
                 || pinnedActions.isEmpty()) return List.of();
-        boolean responder = !responderEnforcementEnabled || requirements.satisfiedBy(roles, scopes);
+        if (!responderEnforcementEnabled || overrideAuthorized) return List.copyOf(pinnedActions);
+        boolean responder = requirements.satisfiedBy(roles, scopes);
         boolean requester = actor.equals(requesterActor);
         return pinnedActions.stream()
                 .filter(action -> action == HumanTaskConfirmationAction.CANCEL ? requester : responder)
                 .toList();
+    }
+
+    /**
+     * Returns whether exact-detail review content may be disclosed independently of action availability.
+     * A requester who can only cancel in enforced mode deliberately does not gain review access.
+     *
+     * @param requirements responder role and scope requirements
+     * @param requesterActor qualified identity of the task requester
+     * @return whether exact-detail review content may be disclosed
+     */
+    public boolean mayReview(HandlerAuthorization requirements, String requesterActor) {
+        if (requirements == null || requesterActor == null) return false;
+        return !responderEnforcementEnabled || overrideAuthorized
+                || requirements.satisfiedBy(roles, scopes);
     }
 }

@@ -41,7 +41,8 @@ missing capability in the catalog and preflight rather than starting a graph tha
 task.
 
 For a multi-field response, select `FORM` and author the closed version-one form schema from the
-catalog controls. The Workbench uses native labelled text, checkbox, number, select, date, and
+catalog controls. The Workbench uses native labelled single- and multiline text, checkbox, bounded
+number, select, date, and
 date-time controls, preserves keyboard/focus behavior and reduced-motion preferences, and sends a
 typed map only after browser and server validation. Unknown fields, markup, nested schemas, and
 executable content are not accepted.

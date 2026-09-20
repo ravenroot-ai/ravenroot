@@ -150,7 +150,7 @@ the default below. Values are read at process startup and require a restart to c
 
 | Server property / environment variable | Default | Valid range | Scope |
 |---|---:|---|---|
-| `ravenroot.human-task.responder-enforcement-enabled` / `RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED` | `false` | strict `true` or `false` | enforce graph-authored responder roles/scopes; tenant/auth boundaries and requester-only cancel are always enforced |
+| `ravenroot.human-task.responder-enforcement-enabled` / `RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED` | `false` | strict `true` or `false` | when false, admitted same-tenant principals may inspect and perform every pinned action; when true, graph-authored responder roles/scopes govern review/resolve/deny and Cancel is requester-only |
 | `ravenroot.human-task.default-response-bytes` / `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | 65,536 | 1–67,108,864; no greater than `max-response-bytes` | default graph response ceiling |
 | `ravenroot.human-task.max-response-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | 262,144 | 1–67,108,864; no greater than `max-decision-body-bytes` | largest graph response ceiling |
 | `ravenroot.human-task.default-escalation-seconds` / `RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS` | 0 | 0–2,147,483,646; zero or below `default-expiry-seconds`; no greater than `max-escalation-seconds` | default escalation delay; zero disables it |

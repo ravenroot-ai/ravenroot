@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -33,6 +34,8 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
     public enum Type {
         /** UTF-8-bounded plain text. */
         TEXT,
+        /** UTF-8-bounded plain text displayed in a multiline control. */
+        MULTILINE_TEXT,
         /** Boolean value. */
         BOOLEAN,
         /** Signed integer value. */
@@ -57,9 +60,28 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
      * @param required whether a non-null response member is required
      * @param maxUtf8Bytes maximum encoded bytes for text-bearing values
      * @param allowedValues pinned values accepted by an enum field
+     * @param minimum optional inclusive numeric lower bound
+     * @param maximum optional inclusive numeric upper bound
      */
     public record Field(String name, String label, String help, Type type, boolean required,
-                        int maxUtf8Bytes, List<String> allowedValues) {
+                        int maxUtf8Bytes, List<String> allowedValues,
+                        Optional<Double> minimum, Optional<Double> maximum) {
+        /**
+         * Compatibility constructor for schema-v1 fields without numeric bounds.
+         * @param name stable field key
+         * @param label responder-visible plain-text label
+         * @param help optional responder-visible plain-text help
+         * @param type closed typed-value contract
+         * @param required whether a non-null response member is required
+         * @param maxUtf8Bytes maximum encoded bytes for text-bearing values
+         * @param allowedValues pinned values accepted by an enum field
+         */
+        public Field(String name, String label, String help, Type type, boolean required,
+                     int maxUtf8Bytes, List<String> allowedValues) {
+            this(name, label, help, type, required, maxUtf8Bytes, allowedValues,
+                    Optional.empty(), Optional.empty());
+        }
+
         /** Validates and snapshots the bounded field definition. */
         public Field {
             if (name == null || !NAME.matcher(name).matches()) {
@@ -81,6 +103,22 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
                         .map(value -> text(value, "allowed value", 256, true)).toList();
             } else if (!allowedValues.isEmpty()) {
                 throw new IllegalArgumentException("only enum fields may carry allowed values");
+            }
+            minimum = minimum == null ? Optional.empty() : minimum;
+            maximum = maximum == null ? Optional.empty() : maximum;
+            if ((minimum.isPresent() || maximum.isPresent())
+                    && type != Type.INTEGER && type != Type.DECIMAL) {
+                throw new IllegalArgumentException("only numeric fields may carry bounds");
+            }
+            minimum.ifPresent(value -> requireFiniteBound(value, "minimum"));
+            maximum.ifPresent(value -> requireFiniteBound(value, "maximum"));
+            if (minimum.isPresent() && maximum.isPresent()
+                    && minimum.orElseThrow() > maximum.orElseThrow()) {
+                throw new IllegalArgumentException("form numeric minimum exceeds maximum");
+            }
+            if (type == Type.INTEGER && (minimum.filter(value -> value != Math.rint(value)).isPresent()
+                    || maximum.filter(value -> value != Math.rint(value)).isPresent())) {
+                throw new IllegalArgumentException("integer form bounds must be integral");
             }
         }
     }
@@ -137,6 +175,10 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
             entry.put("maxUtf8Bytes", PayloadValue.of(field.maxUtf8Bytes()));
             entry.put("allowedValues", PayloadValue.list(field.allowedValues().stream()
                     .map(PayloadValue::of).toList()));
+            entry.put("minimum", field.minimum().<PayloadValue>map(PayloadValue::of)
+                    .orElse(PayloadValue.NULL));
+            entry.put("maximum", field.maximum().<PayloadValue>map(PayloadValue::of)
+                    .orElse(PayloadValue.NULL));
             encodedFields.add(PayloadValue.map(entry));
         }
         var root = new LinkedHashMap<String, PayloadValue>();
@@ -162,15 +204,22 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
         }
         var fields = new ArrayList<Field>();
         for (PayloadValue item : list.values()) {
-            if (!(item instanceof PayloadValue.MapValue map)
-                    || !map.entries().keySet().equals(java.util.Set.of(
-                    "name", "label", "help", "type", "required", "maxUtf8Bytes", "allowedValues"))) {
+            if (!(item instanceof PayloadValue.MapValue map)) {
+                throw new IllegalArgumentException("invalid form field document");
+            }
+            var legacyKeys = java.util.Set.of(
+                    "name", "label", "help", "type", "required", "maxUtf8Bytes", "allowedValues");
+            var boundedKeys = java.util.Set.of("name", "label", "help", "type", "required",
+                    "maxUtf8Bytes", "allowedValues", "minimum", "maximum");
+            if (!map.entries().keySet().equals(legacyKeys)
+                    && !map.entries().keySet().equals(boundedKeys)) {
                 throw new IllegalArgumentException("invalid form field document");
             }
             var allowed = stringList(map.entries().get("allowedValues"));
             fields.add(new Field(string(map, "name"), string(map, "label"), string(map, "help"),
                     Type.valueOf(string(map, "type")), bool(map, "required"),
-                    Math.toIntExact(integer(map, "maxUtf8Bytes")), allowed));
+                    Math.toIntExact(integer(map, "maxUtf8Bytes")), allowed,
+                    number(map, "minimum"), number(map, "maximum")));
         }
         return new HumanTaskFormSchema(Math.toIntExact(version.value()), fields);
     }
@@ -178,10 +227,18 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
     private static void requireType(Field field, PayloadValue value) {
         switch (field.type()) {
             case BOOLEAN -> { if (!(value instanceof PayloadValue.BooleanValue)) invalid(field); }
-            case INTEGER -> { if (!(value instanceof PayloadValue.IntegerValue)) invalid(field); }
-            case DECIMAL -> { if (!(value instanceof PayloadValue.DecimalValue
-                    || value instanceof PayloadValue.IntegerValue)) invalid(field); }
-            case TEXT, ENUM, DATE, DATE_TIME -> {
+            case INTEGER -> {
+                if (!(value instanceof PayloadValue.IntegerValue integer)) { invalid(field); return; }
+                requireBounds(field, integer.value());
+            }
+            case DECIMAL -> {
+                double number;
+                if (value instanceof PayloadValue.DecimalValue decimal) number = decimal.value();
+                else if (value instanceof PayloadValue.IntegerValue integer) number = integer.value();
+                else { invalid(field); return; }
+                requireBounds(field, number);
+            }
+            case TEXT, MULTILINE_TEXT, ENUM, DATE, DATE_TIME -> {
                 if (!(value instanceof PayloadValue.TextValue text)) invalid(field);
                 String supplied = ((PayloadValue.TextValue) value).value();
                 if (supplied.getBytes(StandardCharsets.UTF_8).length > field.maxUtf8Bytes()) invalid(field);
@@ -217,6 +274,23 @@ public record HumanTaskFormSchema(int version, List<Field> fields) {
             throw new IllegalArgumentException("invalid form schema field " + key);
         }
         return value.value();
+    }
+
+    private static Optional<Double> number(PayloadValue.MapValue map, String key) {
+        PayloadValue value = map.entries().get(key);
+        if (value == null || value instanceof PayloadValue.NullValue) return Optional.empty();
+        if (value instanceof PayloadValue.IntegerValue integer) return Optional.of((double) integer.value());
+        if (value instanceof PayloadValue.DecimalValue decimal) return Optional.of(decimal.value());
+        throw new IllegalArgumentException("invalid form schema field " + key);
+    }
+
+    private static void requireBounds(Field field, double value) {
+        if (field.minimum().filter(bound -> value < bound).isPresent()
+                || field.maximum().filter(bound -> value > bound).isPresent()) invalid(field);
+    }
+
+    private static void requireFiniteBound(double value, String name) {
+        if (!Double.isFinite(value)) throw new IllegalArgumentException(name + " must be finite");
     }
 
     private static List<String> stringList(PayloadValue value) {

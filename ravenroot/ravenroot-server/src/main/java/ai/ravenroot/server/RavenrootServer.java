@@ -2738,7 +2738,7 @@ public final class RavenrootServer implements AutoCloseable {
                 java.util.UUID taskId = java.util.UUID.fromString(segments[0]);
                 long generation = Long.parseLong(query(exchange).get("generation"));
                 if (generation < 1) throw new IllegalArgumentException("generation");
-                humanTaskSettlement(exchange, httpContext, context, service, taskId, generation);
+                humanTaskSettlement(exchange, httpContext, context, service, taskId, generation, null);
             } catch (IllegalArgumentException invalid) {
                 fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             }
@@ -3032,7 +3032,9 @@ public final class RavenrootServer implements AutoCloseable {
     private void humanTaskSettlement(HttpExchange exchange, HttpRequestContext httpContext,
                                      ai.ravenroot.api.security.RequestContext context,
                                      ai.ravenroot.core.humantask.HumanTaskService service,
-                                     java.util.UUID taskId, long generation) throws IOException {
+                                     java.util.UUID taskId, long generation,
+                                     ai.ravenroot.api.persistence.HumanTaskOverride requiredOverride)
+            throws IOException {
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null || !(contentType.equalsIgnoreCase("application/json")
                 || contentType.equalsIgnoreCase("application/json; charset=utf-8"))) {
@@ -3116,6 +3118,10 @@ public final class RavenrootServer implements AutoCloseable {
                         ai.ravenroot.api.security.ProtectedResource.owned(
                                 "human-task", taskId.toString(), context.tenantId()));
             }
+            if (requiredOverride != null && !requiredOverride.equals(override)) {
+                throw new IllegalArgumentException(
+                        "administrative settlement body must repeat the authorized override");
+            }
         } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
             throw denied;
         } catch (RuntimeException invalid) {
@@ -3150,6 +3156,13 @@ public final class RavenrootServer implements AutoCloseable {
             return;
         }
         String suffix = exchange.getRequestURI().getPath().substring("/v1/admin/human-tasks".length());
+        String[] actionSegments = suffix.startsWith("/")
+                ? suffix.substring(1).split("/", -1) : new String[0];
+        if (actionSegments.length == 2 && !actionSegments[0].isBlank()
+                && ("attention".equals(actionSegments[1]) || "settle".equals(actionSegments[1]))) {
+            adminHumanTaskOverride(exchange, httpContext, service, actionSegments[0], actionSegments[1]);
+            return;
+        }
         boolean purge = "/purge".equals(suffix);
         if ((!suffix.isEmpty() && !"/".equals(suffix) && !purge)
                 || !method(exchange, httpContext, purge ? "POST" : "GET")) return;
@@ -3185,6 +3198,52 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {
             fail(exchange, httpContext, ErrorCode.INTERNAL_ERROR);
+        }
+    }
+
+    private void adminHumanTaskOverride(
+            HttpExchange exchange, HttpRequestContext httpContext,
+            ai.ravenroot.core.humantask.HumanTaskService service,
+            String taskText, String operation) throws IOException {
+        if (!method(exchange, httpContext, "attention".equals(operation) ? "GET" : "POST")) return;
+        try {
+            Map<String, String> parameters = query(exchange);
+            if (!java.util.Set.of("tenant", "generation", "reason").equals(parameters.keySet())) {
+                throw new IllegalArgumentException("tenant, generation, and reason are required");
+            }
+            String tenant = parameters.get("tenant");
+            java.util.UUID taskId = java.util.UUID.fromString(taskText);
+            long generation = Long.parseLong(parameters.get("generation"));
+            if (tenant == null || tenant.isBlank() || generation < 1) {
+                throw new IllegalArgumentException("invalid override locator");
+            }
+            var override = new ai.ravenroot.api.persistence.HumanTaskOverride(parameters.get("reason"));
+            var caller = httpContext.applicationContext();
+            authorization.requireAllowed(caller,
+                    ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_OVERRIDE,
+                    ai.ravenroot.api.security.ProtectedResource.owned(
+                            "human-task", taskId.toString(), tenant));
+            var scoped = tenant.equals(caller.tenantId()) ? caller
+                    : new ai.ravenroot.api.security.RequestContext(caller.requestId(), caller.subject(),
+                    caller.principalType(), caller.issuer(), tenant, caller.roles(), caller.scopes());
+            if ("settle".equals(operation)) {
+                humanTaskSettlement(exchange, httpContext, scoped, service, taskId, generation, override);
+                return;
+            }
+            var item = service.attentionOverride(scoped,
+                    new ai.ravenroot.api.persistence.HumanTaskAttentionLocator(taskId, generation), override);
+            var counts = item.isEmpty()
+                    ? new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(0, 0)
+                    : new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(1,
+                    item.orElseThrow().status() == ai.ravenroot.api.persistence.HumanTaskStatus.ESCALATED
+                            ? 1 : 0);
+            json(exchange, 200, humanTaskAttentionPageJson(
+                    new ai.ravenroot.api.persistence.HumanTaskAttentionPage(item.stream().toList(),
+                            java.util.Optional.empty(), counts, java.util.List.of())));
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         }
     }
 
@@ -3323,7 +3382,8 @@ public final class RavenrootServer implements AutoCloseable {
         if (!method(exchange, httpContext, "GET")) return;
         Map<String, String> parameters = query(exchange);
         if (!java.util.Set.of("graphVersion", "deploymentId", "processInstanceId", "traversalId",
-                "nodeId", "taskId", "generation", "limit", "cursor").containsAll(parameters.keySet())) {
+                "nodeId", "taskId", "generation", "limit", "cursor", "override", "reason")
+                .containsAll(parameters.keySet())) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
             return;
         }
@@ -3344,7 +3404,22 @@ public final class RavenrootServer implements AutoCloseable {
                 }
                 var locator = new ai.ravenroot.api.persistence.HumanTaskAttentionLocator(
                         java.util.UUID.fromString(taskText), Long.parseLong(generationText));
-                var item = service.attention(context, locator);
+                boolean overrideRequested = parameters.containsKey("override");
+                if (overrideRequested != parameters.containsKey("reason")
+                        || overrideRequested && !"true".equalsIgnoreCase(parameters.get("override"))) {
+                    throw new IllegalArgumentException("override and reason must be supplied together");
+                }
+                java.util.Optional<ai.ravenroot.api.persistence.HumanTaskAttentionItem> item;
+                if (overrideRequested) {
+                    authorization.requireAllowed(context,
+                            ai.ravenroot.api.security.AuthorizationAction.HUMAN_TASK_OVERRIDE,
+                            ai.ravenroot.api.security.ProtectedResource.owned(
+                                    "human-task", taskText, context.tenantId()));
+                    item = service.attentionOverride(context, locator,
+                            new ai.ravenroot.api.persistence.HumanTaskOverride(parameters.get("reason")));
+                } else {
+                    item = service.attention(context, locator);
+                }
                 var counts = item.isEmpty()
                         ? new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(0, 0)
                         : new ai.ravenroot.api.persistence.HumanTaskAttentionCounts(1,
@@ -3356,6 +3431,9 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             String graphVersion = parameters.get("graphVersion");
+            if (parameters.containsKey("override") || parameters.containsKey("reason")) {
+                throw new IllegalArgumentException("override review requires an exact locator");
+            }
             String deploymentId = parameters.get("deploymentId");
             String processId = parameters.get("processInstanceId");
             if (graphVersion == null || graphVersion.isBlank()
@@ -3374,6 +3452,8 @@ public final class RavenrootServer implements AutoCloseable {
                             ? java.util.Optional.of(new ai.ravenroot.api.persistence.HumanTaskAttentionCursor(
                             parameters.get("cursor"))) : java.util.Optional.empty(), limit);
             json(exchange, 200, humanTaskAttentionPageJson(service.attention(context, attentionQuery)));
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            throw denied;
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (RuntimeException failure) {

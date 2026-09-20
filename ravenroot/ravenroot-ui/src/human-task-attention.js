@@ -5,7 +5,8 @@ const COMMENT_MODES = new Set(['DISALLOWED', 'OPTIONAL', 'REQUIRED']);
 const REVIEW_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const BIDI_FORMATTING = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 const PRESENTATION_KINDS = new Set(['CLASSIC', 'CONFIRMATION', 'FORM', 'CUSTOM', 'EXTERNAL']);
-const FORM_TYPES = new Set(['TEXT', 'BOOLEAN', 'INTEGER', 'DECIMAL', 'ENUM', 'DATE', 'DATE_TIME']);
+const FORM_TYPES = new Set(['TEXT', 'MULTILINE_TEXT', 'BOOLEAN', 'INTEGER', 'DECIMAL', 'ENUM',
+  'DATE', 'DATE_TIME']);
 
 function object(value, message) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(message);
@@ -161,10 +162,21 @@ function validateInteractionPresentation(value) {
       if ((field.type === 'ENUM') !== (allowedValues.length > 0)) {
         throw new Error('Human Task form enum values are invalid');
       }
+      const minimum = field.minimum == null ? null : field.minimum;
+      const maximum = field.maximum == null ? null : field.maximum;
+      const numeric = field.type === 'INTEGER' || field.type === 'DECIMAL';
+      if ((!numeric && (minimum != null || maximum != null))
+          || (minimum != null && (typeof minimum !== 'number' || !Number.isFinite(minimum)))
+          || (maximum != null && (typeof maximum !== 'number' || !Number.isFinite(maximum)))
+          || (minimum != null && maximum != null && minimum > maximum)
+          || (field.type === 'INTEGER' && ((minimum != null && !Number.isSafeInteger(minimum))
+            || (maximum != null && !Number.isSafeInteger(maximum))))) {
+        throw new Error('Human Task form numeric bounds are invalid');
+      }
       return Object.freeze({ name, label: displayText(field.label, 'form label', { required: true }),
         help: displayText(field.help ?? '', 'form help'), type: field.type, required: field.required,
         maxUtf8Bytes: integer(field.maxUtf8Bytes, 'form text maximum', 1),
-        allowedValues: Object.freeze(allowedValues) });
+        allowedValues: Object.freeze(allowedValues), minimum, maximum });
     });
     formSchema = Object.freeze({ version: 1, fields: Object.freeze(fields) });
   }

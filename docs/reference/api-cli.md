@@ -45,8 +45,10 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `POST /v1/human-tasks/{taskId}/settle?generation=N` | Canonical strict JSON settlement with separate action, comment, typed response, and optional explicitly authorized override. |
 | `POST /v1/human-tasks/{taskId}/interaction?generation=N` | Issue one registered custom/external capability after ordinary responder authorization. |
 | `DELETE /v1/human-tasks/{taskId}/interaction?generation=N` | Durably revoke that capability across restart/replicas. |
-| `POST /v1/human-task-interactions/complete` | Capability-only callback; refuses bearer/cookie and fences origin/signature/expiry/revocation/generation/schema/action. |
+| `POST /v1/human-task-interactions/complete` | External-provider-only capability callback; refuses bearer/cookie and fences origin/exact-body signature/expiry/revocation/current generation/profile/schema/action. Custom hosts settle through the parent's current authenticated session. |
 | `GET /v1/admin/human-tasks` | Authorized bounded payload-free consistency inventory. |
+| `GET /v1/admin/human-tasks/{taskId}/attention?tenant=T&generation=N&reason=R` | Tenant-explicit exact override review; tenant admin stays tenant-local and platform admin may cross tenant. |
+| `POST /v1/admin/human-tasks/{taskId}/settle?tenant=T&generation=N&reason=R` | Tenant-explicit canonical override settlement with bounded audit evidence. |
 | `POST /v1/admin/human-tasks/purge` | Dry-run or atomic bounded reconciliation with a required idempotency key. |
 
 All settlement transports return deterministic typed outcomes from the same durable service. See the

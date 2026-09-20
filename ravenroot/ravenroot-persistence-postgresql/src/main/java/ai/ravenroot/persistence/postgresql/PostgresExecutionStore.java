@@ -4944,6 +4944,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + "AND t.status IN " + LIVE_HUMAN_TASK_STATUSES + " "
                         + "AND t.confirmation_version > 0";
                 HumanTaskAttentionItem item;
+                boolean reviewAuthorized;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, tenantId);
                     StoredUuid.bind(statement, 2, locator.taskId());
@@ -4954,10 +4955,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         }
                         item = readHumanTaskAttentionItem(rows, tenantId, authorization);
                         if (item == null) return Optional.empty();
+                        reviewAuthorized = humanTaskReviewAuthorized(rows, tenantId, authorization);
                     }
                 }
                 // Keep the content-bearing query physically after authorization and after the
                 // summary cursor is closed. This ordering is part of the non-disclosure contract.
+                if (!reviewAuthorized) return Optional.of(item);
                 return readHumanTaskReviewPresentation(connection, tenantId, locator)
                         .map(review -> withReviewPresentation(item, review));
             });
@@ -5059,6 +5062,18 @@ public final class PostgresExecutionStore implements ExecutionStore {
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
         }
+    }
+
+    private static boolean humanTaskReviewAuthorized(
+            ResultSet rows, String tenantId, HumanTaskAttentionAuthorization authorization)
+            throws SQLException {
+        var requirements = new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                splitTokens(rows.getString("required_scopes")));
+        String requesterActor = new SecurityContext(rows.getString("requester_request_id"), tenantId,
+                rows.getString("requester_subject"),
+                PrincipalType.valueOf(rows.getString("requester_principal_type")),
+                rows.getString("requester_issuer")).qualifiedIdentity();
+        return authorization.mayReview(requirements, requesterActor);
     }
 
     private void writeHumanTasks(Connection connection, ExecutionKey key, ExecutionBatch batch,

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,7 +19,9 @@ class HumanTaskFormSchemaTest {
                 new HumanTaskFormSchema.Field("approved", "Approved", "", HumanTaskFormSchema.Type.BOOLEAN,
                         true, 16, List.of()),
                 new HumanTaskFormSchema.Field("amount", "Amount", "", HumanTaskFormSchema.Type.DECIMAL,
-                        true, 32, List.of()),
+                        true, 32, List.of(), Optional.of(10.0), Optional.of(20.0)),
+                new HumanTaskFormSchema.Field("notes", "Notes", "Explain the decision",
+                        HumanTaskFormSchema.Type.MULTILINE_TEXT, false, 1_024, List.of()),
                 new HumanTaskFormSchema.Field("region", "Region", "", HumanTaskFormSchema.Type.ENUM,
                         false, 16, List.of("eu", "us")),
                 new HumanTaskFormSchema.Field("due", "Due", "", HumanTaskFormSchema.Type.DATE,
@@ -28,6 +31,7 @@ class HumanTaskFormSchemaTest {
         schema.requireResponse(PayloadValue.map(Map.of(
                 "approved", PayloadValue.of(true),
                 "amount", PayloadValue.of(12.5),
+                "notes", PayloadValue.of("first line\nsecond line"),
                 "region", PayloadValue.of("eu"),
                 "due", PayloadValue.of("2026-09-20"))));
         assertThrows(IllegalArgumentException.class, () -> schema.requireResponse(PayloadValue.map(Map.of(
@@ -38,6 +42,13 @@ class HumanTaskFormSchemaTest {
         assertThrows(IllegalArgumentException.class, () -> schema.requireResponse(PayloadValue.map(Map.of(
                 "approved", PayloadValue.of(true), "amount", PayloadValue.of(12),
                 "region", PayloadValue.of("other")))));
+        assertThrows(IllegalArgumentException.class, () -> schema.requireResponse(PayloadValue.map(Map.of(
+                "approved", PayloadValue.of(true), "amount", PayloadValue.of(21)))));
+
+        String legacy = "{\"version\":1,\"fields\":[{\"name\":\"legacy\",\"label\":\"Legacy\","
+                + "\"help\":\"\",\"type\":\"TEXT\",\"required\":false,\"maxUtf8Bytes\":16,"
+                + "\"allowedValues\":[]}]}";
+        assertEquals(Optional.empty(), HumanTaskFormSchema.decode(legacy).fields().getFirst().minimum());
     }
 
     @Test
@@ -51,10 +62,16 @@ class HumanTaskFormSchemaTest {
                 HumanTaskFormSchema.MAX_TEXT_UTF8_BYTES + 1, List.of()));
         assertThrows(IllegalArgumentException.class, () -> new HumanTaskFormSchema.Field(
                 "field", "<script>\u0000", "", HumanTaskFormSchema.Type.TEXT, true, 16, List.of()));
+        assertThrows(IllegalArgumentException.class, () -> new HumanTaskFormSchema.Field(
+                "field", "Label", "", HumanTaskFormSchema.Type.INTEGER, true, 16, List.of(),
+                Optional.of(1.5), Optional.of(10.0)));
+        assertThrows(IllegalArgumentException.class, () -> new HumanTaskFormSchema.Field(
+                "field", "Label", "", HumanTaskFormSchema.Type.DECIMAL, true, 16, List.of(),
+                Optional.of(10.0), Optional.of(1.0)));
     }
 
     @Test
-    void defaultOffResponderEnforcementKeepsCancelRequesterOnly() {
+    void defaultOffResponderEnforcementPermitsAllActionsAndEnforcedReviewIsIndependent() {
         var presentation = new HumanTaskConfirmationPresentation(1, "Review",
                 HumanTaskCommentRequirement.OPTIONAL,
                 List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY,
@@ -67,7 +84,9 @@ class HumanTaskFormSchemaTest {
                 presentation.actions());
         assertTrue(permissive.contains(HumanTaskConfirmationAction.RESOLVE));
         assertTrue(permissive.contains(HumanTaskConfirmationAction.DENY));
-        assertFalse(permissive.contains(HumanTaskConfirmationAction.CANCEL));
+        assertTrue(permissive.contains(HumanTaskConfirmationAction.CANCEL));
+        assertTrue(new HumanTaskAttentionAuthorization("issuer:other", java.util.Set.of(),
+                java.util.Set.of(), false).mayReview(requirements, "issuer:requester"));
 
         var enforced = new HumanTaskAttentionAuthorization("issuer:requester", java.util.Set.of(),
                 java.util.Set.of(), true).permittedActions(requirements, "issuer:requester",
@@ -75,5 +94,13 @@ class HumanTaskFormSchemaTest {
         assertFalse(enforced.contains(HumanTaskConfirmationAction.RESOLVE));
         assertFalse(enforced.contains(HumanTaskConfirmationAction.DENY));
         assertTrue(enforced.contains(HumanTaskConfirmationAction.CANCEL));
+        assertFalse(new HumanTaskAttentionAuthorization("issuer:requester", java.util.Set.of(),
+                java.util.Set.of(), true).mayReview(requirements, "issuer:requester"));
+
+        var override = new HumanTaskAttentionAuthorization("issuer:administrator", java.util.Set.of(),
+                java.util.Set.of(), true, true);
+        assertEquals(presentation.actions(), override.permittedActions(
+                requirements, "issuer:requester", presentation.actions()));
+        assertTrue(override.mayReview(requirements, "issuer:requester"));
     }
 }

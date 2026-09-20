@@ -86,8 +86,10 @@ because Ravenroot cannot create a compatible response envelope.
 `presentationKind` is an immutable discriminator: `CLASSIC`, `CONFIRMATION`, `FORM`, `CUSTOM`, or
 `EXTERNAL`. A version-one `FORM` carries a closed, non-recursive JSON `formSchema` with one to 64
 uniquely named fields. Each field has exactly `name`, `label`, `help`, `type`, `required`,
-`maxUtf8Bytes`, and `allowedValues`. The closed types are `TEXT`, `BOOLEAN`, `INTEGER`, `DECIMAL`,
-`ENUM`, `DATE`, and `DATE_TIME`; only `ENUM` may declare allowed values. Ravenroot renders inert
+`maxUtf8Bytes`, `allowedValues`, `minimum`, and `maximum`; persisted version-one documents written
+before numeric bounds decode with both bounds absent. The closed types are `TEXT`, `MULTILINE_TEXT`,
+`BOOLEAN`, `INTEGER`, `DECIMAL`, `ENUM`, `DATE`, and `DATE_TIME`; only `ENUM` may declare allowed
+values and only numeric types may declare inclusive finite bounds. Ravenroot renders inert
 native controls, enforces required and unknown fields and exact value types on the server, and emits
 the typed map as a `ravenroot.payload/1` envelope with schema `ravenroot.human-task.form`, version
 `1`, and kind `MAP`. Action and comment remain outside that response.
@@ -120,7 +122,9 @@ Responder enforcement is deliberately disabled on a fresh installation. Tenant r
 authentication, exact-task lookup, generation fencing, and review-content boundaries still apply;
 only graph-authored responder roles and scopes are ignored. Set
 `RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED=true` (or the matching JVM property) to require
-every task-authored role and scope for resolve and deny. Cancel is always requester-only. An explicit
+every task-authored role and scope for resolve and deny; in that enforced mode Cancel remains
+requester-only and does not by itself disclose review content. With enforcement disabled, every
+admitted same-tenant principal may inspect and perform every pinned action, including Cancel. An explicit
 override is a distinct action requiring `ravenroot.human-task.override` and either `TENANT_ADMIN` in
 the task tenant or `PLATFORM_ADMIN`; it requires a bounded nonblank reason. Audit records the actor,
 task, generation, action, and reason digest, not review or response content. Ravenroot consumes roles,
@@ -256,17 +260,23 @@ require their own base64 completion signing secret; custom profiles forbid provi
 `POST /v1/human-tasks/{taskId}/interaction?generation=N` authenticates the responder and returns a
 short-lived single-task launch capability plus only the exact authorized review presentation, pinned
 response schema, actions, task/generation, expiry, registered launch URI/origin, and protocol version.
-The capability binds tenant, task, generation, profile and schema versions, allowed actions, return
-origin, and responder authority. It never contains a Ravenroot bearer or provider credential.
+The capability binds tenant, task, generation, profile and schema versions, allowed actions, and
+return origin. It contains no subject, issuer, roles, scopes, Ravenroot bearer, or provider credential.
 `DELETE` on the same route accepts `{"schemaVersion":1,"capability":"..."}` and durably revokes the
 capability across restart and replicas.
 
 The Workbench host is a sandboxed iframe with forms/scripts only: no popup, top-navigation, ambient
-credentials, or bearer. Version-one `postMessage` exchange validates exact source, origin, task,
-generation, capability, schema, action, lifecycle, and message size. Custom completion is relayed to
-`POST /v1/human-task-interactions/complete` with `credentials: omit`; external providers call the
-same route and sign the exact body in `X-Ravenroot-Provider-Signature`. The server rechecks origin,
-signature, expiry, durable revocation, current generation, action, schema, and responder authority.
+credentials, bearer, or `allow-same-origin`. The browser therefore assigns a custom component an
+opaque origin even if it navigates; it cannot become same-origin with or escape into the parent DOM.
+The server separately validates that the launch URI has the exact registered scheme/host/port, while
+the version-one `postMessage` exchange requires the exact frame source and opaque sandbox origin plus
+the task, generation, opaque capability ID, schema, action, lifecycle, and message-size fences. A
+custom component never receives the signed capability. Custom
+completion returns to the parent and uses the canonical authenticated settlement route, which
+rechecks the caller's current authorization. Only external providers call
+`POST /v1/human-task-interactions/complete`; they sign the exact body in
+`X-Ravenroot-Provider-Signature`. The server rechecks origin, signature, expiry, durable revocation,
+current task/generation, configured profile, action, and schema without reconstructing identity claims.
 Completion is compare-and-set, replay-safe and idempotent: after a lost success response, retrying the
 same capability reconciles to the recorded outcome. Stale, expired, revoked, malformed, wrong-origin,
 or incorrectly signed calls cannot settle the task. Closing, timing out, losing authorization, or
@@ -283,6 +293,12 @@ administrator may select another tenant. Rows classify work as `ACTIONABLE`, `TE
 `ORPHANED`, or `NON_RESUMABLE` and report only lifecycle identities, states, deadlines, and task
 timer disposition. They never include request or response payloads, continuation bytes, credentials,
 responder requirements, or comments.
+
+Exact override review is available at `GET /v1/admin/human-tasks/{taskId}/attention` with required
+`tenant`, `generation`, and bounded `reason` parameters. Cross-tenant access is platform-admin only;
+tenant admins remain tenant-local. The matching `/settle` surface requires the same explicit tenant
+locator and the canonical override document. Review and settlement each emit bounded audit evidence
+containing identities, reason digest, and outcome but never review, response, or comment content.
 
 `POST /v1/admin/human-tasks/purge` accepts those selectors plus `dryRun` (default `true`) and `mode`.
 It requires an `Idempotency-Key` header and refuses an unfiltered operation. `CANCEL` uses ordinary

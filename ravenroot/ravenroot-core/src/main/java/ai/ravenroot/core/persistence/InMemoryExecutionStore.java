@@ -2078,7 +2078,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             .permittedActions(task.request());
                     if (actions.isEmpty()) return Optional.empty();
                     return Optional.of(attentionItem(new AuthorizedHumanTask(
-                            task, entry.origin.deploymentId(), actions), true));
+                            task, entry.origin.deploymentId(), actions),
+                            authorization.mayReview(task.request().responderRequirements(),
+                                    task.request().requester().qualifiedIdentity())));
                 }
                 return Optional.empty();
             }

@@ -45,6 +45,7 @@ import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.AuthorizationAction;
+import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
@@ -635,6 +636,30 @@ public final class HumanTaskService {
         return await(store.findHumanTaskAttention(context.tenantId(), locator, authorization));
     }
 
+    /**
+     * Recovers exact review content and all pinned actions through an explicit administrative override.
+     * @param context authenticated administrative caller scoped to the target tenant
+     * @param locator exact task and generation locator
+     * @param override bounded audited override intent
+     * @return exact authorized projection, or empty for an unavailable task
+     */
+    public Optional<HumanTaskAttentionItem> attentionOverride(
+            RequestContext context, HumanTaskAttentionLocator locator, HumanTaskOverride override) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(locator, "locator");
+        Objects.requireNonNull(override, "override");
+        if (!overrideAuthorized(context)) return Optional.empty();
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        var authorization = new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes(),
+                policy.responderEnforcementEnabled(), true);
+        Optional<HumanTaskAttentionItem> item = await(store.findHumanTaskAttention(
+                context.tenantId(), locator, authorization));
+        item.ifPresent(ignored -> auditOverrideAccess(context, locator, override));
+        return item;
+    }
+
     /** Exact-detail projection for a registered interaction host after ordinary responder authorization. */
     public record InteractionTask(HumanTaskAttentionItem attention,
                                   ai.ravenroot.api.persistence.HumanTaskResponseSchema responseSchema) { }
@@ -860,16 +885,63 @@ public final class HumanTaskService {
                 Objects.requireNonNull(override, "override"));
     }
 
+    /**
+     * Applies a configured external provider's delegated capability after rechecking the complete
+     * current task fence. No requester or responder identity is reconstructed from the capability.
+     * @param tenantId immutable capability tenant
+     * @param capabilityId opaque capability identity used for attribution
+     * @param taskId exact bound task identity
+     * @param expectedGeneration capability generation fence
+     * @param profileId registered provider profile
+     * @param profileVersion registered provider profile version
+     * @param schemaDigest pinned response-schema digest
+     * @param settlement requested canonical settlement
+     * @return authoritative settlement result
+     */
+    public HumanTaskResult settleInteractionCapability(
+            String tenantId, UUID capabilityId, UUID taskId, long expectedGeneration,
+            String profileId, int profileVersion, String schemaDigest,
+            HumanTaskSettlement settlement) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(capabilityId, "capabilityId");
+        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(settlement, "settlement");
+        DurableHumanTask task = await(store.loadHumanTask(tenantId, taskId)).orElse(null);
+        if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
+        var presentation = task.request().presentation();
+        boolean generationCurrent = task.generation() == expectedGeneration
+                || task.status().terminal() && task.generation() == expectedGeneration + 1;
+        if (!generationCurrent || presentation.kind()
+                != ai.ravenroot.api.persistence.HumanTaskPresentationKind.EXTERNAL
+                || !profileId.equals(presentation.profileId())
+                || profileVersion != presentation.profileVersion()
+                || !schemaDigest.equals(responseSchemaDigest(task.request().responseSchema()))
+                || !task.request().confirmationPresentation().actions().contains(settlement.action())) {
+            return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
+        }
+        RequestContext capability = new RequestContext("human-task-capability:" + capabilityId,
+                "configured-external-provider", PrincipalType.WORKLOAD,
+                "urn:ravenroot:human-task-interaction", tenantId, Set.of(), Set.of());
+        return settle(capability, taskId, expectedGeneration, settlement, null, true);
+    }
+
     private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
                                    HumanTaskSettlement settlement, HumanTaskOverride override) {
+        return settle(context, taskId, expectedGeneration, settlement, override, false);
+    }
+
+    private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
+                                   HumanTaskSettlement settlement, HumanTaskOverride override,
+                                   boolean delegatedCapability) {
         Objects.requireNonNull(settlement, "settlement");
         return switch (settlement.action()) {
             case RESOLVE -> settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED,
-                    settlement.response().orElseThrow(), settlement.comment(), override);
+                    settlement.response().orElseThrow(), settlement.comment(), override,
+                    delegatedCapability);
             case DENY -> settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED,
-                    null, settlement.comment(), override);
+                    null, settlement.comment(), override, delegatedCapability);
             case CANCEL -> settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED,
-                    null, settlement.comment(), override);
+                    null, settlement.comment(), override, delegatedCapability);
         };
     }
 
@@ -943,11 +1015,17 @@ public final class HumanTaskService {
     private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
                                    HumanTaskStatus target, OpaquePayload response, String comment,
                                    HumanTaskOverride override) {
+        return settle(context, taskId, expectedGeneration, target, response, comment, override, false);
+    }
+
+    private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
+                                   HumanTaskStatus target, OpaquePayload response, String comment,
+                                   HumanTaskOverride override, boolean delegatedCapability) {
         Objects.requireNonNull(context, "context");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
         String actor = SecurityContext.of(context).qualifiedIdentity();
-        if (!authorized(task, context, target, override != null)) {
+        if (!delegatedCapability && !authorized(task, context, target, override != null)) {
             auditOnly(task, override == null ? "HUMAN_TASK_UNAUTHORIZED"
                     : "HUMAN_TASK_OVERRIDE_UNAUTHORIZED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
@@ -993,19 +1071,47 @@ public final class HumanTaskService {
 
     private boolean authorized(DurableHumanTask task, RequestContext context,
                                HumanTaskStatus target, boolean override) {
-        if (override) {
-            return context.scopes().contains(AuthorizationAction.HUMAN_TASK_OVERRIDE.requiredScope())
-                    && (context.roles().contains(Role.TENANT_ADMIN)
-                    || context.roles().contains(Role.PLATFORM_ADMIN));
-        }
+        if (override) return overrideAuthorized(context);
+        if (!policy.responderEnforcementEnabled()) return true;
         String actor = SecurityContext.of(context).qualifiedIdentity();
         if (target == HumanTaskStatus.CANCELLED) {
             return actor.equals(task.request().requester().qualifiedIdentity());
         }
-        if (!policy.responderEnforcementEnabled()) return true;
         Set<String> roles = context.roles().stream().map(Role::name)
                 .collect(Collectors.toUnmodifiableSet());
         return task.request().responderRequirements().satisfiedBy(roles, context.scopes());
+    }
+
+    private static boolean overrideAuthorized(RequestContext context) {
+        return context.scopes().contains(AuthorizationAction.HUMAN_TASK_OVERRIDE.requiredScope())
+                && (context.roles().contains(Role.TENANT_ADMIN)
+                || context.roles().contains(Role.PLATFORM_ADMIN));
+    }
+
+    private void auditOverrideAccess(RequestContext context, HumanTaskAttentionLocator locator,
+                                     HumanTaskOverride override) {
+        DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), locator.taskId())).orElse(null);
+        if (task == null) return;
+        int maxAttempts = task.request().executionLimits().writeAttempts();
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            StoredProcessInstance stored = load(task.key());
+            try {
+                await(store.apply(ExecutionBatch.to(task.key())
+                        .expecting(RevisionExpectation.exactly(stored.revision()))
+                        .publish(EventEnvelope.of(UUID.randomUUID(), task.key().tenantId(),
+                                "HUMAN_TASK_OVERRIDE_REVIEWED", task.key().processInstanceId(),
+                                task.request().traversalId(), task.request().invocationId(),
+                                task.request().attemptId(), null, context.requestId(),
+                                stored.graphVersionPin().reference(), clock.instant(),
+                                overrideReviewPayload(locator.taskId(), locator.generation(),
+                                        SecurityContext.of(context).qualifiedIdentity(), override.reason())))
+                        .build()));
+                return;
+            } catch (ExecutionStoreException conflict) {
+                if (!(conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict)
+                        || attempt == maxAttempts) throw conflict;
+            }
+        }
     }
 
     private static HumanTaskStatus actionStatus(HumanTaskConfirmationAction action) {
@@ -1301,6 +1407,30 @@ public final class HumanTaskService {
                 + ",\"override\":true,\"reasonDigest\":\"sha256:" + sha256(reason)
                 + "\",\"status\":\"" + status.name() + "\",\"taskId\":\"" + taskId + "\"}";
         return OpaquePayload.of(json.getBytes(StandardCharsets.UTF_8), EVENT_CONTENT_TYPE);
+    }
+
+    private static OpaquePayload overrideReviewPayload(UUID taskId, long generation,
+                                                       String actor, String reason) {
+        String json = "{\"actor\":\"" + json(actor) + "\",\"generation\":" + generation
+                + ",\"outcome\":\"REVIEW_DISCLOSED\",\"override\":true,\"reasonDigest\":\"sha256:"
+                + sha256(reason) + "\",\"taskId\":\"" + taskId + "\"}";
+        return OpaquePayload.of(json.getBytes(StandardCharsets.UTF_8), EVENT_CONTENT_TYPE);
+    }
+
+    private static String responseSchemaDigest(
+            ai.ravenroot.api.persistence.HumanTaskResponseSchema schema) {
+        String canonical = schema.contentType() + "\n" + schema.schema() + "\n"
+                + schema.schemaVersion() + "\n" + schema.kind() + "\n" + schema.maxBytes();
+        return "sha256:" + java.util.HexFormat.of().formatHex(sha256Bytes(canonical));
+    }
+
+    private static byte[] sha256Bytes(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 
     private static String sha256(String value) {

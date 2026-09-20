@@ -4045,9 +4045,26 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.of("deployment-c"), recovered.deploymentId());
         assertEquals(fixture.key().processInstanceId(), recovered.processInstanceId());
         assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), recovered.availableActions());
-        assertEquals("Mail body\nsecond line", recovered.reviewPresentation().orElseThrow().text());
+        assertTrue(recovered.reviewPresentation().isEmpty(),
+                "requester-only cancellation must not disclose review content in enforced mode");
+
+        var permissive = new HumanTaskAttentionAuthorization("issuer|USER|other",
+                Set.of(), Set.of(), false);
+        var permissiveDetail = await(store().findHumanTaskAttention(tenant, locator, permissive))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), permissiveDetail.availableActions());
+        assertEquals("Mail body\nsecond line",
+                permissiveDetail.reviewPresentation().orElseThrow().text());
+
+        var override = new HumanTaskAttentionAuthorization("issuer|USER|administrator",
+                Set.of(), Set.of(), true, true);
+        var overrideDetail = await(store().findHumanTaskAttention(tenant, locator, override))
+                .orElseThrow();
+        assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE,
+                HumanTaskConfirmationAction.CANCEL), overrideDetail.availableActions());
         assertEquals(HumanTaskReviewPresentation.TEXT_PLAIN,
-                recovered.reviewPresentation().orElseThrow().contentType());
+                overrideDetail.reviewPresentation().orElseThrow().contentType());
         assertTrue(await(store().findHumanTaskAttention(tenant,
                 new HumanTaskAttentionLocator(fixture.registration().taskId(), 2L), requester)).isEmpty(),
                 "a stale generation must be indistinguishable from an absent task");

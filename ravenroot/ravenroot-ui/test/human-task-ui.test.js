@@ -127,7 +127,35 @@ describe('Human Task inspector and decision dialog', () => {
     expect(humanTaskActionName('DENY', '\ufeff')).toBe('Deny — \ufeff');
   });
 
-  it('runs a registered presentation in an origin-bound sandbox without exposing a bearer', async () => {
+  it('renders accessible multiline and bounded numeric form controls and emits typed values', async () => {
+    const doc = dialogDocument();
+    const submitted = vi.fn(async () => ({}));
+    const formTask = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
+      interactionPresentation: { kind: 'FORM', version: 1, profileId: '', profileVersion: 1,
+        formSchema: { version: 1, fields: [
+          { name: 'notes', label: 'Notes', help: 'Explain', type: 'MULTILINE_TEXT', required: true,
+            maxUtf8Bytes: 512, allowedValues: [], minimum: null, maximum: null },
+          { name: 'score', label: 'Score', help: '', type: 'INTEGER', required: true,
+            maxUtf8Bytes: 16, allowedValues: [], minimum: 1, maximum: 5 },
+        ] } } };
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'),
+      onSubmit: submitted });
+    controller.open(formTask, capability);
+    const notes = doc.querySelector('textarea[data-human-task-form-field="notes"]');
+    const score = doc.querySelector('input[data-human-task-form-field="score"]');
+    expect(notes.closest('label').textContent).toContain('Notes');
+    expect(score.min).toBe('1');
+    expect(score.max).toBe('5');
+    notes.value = 'first line\nsecond line';
+    score.value = '4';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalled());
+    expect(submitted.mock.calls[0][0].response.value).toEqual({
+      notes: 'first line\nsecond line', score: 4,
+    });
+  });
+
+  it('runs a registered presentation in an opaque-origin sandbox without exposing a bearer', async () => {
     const doc = dialogDocument();
     const custom = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
       interactionPresentation: { kind: 'CUSTOM', version: 1, profileId: 'trusted-form',
@@ -145,8 +173,14 @@ describe('Human Task inspector and decision dialog', () => {
     doc.querySelector('.human-task-presentation-launch').click();
     await vi.waitFor(() => expect(doc.querySelector('.human-task-presentation-frame')).not.toBeNull());
     const frame = doc.querySelector('.human-task-presentation-frame');
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-same-origin');
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
     expect(frame.src).toBe(launch.launchUri);
+    const postMessage = vi.spyOn(frame.contentWindow, 'postMessage');
+    frame.dispatchEvent(new doc.defaultView.Event('load'));
+    expect(postMessage).toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][1]).toBe('*');
+    expect(postMessage.mock.calls[0][0]).not.toHaveProperty('capability');
+    expect(postMessage.mock.calls[0][0]).not.toHaveProperty('subject');
     doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
       origin: 'https://attacker.example', source: frame.contentWindow,
       data: { protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
@@ -157,7 +191,7 @@ describe('Human Task inspector and decision dialog', () => {
     await Promise.resolve();
     expect(complete).not.toHaveBeenCalled();
     doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
-      origin: launch.origin, source: frame.contentWindow,
+      origin: 'null', source: frame.contentWindow,
       data: { protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
         taskId: custom.taskId, generation: custom.generation, capabilityId: launch.capabilityId,
         action: 'RESOLVE', comment: '', response: { contentType: launch.responseSchema.contentType,

@@ -15432,10 +15432,28 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
   },
   onInteractionSubmit: async (task, launch, action, comment, response) => {
     const client = runtimeClient;
-    if (!client || !tenantAuthorityAllows(workspace.active, client)) {
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability || !tenantAuthorityAllows(workspace.active, client)) {
       throw new Error('Reconnect before completing this presentation.');
     }
-    const result = await client.completeHumanTaskInteraction(launch, action, comment, response);
+    let typedResponse = null;
+    if (action === 'RESOLVE') {
+      if (response?.contentType !== 'application/vnd.ravenroot.payload+json'
+          || typeof response?.payloadBase64 !== 'string') {
+        throw new Error('The custom presentation returned an invalid typed response.');
+      }
+      try {
+        const binary = atob(response.payloadBase64);
+        const bytes = Uint8Array.from(binary, unit => unit.charCodeAt(0));
+        typedResponse = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      } catch {
+        throw new Error('The custom presentation returned malformed response bytes.');
+      }
+    }
+    // Custom hosts never receive or consume the delegated external-provider capability. The
+    // parent settles through its current authenticated session, so authorization loss is checked
+    // at completion instead of replaying issuance-time identity claims.
+    const result = await client.settleHumanTask(task, action, comment, typedResponse, { capability });
     clearHumanTaskSelection();
     addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
       'completed');

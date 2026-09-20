@@ -150,6 +150,17 @@ async function submitAndAwaitBinding(page) {
   await page.locator('#btn-play').click();
   await expect.poll(() => pushEvent !== null, { timeout: 10_000 }).toBe(true);
   await expect(page.locator('#activity-log')).toContainText('accepted');
+  await selectTraceLevel(page);
+}
+
+// Every test below is about the TECHNICAL rendering: the four identifier levels, bypass classification,
+// the `output=` projection, cursor replay. Since issue #458 the panel opens at the Output level, whose
+// whole purpose is to keep that technical detail out of the way — so each of these selects Trace first
+// and then asserts exactly what it always asserted. The level is a view over one code path; it is not a
+// second rendering that could drift from this one, and nothing here was weakened to accommodate it.
+async function selectTraceLevel(page) {
+  await page.locator('.activity-modes [data-mode="trace"]').click();
+  await expect(page.locator('.activity-modes [data-mode="trace"]')).toHaveAttribute('aria-checked', 'true');
 }
 
 test.beforeEach(async () => {

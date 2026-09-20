@@ -7851,7 +7851,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'ensureProgramGraphReady',
   'a52ddff831584d9d8dcc07d1d6ae2e5d8cb5a50529f5a28bac41335847ed1e5a',
   1),
- ('compose.yaml', 'file', '', '', '558286959d038d734630215db812e81a170e241ee2c8104f237c681da533cfd7', 1),
+ ('compose.yaml', 'file', '', '', '19fad875999c810bfa27a788cb4dd156b8953b2827e372181359867ab0b3ca92', 1),
  ('deploy/dev/sandbox-supervisor.sh',
   'file',
   '',
@@ -7862,25 +7862,25 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'd919672d72496196a4e0a04b64e6ce8af0c989b8730af3c763f6b3c6bfb1c840',
+  'a0b30f1e23071d1bcf28b8f186b520127d48f232636924bfc0dcbbfc3dd41370',
   1),
  ('deploy/helm/ravenroot/values.schema.json',
   'file',
   '',
   '',
-  '8fab9af55f5925a0e9fa61844816cde901ca0849efbf57a31946facd7d977b68',
+  'c80fc7534f0d6df9e0ffb7d8723b6417aaca6354b99823e3526be385947ff8da',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
   '',
   '',
-  'dae6457e8b419d2457ce93b24e12b069b7f571251f845d951eca814d9363f736',
+  '7cfe78ac332704fda4dd73f0e12e156ea9b489547334819e62cdad4d72c6da1c',
   1),
  ('deploy/kubernetes/ravenroot.yaml',
   'file',
   '',
   '',
-  'aafcbcad4b61dafdc984214ab6262a27360df3ab1fe6ddb8ed9030845c6a603d',
+  'bc818fa4a5992cbfd798be2aa71927dac2f87e4977635e2cff754376728d1e12',
   1),
  ('ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java',
   'file',
@@ -8120,7 +8120,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '1f2b4dc5a473fcdaea80a4deb1232beb31d3b8f3b5452af0d65a2d4e3d6fa82e',
+  'cbcd317e27e2136ee17d7c546a83bbb0fd3a28b0075734d698d3a04662042976',
   1),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/ProgramBuildSubmission.java',
   'file',
@@ -8132,7 +8132,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '88522e74f70e141f34d9b265e1d04a1457cf2446d8ca65c1418ed118ac941f58',
+  'e58594648be4fc2b6a17e0d365764fea2818f15aeaf8dcca589943d97dfab6e5',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -8422,7 +8422,8 @@ PROGRAM_GITHUB_EXCLUDED_PRIOR_IDS = ['oc-09da9620b16d08004595',
  'oc-e33e0e11df5aded1073e',
  'oc-e5b8535d9326cf51d46d',
  'oc-f21e86ac333e9d880b35',
- 'oc-f49404dab093ca3f78e9']
+ 'oc-f49404dab093ca3f78e9',
+ 'oc-df87bb81d37de6a99f4d']
 
 PROGRAM_GITHUB_CONTRACTS = [{'setting': 'program.runtime.selector',
   'owner': 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java#ProgramRuntimeConfiguration',
@@ -12909,7 +12910,17 @@ INTERACTION_WEBSOCKET_RETAINED_PARTITIONS = [{'semanticPartition': 'interaction.
   'rationale': 'The maintained environment reference publishes the exact interaction listener binding '
                'and links its typed contract.',
   'candidateIds': ['oc-f1c71dd9674ee3c81279', 'oc-f72dbf1ad32b5a779753'],
-  'retainedAuthority': 'environment-reference-generator-v1'}]
+  'retainedAuthority': 'environment-reference-generator-v1'},
+ {'semanticPartition': 'interaction.human-task.canonical-settlement-command',
+  'classification': 'protocol-or-format-invariant',
+  'status': 'retained',
+  'rationale': 'The interaction listener maps its fixed Human Task resolve command onto the shared canonical settlement model.',
+  'candidateIds': ['oc-0e926cd2e01d082b72f4']},
+ {'semanticPartition': 'interaction.human-task.response-limit-sentinel',
+  'classification': 'derived',
+  'status': 'retained',
+  'rationale': 'The negative sentinel is derived from the positive response-byte contract and prevents unauthorized response parsing.',
+  'candidateIds': ['oc-4111365ba06c76df988d']}]
 
 # This family belongs to the upstream interaction listener, not the program/GitHub remediation.
 INTERACTION_WEBSOCKET_AUTHORITY_ID = "ravenroot-interaction-websocket-policy-v1"
@@ -13130,7 +13141,7 @@ def interaction_websocket_authority_from_source(root: Path, discovered: dict[str
     carriers = [copy.deepcopy(INTERACTION_WEBSOCKET_BINDING_CARRIER)]
     partitions = copy.deepcopy(INTERACTION_WEBSOCKET_RETAINED_PARTITIONS)
     all_ids = [identifier for group in contracts + carriers + partitions for identifier in group["candidateIds"]]
-    if len(all_ids) != 164 or len(all_ids) != len(set(all_ids)) \
+    if len(all_ids) != 166 or len(all_ids) != len(set(all_ids)) \
             or set(all_ids) != interaction_websocket_cohort_candidate_ids(root, discovered):
         return None
     published = {identifier for group in partitions if group["classification"] == "published-contract-description"
@@ -14003,22 +14014,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-daf9eac839b20989ca04": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-a271ee471e83bf252375":
+    "oc-c9604313960948e97fdb": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-1eb90aa79e5b7129922c":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-9c4ec93418ccf7fe9ebb": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-f5f0a5765ae0f54764bc": (
+    "oc-8433933f4486f32c0c40": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-a7cfe50041f707a20f9a": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-cd5b7273887ef1f1bc1d": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-348460f6a651840325fd": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-daf9eac839b20989ca04": "/v1/events",
-    "oc-a271ee471e83bf252375": "/v1/events",
-    "oc-9c4ec93418ccf7fe9ebb": "/v1/events",
-    "oc-f5f0a5765ae0f54764bc": "/v1/events/recent",
-    "oc-cd5b7273887ef1f1bc1d": "/v1/events/recent",
+    "oc-c9604313960948e97fdb": "/v1/events",
+    "oc-1eb90aa79e5b7129922c": "/v1/events",
+    "oc-8433933f4486f32c0c40": "/v1/events",
+    "oc-a7cfe50041f707a20f9a": "/v1/events/recent",
+    "oc-348460f6a651840325fd": "/v1/events/recent",
 }
 
 

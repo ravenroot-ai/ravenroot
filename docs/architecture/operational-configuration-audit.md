@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 23384 |
+| Atomic operational candidates discovered | 23388 |
 | Source-proven Helm operator fields | 38 |
 | Helm operator fields represented by lexical inventory rows | 30 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 23384 |
+| Reviewed | 23388 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 311 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 1904 |
-| Retained protocol or format invariants | 9662 |
+| Retained protocol or format invariants | 9666 |
 | Retained published contract descriptions | 504 |
 | Retained presentation text | 606 |
 | Retained derived values | 1054 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 70.
+Checked source reconciliations: 71.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 23384 candidates.
+zero-count or unclassified rows as needed and sums to 23388 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 23384 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 21733 |
+| retained | 21737 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 23384 candidates.
 | derived | 1054 |
 | operator-configurable | 1651 |
 | presentation-text | 606 |
-| protocol-or-format-invariant | 9662 |
+| protocol-or-format-invariant | 9666 |
 | published-contract-description | 504 |
 | security-ceiling-or-default | 1904 |
 | test-fixture | 8003 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 23384 candidates.
 |---|---:|
 | deployment | 2835 |
 | deployment-example | 20 |
-| java | 7086 |
+| java | 7090 |
 | script | 2289 |
 | test-fixture | 8003 |
 | ui | 3151 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 287 |
 | #320 | 1469 |
 | #321 | 8559 |
-| Retained; no remediation required | 12807 |
+| Retained; no remediation required | 12811 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 23383 |
-| Unchanged identities | 23382 |
-| Approved identity migrations | 0 |
-| Approved retirements | 1 |
-| Semantically classified additions | 2 |
-| Current candidates | 23384 |
+| Source inventory candidates | 23384 |
+| Unchanged identities | 23383 |
+| Approved identity migrations | 1 |
+| Approved retirements | 0 |
+| Semantically classified additions | 4 |
+| Current candidates | 23388 |
 
 ## Final semantic review
 
@@ -7521,7 +7521,11 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-bef54a8c734e47b76b12` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:30` `JdbcDriverLoader` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-e29f88ec3806fa403b17` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:30` `JdbcDriverLoader` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-574725ccafb2ed3b9820` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:119` `try` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-591e4c5eb3e4f9668c66` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:149` `getManifest` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-a1d906a4531178802f2b` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:147` `PrivateDriverClassLoader` | java | retained | protocol-or-format-invariant | The Java release that multi-release driver jars are resolved against is the product's bytecode target, pinned by a test to the compiled class-file version. Making it operator-configurable would let a deployment choose which verified class bytes a driver is defined from, which is exactly the property the pinned driver digest exists to fix. |
+| `oc-f36134904740479e2e49` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:148` `PrivateDriverClassLoader` | java | retained | protocol-or-format-invariant | The versioned-entry namespace is fixed by the JAR file specification for multi-release jars; it names a format, not a setting. |
+| `oc-f6a7d6a2e76d68858585` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:149` `PrivateDriverClassLoader` | java | retained | protocol-or-format-invariant | The JAR file specification starts versioned directories at release 9. A lower directory is content the JDK discards and other tooling does not, so the jar would admit more than one reading of what its image contains and is refused as ambiguous. |
+| `oc-43b29a0111753c3d79c0` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:174` `try` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-b226f4491fef9ccb8bfd` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverLoader.java:233` `versionedEntry` | java | retained | protocol-or-format-invariant | The release directory is read as a canonical decimal, which the leading-zero test enforces. It is a parser invariant of the JAR format rather than an operating setting. |
 | `oc-21bc79ad4633e75db3a5` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcExecutor.java:145` `try` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-1ea347b1a259fefbb5dc` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcParameters.java:22` `parse` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-b3c4198f8449302604aa` | `ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcParameters.java:22` `parse` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |

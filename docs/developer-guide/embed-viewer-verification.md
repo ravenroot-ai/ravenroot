@@ -29,9 +29,18 @@ Also confirm that mode switching preserves each viewport without layout, fit, or
 Render affects only the selected mode.
 
 The historical image rows below retain their filenames for release continuity. In the public v2 UI,
-Cyto is the Design renderer and Elastic is Monitoring; N8N is no longer a public choice. V2 release
-captures must cover Design and Monitoring at desktop and narrow responsive widths, in both themes,
-including the run selector's zero/one/three states.
+Cyto is the Design renderer and Elastic is Monitoring; N8N is no longer a public choice. The v2
+browser matrix covers Design and Monitoring at desktop and narrow responsive widths in both themes,
+including the run selector's zero/one/three states; the committed desktop parity captures follow.
+
+## V2 semantic viewer evidence
+
+| Theme / mode | Native | Embedded | Difference |
+|---|---|---|---|
+| Dark Design | ![Dark native Design](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-native-design.png) | ![Dark embedded Design](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-embed-design.png) | ![Dark Design difference](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-design-diff.png) |
+| Dark Monitoring | ![Dark native Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-native-monitoring.png) | ![Dark embedded Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-embed-monitoring.png) | ![Dark Monitoring difference](../qa/evidence/embedded-deployment-viewer-v2/v2-dark-monitoring-diff.png) |
+| Light Design | ![Light native Design](../qa/evidence/embedded-deployment-viewer-v2/v2-light-native-design.png) | ![Light embedded Design](../qa/evidence/embedded-deployment-viewer-v2/v2-light-embed-design.png) | ![Light Design difference](../qa/evidence/embedded-deployment-viewer-v2/v2-light-design-diff.png) |
+| Light Monitoring | ![Light native Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-light-native-monitoring.png) | ![Light embedded Monitoring](../qa/evidence/embedded-deployment-viewer-v2/v2-light-embed-monitoring.png) | ![Light Monitoring difference](../qa/evidence/embedded-deployment-viewer-v2/v2-light-monitoring-diff.png) |
 
 ## Dark theme
 

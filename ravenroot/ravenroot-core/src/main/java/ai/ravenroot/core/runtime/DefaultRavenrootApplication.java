@@ -2362,6 +2362,29 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return List.copyOf(events);
     }
 
+    @Override
+    public List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
+                                                               long afterSequence, int limit) {
+        if (!durableEventJournalAvailable()) return List.of();
+        var key = new ExecutionKey(requireTenant(tenantId), java.util.Objects.requireNonNull(processInstanceId));
+        List<JournalRecord> page = await(executionStore.readProcessJournal(key, afterSequence, limit));
+        var nodeNames = loadInvocationNodeNames(key);
+        var events = new ArrayList<DurableExecutionEvent>(page.size());
+        for (JournalRecord record : page) {
+            EventEnvelope envelope = record.envelope();
+            String nodeId = envelope.invocation().map(nodeNames::get).orElse(null);
+            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
+                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
+                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
+                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
+                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
+                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
+                            .orElse(null) : null));
+        }
+        return List.copyOf(events);
+    }
+
     /**
      * The invocation-to-node binding {@code InvocationAdded} recorded as structure, in the same
      * transaction as the events themselves. The envelope deliberately carries no node id; see

@@ -532,8 +532,9 @@ export function createEmbedViewer(container, {
         throw failure;
       }
     },
-    observe(frame) {
+    observe(frame, generation = runGeneration) {
       if (!deploymentState || destroyed) return { accepted: false, reason: 'snapshot' };
+      if (generation !== runGeneration) return { accepted: false, reason: 'stale-generation' };
       const result = applyDeploymentViewFrame(deploymentState, frame);
       applyDeploymentViewStateToRenderer(instance, deploymentState);
       if (elasticMount && frame.event?.nodeId) {

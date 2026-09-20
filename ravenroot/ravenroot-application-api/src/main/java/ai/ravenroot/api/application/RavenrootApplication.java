@@ -437,6 +437,12 @@ public interface RavenrootApplication extends AutoCloseable {
         return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
     }
 
+    /** Reads one exact process's durable event stream for authoritative embed reconciliation. */
+    default List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
+                                                                long afterSequence, int limit) {
+        return List.of();
+    }
+
     /**
  * Starts one of this tenant's registered deployments and completes at readiness.
  *

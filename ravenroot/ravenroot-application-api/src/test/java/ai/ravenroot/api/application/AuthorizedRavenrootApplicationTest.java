@@ -910,6 +910,35 @@ class AuthorizedRavenrootApplicationTest {
                 "unknown ownership still fails closed; this resolves ownership rather than waiving it");
     }
 
+    @Test
+    void embedRunDiscoveryRejectsAnOldSameVersionDeploymentIncarnation() {
+        var raw = new FakeApplication();
+        UUID oldId = UUID.randomUUID();
+        UUID currentId = UUID.randomUUID();
+        raw.inventory = List.of(inventory(oldId, "inc-old"), inventory(currentId, "inc-current"));
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),
+                event -> { }, true);
+        var viewer = context("tenant-a", Role.VIEWER, "ravenroot.embed.deployment.runs.read");
+
+        assertEquals(List.of(currentId), facade.embedDeploymentRuns(viewer, "deployment",
+                "inc-current", "graph-v1", 10).stream().map(row -> row.key().processInstanceId()).toList());
+        assertTrue(facade.embedDeploymentRun(viewer, "deployment", "inc-current",
+                "graph-v1", oldId).isEmpty());
+        assertTrue(facade.embedDeploymentRun(viewer, "deployment", "inc-current",
+                "graph-v1", currentId).isPresent());
+    }
+
+    private static ai.ravenroot.api.persistence.ProcessInventoryEntry inventory(UUID id, String incarnation) {
+        return new ai.ravenroot.api.persistence.ProcessInventoryEntry(
+                new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", id), ProcessInstanceStatus.RUNNING,
+                ai.ravenroot.api.persistence.InventoryDisposition.ACTIVE, 1, 1,
+                new ai.ravenroot.api.persistence.GraphVersionPin("graph-v1"),
+                java.util.Optional.of("deployment"), java.util.Optional.of(incarnation),
+                java.util.Optional.empty(), java.util.Optional.empty(), java.util.Optional.empty(), 0,
+                java.util.Optional.empty(), 1, Instant.EPOCH, Instant.EPOCH,
+                java.util.Optional.empty(), null);
+    }
+
     private static RequestContext context(String tenant, Role role, String scope) {
         return context("alice", tenant, role, scope);
     }
@@ -979,6 +1008,20 @@ class AuthorizedRavenrootApplicationTest {
         /** Every tenant id the facade asked this delegate about, in order. */
         private final List<String> observedResultTenants = new ArrayList<>();
         private final List<String> observedSourceSessionTenants = new ArrayList<>();
+        private List<ai.ravenroot.api.persistence.ProcessInventoryEntry> inventory = List.of();
+
+        @Override public boolean processInventoryAvailable() { return true; }
+        @Override public int processInventoryMaxPageSize() { return 100; }
+        @Override public ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
+                String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            return new ai.ravenroot.api.persistence.ProcessInventoryPage(inventory,
+                    java.util.Optional.empty(), Instant.MIN);
+        }
+        @Override public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> processInstance(
+                String tenantId, UUID processInstanceId) {
+            return inventory.stream().filter(row -> row.key().tenantId().equals(tenantId)
+                    && row.key().processInstanceId().equals(processInstanceId)).findFirst();
+        }
 
         @Override public ai.ravenroot.api.programming.ProgramAuthoringLimits programAuthoringLimits() {
             return programLimits;

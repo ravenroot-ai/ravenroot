@@ -1163,7 +1163,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
     private static final String INVENTORY_COLUMNS =
             "SELECT p.process_instance_id, p.status, p.termination_reason, p.graph_version_pin, "
                     + "p.revision, p.fencing_token, "
-                    + "p.lifecycle_generation, p.deployment_id, p.workload_id, p.correlation_id, "
+                    + "p.lifecycle_generation, p.deployment_id, p.deployment_incarnation_id, "
+                    + "p.workload_id, p.correlation_id, "
                     + "p.created_at_epoch_second, p.created_at_nano, p.updated_at_epoch_second, "
                     + "p.updated_at_nano, p.retained_until_epoch_second, p.retained_until_nano, "
                     + "l.worker_id AS lease_worker_id, l.expires_at_epoch_second AS lease_expires_at_epoch_second, "
@@ -1548,6 +1549,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 rows.getLong("revision"), rows.getLong("lifecycle_generation"),
                 new GraphVersionPin(rows.getString("graph_version_pin")),
                 Optional.ofNullable(rows.getString("deployment_id")),
+                Optional.ofNullable(rows.getString("deployment_incarnation_id")),
                 Optional.ofNullable(rows.getString("workload_id")),
                 Optional.ofNullable(rows.getString("correlation_id")),
                 leaseLive ? Optional.of(worker) : Optional.empty(),
@@ -2376,7 +2378,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, control_state, "
                         + "updated_at_epoch_second, "
                         + "updated_at_nano, created_at_epoch_second, created_at_nano, "
-                        + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
+                        + "lifecycle_generation, deployment_id, deployment_incarnation_id, "
+                        + "workload_id, correlation_id, "
                         + "retained_until_epoch_second, retained_until_nano FROM process_instance "
                         + "WHERE tenant_id = ? AND process_instance_id = ?")) {
             statement.setString(1, key.tenantId());
@@ -2392,8 +2395,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         StoredInstant.read(rows, "updated_at"),
                         StoredInstant.read(rows, "created_at"),
                         rows.getLong("lifecycle_generation"),
-                        ExecutionOrigin.of(rows.getString("deployment_id"), rows.getString("workload_id"),
-                                rows.getString("correlation_id")),
+                        ExecutionOrigin.of(rows.getString("deployment_id"),
+                                rows.getString("deployment_incarnation_id"),
+                                rows.getString("workload_id"), rows.getString("correlation_id")),
                         nullableInstant(rows, "retained_until"), rows.getString("control_state"));
             }
         }
@@ -2493,9 +2497,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "termination_reason, graph_version_pin, "
                         + "revision, fencing_token, updated_at_epoch_second, updated_at_nano, "
                         + "created_at_epoch_second, created_at_nano, lifecycle_generation, "
-                        + "deployment_id, workload_id, correlation_id, retained_until_epoch_second, "
+                        + "deployment_id, deployment_incarnation_id, workload_id, correlation_id, "
+                        + "retained_until_epoch_second, "
                         + "retained_until_nano, control_state) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET status = excluded.status, "
                         // Assigned on conflict, beside the status it qualifies and never apart from
                         // it: the pair is one fact, so a row must never carry a new status with the
@@ -2505,7 +2510,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "updated_at_epoch_second = excluded.updated_at_epoch_second, "
                         + "updated_at_nano = excluded.updated_at_nano, "
                         + "lifecycle_generation = excluded.lifecycle_generation, "
-                        + "deployment_id = excluded.deployment_id, workload_id = excluded.workload_id, "
+                        + "deployment_id = excluded.deployment_id, "
+                        + "deployment_incarnation_id = excluded.deployment_incarnation_id, "
+                        + "workload_id = excluded.workload_id, "
                         + "correlation_id = excluded.correlation_id, "
                         + "retained_until_epoch_second = excluded.retained_until_epoch_second, "
                         + "retained_until_nano = excluded.retained_until_nano")) {
@@ -2520,6 +2527,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             index = StoredInstant.bindValue(statement, index, createdAt);
             statement.setLong(index++, lifecycleGeneration);
             statement.setString(index++, origin.deploymentId().orElse(null));
+            statement.setString(index++, origin.deploymentIncarnationId().orElse(null));
             statement.setString(index++, origin.workloadId().orElse(null));
             statement.setString(index++, origin.correlationId().orElse(null));
             if (retainedUntil == null) {
@@ -2528,7 +2536,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             } else {
                 StoredInstant.bindValue(statement, index, retainedUntil);
             }
-            statement.setString(18, controlState.name());
+            statement.setString(19, controlState.name());
             statement.executeUpdate();
         }
     }
@@ -4945,6 +4953,31 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         while (rows.next()) {
                             page.add(readJournalRecord(tenantId, rows));
                         }
+                    }
+                }
+                return List.copyOf(page);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                    long afterSequence, int limit) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            if (afterSequence < 0) throw failure(ExecutionStoreFailure.invalid("afterSequence cannot be negative"));
+            requireLimit(limit);
+            return inReadTransaction(null, () -> {
+                var page = new ArrayList<JournalRecord>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "SELECT * FROM event_journal WHERE tenant_id = ? AND process_instance_id = ? "
+                                + "AND stream_sequence > ? ORDER BY stream_sequence LIMIT ?")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    statement.setLong(3, afterSequence);
+                    statement.setInt(4, limit);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) page.add(readJournalRecord(key.tenantId(), rows));
                     }
                 }
                 return List.copyOf(page);

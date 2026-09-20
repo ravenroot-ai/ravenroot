@@ -43,6 +43,10 @@ export function applyDeploymentViewFrame(state, frame) {
     resetDeploymentViewRuntime(state, 'VERSION_MISMATCH', 'binding-mismatch');
     return { accepted: false, reason: 'binding-mismatch', terminal: true };
   }
+  if (frame.type === 'reset') {
+    resetDeploymentViewRuntime(state, 'LIVE', 'AUTHORITATIVE_REPLAY');
+    return { accepted: true, reason: 'authoritative-reset' };
+  }
   if (frame.type === 'gap') {
     resetDeploymentViewRuntime(state, 'GAP', frame.reason || 'cursor-unavailable');
     state.cursor = frame.cursor || null;

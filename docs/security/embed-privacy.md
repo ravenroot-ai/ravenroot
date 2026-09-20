@@ -10,7 +10,8 @@ The embedded viewer exposes only a registered projection whose privacy and taked
 - For live sources, bind observation to deployment id, graph version, incarnation, session proof key,
   and an opaque process-local cursor. Emit only allowlisted lifecycle and execution fields.
 - For a selectable v2 source, filter durable process inventory server-side by tenant, deployment, and
-  graph version, then bind observation to one authorized process instance. Never serialize workload,
+  graph version and the durably recorded admitting incarnation, then bind observation to one
+  authorized process instance. Never serialize workload,
   lease, worker, correlation, payload, credential, or tenant-wide discovery metadata.
 - Treat `showStartExecution` as presentation only. Require separate embed-execute authority, exact
   deployment/version/incarnation reconciliation, and a bounded idempotency identity before the server
@@ -23,6 +24,10 @@ or observation events. The frame uses an explicit credentialed request with an a
 it does not use ambient cookies. A gap, authority change, undeploy, or source replacement clears
 observed state and terminates the attachment so stale runtime decoration cannot be mistaken for live
 state.
+
+A selected-run replay-gap recovery reads only that process's durable journal. The viewer receives an
+atomic runtime reset followed by allowlisted node/edge lifecycle facts; correlation, payload, worker,
+lease, workload, and sibling-process records remain server-side.
 
 The run list is reconciled authoritatively. Revocation, authorization loss, undeploy, source
 replacement, or disappearance clears the selection and runtime decoration. Completion may remain as

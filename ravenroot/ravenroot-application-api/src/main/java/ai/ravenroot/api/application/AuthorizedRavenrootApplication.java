@@ -688,32 +688,48 @@ public final class AuthorizedRavenrootApplication {
 
     /** Returns only process rows hosted by the exact deployment and graph version. */
     public java.util.List<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRuns(
-            RequestContext context, String deploymentId, String graphVersion, int limit) {
+            RequestContext context, String deploymentId, String incarnationId,
+            String graphVersion, int limit) {
         require(context, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
                 ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
                         context.tenantId()));
         String version = requireText(graphVersion, "graph version");
+        String incarnation = requireText(incarnationId, "incarnation id");
         if (!delegate.processInventoryAvailable()) return java.util.List.of();
         int bounded = Math.max(1, Math.min(limit, delegate.processInventoryMaxPageSize()));
         var query = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder()
                 .hostedBy(deploymentId).includeTerminal(true).limit(bounded).build();
         return delegate.processInventory(context.tenantId(), query).items().stream()
                 .filter(item -> version.equals(item.graphVersionPin().reference()))
+                .filter(item -> item.deploymentIncarnationId().filter(incarnation::equals).isPresent())
                 .toList();
     }
 
     /** Resolves one exact run without depending on its position in the bounded selector page. */
     public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRun(
-            RequestContext context, String deploymentId, String graphVersion,
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion,
             java.util.UUID processInstanceId) {
         require(context, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
                 ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
                         context.tenantId()));
         if (!delegate.processInventoryAvailable()) return java.util.Optional.empty();
         String version = requireText(graphVersion, "graph version");
+        String incarnation = requireText(incarnationId, "incarnation id");
         return delegate.processInstance(context.tenantId(), java.util.Objects.requireNonNull(processInstanceId))
                 .filter(item -> item.deploymentId().filter(deploymentId::equals).isPresent())
+                .filter(item -> item.deploymentIncarnationId().filter(incarnation::equals).isPresent())
                 .filter(item -> version.equals(item.graphVersionPin().reference()));
+    }
+
+    /** Replays one already-authorized selected run from its durable per-process journal. */
+    public java.util.List<DurableExecutionEvent> embedDeploymentRunReplay(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion,
+            java.util.UUID processInstanceId, long afterSequence, int limit) {
+        var run = embedDeploymentRun(context, deploymentId, incarnationId, graphVersion, processInstanceId);
+        if (run.isEmpty()) return java.util.List.of();
+        int bounded = Math.max(1, Math.min(limit, 512));
+        return delegate.durableEventsForProcess(context.tenantId(), processInstanceId,
+                afterSequence, bounded);
     }
 
     /** Starts one idempotent traversal under an embed-only capability and exact binding. */

@@ -67,6 +67,25 @@ describe('deployment viewer runtime state', () => {
     expect(current.nodeStates.get('worker').runtimeState).toBe('active');
   });
 
+  it('atomically clears stale run decoration before authoritative durable replay', () => {
+    const selected = { ...binding, processInstanceId: 'process-a' };
+    const state = createDeploymentViewState(selected);
+    applyDeploymentViewFrame(state, frame({ processInstanceId: 'process-a' }));
+    expect(state.nodeStates.has('worker')).toBe(true);
+
+    expect(applyDeploymentViewFrame(state, { type: 'reset', ...selected }))
+      .toMatchObject({ accepted: true, reason: 'authoritative-reset' });
+    expect(state.nodeStates.size).toBe(0);
+    expect(state.edgeStates.size).toBe(0);
+    expect(state.continuity).toBe('LIVE');
+
+    applyDeploymentViewFrame(state, frame({ processInstanceId: 'process-a', cursor: null, event: {
+      type: 'NODE_COMPLETED', nodeId: 'after-gap', executionId: 'run-1', sequence: 1,
+    } }));
+    expect(state.nodeStates.has('worker')).toBe(false);
+    expect(state.nodeStates.get('after-gap').runtimeState).toBe('completed');
+  });
+
   it('treats a gap and undeploy as terminal rather than inventing continuity', () => {
     const state = createDeploymentViewState(binding);
     expect(applyDeploymentViewFrame(state, { type: 'gap', ...binding,

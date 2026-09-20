@@ -487,7 +487,7 @@ The host still receives only `READY`, `PONG`, or the non-sensitive terminal `FAI
 | `LIVE` | Lifecycle or execution events are current for the bound graph version and incarnation | None |
 | `RECONNECTING` | The transport ended before a terminal frame | Wait for bounded retry |
 | `STOPPED` or `UNAVAILABLE` | The bound deployment lifecycle is not producing live execution activity | An operator may start or restart the deployment; the viewer remains read-only |
-| `GAP` | The opaque cursor fell outside the process-local replay window | Terminal; create a fresh viewer session |
+| `GAP` | V1 fell outside the process-local replay window, or v2 could not obtain a complete selected-run durable replay | Terminal; create a fresh viewer session. A recoverable v2 gap is cleared and replayed without entering this state |
 | `VERSION_MISMATCH` | The deployment now resolves to a different graph version or incarnation | Terminal; review the replacement, then create a new registration or session as policy requires |
 | `DETACHED` | The deployment was undeployed or viewing authority changed | Terminal; do not reuse the attachment |
 

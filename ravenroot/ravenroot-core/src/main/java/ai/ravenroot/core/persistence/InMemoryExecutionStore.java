@@ -1313,7 +1313,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         return new ProcessInventoryEntry(key, entry.state.status(),
                 InventoryDisposition.ofProcess(entry.state.status(), leaseLive, anyAttemptParked(entry)),
                 entry.revision, entry.lifecycleGeneration, entry.graphVersionPin,
-                entry.origin.deploymentId(), entry.origin.workloadId(), entry.origin.correlationId(),
+                entry.origin.deploymentId(), entry.origin.deploymentIncarnationId(),
+                entry.origin.workloadId(), entry.origin.correlationId(),
                 leaseLive ? Optional.of(entry.lease.workerId()) : Optional.empty(),
                 entry.fencingToken,
                 leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
@@ -2674,6 +2675,32 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         break;
                     }
                 }
+                return List.copyOf(page);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                    long afterSequence, int limit) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EVENT_JOURNAL);
+            java.util.Objects.requireNonNull(key, "key");
+            if (afterSequence < 0 || limit < 1) {
+                throw failure(ExecutionStoreFailure.invalid("process journal cursor and limit are invalid"));
+            }
+            synchronized (monitor) {
+                var page = new ArrayList<JournalRecord>();
+                for (JournalRecord record : journalOf(key.tenantId()).records) {
+                    if (!record.key().equals(key) || record.streamSequence() <= afterSequence) continue;
+                    if (!record.envelope().digestMatchesContent()) {
+                        throw failure(new ExecutionStoreFailure.Corrupted(key,
+                                "process journal event digest does not match its content"));
+                    }
+                    page.add(record);
+                    if (page.size() == limit) break;
+                }
+                page.sort(java.util.Comparator.comparingLong(JournalRecord::streamSequence));
                 return List.copyOf(page);
             }
         });

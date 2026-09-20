@@ -46,8 +46,9 @@ source and all snapshot-only inputs are refused.
 5. The viewer retrieves only the authorized read-only projection.
 6. If the source is a deployment, the viewer uses its proof key and bearer to request
    `/v1/embed/observation`; the stream carries only allowlisted lifecycle and execution fields.
-7. Expiry, registration revocation, access revocation, undeploy, source replacement, or a replay gap
-   ends the attachment.
+7. Expiry, registration revocation, access revocation, undeploy, or source replacement ends the
+   attachment. A selected v2 replay gap is rebuilt from its exact durable process stream when that
+   stream is complete; otherwise it ends fail closed.
 
 The projection cannot mutate a graph, read credentials, install adapters, or expand its own scope.
 V1 cannot start execution. V2 can request one server-side traversal only when both the presentation
@@ -55,9 +56,10 @@ option and independent capability are present; it cannot stop/restart/undeploy a
 control the global engine. Exact origin and host checks apply at launch and exchange.
 
 The deployment observation cursor is opaque, bound to the registration revision, session, deployment,
-graph version, and incarnation, and valid only within the process-local replay window. A reconnect can
-resume within that window. A gap or mismatched binding clears observed state and requires a fresh
-projection/session; it never changes the registered source.
+graph version, incarnation, and selected process, and valid only within the process-local replay
+window. A reconnect can resume within that window. V2 clears observed state and replays the selected
+process's durable stream on a gap; a truncated stream or mismatched binding requires a fresh
+projection/session and never changes the registered source.
 
 ## Extension discovery
 

@@ -1062,6 +1062,10 @@ final class PostgresSchema {
                         "ALTER TABLE human_task ADD COLUMN presentation_schema_digest TEXT NOT NULL DEFAULT ''")),
                 new SchemaMigration(12, "durable human-task interaction revocations", List.of(
                         "CREATE TABLE human_task_interaction_revocation (tenant_id TEXT NOT NULL, capability_id UUID NOT NULL, task_id UUID NOT NULL, generation BIGINT NOT NULL, revoked_at_epoch_second BIGINT NOT NULL, revoked_at_nano INTEGER NOT NULL, expires_at_epoch_second BIGINT NOT NULL, expires_at_nano INTEGER NOT NULL, PRIMARY KEY (tenant_id, capability_id))",
-                        "CREATE INDEX human_task_interaction_revocation_expiry ON human_task_interaction_revocation (tenant_id, expires_at_epoch_second, expires_at_nano)")));
+                        "CREATE INDEX human_task_interaction_revocation_expiry ON human_task_interaction_revocation (tenant_id, expires_at_epoch_second, expires_at_nano)")),
+                new SchemaMigration(13, "durable deployment incarnation origin", List.of(
+                        "ALTER TABLE process_instance ADD COLUMN deployment_incarnation_id TEXT",
+                        "CREATE INDEX idx_process_instance_deployment_incarnation ON process_instance "
+                                + "(tenant_id, deployment_id, deployment_incarnation_id)")));
     }
 }

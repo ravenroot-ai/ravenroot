@@ -58,6 +58,7 @@ import java.util.Optional;
  *                            all.</p>
  * @param graphVersionPin     the write-once definition this instance replays against
  * @param deploymentId        hosting deployment, absent for a transient submission
+ * @param deploymentIncarnationId physical deployment incarnation that admitted this instance
  * @param workloadId          owning workload, when the caller models one
  * @param correlationId       caller correlation identity for the causing request
  * @param ownerWorkerId       worker holding an unexpired lease, absent when none does
@@ -83,7 +84,8 @@ import java.util.Optional;
 public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus status,
                                     InventoryDisposition disposition, long revision,
                                     long lifecycleGeneration, GraphVersionPin graphVersionPin,
-                                    Optional<String> deploymentId, Optional<String> workloadId,
+                                    Optional<String> deploymentId, Optional<String> deploymentIncarnationId,
+                                    Optional<String> workloadId,
                                     Optional<String> correlationId, Optional<String> ownerWorkerId,
                                     long fencingToken, Optional<Instant> leaseExpiresAt,
                                     int traversalCount, Instant createdAt, Instant updatedAt,
@@ -103,6 +105,8 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
         }
         if (traversalCount < 0) throw new IllegalArgumentException("traversalCount cannot be negative");
         deploymentId = deploymentId == null ? Optional.empty() : deploymentId;
+        deploymentIncarnationId = deploymentIncarnationId == null
+                ? Optional.empty() : deploymentIncarnationId;
         workloadId = workloadId == null ? Optional.empty() : workloadId;
         correlationId = correlationId == null ? Optional.empty() : correlationId;
         ownerWorkerId = ownerWorkerId == null ? Optional.empty() : ownerWorkerId;
@@ -148,7 +152,7 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
                                  int traversalCount, Instant createdAt, Instant updatedAt,
                                  Optional<Instant> retainedUntil) {
         this(key, status, disposition, revision, lifecycleGeneration, graphVersionPin, deploymentId,
-                workloadId, correlationId, ownerWorkerId, fencingToken, leaseExpiresAt, traversalCount,
+                Optional.empty(), workloadId, correlationId, ownerWorkerId, fencingToken, leaseExpiresAt, traversalCount,
                 createdAt, updatedAt, retainedUntil, null);
     }
 
@@ -157,7 +161,7 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
      * @return deployment, workload and correlation identities of this row.
      */
     public ExecutionOrigin origin() {
-        return new ExecutionOrigin(deploymentId, workloadId, correlationId);
+        return new ExecutionOrigin(deploymentId, deploymentIncarnationId, workloadId, correlationId);
     }
 
     /**

@@ -915,6 +915,15 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<List<JournalRecord>> readJournal(String tenantId, long afterOffset, int limit);
 
+    /** Reads one exact process stream by its durable per-instance sequence. */
+    default CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
+                                                                     long afterSequence, int limit) {
+        var refused = new java.util.concurrent.CompletableFuture<List<JournalRecord>>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EVENT_JOURNAL)));
+        return refused;
+    }
+
     /**
      * The lowest {@link JournalRecord#journalOffset()} this tenant's journal still holds, or the next
      * offset it will issue when the journal is empty.

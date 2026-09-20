@@ -624,9 +624,17 @@ public final class EmbedBrowserHttpHandler {
                 var current = resolved.view();
                 var lifecycle = current.lifecycle();
                 writeLifecycle(output, binding, lifecycle);
-                long sent = firstAttachment && binding.processInstanceId() == null
-                        ? initial.latestSequence()
-                        : writeObservationBatch(output, bearer, session, context, binding, initial, sequence);
+                long sent;
+                if (binding.processInstanceId() != null && firstAttachment) {
+                    if (!writeDurableReplay(output, context, binding)) {
+                        writeTerminal(output, "source-gap", binding, "DURABLE_REPLAY_UNAVAILABLE");
+                        return;
+                    }
+                    sent = initial.latestSequence();
+                } else {
+                    sent = firstAttachment ? initial.latestSequence()
+                            : writeObservationBatch(output, bearer, session, context, binding, initial, sequence);
+                }
                 if (sent < 0) return;
                 while (!Thread.currentThread().isInterrupted()) {
                     wakeup.await(1_000);
@@ -642,7 +650,15 @@ public final class EmbedBrowserHttpHandler {
                     DeploymentEventBatch batch = deployments.localDeploymentEventsAfter(context,
                             binding.deploymentId(), binding.incarnationId(), binding.graphVersion(), sent);
                     if (batch.status() == DeploymentEventBatch.Status.GAP) {
-                        writeTerminal(output, "source-gap", binding, "REPLAY_WINDOW_EXCEEDED"); return;
+                        if (binding.processInstanceId() == null
+                                || !writeDurableReplay(output, context, binding)) {
+                            writeTerminal(output, "source-gap", binding, "REPLAY_WINDOW_EXCEEDED"); return;
+                        }
+                        DeploymentEventBatch currentBatch = deployments.localDeploymentEventsAfter(context,
+                                binding.deploymentId(), binding.incarnationId(), binding.graphVersion(), 0);
+                        if (currentBatch.status() != DeploymentEventBatch.Status.AVAILABLE) return;
+                        sent = currentBatch.latestSequence();
+                        continue;
                     }
                     if (batch.status() != DeploymentEventBatch.Status.AVAILABLE) {
                         resolved = resolveEmbedView(bearer, session, context, binding);
@@ -709,6 +725,34 @@ public final class EmbedBrowserHttpHandler {
         return Math.max(sent, batch.latestSequence());
     }
 
+    private boolean writeDurableReplay(OutputStream output, RequestContext context,
+                                       DeploymentObservationCursorStore.Binding binding) throws IOException {
+        java.util.UUID processId = java.util.UUID.fromString(binding.processInstanceId());
+        long sequence = 0;
+        boolean first = true;
+        output.write(("event: runtime-reset\ndata: {\"type\":\"runtime-reset\",\"deploymentId\":\""
+                + JsonStrings.escape(binding.deploymentId()) + "\",\"incarnationId\":\""
+                + JsonStrings.escape(binding.incarnationId()) + "\",\"graphVersion\":\""
+                + JsonStrings.escape(binding.graphVersion()) + "\",\"processInstanceId\":\""
+                + binding.processInstanceId() + "\"}\n\n").getBytes(StandardCharsets.UTF_8));
+        while (sequence < 100_000) {
+            var page = deployments.embedDeploymentRunReplay(context, binding.deploymentId(),
+                    binding.incarnationId(), binding.graphVersion(), processId, sequence, 512);
+            if (page.isEmpty()) break;
+            if (first && page.getFirst().streamSequence() != 1) return false;
+            first = false;
+            for (var event : page) {
+                output.write(("event: execution\ndata: " + durableExecutionJson(binding, event) + "\n\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                sequence = event.streamSequence();
+            }
+            if (page.size() < 512) break;
+        }
+        if (sequence >= 100_000) return false;
+        output.flush();
+        return true;
+    }
+
     private EmbedViewResolution resolveEmbedView(String bearer,
                                                   EmbedBrowserSessionAuthority.ActiveSession expected,
                                                   RequestContext context,
@@ -731,7 +775,8 @@ public final class EmbedBrowserHttpHandler {
     private boolean authorizedRun(RequestContext context, DeploymentViewerView view, String processInstanceId) {
         try {
             return deployments.embedDeploymentRun(context, view.source().deploymentId(),
-                    view.source().graphVersion(), java.util.UUID.fromString(processInstanceId)).isPresent();
+                    view.source().incarnationId(), view.source().graphVersion(),
+                    java.util.UUID.fromString(processInstanceId)).isPresent();
         } catch (IllegalArgumentException invalidIdentity) {
             return false;
         }
@@ -768,7 +813,8 @@ public final class EmbedBrowserHttpHandler {
     private String runsArray(RequestContext context, DeploymentViewerView view) {
         Instant terminalCutoff = configuration.clock().instant().minus(Duration.ofHours(1));
         List<ai.ravenroot.api.persistence.ProcessInventoryEntry> rows = deployments.embedDeploymentRuns(
-                context, view.source().deploymentId(), view.source().graphVersion(), 256).stream()
+                context, view.source().deploymentId(), view.source().incarnationId(),
+                view.source().graphVersion(), 256).stream()
                 .filter(row -> !row.status().terminal() || !row.updatedAt().isBefore(terminalCutoff))
                 .sorted(java.util.Comparator.comparing(
                         ai.ravenroot.api.persistence.ProcessInventoryEntry::updatedAt).reversed())
@@ -839,6 +885,21 @@ public final class EmbedBrowserHttpHandler {
                 + ",\"executionId\":\"" + event.executionId() + "\",\"traversalId\":\""
                 + event.traversalId() + "\",\"publicReason\":" + nullable(event.publicReason())
                 + ",\"description\":\"" + JsonStrings.escape(description) + "\"}}";
+    }
+
+    private static String durableExecutionJson(DeploymentObservationCursorStore.Binding binding,
+                                                ai.ravenroot.api.application.DurableExecutionEvent event) {
+        return "{\"type\":\"execution\",\"deploymentId\":\""
+                + JsonStrings.escape(binding.deploymentId()) + "\",\"incarnationId\":\""
+                + JsonStrings.escape(binding.incarnationId()) + "\",\"graphVersion\":\""
+                + JsonStrings.escape(binding.graphVersion()) + "\",\"processInstanceId\":\""
+                + event.processInstanceId() + "\",\"event\":{\"occurredAt\":\""
+                + event.occurredAt() + "\",\"type\":\"" + JsonStrings.escape(event.eventType())
+                + "\",\"nodeId\":" + nullable(event.nodeId()) + ",\"edgeId\":"
+                + nullable(event.edgeId()) + ",\"activeInstances\":0,\"inFlightArrivals\":0,"
+                + "\"fallback\":false,\"executionId\":\"" + event.traversalId()
+                + "\",\"traversalId\":\"" + event.traversalId() + "\",\"sequence\":"
+                + event.streamSequence() + ",\"publicReason\":null,\"description\":\"\"}}";
     }
 
     private static String nullable(String value) {

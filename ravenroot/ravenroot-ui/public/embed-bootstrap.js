@@ -173,7 +173,7 @@
     return { type, id, data: data.join('\n') };
   };
 
-  const readObservation = async (reader, viewerInstance, source, signal) => {
+  const readObservation = async (reader, viewerInstance, source, signal, generation) => {
     const decoder = new TextDecoder();
     let buffer = '';
     let cursor = '';
@@ -193,7 +193,8 @@
         if (!parsed.data) continue;
         const payload = JSON.parse(parsed.data);
         const type = parsed.type === 'source-gap' ? 'gap'
-          : parsed.type === 'source-invalidated' ? 'invalidated' : parsed.type;
+          : parsed.type === 'source-invalidated' ? 'invalidated'
+            : parsed.type === 'runtime-reset' ? 'reset' : parsed.type;
         viewerInstance.observe({
           type,
           deploymentId: payload.deploymentId ?? source.deploymentId,
@@ -213,10 +214,11 @@
             occurredAt: payload.event?.occurredAt ?? payload.occurredAt ?? null,
             publicReason: payload.event?.publicReason ?? payload.publicReason ?? null,
             description: payload.event?.description ?? payload.description ?? '',
+            sequence: Number(payload.event?.sequence ?? payload.sequence) || undefined,
           } } : {}),
           ...(type === 'lifecycle' ? { lifecycle: payload.lifecycle } : {}),
           ...(['gap', 'invalidated'].includes(type) ? { reason: payload.reason } : {}),
-        });
+        }, generation);
         cursor = parsed.id || cursor;
         if (parsed.type === 'source-gap' || parsed.type === 'source-invalidated') {
           await reader.cancel();
@@ -415,7 +417,7 @@
             const request = await signedBody(OBSERVATION_PATH, { cursor, processInstanceId });
             const reader = await postStream(OBSERVATION_PATH, request, exchanged.bearer, controller.signal);
             const result = await readObservation(reader, viewer,
-              { ...projection.source, processInstanceId }, controller.signal);
+              { ...projection.source, processInstanceId }, controller.signal, generation);
             cursor = result.cursor;
             if (result.terminal || controller.signal.aborted || generation !== selectedGeneration) return;
           } catch (failure) {

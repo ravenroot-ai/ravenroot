@@ -30,6 +30,7 @@ import java.util.UUID;
  * @param commentMaxUtf8Bytes immutable pinned comment limit.
  * @param availableActions pinned actions currently authorized for this caller.
  * @param reviewPresentation review material present only on authorized exact-task detail.
+ * @param interactionPresentation bounded pinned presentation metadata; never executable content.
  */
 public record HumanTaskAttentionItem(
         UUID taskId,
@@ -48,7 +49,44 @@ public record HumanTaskAttentionItem(
         int actionLabelMaxUtf8Bytes,
         int commentMaxUtf8Bytes,
         List<HumanTaskConfirmationAction> availableActions,
-        Optional<HumanTaskReviewPresentation> reviewPresentation) {
+        Optional<HumanTaskReviewPresentation> reviewPresentation,
+        HumanTaskPresentation interactionPresentation) {
+
+    /**
+     * Compatibility constructor retaining the projection shape before presentation profiles.
+     *
+     * @param taskId exact task identity
+     * @param generation current optimistic decision fence
+     * @param status current lifecycle status
+     * @param graphVersion immutable graph-version pin
+     * @param deploymentId durable hosting deployment, when present
+     * @param processInstanceId exact owning process instance
+     * @param traversalId exact suspended traversal
+     * @param nodeId exact graph node
+     * @param createdAt immutable registration time
+     * @param expiresAt durable expiry deadline
+     * @param escalateAt optional durable escalation deadline
+     * @param presentation immutable pinned confirmation presentation
+     * @param promptMaxUtf8Bytes immutable pinned prompt limit
+     * @param actionLabelMaxUtf8Bytes immutable pinned action-label limit
+     * @param commentMaxUtf8Bytes immutable pinned comment limit
+     * @param availableActions pinned actions currently authorized for this caller
+     * @param reviewPresentation exact-detail review material, when authorized and present
+     */
+    public HumanTaskAttentionItem(UUID taskId, long generation, HumanTaskStatus status,
+                                  String graphVersion, Optional<String> deploymentId,
+                                  UUID processInstanceId, UUID traversalId, String nodeId,
+                                  Instant createdAt, Instant expiresAt, Optional<Instant> escalateAt,
+                                  HumanTaskConfirmationPresentation presentation,
+                                  int promptMaxUtf8Bytes, int actionLabelMaxUtf8Bytes,
+                                  int commentMaxUtf8Bytes,
+                                  List<HumanTaskConfirmationAction> availableActions,
+                                  Optional<HumanTaskReviewPresentation> reviewPresentation) {
+        this(taskId, generation, status, graphVersion, deploymentId, processInstanceId, traversalId,
+                nodeId, createdAt, expiresAt, escalateAt, presentation, promptMaxUtf8Bytes,
+                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, reviewPresentation,
+                HumanTaskPresentation.compatibility(presentation));
+    }
 
     /**
      * Compatibility constructor for summary projections that deliberately omit review content.
@@ -79,7 +117,8 @@ public record HumanTaskAttentionItem(
                                   List<HumanTaskConfirmationAction> availableActions) {
         this(taskId, generation, status, graphVersion, deploymentId, processInstanceId, traversalId,
                 nodeId, createdAt, expiresAt, escalateAt, presentation, promptMaxUtf8Bytes,
-                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, Optional.empty());
+                actionLabelMaxUtf8Bytes, commentMaxUtf8Bytes, availableActions, Optional.empty(),
+                HumanTaskPresentation.compatibility(presentation));
     }
 
     /** Validates the bounded safe projection. */
@@ -105,6 +144,8 @@ public record HumanTaskAttentionItem(
         }
         availableActions = List.copyOf(availableActions == null ? List.of() : availableActions);
         reviewPresentation = reviewPresentation == null ? Optional.empty() : reviewPresentation;
+        interactionPresentation = interactionPresentation == null
+                ? HumanTaskPresentation.compatibility(presentation) : interactionPresentation;
         reviewPresentation.ifPresent(review -> {
             if (!review.present()) {
                 throw new IllegalArgumentException("detail review presentation must be present");

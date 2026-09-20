@@ -510,27 +510,34 @@ public final class InteractionWebSocketServer implements AutoCloseable {
             }
             try {
                 RequestContext context = commandContext(principal);
-                HumanTaskResult result = switch (command.name()) {
+                ai.ravenroot.api.persistence.HumanTaskSettlement settlement = switch (command.name()) {
                     case "human-task.resolve" -> {
-                        int authorizedLimit = humanTasks.authorizedResponseBodyLimit(context, command.taskId())
+                        int authorizedLimit = humanTasks.authorizedResponseBodyLimit(
+                                        context, command.taskId(), command.override())
                                 .orElse(-1);
                         if (authorizedLimit < 0) {
-                            yield new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, null, null);
-                        }
-                        if (command.payload().length > authorizedLimit) {
-                            yield new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, null, null);
+                            yield null;
                         }
                         ensureAuthorized();
-                        yield humanTasks.resolve(context, command.taskId(), command.generation(),
+                        yield ai.ravenroot.api.persistence.HumanTaskSettlement.resolve(
                                 OpaquePayload.of(command.payload(), command.contentType()),
                                 command.comment() == null ? "" : command.comment());
                     }
-                    case "human-task.deny" -> humanTasks.deny(context, command.taskId(), command.generation(),
+                    case "human-task.deny" -> ai.ravenroot.api.persistence.HumanTaskSettlement.deny(
                             command.comment() == null ? "" : command.comment());
-                    case "human-task.cancel" -> humanTasks.cancel(context, command.taskId(), command.generation(),
+                    case "human-task.cancel" -> ai.ravenroot.api.persistence.HumanTaskSettlement.cancel(
                             command.comment() == null ? "" : command.comment());
                     default -> throw new IllegalStateException("unreachable command");
                 };
+                HumanTaskResult result;
+                if (settlement == null) {
+                    result = new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, null, null);
+                } else if (command.override()) {
+                    result = humanTasks.settleOverride(context, command.taskId(), command.generation(), settlement,
+                            new ai.ravenroot.api.persistence.HumanTaskOverride(command.overrideReason()));
+                } else {
+                    result = humanTasks.settle(context, command.taskId(), command.generation(), settlement);
+                }
                 if (result.resumeTraversalId() != null) humanTaskSweep.accept(context.tenantId());
                 ensureAuthorized();
                 enqueue(InteractionProtocol.commandResult(command, result));

@@ -93,8 +93,19 @@ class ServedConfigurationTest {
                     "reviewPresentationVersions", "reviewTextMaxUtf8Bytes",
                     "confirmationPromptMaxUtf8Bytes", "confirmationActionLabelMaxUtf8Bytes",
                     "commentMaxUtf8Bytes", "attentionPollMillis", "attentionBackoffMaxMillis",
-                    "attentionPageSize", "attentionPageSizeMax"), humanTasks.keySet());
-            assertEquals(1, humanTasks.get("schemaVersion").getAsInt());
+                    "attentionPageSize", "attentionPageSizeMax", "responderEnforcementEnabled",
+                    "overrideScope", "formSchemaVersions", "registeredPresentationProtocolVersions",
+                    "registeredPresentationsEnabled", "capabilityCompletionPath"), humanTasks.keySet());
+            assertEquals(2, humanTasks.get("schemaVersion").getAsInt());
+            assertEquals(policy.responderEnforcementEnabled(),
+                    humanTasks.get("responderEnforcementEnabled").getAsBoolean());
+            assertEquals("ravenroot.human-task.override", humanTasks.get("overrideScope").getAsString());
+            assertEquals(1, humanTasks.getAsJsonArray("formSchemaVersions").get(0).getAsInt());
+            assertEquals(1, humanTasks.getAsJsonArray("registeredPresentationProtocolVersions")
+                    .get(0).getAsInt());
+            assertFalse(humanTasks.get("registeredPresentationsEnabled").getAsBoolean());
+            assertEquals("/v1/human-task-interactions/complete",
+                    humanTasks.get("capabilityCompletionPath").getAsString());
             assertEquals(1, humanTasks.getAsJsonArray("confirmationPresentationVersions").size());
             assertEquals(1, humanTasks.getAsJsonArray("confirmationPresentationVersions").get(0).getAsInt());
             assertEquals(1, humanTasks.getAsJsonArray("reviewPresentationVersions").size());

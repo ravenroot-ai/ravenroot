@@ -499,7 +499,7 @@ jobs:
         working-directory: ravenroot
         run: >-
           mvn -B --no-transfer-progress -pl ravenroot-server -am
-          -Dtest=HumanTaskConfirmationBrowserProcessIntegrationTest
+          -Dtest=HumanTaskConfirmationBrowserProcessIntegrationTest,HumanTaskExternalProviderProcessIntegrationTest
           -Dravenroot.humanTaskConfirmation.browserTest=true
           -Dsurefire.failIfNoSpecifiedTests=false test
       # Archive unconditionally: this evidence is the only record of a real restart, and a failure

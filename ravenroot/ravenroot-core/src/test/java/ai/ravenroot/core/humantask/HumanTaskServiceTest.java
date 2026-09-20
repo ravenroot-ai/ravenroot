@@ -88,7 +88,7 @@ class HumanTaskServiceTest {
             100, 200, 10, 20, 30, 40,
             10, 20, 10, 2, 10,
             300, 5, 10,
-            5, 6, 7, 8, 9, 2);
+            5, 6, 7, 8, 9, 2, HumanTaskPolicy.Confirmation.DEFAULTS, true);
 
     @TempDir
     Path directory;
@@ -281,7 +281,8 @@ class HumanTaskServiceTest {
     void suspensionAndResolutionAreAtomicGenerationFencedAndPayloadSafe() throws Exception {
         try (var store = sqlite("resolution", Clock.fixed(NOW, ZoneOffset.UTC))) {
             Fixture fixture = running(store);
-            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC),
+                    enforced(HumanTaskPolicy.DEFAULTS));
             ExecutionRecorder recorder = ExecutionRecorder.open(store, fixture.key, "worker",
                     Duration.ofSeconds(30), 1);
             HumanTaskResult suspended;
@@ -412,8 +413,8 @@ class HumanTaskServiceTest {
             assertEquals(HumanTaskResult.Code.PAYLOAD_REFUSED,
                     service.resolve(responder(), suspended.task().request().taskId(), 1, wrongSchema).code());
             assertEquals(HumanTaskResult.Code.CANCELLED,
-                    service.cancel(requester(), suspended.task().request().taskId(), 1).code(),
-                    "the original requester may cancel without holding responder roles");
+                    service.cancel(responder(), suspended.task().request().taskId(), 1).code(),
+                    "default-off enforcement permits any admitted same-tenant principal to cancel");
         }
     }
 
@@ -692,7 +693,8 @@ class HumanTaskServiceTest {
 
             var attention = service.attention(requester(),
                     new HumanTaskAttentionLocator(task.taskId(), 1)).orElseThrow();
-            assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), attention.availableActions());
+            assertEquals(List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.CANCEL),
+                    attention.availableActions(), "default-off enforcement preserves requester cancel and resolve");
             assertEquals("Proceed", attention.presentation().resolveLabel());
             assertEquals("proceed", attention.presentation().cancelLabel());
             assertEquals(HumanTaskResult.Code.CANCELLED,
@@ -1064,6 +1066,18 @@ class HumanTaskServiceTest {
                         PayloadKind.MAP, 4096), HandlerAuthorization.ofRoles(Role.APPROVER.name()),
                 Optional.of(Duration.ofMinutes(5)), Duration.ofHours(1),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+    }
+
+    private static HumanTaskPolicy enforced(HumanTaskPolicy policy) {
+        return new HumanTaskPolicy(policy.defaultResponseBytes(), policy.maxResponseBytes(),
+                policy.defaultEscalationSeconds(), policy.maxEscalationSeconds(),
+                policy.defaultExpirySeconds(), policy.maxExpirySeconds(), policy.maxTitleUtf8Bytes(),
+                policy.maxDescriptionUtf8Bytes(), policy.maxResponseSchemaUtf8Bytes(),
+                policy.maxAuthorizationTokens(), policy.maxAuthorizationTokenUtf8Bytes(),
+                policy.decisionBodyMaxBytes(), policy.inboxDefaultPageSize(), policy.inboxMaxPageSize(),
+                policy.responseMaxDepth(), policy.responseMaxCollectionSize(), policy.responseMaxValueCount(),
+                policy.responseMaxTextLength(), policy.responseMaxKeyLength(), policy.writeAttempts(),
+                policy.confirmation(), true);
     }
 
     private static OpaquePayload response() {

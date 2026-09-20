@@ -7,17 +7,61 @@ import {
 
 export function normalizedCanvasState(value, graph) {
   if (!value || typeof value !== 'object') return null;
-  const ids = new Set((graph?.nodes || []).map(node => node.id));
-  const positions = Object.fromEntries(Object.entries(value.positions || {}).filter(([id, p]) => ids.has(id)
+  const nodeIds = new Set((graph?.nodes || []).map(node => node.id));
+  const canonicalIds = new Set([...nodeIds, ...(graph?.edges || []).map(edge => edge.id)]);
+  const positions = Object.fromEntries(Object.entries(value.positions || {}).filter(([id, p]) => nodeIds.has(id)
     && Number.isFinite(p?.x) && Number.isFinite(p?.y)).map(([id, p]) => [id, { x: p.x, y: p.y }]));
   return {
     zoom: Number.isFinite(value.zoom) && value.zoom > 0 ? value.zoom : null,
     pan: Number.isFinite(value.pan?.x) && Number.isFinite(value.pan?.y) ? { x: value.pan.x, y: value.pan.y } : null,
-    selectedIds: Array.isArray(value.selectedIds) ? value.selectedIds.filter(id => ids.has(id)) : [],
-    focusNodeId: ids.has(value.focusNodeId) ? value.focusNodeId : null,
+    selectedIds: Array.isArray(value.selectedIds) ? value.selectedIds.filter(id => canonicalIds.has(id)) : [],
+    focusNodeId: nodeIds.has(value.focusNodeId) ? value.focusNodeId : null,
     selectedGroupId: typeof value.selectedGroupId === 'string' ? value.selectedGroupId : null,
     focusGroupId: typeof value.focusGroupId === 'string' ? value.focusGroupId : null,
     positions,
+  };
+}
+
+export const DEFAULT_MONITORING_FORCES = Object.freeze({
+  repulsion: 320,
+  attraction: .3,
+  speed: .5,
+});
+
+export function normalizedMonitoringForces(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const bounded = (candidate, fallback, minimum, maximum) => {
+    const number = Number(candidate);
+    return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+  };
+  return {
+    repulsion: bounded(source.repulsion, DEFAULT_MONITORING_FORCES.repulsion, 30, 1200),
+    attraction: bounded(source.attraction, DEFAULT_MONITORING_FORCES.attraction, .05, 1.5),
+    speed: bounded(source.speed, DEFAULT_MONITORING_FORCES.speed, .1, 1),
+  };
+}
+
+export function normalizedModeViewState(value, graph) {
+  if (!value || typeof value !== 'object') return null;
+  const groups = readVisualGroups(graph).groups;
+  return {
+    canvasState: normalizedCanvasState(value.canvasState, graph),
+    visualGroupState: reconcileVisualGroupState(groups, value.visualGroupState),
+    forces: normalizedMonitoringForces(value.forces),
+    layoutMode: typeof value.layoutMode === 'string' ? value.layoutMode : null,
+  };
+}
+
+export function documentModeViewStates(document_) {
+  const stored = document_?.viewStates ?? document_?.presentation?.viewStates;
+  const legacy = {
+    canvasState: document_?.canvasState ?? document_?.presentation?.canvasState,
+    visualGroupState: document_?.visualGroupState ?? document_?.presentation?.visualGroupState,
+  };
+  const activeMode = normalizeRenderMode(document_?.renderMode ?? document_?.presentation?.renderMode);
+  return {
+    design: normalizedModeViewState(stored?.design ?? (activeMode === DESIGN_RENDER_MODE ? legacy : null), document_?.graph),
+    monitoring: normalizedModeViewState(stored?.monitoring ?? (activeMode === MONITORING_RENDER_MODE ? legacy : null), document_?.graph),
   };
 }
 
@@ -161,18 +205,24 @@ export function retainableLayout(currentLayout) {
   return isRendererKindLayout(currentLayout) ? null : (currentLayout || null);
 }
 
-// Loading is different from asking for a layout. Persisted coordinates belong to the document;
-// the currently selected LAYOUT belongs to the user's view. Combine them without running the
-// renderer's positioning engine, so opening a file changes paint but not placement.
+// Loading is different from asking for a layout. Persisted coordinates belong to the document and
+// are restored without running an engine. When coordinates are absent, however, a persisted Design
+// arrangement is the document's only geometry instruction and must be the initialization engine.
 //
 // A renderer-kind selection is deliberately NOT retained. Carrying `elastic` through here
 // made `initLoadedGraph` run `setLayout('elastic')` against the brand-new post-replace `cy`, which
 // built a live Elastic renderer for the replacement and defeated the teardown the replace had just
 // performed. Such a view falls back to the graph's own persisted/default layout.
-export function loadedGraphLayoutPlan(graph, currentLayout) {
+export function loadedGraphLayoutPlan(graph, currentLayout, designArrangement = null) {
+  const persisted = graphHasPersistedLayout(graph);
+  const arrangement = DESIGN_ARRANGEMENTS[designArrangement];
   return graphLayoutPlan(graph, {
-    layoutName: retainableLayout(currentLayout) || initialLayoutForGraph(graph),
-    preservePositions: graphHasPersistedLayout(graph),
+    // A selected arrangement is the document's authority when coordinates do not exist. Keep has
+    // no engine of its own, so it retains the document's last finite Design engine (or the normal
+    // unpositioned fallback) rather than preserving an overlap that was never authored.
+    layoutName: !persisted && arrangement?.layout
+      ? arrangement.layout : (retainableLayout(currentLayout) || initialLayoutForGraph(graph)),
+    preservePositions: persisted,
   });
 }
 

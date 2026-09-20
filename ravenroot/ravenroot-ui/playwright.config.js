@@ -13,7 +13,7 @@ export default defineConfig({
   // `source-session-activity-real` joins them for the same reason: its server is a real JVM this
   // config never starts, and the stub fixture server has no source session to observe.
   testIgnore: ['**/plugin-ui/**', '**/human-task-confirmation-real/**',
-    '**/source-session-activity-real/**'],
+    '**/source-session-activity-real/**', '**/launch-profile-real/**'],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

@@ -54,6 +54,8 @@
       url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations
       url: /operator-guide/embed-operations.html
+    - title: Human Task operations
+      url: /operator-guide/human-tasks.html
 
 - title: Integrator guide
   items:
@@ -213,6 +215,8 @@
       url: /troubleshooting/ai-extensions.html
     - title: Embed access, backup, and recovery
       url: /troubleshooting/embed-backup.html
+    - title: Human Tasks
+      url: /troubleshooting/human-tasks.html
 
 - title: Contributing and governance
   items:

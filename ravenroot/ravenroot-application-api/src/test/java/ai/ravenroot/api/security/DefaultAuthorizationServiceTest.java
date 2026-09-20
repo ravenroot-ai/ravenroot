@@ -112,6 +112,23 @@ class DefaultAuthorizationServiceTest {
     }
 
     @Test
+    void humanTaskOverrideRequiresExplicitAdminScopeAndPreservesTenantAuthority() {
+        var service = new DefaultAuthorizationService(event -> { });
+        var resource = ProtectedResource.owned("human-task", "task-1", "tenant-a");
+        assertTrue(service.decide(context("tenant-a", Set.of(Role.TENANT_ADMIN),
+                        Set.of("ravenroot.human-task.override")),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+        assertFalse(service.decide(context("tenant-b", Set.of(Role.TENANT_ADMIN),
+                        Set.of("ravenroot.human-task.override")),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+        assertTrue(service.decide(context("platform", Set.of(Role.PLATFORM_ADMIN),
+                        Set.of("ravenroot.human-task.override")),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+        assertFalse(service.decide(context("tenant-a", Set.of(Role.TENANT_ADMIN), Set.of()),
+                AuthorizationAction.HUMAN_TASK_OVERRIDE, resource).allowed());
+    }
+
+    @Test
     void runnerPrincipalAndTenantRefusalsAreRecordedAsDeniedEvenForPlatformAdmins() {
         var events = new ArrayList<AuthorizationAuditEvent>();
         var service = new DefaultAuthorizationService(events::add);
@@ -154,7 +171,8 @@ class DefaultAuthorizationServiceTest {
             case ARTIFACT_CREATE, ARTIFACT_VALIDATE, ARTIFACT_TEST -> Role.DEVELOPER;
             case ARTIFACT_APPROVE, ARTIFACT_ACTIVATE, ARTIFACT_RETIRE -> Role.APPROVER;
             case RUNTIME_OBSERVE, AGENT_AUTHORITY_CONTROL, AUDIT_ADMIN -> Role.PLATFORM_ADMIN;
-            case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN -> Role.TENANT_ADMIN;
+            case RUNNER_ADMIN, AUDIT_READ, AUDIT_EXPORT, HUMAN_TASK_ADMIN,
+                    HUMAN_TASK_OVERRIDE -> Role.TENANT_ADMIN;
             // EXECUTION_CONTROL moved out of this reserved arm the same commit it became
             // available -- see enforcesTheCompleteRoleAndScopeMatrix, which now exercises it through
             // the positive branch above (allowed with role+scope, denied with wrong role, denied with

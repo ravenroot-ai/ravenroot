@@ -21,7 +21,13 @@ final class InteractionProtocol {
     record Resume(long afterJournalOffset) implements Inbound { }
     record Acknowledge(long journalOffset, UUID eventId) implements Inbound { }
     record Command(String messageId, String name, UUID taskId, long generation,
-                   byte[] payload, String contentType, String comment) implements Inbound { }
+                   byte[] payload, String contentType, String comment,
+                   boolean override, String overrideReason) implements Inbound {
+        Command(String messageId, String name, UUID taskId, long generation,
+                byte[] payload, String contentType, String comment) {
+            this(messageId, name, taskId, generation, payload, contentType, comment, false, null);
+        }
+    }
 
     static Inbound parse(String json, int maxBytes) {
         byte[] encoded = json.getBytes(StandardCharsets.UTF_8);
@@ -71,9 +77,9 @@ final class InteractionProtocol {
         String name = text(fields, "command", 64);
         Set<String> permitted = switch (name) {
             case "human-task.resolve" -> Set.of("version", "type", "messageId", "command", "taskId",
-                    "generation", "payloadBase64", "contentType", "comment");
+                    "generation", "payloadBase64", "contentType", "comment", "override", "overrideReason");
             case "human-task.deny", "human-task.cancel" -> Set.of("version", "type", "messageId", "command",
-                    "taskId", "generation", "comment");
+                    "taskId", "generation", "comment", "override", "overrideReason");
             default -> throw new ProtocolFailure(1002, "unsupported command");
         };
         if (!permitted.containsAll(fields.keySet()) || !fields.keySet().containsAll(
@@ -81,6 +87,10 @@ final class InteractionProtocol {
         long generation = integer(fields, "generation");
         if (generation < 1) fail();
         String comment = optionalText(fields, "comment", MAX_COMMENT_BYTES);
+        boolean override = optionalBoolean(fields, "override");
+        String overrideReason = optionalText(fields, "overrideReason",
+                ai.ravenroot.api.persistence.HumanTaskOverride.MAX_REASON_UTF8_BYTES);
+        if (override != (overrideReason != null)) fail();
         byte[] payload = null;
         String contentType = null;
         if ("human-task.resolve".equals(name)) {
@@ -91,7 +101,8 @@ final class InteractionProtocol {
             if (contentType == null || contentType.isBlank()) contentType = "application/octet-stream";
         }
         return new Command(text(fields, "messageId", MAX_MESSAGE_ID_BYTES), name,
-                UUID.fromString(text(fields, "taskId", 36)), generation, payload, contentType, comment);
+                UUID.fromString(text(fields, "taskId", 36)), generation, payload, contentType, comment,
+                override, overrideReason);
     }
 
     static String authenticated() {
@@ -184,6 +195,12 @@ final class InteractionProtocol {
             throw new ProtocolFailure(1002, "invalid protocol message");
         }
         return integer.value();
+    }
+
+    private static boolean optionalBoolean(Map<String, PayloadValue> fields, String name) {
+        if (!fields.containsKey(name)) return false;
+        if (!(fields.get(name) instanceof PayloadValue.BooleanValue value)) fail();
+        return ((PayloadValue.BooleanValue) fields.get(name)).value();
     }
 
     private static void fail() {

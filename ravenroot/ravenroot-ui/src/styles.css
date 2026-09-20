@@ -230,15 +230,15 @@
     .application-menu-shortcut { color: var(--tx-3); font-size: 11px; white-space: nowrap; }
     .application-menu-separator { height: 1px; margin: 4px 6px; background: var(--bd); }
     #topbar.density-hide-view .view-mirrors,
-    #topbar.density-hide-file .file-mirrors,
-    #topbar.density-hide-monitoring-controls #elastic-ctrl { display: none !important; }
+    #topbar.density-hide-file .file-mirrors { display: none !important; }
     #graph-title {
       font-size: 13px; color: var(--tx-2);
       max-width: 240px; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap;
     }
     .document-switcher {
-      min-width: 32px; max-width: 360px; height: 32px; flex: 0 1 360px;
+      /* Do not collapse under the pointer when blur-time autosave widens the dirty label. */
+      min-width: 64px; max-width: 360px; height: 32px; flex: 0 1 360px;
       display: inline-flex; align-items: center; gap: 6px;
       padding: 0 8px; border: 1px solid transparent; border-radius: 4px;
       background: transparent; color: var(--tx-2); font: inherit; cursor: pointer;
@@ -1434,6 +1434,10 @@
     /* The canvas fills what the strip leaves. It is created inside its pane and never moved: moving
        it stops Cytoscape painting, and resize/fit/forceRender do not bring it back. */
     .doc-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+    /* A document with no authored coordinates has no honest preset frame to show. Keep only that
+       initial canvas visually withheld until its selected finite arrangement and routing settle;
+       the pane header and live busy announcement remain available throughout. */
+    .doc-canvas--initial-layout-pending { opacity: 0; pointer-events: none; }
     /* ELK cannot be cancelled once its worker result has entered Cytoscape's animation. The canvas
        is therefore one accessible busy operation through final edge routing: document switching
        remains available on the pane, while pointer edits cannot race coordinates still in flight. */
@@ -1939,6 +1943,9 @@
     .human-task-dialog-identity { margin: 0; color: var(--tx-2); font: 10px/1.45 'SFMono-Regular', Consolas, monospace; overflow-wrap: anywhere; }
     .human-task-dialog textarea { width: 100%; min-height: 96px; resize: vertical; }
     .human-task-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .human-task-interaction-host { min-height: 240px; border: 1px solid var(--border); border-radius: 6px;
+      overflow: hidden; background: var(--bg-1); }
+    .human-task-presentation-frame { display: block; width: 100%; min-height: 320px; border: 0; }
     .human-task-decision-deny, .human-task-decision-cancel { color: var(--outcome-error-text); }
 
     .d3-nodes circle.human-task-attention {
@@ -2361,7 +2368,6 @@
       .logo-wordmark { display: none; }
       .document-switcher { max-width: 250px; }
       #font-slider, #node-action-scale-slider { width: 56px; }
-      #rep-slider, #attr-slider { width: 52px; }
     }
 
     .badge {
@@ -2432,6 +2438,17 @@
       width: 14px; height: 14px; border-radius: 50%;
       background: var(--cyan); border: 2px solid var(--bg-1);
       cursor: pointer;
+    }
+    @media (max-width: 1350px) {
+      #elastic-ctrl { gap: 2px; }
+      #rep-slider, #attr-slider { width: 36px; }
+      #rep-val, #attr-val { min-width: 22px; font-size: 10px; }
+      #speed-icon, #speed-slider, #speed-val { display: none; }
+      /* Monitoring keeps its unique forces reachable without changing the canvas height (which
+         would alter the restored viewport). The two general presentation sliders remain available
+         in Design and keep their document/global values through the round-trip. */
+      #topbar:has(#elastic-ctrl.visible) #font-ctrl,
+      #topbar:has(#elastic-ctrl.visible) #node-action-scale-ctrl { display: none; }
     }
     /* tooltip D3 elastic */
     .d3-tooltip {

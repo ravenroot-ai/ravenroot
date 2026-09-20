@@ -152,10 +152,12 @@
   <!-- Semantic rendering modes. Algorithm names stay internal. -->
   <div class="btn-group command-mirrors layout-mirrors" role="radiogroup" aria-label="Graph view">
     <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-design"
-            data-command-id="layout.design" title="Arrange every node for workflow design and editing">✎ Design</button>
+            data-command-id="layout.design" title="Restore the saved Design view">✎ Design</button>
     <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-monitoring"
-            data-command-id="layout.monitoring" title="Continuously visualize live workflow activity">◉ Monitoring</button>
+            data-command-id="layout.monitoring" title="Restore the saved Monitoring view">◉ Monitoring</button>
   </div>
+  <button class="btn command-mirrors render-mirror" id="btn-render" data-command-id="layout.render"
+          title="Recompute the active graph view">↻ Render</button>
   <div class="vr command-mirrors view-mirrors"></div>
   <div class="command-mirrors view-mirrors btn-group">
     <button class="btn" data-command-id="view.fit" title="Fit to screen (F)">⤢ Fit</button>

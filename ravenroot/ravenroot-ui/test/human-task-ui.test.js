@@ -15,13 +15,14 @@ const task = { taskId: 'task-secret-safe-id', generation: 7, status: 'ESCALATED'
     contentType: 'text/plain', text: '<script>alert(1)</script>\nsecond line',
     contentDigest: `sha256:${'a'.repeat(64)}`, maxUtf8Bytes: 128 } };
 
-function dialogDocument() {
+function dialogDocument(url = 'https://workbench.example/') {
   return new JSDOM(`<body><dialog id="d" aria-labelledby="t"><form><p data-human-task-prompt></p>
     <p data-human-task-identity></p><section data-human-task-review><p data-human-task-review-status></p>
     <pre data-human-task-review-text></pre><p data-human-task-review-digest></p></section>
     <div data-human-task-comment-field><textarea data-human-task-comment></textarea>
-    <small data-human-task-comment-hint></small></div><p data-human-task-error hidden></p>
-    <div data-human-task-actions></div><button type="button" data-human-task-close>Close</button></form></dialog></body>`)
+    <small data-human-task-comment-hint></small></div><p id="human-task-error" role="status"
+    aria-live="polite" data-human-task-error hidden></p><div data-human-task-actions></div>
+    <button type="button" data-human-task-close>Close</button></form></dialog></body>`, { url })
     .window.document;
 }
 
@@ -125,6 +126,155 @@ describe('Human Task inspector and decision dialog', () => {
     expect(humanTaskActionName('DENY', '\u{1ccd6}')).toBe('Deny — \u{1ccd6}');
     expect(humanTaskActionName('RESOLVE', '\u00a0')).toBe('Resolve');
     expect(humanTaskActionName('DENY', '\ufeff')).toBe('Deny — \ufeff');
+  });
+
+  it('renders accessible multiline and bounded numeric form controls and emits typed values', async () => {
+    const doc = dialogDocument();
+    const submitted = vi.fn(async () => ({}));
+    const formTask = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
+      interactionPresentation: { kind: 'FORM', version: 1, profileId: '', profileVersion: 1,
+        formSchema: { version: 1, fields: [
+          { name: 'notes', label: 'Notes', help: 'Explain', type: 'MULTILINE_TEXT', required: true,
+            maxUtf8Bytes: 512, allowedValues: [], minimum: null, maximum: null },
+          { name: 'score', label: 'Score', help: '', type: 'INTEGER', required: true,
+            maxUtf8Bytes: 16, allowedValues: [], minimum: 1, maximum: 5 },
+        ] } } };
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'),
+      onSubmit: submitted });
+    controller.open(formTask, capability);
+    const notes = doc.querySelector('textarea[data-human-task-form-field="notes"]');
+    const score = doc.querySelector('input[data-human-task-form-field="score"]');
+    expect(notes.closest('label').textContent).toContain('Notes');
+    expect(score.min).toBe('1');
+    expect(score.max).toBe('5');
+    notes.value = 'first line\nsecond line';
+    score.value = '4';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalled());
+    expect(submitted.mock.calls[0][0].response.value).toEqual({
+      notes: 'first line\nsecond line', score: 4,
+    });
+  });
+
+  it('submits required Boolean false and enforces exact UTF-8 text boundaries locally', async () => {
+    const doc = dialogDocument();
+    const submitted = vi.fn(async () => ({}));
+    const formTask = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
+      interactionPresentation: { kind: 'FORM', version: 1, profileId: '', profileVersion: 1,
+        formSchema: { version: 1, fields: [
+          { name: 'approved', label: 'Approved', help: '', type: 'BOOLEAN', required: true,
+            maxUtf8Bytes: 1, allowedValues: [], minimum: null, maximum: null },
+          { name: 'title', label: 'Title', help: '', type: 'TEXT', required: true,
+            maxUtf8Bytes: 4, allowedValues: [], minimum: null, maximum: null },
+          { name: 'notes', label: 'Notes', help: '', type: 'MULTILINE_TEXT', required: true,
+            maxUtf8Bytes: 4, allowedValues: [], minimum: null, maximum: null },
+        ] } } };
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'),
+      onSubmit: submitted });
+    controller.open(formTask, capability);
+    const approved = doc.querySelector('[data-human-task-form-field="approved"]');
+    const title = doc.querySelector('[data-human-task-form-field="title"]');
+    const notes = doc.querySelector('[data-human-task-form-field="notes"]');
+    expect(approved.required).toBe(false);
+    expect(approved.checked).toBe(false);
+    title.value = 'abcd';
+    notes.value = 'éé';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    await vi.waitFor(() => expect(submitted).toHaveBeenCalledTimes(1));
+    expect(submitted.mock.calls[0][0].response.value).toEqual({
+      approved: false, title: 'abcd', notes: 'éé',
+    });
+
+    controller.open(formTask, capability);
+    const overTitle = doc.querySelector('[data-human-task-form-field="title"]');
+    const validNotes = doc.querySelector('[data-human-task-form-field="notes"]');
+    overTitle.value = 'ééx';
+    validNotes.value = '🙂';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    expect(submitted).toHaveBeenCalledTimes(1);
+    expect(overTitle.getAttribute('aria-invalid')).toBe('true');
+    expect(overTitle.getAttribute('aria-describedby')).toBe('human-task-error');
+    expect(doc.activeElement).toBe(overTitle);
+    expect(doc.querySelector('[data-human-task-error]').textContent).toBe(
+      'Title must be at most 4 UTF-8 bytes.');
+
+    overTitle.value = 'abc';
+    overTitle.dispatchEvent(new doc.defaultView.Event('input'));
+    validNotes.value = '🙂x';
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+    expect(submitted).toHaveBeenCalledTimes(1);
+    expect(validNotes.getAttribute('aria-invalid')).toBe('true');
+    expect(doc.activeElement).toBe(validNotes);
+    expect(doc.querySelector('[data-human-task-error]').textContent).toBe(
+      'Notes must be at most 4 UTF-8 bytes.');
+  });
+
+  it('runs a registered presentation in an opaque-origin sandbox without exposing a bearer', async () => {
+    const doc = dialogDocument();
+    const custom = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
+      interactionPresentation: { kind: 'CUSTOM', version: 1, profileId: 'trusted-form',
+        profileVersion: 2 }, availableActions: ['RESOLVE'] };
+    const launch = { schemaVersion: 1, capability: 'signed-capability', capabilityId: 'cap-1',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(), launchUri: 'https://forms.example/task',
+      origin: 'https://forms.example', kind: 'CUSTOM', taskId: custom.taskId,
+      generation: custom.generation, actions: ['RESOLVE'], review: null,
+      responseSchema: { contentType: 'application/vnd.ravenroot.payload+json', schema: 'test',
+        schemaVersion: '1', kind: 'MAP', maxBytes: 4096 } };
+    const complete = vi.fn(async () => ({ outcome: 'RESOLVED' }));
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'),
+      onLaunch: async () => launch, onInteractionSubmit: complete });
+    controller.open(custom, capability);
+    doc.querySelector('.human-task-presentation-launch').click();
+    await vi.waitFor(() => expect(doc.querySelector('.human-task-presentation-frame')).not.toBeNull());
+    const frame = doc.querySelector('.human-task-presentation-frame');
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
+    expect(frame.src).toBe(launch.launchUri);
+    const postMessage = vi.spyOn(frame.contentWindow, 'postMessage');
+    frame.dispatchEvent(new doc.defaultView.Event('load'));
+    expect(postMessage).toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][1]).toBe('*');
+    expect(postMessage.mock.calls[0][0]).not.toHaveProperty('capability');
+    expect(postMessage.mock.calls[0][0]).not.toHaveProperty('subject');
+    doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
+      origin: 'https://attacker.example', source: frame.contentWindow,
+      data: { protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
+        taskId: custom.taskId, generation: custom.generation, capabilityId: launch.capabilityId,
+        action: 'RESOLVE', comment: '', response: { contentType: launch.responseSchema.contentType,
+          payloadBase64: 'e30=' } },
+    }));
+    await Promise.resolve();
+    expect(complete).not.toHaveBeenCalled();
+    doc.defaultView.dispatchEvent(new doc.defaultView.MessageEvent('message', {
+      origin: 'null', source: frame.contentWindow,
+      data: { protocol: 'ravenroot.human-task.presentation', version: 1, type: 'complete',
+        taskId: custom.taskId, generation: custom.generation, capabilityId: launch.capabilityId,
+        action: 'RESOLVE', comment: '', response: { contentType: launch.responseSchema.contentType,
+          payloadBase64: 'e30=' } },
+    }));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith(custom, launch, 'RESOLVE', '',
+      { contentType: launch.responseSchema.contentType, payloadBase64: 'e30=' }));
+  });
+
+  it('refuses a same-origin external presentation before creating a script frame', async () => {
+    const doc = dialogDocument('https://workbench.example/');
+    const external = { ...task, presentation: { ...task.presentation, commentRequirement: 'OPTIONAL' },
+      interactionPresentation: { kind: 'EXTERNAL', version: 1, profileId: 'provider',
+        profileVersion: 1 }, availableActions: ['RESOLVE'] };
+    const launch = { schemaVersion: 1, capability: 'signed-capability', capabilityId: 'cap-1',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      launchUri: 'https://workbench.example/provider/task', origin: 'https://workbench.example',
+      kind: 'EXTERNAL', taskId: external.taskId, generation: external.generation,
+      actions: ['RESOLVE'], review: null,
+      responseSchema: { contentType: 'application/vnd.ravenroot.payload+json', schema: 'test',
+        schemaVersion: '1', kind: 'MAP', maxBytes: 4096 } };
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'),
+      onLaunch: async () => launch });
+    controller.open(external, capability);
+    doc.querySelector('.human-task-presentation-launch').click();
+    await vi.waitFor(() => expect(doc.querySelector('[data-human-task-error]').textContent)
+      .toContain('not isolated'));
+    expect(doc.querySelector('.human-task-presentation-frame')).toBeNull();
+    expect(doc.getElementById('d').getAttribute('aria-busy')).toBe('false');
   });
 
   it('suspends stale presentation during reauthentication without clearing the durable locator', () => {

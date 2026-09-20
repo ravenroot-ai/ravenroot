@@ -156,6 +156,9 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                 // leaving it active would make the second task's one-second timer a browser-speed
                 // race rather than the required deterministic one-escalated/one-waiting fixture.
                 server.installHumanTasks(tasks, tenantId -> recovery.sweepOnce(tenantId), policy);
+                var interactions = ai.ravenroot.server.humantaskinteraction
+                        .HumanTaskInteractionConfiguration.fromEnvironment(System.getenv());
+                if (interactions != null) server.installHumanTaskInteractions(interactions);
                 server.start();
                 Thread shutdown = new Thread(() -> {
                     // Process.destroy sends a normal JVM termination signal. Close this test-owned
@@ -361,6 +364,9 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                   <key id="confirmationPrompt" for="node" attr.name="confirmationPrompt" attr.type="string"/>
                   <key id="confirmationComment" for="node" attr.name="confirmationComment" attr.type="string"/>
                   <key id="confirmationActions" for="node" attr.name="confirmationActions" attr.type="string"/>
+                  <key id="presentationKind" for="node" attr.name="presentationKind" attr.type="string"/>
+                  <key id="presentationProfileId" for="node" attr.name="presentationProfileId" attr.type="string"/>
+                  <key id="presentationProfileVersion" for="node" attr.name="presentationProfileVersion" attr.type="string"/>
                   <key id="escalateAfterSeconds" for="node" attr.name="escalateAfterSeconds" attr.type="string"/>
                   <key id="expiresAfterSeconds" for="node" attr.name="expiresAfterSeconds" attr.type="string"/>
                   <key id="layoutX" for="node" attr.name="layoutX" attr.type="double"/>
@@ -373,7 +379,8 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                     <data key="joinSemantics">declared</data>
                     <node id="start"><data key="kind">start</data><data key="layoutX">120</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
                     <node id="human-task-e2e-source"><data key="kind">behavior</data><data key="behavior">test.confirmation-source</data><data key="layoutX">300</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
-                    <node id="human-confirmation"><data key="kind">behavior</data><data key="behavior">human-task</data><data key="title">Confirm durable restart</data><data key="responseContentType">application/vnd.ravenroot.payload+json</data><data key="responseSchema">ravenroot.human-task.response</data><data key="responseSchemaVersion">1</data><data key="responseKind">MAP</data><data key="maxResponseBytes">65536</data><data key="confirmationPresentationVersion">1</data><data key="confirmationPrompt">""" + "P".repeat(8192) + """
+                    <node id="human-confirmation"><data key="kind">behavior</data><data key="behavior">human-task</data><data key="title">Confirm durable restart</data><data key="responseContentType">application/vnd.ravenroot.payload+json</data><data key="responseSchema">ravenroot.human-task.response</data><data key="responseSchemaVersion">1</data><data key="responseKind">MAP</data><data key="maxResponseBytes">65536</data><data key="confirmationPresentationVersion">1</data>""" + registeredPresentationData() + """
+                <data key="confirmationPrompt">""" + "P".repeat(8192) + """
                 </data><data key="confirmationComment">REQUIRED</data><data key="confirmationActions">RESOLVE,DENY,CANCEL</data><data key="escalateAfterSeconds">1</data><data key="expiresAfterSeconds">300</data><data key="layoutX">480</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
                     <node id="human-confirmation-downstream"><data key="kind">behavior</data><data key="behavior">test.confirmation-downstream</data><data key="layoutX">660</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
                     <node id="end"><data key="kind">end</data><data key="layoutX">840</data><data key="layoutY">220</data><data key="layoutWidth">80</data><data key="layoutHeight">52</data></node>
@@ -384,6 +391,18 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                   </graph>
                 </graphml>
                 """;
+    }
+
+    private static String registeredPresentationData() {
+        String kind = System.getenv().getOrDefault(
+                "RAVENROOT_HUMAN_TASK_FIXTURE_PRESENTATION_KIND", "").strip();
+        if (kind.isEmpty()) return "";
+        if (!"CUSTOM".equals(kind) && !"EXTERNAL".equals(kind)) {
+            throw new IllegalArgumentException("invalid fixture presentation kind");
+        }
+        return "<data key=\"presentationKind\">" + kind + "</data>"
+                + "<data key=\"presentationProfileId\">fixture-provider</data>"
+                + "<data key=\"presentationProfileVersion\">1</data>";
     }
 
     private static void awaitTermination() throws InterruptedException {

@@ -26,6 +26,26 @@ function denseGraphMl() {
     <graph id="dense" edgedefault="directed">${nodes}${chain}${parallel}</graph></graphml>`;
 }
 
+function unpositionedArrangedGraphMl(arrangement = 'flow', layout = 'dagre') {
+  return `<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+    <key id="name" for="node" attr.name="name" attr.type="string"/>
+    <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+    <key id="render-mode" for="graph" attr.name="ravenroot.renderMode" attr.type="string"/>
+    <key id="layout-mode" for="graph" attr.name="ravenroot.layoutMode" attr.type="string"/>
+    <key id="arrangement" for="graph" attr.name="ravenroot.designArrangement" attr.type="string"/>
+    <graph id="raw" edgedefault="directed">
+      <data key="render-mode">design</data><data key="layout-mode">${layout}</data>
+      <data key="arrangement">${arrangement}</data>
+      <node id="raw-start"><data key="name">Start</data><data key="kind">START</data></node>
+      <node id="raw-a"><data key="name">A</data><data key="kind">PASSTHROUGH</data></node>
+      <node id="raw-b"><data key="name">B</data><data key="kind">PASSTHROUGH</data></node>
+      <node id="raw-end"><data key="name">End</data><data key="kind">END</data></node>
+      <edge id="raw-edge-1" source="raw-start" target="raw-a"/>
+      <edge id="raw-edge-2" source="raw-a" target="raw-b"/>
+      <edge id="raw-edge-3" source="raw-b" target="raw-end"/>
+    </graph></graphml>`;
+}
+
 async function openLayoutMenu(page) {
   await page.locator('#menu-layout').click();
   await expect(page.locator('#application-menu')).toBeVisible();
@@ -82,6 +102,61 @@ async function expectIndependentParallelEdges(page) {
   return snapshot;
 }
 
+async function startTimedOutInitialElk(page) {
+  return page.evaluate(xml => {
+    window.__lateInitialElkRuns = 0;
+    window.__lateInitialElkStops = 0;
+    window.__timeoutVisibleFrames = [];
+    const collectionPrototype = Object.getPrototypeOf(window.cy.elements());
+    const originalLayout = collectionPrototype.layout;
+    const originalSetTimeout = window.setTimeout;
+    window.setTimeout = function(callback, delay, ...args) {
+      return originalSetTimeout.call(window, callback, delay === 15000 ? 40 : delay, ...args);
+    };
+    collectionPrototype.layout = function(options) {
+      const controller = originalLayout.call(this, options);
+      if (options.name !== 'elk' || this.cy().getElementById('raw-start').empty()) return controller;
+      window.__lateInitialLayoutCy = this.cy();
+      const run = controller.run.bind(controller);
+      controller.one('layoutstop', () => { window.__lateInitialElkStops += 1; });
+      controller.run = () => {
+        originalSetTimeout.call(window, () => {
+          window.__lateInitialElkRuns += 1;
+          run();
+        }, 300);
+        return controller;
+      };
+      return controller;
+    };
+    const recordVisible = () => {
+      if (window.cy?.getElementById('raw-start').nonempty()) {
+        const owner = window.ravenroot.activeDocument();
+        if (Number(getComputedStyle(owner.container).opacity) > 0) {
+          window.__timeoutVisibleFrames.push(window.cy.nodes().map(node => node.position()));
+        }
+      }
+      if (!window.__timeoutVisibleFrames.length) requestAnimationFrame(recordVisible);
+    };
+    requestAnimationFrame(recordVisible);
+    try {
+      window.ravenroot.replaceActiveDocumentFromText(xml, 'timed-out-elk.graphml');
+      const owner = window.ravenroot.activeDocument();
+      return {
+        uniquePositions: new Set(window.cy.nodes().map(node => {
+          const p = node.position(); return `${p.x}:${p.y}`;
+        })).size,
+        opacity: getComputedStyle(owner.container).opacity,
+        inert: owner.container.inert,
+        ariaHidden: owner.container.getAttribute('aria-hidden'),
+        busy: owner.layoutBusy,
+      };
+    } finally {
+      collectionPrototype.layout = originalLayout;
+      window.setTimeout = originalSetTimeout;
+    }
+  }, unpositionedArrangedGraphMl('hierarchical', 'hierarchical'));
+}
+
 test.describe('Design arrangements', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -96,8 +171,8 @@ test.describe('Design arrangements', () => {
     }))).toEqual({ n0: { x: 100, y: 100 }, n9: { x: 245, y: 210 }, historyDepth: 0 });
     await openLayoutMenu(page);
     const labels = await page.locator('#application-menu .application-menu-item span:first-child').allTextContents();
-    expect(labels.slice(-8)).toEqual([
-      'Design', 'Monitoring', 'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
+    expect(labels.slice(-9)).toEqual([
+      'Design', 'Monitoring', 'Render', 'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
       'Arrange — Hierarchical (new)', 'Arrange — Layered (top-down)',
     ]);
     await page.screenshot({ path: '/tmp/ravenroot-648-arrange-menu.png', fullPage: true });
@@ -107,6 +182,186 @@ test.describe('Design arrangements', () => {
       await expect(page.locator(`[data-command-id="layout.arrange.${arrangementCommandIds[label]}"]`))
         .toHaveAttribute('aria-disabled', 'true');
     }
+  });
+
+  const initialArrangementCases = [
+    ['hierarchical', 'hierarchical', 'elk'],
+    ['flow', 'dagre', 'dagre'],
+    ['organic', 'cose', 'cose'],
+    ['hierarchical-new', 'hierarchical-new', 'rr-layered'],
+    ['layered-down', 'layered-down', 'rr-layered'],
+    ['keep', 'cose', 'cose'],
+  ];
+
+  for (const [arrangement, layout, engine] of initialArrangementCases) test(
+    `withholds raw ${arrangement} until its only initial arrangement is paintable`, async ({ page }) => {
+    await page.evaluate(({ xml }) => {
+      window.__rawInitialLayouts = [];
+      window.__rawPaintFrames = [];
+      const collectionPrototype = Object.getPrototypeOf(window.cy.elements());
+      const originalLayout = collectionPrototype.layout;
+      collectionPrototype.layout = function(options) {
+        if (this.cy().getElementById('raw-start').nonempty()) {
+          window.__rawInitialLayouts.push(options.name);
+        }
+        return originalLayout.call(this, options);
+      };
+      const record = () => {
+        if (window.cy?.getElementById('raw-start').nonempty()) {
+          const canvas = window.ravenroot.activeDocument().container;
+          const style = getComputedStyle(canvas);
+          if (style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) > 0) {
+            window.__rawPaintFrames.push(window.cy.nodes().map(node => node.position()));
+          }
+        }
+        if (window.__rawPaintFrames.length < 3) requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);
+      window.ravenroot.replaceActiveDocumentFromText(xml, 'raw-arranged.graphml');
+    }, { xml: unpositionedArrangedGraphMl(arrangement, layout) });
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+    await expect.poll(() => page.evaluate(() => window.__rawPaintFrames.length)).toBe(3);
+    expect(await page.evaluate(() => window.__rawInitialLayouts)).toEqual([engine]);
+    expect(await page.evaluate(() => {
+      const owner = window.ravenroot.activeDocument();
+      return {
+        arrangement: owner.designArrangement,
+        layout: owner.layoutMode,
+        historyDepth: owner.history.depth(),
+        dirty: owner.history.isDirty(),
+        paintable: getComputedStyle(owner.container).opacity === '1'
+          && !owner.container.classList.contains('doc-canvas--initial-layout-pending'),
+        everyPaintArranged: window.__rawPaintFrames.every(frame =>
+          new Set(frame.map(position => `${position.x}:${position.y}`)).size === 4),
+      };
+    })).toEqual({ arrangement, layout, historyDepth: 0, dirty: false,
+      paintable: true, everyPaintArranged: true });
+  });
+
+  test('keeps authored coordinates directly paintable without an initialization layout', async ({ page }) => {
+    expect(await page.evaluate(xml => {
+      const prototype = Object.getPrototypeOf(window.cy.elements());
+      const originalLayout = prototype.layout;
+      const layouts = [];
+      prototype.layout = function(options) {
+        if (this.cy().getElementById('n0').nonempty()) layouts.push(options.name);
+        return originalLayout.call(this, options);
+      };
+      try {
+        window.ravenroot.replaceActiveDocumentFromText(xml, 'authored.graphml');
+        const owner = window.ravenroot.activeDocument();
+        return {
+          layouts,
+          opacity: getComputedStyle(owner.container).opacity,
+          concealed: owner.container.classList.contains('doc-canvas--initial-layout-pending'),
+          inert: owner.container.inert,
+          n0: window.cy.getElementById('n0').position(),
+          historyDepth: owner.history.depth(),
+          dirty: owner.history.isDirty(),
+        };
+      } finally {
+        prototype.layout = originalLayout;
+      }
+    }, denseGraphMl())).toEqual({
+      layouts: [], opacity: '1', concealed: false, inert: false,
+      n0: { x: 100, y: 100 }, historyDepth: 0, dirty: false,
+    });
+  });
+
+  test('reveals an initial canvas when its arrangement engine fails synchronously', async ({ page }) => {
+    expect(await page.evaluate(xml => {
+      const prototype = Object.getPrototypeOf(window.cy.elements());
+      const originalLayout = prototype.layout;
+      prototype.layout = function(options) {
+        if (this.cy().getElementById('raw-start').nonempty()) throw new Error('synthetic layout failure');
+        return originalLayout.call(this, options);
+      };
+      try {
+        window.ravenroot.replaceActiveDocumentFromText(xml, 'failed-arrangement.graphml');
+        const owner = window.ravenroot.activeDocument();
+        return {
+          opacity: getComputedStyle(owner.container).opacity,
+          concealed: owner.container.classList.contains('doc-canvas--initial-layout-pending'),
+          inert: owner.container.inert,
+          ariaHidden: owner.container.getAttribute('aria-hidden'),
+          busy: owner.layoutBusy,
+          uniquePositions: new Set(window.cy.nodes().map(node => {
+            const p = node.position(); return `${p.x}:${p.y}`;
+          })).size,
+          historyDepth: owner.history.depth(),
+          dirty: owner.history.isDirty(),
+        };
+      } finally {
+        prototype.layout = originalLayout;
+      }
+    }, unpositionedArrangedGraphMl())).toEqual({
+      opacity: '1', concealed: false, inert: false, ariaHidden: null,
+      busy: false, uniquePositions: 4, historyDepth: 0, dirty: false,
+    });
+  });
+
+  test('releases a concealed initial canvas when its async arrangement is retired', async ({ page }) => {
+    expect(await page.evaluate(({ raw, authored }) => {
+      window.ravenroot.replaceActiveDocumentFromText(raw, 'retired-arrangement.graphml');
+      const owner = window.ravenroot.activeDocument();
+      const concealedBeforeRetirement = owner.container.classList
+        .contains('doc-canvas--initial-layout-pending');
+      window.ravenroot.replaceActiveDocumentFromText(authored, 'replacement.graphml');
+      return {
+        concealedBeforeRetirement,
+        opacity: getComputedStyle(owner.container).opacity,
+        concealed: owner.container.classList.contains('doc-canvas--initial-layout-pending'),
+        inert: owner.container.inert,
+        ariaHidden: owner.container.getAttribute('aria-hidden'),
+        busy: owner.layoutBusy,
+        n0: window.cy.getElementById('n0').position(),
+      };
+    }, { raw: unpositionedArrangedGraphMl('hierarchical', 'hierarchical'), authored: denseGraphMl() }))
+      .toEqual({
+        concealedBeforeRetirement: true, opacity: '1', concealed: false, inert: false,
+        ariaHidden: null, busy: false, n0: { x: 100, y: 100 },
+      });
+  });
+
+  for (const scenario of ['fallback', 'user edit', 'newer arrangement']) test(
+    `timed-out ELK cannot publish after ${scenario}`, async ({ page }) => {
+    expect(await startTimedOutInitialElk(page)).toEqual({
+      uniquePositions: 1, opacity: '0', inert: true, ariaHidden: 'true', busy: true,
+    });
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+    await expect.poll(() => page.evaluate(() => window.__timeoutVisibleFrames.length)).toBe(1);
+    expect(await page.evaluate(() => {
+      const owner = window.ravenroot.activeDocument();
+      return {
+        firstVisibleUnique: new Set(window.__timeoutVisibleFrames[0].map(p => `${p.x}:${p.y}`)).size,
+        opacity: getComputedStyle(owner.container).opacity,
+        inert: owner.container.inert,
+        ariaHidden: owner.container.getAttribute('aria-hidden'),
+        busy: owner.layoutBusy,
+        isolatedDestroyed: window.__lateInitialLayoutCy.destroyed(),
+        historyDepth: owner.history.depth(),
+        dirty: owner.history.isDirty(),
+      };
+    })).toEqual({ firstVisibleUnique: 4, opacity: '1', inert: false, ariaHidden: null,
+      busy: false, isolatedDestroyed: true, historyDepth: 0, dirty: false });
+
+    if (scenario === 'user edit') {
+      await page.evaluate(() => {
+        window.cy.getElementById('raw-a').position({ x: 777, y: 333 });
+      });
+    } else if (scenario === 'newer arrangement') {
+      await arrange(page, 'Arrange — Flow');
+    }
+    const stable = await positions(page);
+    await expect.poll(() => page.evaluate(() => window.__lateInitialElkRuns)).toBe(1);
+    await page.waitForTimeout(500);
+    expect(await positions(page)).toEqual(stable);
+    expect(await page.evaluate(() => ({
+      activeLayout: window.ravenroot.activeDocument().layoutMode,
+      busy: window.ravenroot.activeDocument().layoutBusy,
+      lateRuns: window.__lateInitialElkRuns,
+    }))).toEqual({ activeLayout: scenario === 'newer arrangement' ? 'dagre' : 'hierarchical',
+      busy: false, lateRuns: 1 });
   });
 
   test('records one winning arrangement, keeps every edge independent, and undoes the geometry', async ({ page }) => {
@@ -133,6 +388,21 @@ test.describe('Design arrangements', () => {
     await page.locator('#btn-undo').click();
     await expect.poll(() => positions(page)).toEqual(before);
     await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(0);
+  });
+
+  test('keeps arrangement selection independent and selecting it again clears future Render choice', async ({ page }) => {
+    await arrange(page, 'Arrange — Flow');
+    const arranged = await positions(page);
+    await openLayoutMenu(page);
+    await page.locator('[data-command-id="layout.arrange.flow"]').click();
+    expect(await page.evaluate(() => ({
+      choice: window.ravenroot.activeDocument().designArrangement,
+      stored: window.ravenroot.activeDocument().graph.graphProperties['ravenroot.designArrangement'],
+    }))).toEqual({ choice: null, stored: undefined });
+    expect(await positions(page)).toEqual(arranged);
+    await page.locator('#btn-render').click();
+    await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+    expect(await positions(page)).not.toEqual(arranged);
   });
 
   test('preserves coordinates for Keep positions and retains edge identity across every arrangement', async ({ page }) => {
@@ -324,6 +594,11 @@ test.describe('Design arrangements', () => {
       choice: window.ravenroot.activeDocument().designArrangement,
       layout: window.ravenroot.activeDocument().layoutMode,
     }))).toEqual({ active: firstId, documents: [firstId, secondId], choice: 'flow', layout: 'dagre' });
+    const restoredPositions = await positions(page);
+    for (const [id, expected] of Object.entries(arranged)) {
+      expect(restoredPositions[id].x).toBeCloseTo(expected.x, 3);
+      expect(restoredPositions[id].y).toBeCloseTo(expected.y, 3);
+    }
     await openLayoutMenu(page);
     await expect(page.locator('[data-command-id="layout.arrange.flow"]'))
       .toHaveAttribute('aria-checked', 'true');

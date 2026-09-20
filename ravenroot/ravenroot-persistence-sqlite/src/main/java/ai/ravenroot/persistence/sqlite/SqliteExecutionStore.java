@@ -229,6 +229,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     + "t.confirmation_cancel_label, t.confirmation_max_prompt_bytes, "
                     + "t.confirmation_max_action_label_bytes, "
                     + "t.confirmation_max_comment_bytes, "
+                    + "t.presentation_kind, t.presentation_version, t.presentation_profile_id, "
+                    + "t.presentation_profile_version, t.presentation_form_schema, "
+                    + "t.presentation_schema_digest, "
                     + "p.deployment_id AS attention_deployment_id "
                     + "FROM human_task t JOIN process_instance p "
                     + "ON p.tenant_id = t.tenant_id "
@@ -4010,6 +4013,54 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public CompletionStage<Void> revokeHumanTaskInteraction(String tenantId,
+            ai.ravenroot.api.persistence.HumanTaskInteractionRevocation revocation) {
+        return async(() -> inWriteTransaction(null, () -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(revocation, "revocation");
+            try (PreparedStatement purge = connection.prepareStatement(
+                    "DELETE FROM human_task_interaction_revocation WHERE tenant_id = ? AND "
+                            + StoredInstant.atOrBefore("expires_at"))) {
+                purge.setString(1, tenantId);
+                StoredInstant.bindComparison(purge, 2, clock.instant());
+                purge.executeUpdate();
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT OR IGNORE INTO human_task_interaction_revocation "
+                            + "(tenant_id, capability_id, task_id, generation, "
+                            + "revoked_at_epoch_second, revoked_at_nano, "
+                            + "expires_at_epoch_second, expires_at_nano) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                statement.setString(1, tenantId);
+                statement.setString(2, revocation.capabilityId().toString());
+                statement.setString(3, revocation.taskId().toString());
+                statement.setLong(4, revocation.generation());
+                int index = StoredInstant.bindValue(statement, 5, revocation.revokedAt());
+                StoredInstant.bindValue(statement, index, revocation.expiresAt());
+                statement.executeUpdate();
+            }
+            return null;
+        }));
+    }
+
+    @Override
+    public CompletionStage<Boolean> isHumanTaskInteractionRevoked(
+            String tenantId, UUID capabilityId, Instant now) {
+        return async(() -> inReadTransaction(null, () -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(capabilityId, "capabilityId");
+            Objects.requireNonNull(now, "now");
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "SELECT 1 FROM human_task_interaction_revocation WHERE tenant_id = ? "
+                            + "AND capability_id = ? AND " + StoredInstant.strictlyAfter("expires_at"))) {
+                statement.setString(1, tenantId);
+                statement.setString(2, capabilityId.toString());
+                StoredInstant.bindComparison(statement, 3, now);
+                try (ResultSet rows = statement.executeQuery()) { return rows.next(); }
+            }
+        }));
+    }
+
+    @Override
     public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
         return async(() -> {
             requireTenantId(tenantId);
@@ -4172,6 +4223,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "AND t.status IN ('WAITING', 'ESCALATED') "
                         + "AND t.confirmation_version > 0";
                 HumanTaskAttentionItem item;
+                boolean reviewAuthorized;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, tenantId);
                     statement.setString(2, locator.taskId().toString());
@@ -4180,10 +4232,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         if (!rows.next()) return Optional.empty();
                         item = readHumanTaskAttentionItem(rows, tenantId, authorization);
                         if (item == null) return Optional.empty();
+                        reviewAuthorized = humanTaskReviewAuthorized(rows, tenantId, authorization);
                     }
                 }
                 // Keep the content-bearing query physically after authorization and after the
                 // summary cursor is closed. This ordering is part of the non-disclosure contract.
+                if (!reviewAuthorized) return Optional.of(item);
                 return readHumanTaskReviewPresentation(tenantId, locator)
                         .map(review -> withReviewPresentation(item, review));
             });
@@ -4215,7 +4269,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 item.traversalId(), item.nodeId(), item.createdAt(), item.expiresAt(),
                 item.escalateAt(), item.presentation(), item.promptMaxUtf8Bytes(),
                 item.actionLabelMaxUtf8Bytes(), item.commentMaxUtf8Bytes(),
-                item.availableActions(), review.present() ? Optional.of(review) : Optional.empty());
+                item.availableActions(), review.present() ? Optional.of(review) : Optional.empty(),
+                item.interactionPresentation());
     }
 
     private static boolean after(HumanTaskAttentionItem item,
@@ -4276,10 +4331,25 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     Optional.ofNullable(escalation), presentation,
                     rows.getInt("confirmation_max_prompt_bytes"),
                     rows.getInt("confirmation_max_action_label_bytes"),
-                    rows.getInt("confirmation_max_comment_bytes"), actions);
+                    rows.getInt("confirmation_max_comment_bytes"), actions, Optional.empty(),
+                    readHumanTaskPresentation(rows));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
         }
+    }
+
+    private static boolean humanTaskReviewAuthorized(
+            ResultSet rows, String tenantId, HumanTaskAttentionAuthorization authorization)
+            throws SQLException {
+        var requirements = new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                splitTokens(rows.getString("required_scopes")));
+        String requesterActor = new ai.ravenroot.api.security.SecurityContext(
+                rows.getString("requester_request_id"), tenantId,
+                rows.getString("requester_subject"),
+                ai.ravenroot.api.security.PrincipalType.valueOf(
+                        rows.getString("requester_principal_type")),
+                rows.getString("requester_issuer")).qualifiedIdentity();
+        return authorization.mayReview(requirements, requesterActor);
     }
 
     private void writeHumanTasks(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
@@ -4384,11 +4454,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "confirmation_cancel_label, confirmation_max_prompt_bytes, "
                 + "confirmation_max_action_label_bytes, confirmation_max_comment_bytes, "
                 + "review_version, review_content_type, review_text, review_digest, "
-                + "review_max_utf8_bytes, "
+                + "review_max_utf8_bytes, presentation_kind, presentation_version, "
+                + "presentation_profile_id, presentation_profile_version, presentation_form_schema, "
+                + "presentation_schema_digest, "
                 + "created_at_epoch_second, created_at_nano, "
                 + "status, actor, decision_comment, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(62) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(68) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             statement.setString(index++, task.key().processInstanceId().toString());
@@ -4452,6 +4524,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(index++, review.text());
             statement.setString(index++, review.contentDigest());
             statement.setInt(index++, review.maxUtf8Bytes());
+            ai.ravenroot.api.persistence.HumanTaskPresentation interaction = request.presentation();
+            statement.setString(index++, interaction.kind().name());
+            statement.setInt(index++, interaction.version());
+            statement.setString(index++, interaction.profileId());
+            statement.setInt(index++, interaction.profileVersion());
+            statement.setString(index++, interaction.formSchema());
+            statement.setString(index++, interaction.schemaDigest());
             index = StoredInstant.bindValue(statement, index, task.createdAt());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
@@ -4579,7 +4658,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             rows.getInt("confirmation_max_comment_bytes")),
                     new HumanTaskReviewPresentation(rows.getInt("review_version"),
                             rows.getString("review_content_type"), rows.getString("review_text"),
-                            rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")));
+                            rows.getString("review_digest"), rows.getInt("review_max_utf8_bytes")),
+                    readHumanTaskPresentation(rows));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getString("decision_comment"), rows.getLong("generation"),
@@ -4598,6 +4678,21 @@ public final class SqliteExecutionStore implements ExecutionStore {
         return java.util.Arrays.stream(stored.split(","))
                 .map(HumanTaskConfirmationAction::valueOf)
                 .toList();
+    }
+
+    /** Maps pre-discriminator embedded rows to their already-existing confirmation presentation. */
+    private static ai.ravenroot.api.persistence.HumanTaskPresentation readHumanTaskPresentation(
+            ResultSet rows) throws SQLException {
+        var kind = ai.ravenroot.api.persistence.HumanTaskPresentationKind.valueOf(
+                rows.getString("presentation_kind"));
+        int version = rows.getInt("presentation_version");
+        if (kind == ai.ravenroot.api.persistence.HumanTaskPresentationKind.CLASSIC
+                && version == 0 && rows.getInt("confirmation_version") > 0) {
+            return ai.ravenroot.api.persistence.HumanTaskPresentation.confirmation();
+        }
+        return new ai.ravenroot.api.persistence.HumanTaskPresentation(kind, version,
+                rows.getString("presentation_profile_id"), rows.getInt("presentation_profile_version"),
+                rows.getString("presentation_form_schema"), rows.getString("presentation_schema_digest"));
     }
 
     private void requireAttemptExists(ProcessInstance folded, UUID traversalId, UUID invocationId,

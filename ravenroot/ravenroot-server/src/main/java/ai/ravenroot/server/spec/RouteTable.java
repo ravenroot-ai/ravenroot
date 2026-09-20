@@ -744,12 +744,51 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-tasks/{taskId}/settle",
+                    "Applies the canonical generation-fenced Human Task settlement document used by HTTP, "
+                            + "the interaction WebSocket, Workbench, and CLI. Typed response bytes remain "
+                            + "separate from action and comment; an explicit override carries a bounded reason "
+                            + "and requires Human Task override authority.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST", "DELETE"),
+                    "/v1/human-tasks/{taskId}/interaction",
+                    "Issues or durably revokes one expiring, task- and generation-bound capability for an "
+                            + "operator-registered custom presentation or external provider. The response "
+                            + "contains only the authorized review projection and pinned response contract.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-task-interactions/complete",
+                    "Completes one configured external-provider interaction using only its bounded signed capability. Ambient "
+                            + "Authorization and Cookie credentials are refused; origin, provider signature, "
+                            + "task generation, schema, action, expiry, and durable revocation are fenced.",
+                    false, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks",
                     "Lists an authorized, bounded, payload-free consistency inventory of durable Human Tasks. "
                             + "Filters cover task and execution identity, lifecycle, age, and actionable, terminal, "
                             + "orphaned, or non-resumable classification.",
                     true, true, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/admin/human-tasks/{taskId}/attention",
+                    "Returns exact tenant-explicit Human Task review through an authorized override. "
+                            + "Tenant administrators remain tenant-local; platform administrators may select "
+                            + "another tenant. Audit evidence excludes review and response content.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/{taskId}/settle",
+                    "Applies the tenant-explicit canonical Human Task override settlement with a bounded "
+                            + "reason and payload-free audit outcome.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/admin/human-tasks/purge",
                     "Dry-runs or applies a bounded, idempotent administrative reconciliation. CANCEL uses normal "
                             + "task re-entry semantics; FORCE_ABANDON atomically closes inconsistent work without "

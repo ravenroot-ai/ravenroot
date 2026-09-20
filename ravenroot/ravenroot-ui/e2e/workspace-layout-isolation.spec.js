@@ -74,7 +74,7 @@ async function prepareElasticPair(page) {
   const sibling = await page.evaluate(() => window.ravenroot.activeDocument().id);
   const target = await openSettledDocument(page, 'elastic-target.graphml');
   await page.evaluate(id => window.ravenroot.activateDocument(id), sibling);
-  await page.locator('#btn-design').click();
+  await page.locator('#btn-render').click();
   await settleActiveDocument(page);
   await page.evaluate(id => window.ravenroot.activateDocument(id), target);
   await page.locator('#btn-monitoring').click();
@@ -89,16 +89,16 @@ async function prepareElasticPair(page) {
   return { sibling, target };
 }
 
-async function preparePendingHiddenElastic(page) {
+async function prepareHiddenElastic(page) {
   await page.setViewportSize(RESPONSIVE_FALLBACK);
   const target = await page.evaluate(() => window.ravenroot.activeDocument().id);
   const sibling = await openSettledDocument(page, 'pending-elastic-sibling.graphml');
 
-  // Keep the whole interleaving in one browser task: Design owns the ELK slot, Monitoring replaces
-  // it, then the responsive workspace hides its owner before the D3 renderer can be instantiated.
+  // Keep the whole interleaving in one browser task. Monitoring must instantiate from its saved
+  // view before the responsive workspace hides the owner; hiding may suspend, but never defer a
+  // second coordinate authority or leave an ungrouped Cytoscape frame behind.
   await page.evaluate(([targetId, siblingId]) => {
     window.ravenroot.activateDocument(targetId);
-    document.querySelector('#btn-design').click();
     document.querySelector('#btn-monitoring').click();
     window.ravenroot.activateDocument(siblingId);
   }, [target, sibling]);
@@ -109,15 +109,20 @@ async function preparePendingHiddenElastic(page) {
       layoutMode: owner?.layoutMode,
       rendererKind: owner?.renderer?.kind,
       shown: owner?.pane?.classList.contains('doc-pane--shown'),
-      pendingGeneration: owner?.pendingElasticLayoutToken?.generation ?? null,
+      pending: owner?.pendingElasticLayoutToken ?? null,
       hostCount: owner?.pane?.querySelectorAll('.doc-elastic-host').length ?? -1,
+      suspended: owner?.renderer?.host?.classList.contains('suspended') ?? false,
+      simulationLive: Boolean(owner?.renderer?.simulation?.alpha() > 0
+        && owner?.renderer?.simulation?._stepper),
     };
   }, target)).toEqual({
     layoutMode: 'elastic',
-    rendererKind: 'cytoscape',
+    rendererKind: 'elastic',
     shown: false,
-    pendingGeneration: expect.any(Number),
-    hostCount: 0,
+    pending: null,
+    hostCount: 1,
+    suspended: true,
+    simulationLive: false,
   });
   return { target, sibling };
 }
@@ -141,7 +146,7 @@ test.describe('per-document layout ownership', () => {
     // contains -- no hardcoded geometry or node count. The document opens on its authored preset
     // positions (createWorkflowDocument), not a dagre run, so this has to be measured, not assumed
     // from the initial state.
-    await page.locator('#btn-design').click();
+    await page.locator('#btn-render').click();
     await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
     const designPositions = await snapshot();
 
@@ -150,8 +155,8 @@ test.describe('per-document layout ownership', () => {
     // raced positions diverge from the dagre-alone ground truth above; if the latest request
     // genuinely owns the final state, they coincide -- dagre is a deterministic layered layout,
     // not a relaxation seeded by whatever positions cose left behind.
-    await page.locator('#btn-design').click();
-    await page.locator('#btn-design').click();
+    await page.locator('#btn-render').click();
+    await page.locator('#btn-render').click();
     await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
     const positions = await snapshot();
 
@@ -171,7 +176,7 @@ test.describe('per-document layout ownership', () => {
       const foregroundBefore = foreground.cy.nodes().map(node => ({ id: node.id(), ...node.position() }));
       window.ravenroot.activateDocument(backgroundId);
       const stopped = new Promise(resolve => background.cy.one('layoutstop', () => resolve()));
-      document.querySelector('#btn-design').click();
+      document.querySelector('#btn-render').click();
       window.ravenroot.activateDocument(foregroundId);
       await stopped;
       return {
@@ -199,14 +204,14 @@ test.describe('per-document layout ownership', () => {
 
     await page.evaluate(id => {
       window.ravenroot.activateDocument(id);
-      document.querySelector('#btn-design').click();
+      document.querySelector('#btn-render').click();
       window.ravenroot.closeDocument(id);
     }, closing);
     await page.waitForTimeout(100);
     expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(survivor);
 
     await page.evaluate(text => {
-      document.querySelector('#btn-design').click();
+      document.querySelector('#btn-render').click();
       window.ravenroot.replaceActiveDocumentFromText(text, 'replacement.graphml');
     }, graphMl);
     await page.waitForTimeout(800);
@@ -220,17 +225,17 @@ test.describe('per-document layout ownership', () => {
     expect(await paintedPixels(page, survivor)).toBeGreaterThan(0);
   });
 
-  test('a hidden Monitoring handoff stays owner-local and resumes without stale publication', async ({ page }) => {
+  test('a hidden Monitoring view stays owner-local and resumes without stale publication', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
-    const { target, sibling } = await preparePendingHiddenElastic(page);
+    const { target, sibling } = await prepareHiddenElastic(page);
     const siblingBefore = await rendererSnapshot(page, sibling);
     const targetBefore = await rendererSnapshot(page, target);
-    const pendingGeneration = await page.evaluate(id =>
-      window.ravenroot.workspace.find(id).pendingElasticLayoutToken.generation, target);
+    const rendererGeneration = await page.evaluate(id =>
+      window.ravenroot.workspace.find(id).renderer.token.generation, target);
 
-    // The same-task focus bounce may consume the pending handoff, but it must suspend the resulting
-    // renderer inside its own hidden pane and never publish coordinates into either document.
+    // A same-task focus bounce preserves the already-restored renderer inside its own hidden pane
+    // and never publishes coordinates into either document.
     await page.evaluate(([targetId, siblingId]) => {
       window.ravenroot.activateDocument(targetId);
       window.ravenroot.activateDocument(siblingId);
@@ -247,7 +252,7 @@ test.describe('per-document layout ownership', () => {
         hostConnected: owner.renderer.host.isConnected,
         svgOwner: owner.renderer.svg.dataset.documentId,
         suspended: owner.renderer.host.classList.contains('suspended'),
-        requestGeneration: owner.renderer.layoutToken.generation,
+        requestGeneration: owner.renderer.token.generation,
       };
     }, target)).toEqual({
       layoutMode: 'elastic',
@@ -262,10 +267,10 @@ test.describe('per-document layout ownership', () => {
       requestGeneration: expect.any(Number),
     });
     expect(await page.evaluate(id =>
-      window.ravenroot.workspace.find(id).renderer.layoutToken.generation, target))
-      .toBeGreaterThan(pendingGeneration);
+      window.ravenroot.workspace.find(id).renderer.token.generation, target))
+      .toBe(rendererGeneration);
     const resumedGeneration = await page.evaluate(id =>
-      window.ravenroot.workspace.find(id).renderer.layoutToken.generation, target);
+      window.ravenroot.workspace.find(id).renderer.token.generation, target);
     const targetHidden = await rendererSnapshot(page, target);
     expect(targetHidden.positions).toEqual(targetBefore.positions);
     expect(targetHidden.edges).toEqual(targetBefore.edges);
@@ -283,8 +288,9 @@ test.describe('per-document layout ownership', () => {
         hostConnected: owner.renderer.host.isConnected,
         svgConnected: owner.renderer.svg.isConnected,
         svgOwner: owner.renderer.svg.dataset.documentId,
-        simulationLive: Boolean(owner.renderer.simulation && owner.renderer.simulation.alpha() > 0),
-        requestGeneration: owner.renderer.layoutToken.generation,
+        simulationLive: Boolean(owner.renderer.simulation?.alpha() > 0
+          && owner.renderer.simulation?._stepper),
+        requestGeneration: owner.renderer.token.generation,
       };
     }, target)).toEqual({
       layoutMode: 'elastic',
@@ -295,7 +301,7 @@ test.describe('per-document layout ownership', () => {
       hostConnected: true,
       svgConnected: true,
       svgOwner: target,
-      simulationLive: true,
+      simulationLive: false,
       requestGeneration: resumedGeneration,
     });
     const targetShown = await rendererSnapshot(page, target);
@@ -305,10 +311,10 @@ test.describe('per-document layout ownership', () => {
     expect(errors).toEqual([]);
   });
 
-  test('closing a hidden owner invalidates its pending Elastic generation', async ({ page }) => {
+  test('closing a hidden owner retires its restored Elastic renderer', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
-    const { target, sibling } = await preparePendingHiddenElastic(page);
+    const { target, sibling } = await prepareHiddenElastic(page);
     const siblingBefore = await rendererSnapshot(page, sibling);
 
     await page.locator('#document-switcher').click();
@@ -324,17 +330,17 @@ test.describe('per-document layout ownership', () => {
     expect(errors).toEqual([]);
   });
 
-  test('same-turn replace invalidates pending Elastic before resume can instantiate it', async ({ page }) => {
+  test('same-turn replace retires restored Elastic before it can resume', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
-    const { target, sibling } = await preparePendingHiddenElastic(page);
+    const { target, sibling } = await prepareHiddenElastic(page);
     const siblingBefore = await rendererSnapshot(page, sibling);
     const retired = await page.evaluate(id => {
       const owner = window.ravenroot.workspace.find(id);
       window.__pendingElasticCy = owner.cy;
       window.__pendingElasticRenderer = owner.renderer;
       return {
-        layoutGeneration: owner.pendingElasticLayoutToken.generation,
+        layoutGeneration: owner.layoutSessionToken?.generation ?? owner.renderer.token.generation,
         rendererGeneration: owner.renderer.token.generation,
       };
     }, target);
@@ -406,13 +412,13 @@ test.describe('per-document layout ownership', () => {
     expect(errors).toEqual([]);
   });
 
-  test('a newer layout invalidates pending Elastic before resume can instantiate it', async ({ page }) => {
+  test('returning to Design retires restored Elastic before it can resume', async ({ page }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
-    const { target, sibling } = await preparePendingHiddenElastic(page);
+    const { target, sibling } = await prepareHiddenElastic(page);
     const siblingBefore = await rendererSnapshot(page, sibling);
     const retired = await page.evaluate(id =>
-      window.ravenroot.workspace.find(id).pendingElasticLayoutToken.generation, target);
+      window.ravenroot.workspace.find(id).renderer.token.generation, target);
 
     await page.evaluate(id => {
       window.ravenroot.activateDocument(id);
@@ -426,7 +432,7 @@ test.describe('per-document layout ownership', () => {
         layoutMode: owner.layoutMode,
         rendererKind: owner.renderer.kind,
         pending: owner.pendingElasticLayoutToken ?? null,
-        generationAdvanced: owner.layoutSessionToken.generation > generation,
+        generationAdvanced: owner.renderer.token.generation !== generation,
         hosts: owner.pane.querySelectorAll('.doc-elastic-host').length,
       };
     }, [target, retired])).toEqual({
@@ -583,7 +589,7 @@ test.describe('per-document layout ownership', () => {
 
     await page.evaluate(([backgroundId, elasticId]) => {
       window.ravenroot.activateDocument(backgroundId);
-      document.querySelector('#btn-design').click();
+      document.querySelector('#btn-render').click();
       window.ravenroot.activateDocument(elasticId);
       document.querySelector('#btn-monitoring').click();
     }, [first, second]);

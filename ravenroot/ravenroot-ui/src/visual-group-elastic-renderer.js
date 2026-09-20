@@ -19,6 +19,7 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
   let frozen = null;
   let focusedGroup = null;
   let selectedGroup = null;
+  let groupDrag = null;
   const transition = createVisualGroupTransition({ isCurrent: () => !destroyed && isLive(), paint });
   const point = id => transition.active ? positions.get(id) : canonicalNodes.get(id);
   const endpointId = endpoint => typeof endpoint === 'object' ? endpoint.id : endpoint;
@@ -143,7 +144,37 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
       input.onSelection?.([group.id], { focus: group.id, groupId: group.groupId });
       input.onToggle?.(group.groupId, collapsed);
     };
-    badge.on('click.group', (_, group) => activate(group))
+    const dragGroup = d3.drag().clickDistance(4)
+      .filter((event, group) => group.role === 'summary' && group.opacity === 1 && event.button === 0)
+      .on('start.group', (event, group) => {
+        transition.finish();
+        const members = group.memberNodeIds.map(id => canonicalNodes.get(id)).filter(Boolean);
+        groupDrag = { groupId: group.groupId, origin: { x: event.x, y: event.y }, members,
+          positions: members.map(node => ({ node, x: node.x, y: node.y, fx: node.fx, fy: node.fy })) };
+        members.forEach(node => { node.fx = node.x; node.fy = node.y; });
+        simulation.alphaTarget(.3).restart();
+      })
+      .on('drag.group', event => {
+        if (!groupDrag) return;
+        const dx = event.x - groupDrag.origin.x;
+        const dy = event.y - groupDrag.origin.y;
+        groupDrag.positions.forEach(item => {
+          item.node.x = item.x + dx; item.node.y = item.y + dy;
+          item.node.fx = item.node.x; item.node.fy = item.node.y;
+        });
+        paint(transition.values, { final: true });
+      })
+      .on('end.group', () => {
+        if (!groupDrag) return;
+        // A Monitoring group move is a pin, matching the ordinary node gesture's fixed position
+        // while ensuring the hidden members retain their internal offsets as one rigid unit.
+        groupDrag.positions.forEach(item => { item.node.fx = item.node.x; item.node.fy = item.node.y; });
+        input.onGroupMove?.(groupDrag.groupId);
+        groupDrag = null;
+        simulation.alphaTarget(0);
+      });
+    badge.call(dragGroup);
+    badge.on('click.group', (event, group) => { if (!event.defaultPrevented) activate(group); })
       .on('focus.group', (_, group) => {
         focusedGroup = group.groupId;
         selectedGroup = group.groupId;

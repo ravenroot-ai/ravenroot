@@ -28,8 +28,7 @@ export function createNodeActionCatalog({ targetLabel, capabilities, handlers })
 function asSelectableArrangement(command, id) {
   return {
     ...command,
-    isChecked: context => context.hasDocument && context.renderMode === 'design'
-      && context.designArrangement === id,
+    isChecked: context => context.hasDocument && context.designArrangement === id,
     kind: 'radio',
   };
 }
@@ -207,6 +206,9 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     renderMode('design', 10),
     renderMode('monitoring', 20),
+    { id: 'layout.render', group: 'render-action', order: 125,
+      placements: ['menu.layout', 'toolbar.layout', 'help'], execute: actions.render,
+      isEnabled: active },
     asSelectableArrangement(arrangement('hierarchical', 10), 'hierarchical'),
     asSelectableArrangement(arrangement('flow', 20), 'flow'),
     asSelectableArrangement(arrangement('organic', 30), 'organic'),

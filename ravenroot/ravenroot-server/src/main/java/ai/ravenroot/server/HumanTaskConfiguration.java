@@ -91,7 +91,10 @@ public final class HumanTaskConfiguration {
                 integer(properties, environment, "ravenroot.human-task.write-attempts",
                         "RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS",
                         defaults.writeAttempts()),
-                confirmation(properties, environment, defaults.confirmation()));
+                confirmation(properties, environment, defaults.confirmation()),
+                bool(properties, environment, "ravenroot.human-task.responder-enforcement-enabled",
+                        "RAVENROOT_HUMAN_TASK_RESPONDER_ENFORCEMENT_ENABLED",
+                        defaults.responderEnforcementEnabled()));
         } catch (IllegalArgumentException invalid) {
             throw attributed(invalid);
         }
@@ -157,6 +160,16 @@ public final class HumanTaskConfiguration {
             throw invalid(property, variable);
         }
         return (int) value;
+    }
+
+    private static boolean bool(Map<String, String> properties, Map<String, String> environment,
+                                String property, String variable, boolean fallback) {
+        String raw = nonBlank(properties.get(property));
+        if (raw == null) raw = nonBlank(environment.get(variable));
+        if (raw == null) return fallback;
+        if ("true".equalsIgnoreCase(raw)) return true;
+        if ("false".equalsIgnoreCase(raw)) return false;
+        throw new IllegalArgumentException(property + " / " + variable + " must be true or false");
     }
 
     private static long whole(Map<String, String> properties, Map<String, String> environment,

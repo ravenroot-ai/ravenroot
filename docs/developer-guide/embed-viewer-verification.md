@@ -2,7 +2,7 @@
 
 This page records the public verification surface for the native deployment viewer and the
 cross-origin embedded viewer. It is evidence for renderer and authority parity, not a pixel-perfect
-requirement: Cyto, N8N, and Elastic deliberately use different geometry.
+requirement: Design and Monitoring deliberately use different geometry.
 
 ## Automated coverage
 
@@ -21,6 +21,17 @@ shared style semantics. Browser coverage verifies:
 The visual test requires exact semantic presentation equality, enforces a bounded pixel-difference
 budget that allows renderer-owned geometry, then saves the rendered native view, embedded view, and
 pixel diff for each matrix cell.
+
+The v2 unit matrix covers zero, one, and three authorized selector rows and generation-fenced runtime
+reset. Before release, exercise rapid switching, exact-selection refresh, stale version/incarnation,
+completion retention, disappearance, revocation, authorization loss, and replay-gap reconciliation.
+Also confirm that mode switching preserves each viewport without layout, fit, or simulation and that
+Render affects only the selected mode.
+
+The historical image rows below retain their filenames for release continuity. In the public v2 UI,
+Cyto is the Design renderer and Elastic is Monitoring; N8N is no longer a public choice. V2 release
+captures must cover Design and Monitoring at desktop and narrow responsive widths, in both themes,
+including the run selector's zero/one/three states.
 
 ## Dark theme
 

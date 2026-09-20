@@ -425,6 +425,19 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Starts one payload-free traversal from an exact immutable local deployment binding.
+     * Implementations must compare both graph version and incarnation before admitting the request,
+     * and must reconcile {@code requestId} through durable ingress rather than dispatch twice.
+     */
+    default EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
+                                                                 String deploymentId,
+                                                                 String incarnationId,
+                                                                 String graphVersion,
+                                                                 String requestId) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
+    /**
  * Starts one of this tenant's registered deployments and completes at readiness.
  *
  * <p>Idempotent and single-flight, inheriting {@code GraphDeployment.start}'s own contract:

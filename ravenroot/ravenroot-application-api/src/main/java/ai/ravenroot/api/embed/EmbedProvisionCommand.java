@@ -117,6 +117,30 @@ public record EmbedProvisionCommand(String registrationId, long expectedRevision
                 EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);
     }
 
+    /** Creates an additive v2 deployment registration with selectable runs. */
+    public static EmbedProvisionCommand deploymentV2(String registrationId, long expectedRevision,
+                                                      String workloadIssuer, String workloadSubject,
+                                                      String tenantId, String parentOrigin,
+                                                      Optional<EmbedTheme> themeOverride,
+                                                      String deploymentId,
+                                                      boolean showStartExecution) {
+        var source = EmbedViewerSource.deploymentV2(deploymentId, showStartExecution);
+        var grant = new VerifiedEmbedGraphGrant(tenantId, "deployment:" + deploymentId, deploymentId,
+                1, deploymentId, "deferred", "deferred", "deployment-live-v2");
+        var eligibility = new EmbedProjectionEligibility("deployment-live-v2",
+                false, false, false, false, false, false, false);
+        var projection = new EmbedGraphProjection(EmbedGraphProjection.CURRENT_CONTRACT_VERSION,
+                deploymentId, "deferred", "deferred", java.util.List.of(), java.util.List.of());
+        var capabilities = new java.util.HashSet<EmbedCapability>();
+        capabilities.add(EmbedCapability.GRAPH_READ);
+        capabilities.add(EmbedCapability.DEPLOYMENT_OBSERVE);
+        capabilities.add(EmbedCapability.DEPLOYMENT_RUN_READ);
+        if (showStartExecution) capabilities.add(EmbedCapability.DEPLOYMENT_EXECUTE);
+        return new EmbedProvisionCommand(registrationId, expectedRevision, workloadIssuer, workloadSubject,
+                tenantId, parentOrigin, Set.copyOf(capabilities), themeOverride, grant,
+                EmbedSnapshotLifecycle.ACTIVE, eligibility, projection, source);
+    }
+
     /** The revision this command writes when it is accepted; monotone by construction.
      * @return {@code expectedRevision + 1}
      */

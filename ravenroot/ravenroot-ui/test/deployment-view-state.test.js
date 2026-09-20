@@ -54,6 +54,19 @@ describe('deployment viewer runtime state', () => {
     }
   });
 
+  it('fences selected-run events by exact process identity', () => {
+    const selected = { ...binding, processInstanceId: 'process-a' };
+    const state = createDeploymentViewState(selected);
+    expect(applyDeploymentViewFrame(state, frame({ processInstanceId: 'process-b' })))
+      .toMatchObject({ accepted: false, terminal: true, reason: 'binding-mismatch' });
+    expect(state.nodeStates.size).toBe(0);
+
+    const current = createDeploymentViewState(selected);
+    expect(applyDeploymentViewFrame(current, frame({ processInstanceId: 'process-a' })).accepted)
+      .toBe(true);
+    expect(current.nodeStates.get('worker').runtimeState).toBe('active');
+  });
+
   it('treats a gap and undeploy as terminal rather than inventing continuity', () => {
     const state = createDeploymentViewState(binding);
     expect(applyDeploymentViewFrame(state, { type: 'gap', ...binding,

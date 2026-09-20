@@ -25,13 +25,17 @@ public final class EmbedRegistrationRules {
                                                            EmbedProjectionBudget budget) {
         Objects.requireNonNull(command, "command");
         Objects.requireNonNull(budget, "budget");
-        if (command.source() instanceof EmbedViewerSource.Deployment deployment) {
+        if (command.source() instanceof EmbedViewerSource.Deployment
+                || command.source() instanceof EmbedViewerSource.DeploymentV2) {
+            String deploymentId = command.source() instanceof EmbedViewerSource.Deployment deployment
+                    ? deployment.deploymentId()
+                    : ((EmbedViewerSource.DeploymentV2) command.source()).deploymentId();
             if (!command.capabilities().contains(EmbedCapability.GRAPH_READ)
                     || !command.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)) {
                 return EmbedProvisionOutcome.Reason.CAPABILITY_MISSING;
             }
             if (!command.tenantId().equals(command.graphGrant().tenantId())
-                    || !deployment.deploymentId().equals(command.graphGrant().deploymentId())) {
+                    || !deploymentId.equals(command.graphGrant().deploymentId())) {
                 return EmbedProvisionOutcome.Reason.IDENTITY_INCOHERENT;
             }
             return null;

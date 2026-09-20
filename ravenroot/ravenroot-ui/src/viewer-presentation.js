@@ -1,5 +1,6 @@
 import { getRendererPalette } from './theme-palette.js';
 import { COMMON_NODE_GLYPHS } from './catalog-node-icon.js';
+import { CATALOG_NODE_SYMBOLS, catalogNodeSymbol } from './catalog-node-symbol.js';
 
 export const VIEWER_NODE_ICONS = Object.freeze({
   start: '▶ ', end: '⏹ ', error: '⚠ ', terminal: '⊙ ', consumer: '⩓ ',
@@ -23,11 +24,7 @@ export function viewerNodeSize(node) {
   return [Math.max(90, Math.min(230, name.length * 7.8 + 52)), 52];
 }
 
-export const VIEWER_CARD_GLYPH = Object.freeze({
-  start: '▶', end: '■', error: '⚠', terminal: '⊙', consumer: '⧒', handler: '↩',
-  flow: '⚙', actor: '◎', system: '▤', behavior: '⚙', passthrough: '↩',
-  trace: COMMON_NODE_GLYPHS.trace, 'human-task': COMMON_NODE_GLYPHS['human-task'],
-});
+export const VIEWER_CARD_GLYPH = CATALOG_NODE_SYMBOLS;
 
 function agentCardSvg(palette) {
   return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400' width='80' height='80'>
@@ -50,7 +47,7 @@ function agentCardSvg(palette) {
 
 export function viewerCardImage(nodeType, palette) {
   if (nodeType === 'agent') return `data:image/svg+xml,${encodeURIComponent(agentCardSvg(palette))}`;
-  const glyph = VIEWER_CARD_GLYPH[nodeType] || '◎';
+  const glyph = catalogNodeSymbol(nodeType);
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>`
     + `<text x='40' y='40' text-anchor='middle' dominant-baseline='central' `
     + `font-size='32' fill='${palette.nodeText}' `
@@ -249,7 +246,7 @@ export function viewerNodeLabel(node) {
   const type = viewerNodeType(node);
   const label = String(node?.label || node?.name || node?.id || '');
   const bypassed = Boolean(node?.bypassed);
-  return `${VIEWER_NODE_ICONS[type] || '• '}${label}${bypassed ? ' · bypassed' : ''}`;
+  return `${VIEWER_NODE_ICONS[type] || `${catalogNodeSymbol(type)} `}${label}${bypassed ? ' · bypassed' : ''}`;
 }
 
 export function viewerCardLabel(node) {

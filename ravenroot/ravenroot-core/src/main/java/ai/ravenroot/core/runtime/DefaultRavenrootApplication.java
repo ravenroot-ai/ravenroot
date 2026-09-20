@@ -4,6 +4,7 @@ import ai.ravenroot.api.application.ApplicationStatus;
 import ai.ravenroot.api.application.DurableExecutionEvent;
 import ai.ravenroot.api.application.DeploymentEventBatch;
 import ai.ravenroot.api.application.DeploymentViewerView;
+import ai.ravenroot.api.application.EmbedDeploymentStart;
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
@@ -2621,6 +2622,42 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (RuntimeException unprojectable) {
             return java.util.Optional.empty();
         }
+    }
+
+    @Override
+    public EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
+                                                               String deploymentId,
+                                                               String incarnationId,
+                                                               String graphVersion,
+                                                               String requestId) {
+        java.util.Objects.requireNonNull(security, "security");
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) {
+            throw new IllegalArgumentException("invalid embed execution request id");
+        }
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()),
+                requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        }
+        var receipt = record.deployment().ingress().offerDurably(security,
+                ai.ravenroot.api.deployment.IngressTarget.start(), java.util.Map.of(),
+                "embed-viewer", requestId);
+        var outcome = switch (receipt) {
+            case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored ->
+                    EmbedDeploymentStart.Outcome.ACCEPTED;
+            case ai.ravenroot.api.deployment.IngressReceipt.Duplicate ignored ->
+                    EmbedDeploymentStart.Outcome.DUPLICATE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Ambiguous ignored ->
+                    EmbedDeploymentStart.Outcome.RECONCILE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Refused ignored ->
+                    EmbedDeploymentStart.Outcome.REFUSED;
+            case ai.ravenroot.api.deployment.IngressReceipt.VolatileCustody ignored ->
+                    EmbedDeploymentStart.Outcome.REFUSED;
+        };
+        return new EmbedDeploymentStart(outcome, requestId);
     }
 
     @Override

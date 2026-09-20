@@ -8,6 +8,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,5 +44,21 @@ class EmbedViewerSourceContractTest {
                 EmbedRegistrationState.ACTIVE, session, EmbedSnapshotLifecycle.ACTIVE,
                 EmbedProjectionEligibility.allowed("policy"), projection, Instant.EPOCH,
                 EmbedViewerSource.deployment("deployment")));
+    }
+
+    @Test
+    void v2RunSelectionAndStartPresentationAreAdditiveAndFailClosed() {
+        var hidden = EmbedProvisionCommand.deploymentV2("runs-hidden", 0, "issuer", "subject", "tenant",
+                "https://parent.example", Optional.empty(), "orders", false);
+        assertEquals(new EmbedViewerSource.DeploymentV2("orders", false), hidden.source());
+        assertTrue(hidden.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ));
+        assertNull(EmbedRegistrationRules.rejectionOf(hidden, EmbedProjectionBudget.DEFAULTS));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                hidden.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE));
+
+        var shown = EmbedProvisionCommand.deploymentV2("runs-start", 0, "issuer", "subject", "tenant",
+                "https://parent.example", Optional.empty(), "orders", true);
+        assertTrue(shown.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE));
+        assertEquals("2", shown.source().viewerSourceVersion());
     }
 }

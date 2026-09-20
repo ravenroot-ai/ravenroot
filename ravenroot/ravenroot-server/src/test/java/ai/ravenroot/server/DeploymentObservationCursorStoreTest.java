@@ -24,8 +24,16 @@ class DeploymentObservationCursorStoreTest {
                 new DeploymentObservationCursorStore.Binding("session-1", "deployment", "inc-2", "v1")));
         assertNull(store.resolve(first,
                 new DeploymentObservationCursorStore.Binding("session-1", "deployment", "inc-1", "v2")));
+        assertNull(store.resolve(first,
+                new DeploymentObservationCursorStore.Binding("session-1", "deployment", "inc-1", "v1", "run-1")));
 
-        store.issue(binding, 8);
+        var selected = new DeploymentObservationCursorStore.Binding(
+                "session-1", "deployment", "inc-1", "v1", "run-1");
+        String selectedCursor = store.issue(selected, 8);
+        assertEquals(8, store.resolve(selectedCursor, selected).sequence());
+        assertNull(store.resolve(selectedCursor, new DeploymentObservationCursorStore.Binding(
+                "session-1", "deployment", "inc-1", "v1", "run-2")));
+
         store.issue(binding, 9);
         assertNull(store.resolve(first, binding), "bounded cursor state must fail closed after eviction");
     }

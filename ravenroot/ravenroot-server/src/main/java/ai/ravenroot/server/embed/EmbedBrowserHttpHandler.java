@@ -27,6 +27,9 @@ import java.security.interfaces.ECPublicKey;
 import java.security.spec.ECPoint;
 import java.security.spec.ECPublicKeySpec;
 import java.time.Instant;
+import java.time.Duration;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
@@ -36,7 +39,7 @@ import java.io.OutputStream;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/** Complete five-route server adapter for the distinct-origin, static embedded projection. */
+/** Complete distinct-origin adapter for static v1 projections and additive v2 live-run viewing. */
 public final class EmbedBrowserHttpHandler {
     public static final String CREATE_PATH = "/v1/embed/sessions";
     public static final String ACKNOWLEDGEMENT_PATH = "/v1/embed/acknowledgements";
@@ -44,6 +47,8 @@ public final class EmbedBrowserHttpHandler {
     public static final String EXCHANGE_PATH = "/v1/embed/exchange";
     public static final String PROJECTION_PATH = "/v1/embed/projection";
     public static final String OBSERVATION_PATH = "/v1/embed/observation";
+    public static final String RUNS_PATH = "/v1/embed/runs";
+    public static final String START_EXECUTION_PATH = "/v1/embed/executions";
     public static final String BOOTSTRAP_SCRIPT_PATH = "/embed-bootstrap.js";
     private static final int MAX_BODY_BYTES = 8 * 1024;
 
@@ -148,6 +153,11 @@ public final class EmbedBrowserHttpHandler {
         }
         try {
             var bootstrap = sessions.begin(available.registration());
+            boolean viewerV2 = available.registration().source() instanceof EmbedViewerSource.DeploymentV2;
+            boolean showStartExecution = viewerV2
+                    && ((EmbedViewerSource.DeploymentV2) available.registration().source()).showStartExecution()
+                    && available.registration().sessionGrant().capabilities()
+                    .contains(EmbedCapability.DEPLOYMENT_EXECUTE);
             audit(requestId.get(), available.registration(), EmbedSecurityAuditSink.Phase.TICKET_CONSUMED);
             exchange.getResponseHeaders().remove("X-Frame-Options");
             exchange.getResponseHeaders().set("Content-Security-Policy",
@@ -164,9 +174,26 @@ public final class EmbedBrowserHttpHandler {
                     + "\",\"viewerOrigin\":\"" + JsonStrings.escape(configuration.viewerOrigin().value())
                     + "\",\"parentOrigin\":\"" + JsonStrings.escape(parentOrigin.value())
                     + "\",\"theme\":" + available.registration().sessionGrant().themeOverride()
-                    .map(theme -> "\"" + theme.wireValue() + "\"").orElse("null") + "}";
+                    .map(theme -> "\"" + theme.wireValue() + "\"").orElse("null")
+                    + (viewerV2 ? ",\"viewerSourceVersion\":\"2\",\"showStartExecution\":"
+                    + showStartExecution : "") + "}";
             String themeAttribute = available.registration().sessionGrant().themeOverride()
                     .map(theme -> " data-theme=\"" + theme.wireValue() + "\"").orElse("");
+            String viewControls = viewerV2
+                    ? "<label class=\"embed-mode-label\">View <select data-viewer-mode>"
+                    + "<option value=\"design\">Design</option>"
+                    + "<option value=\"monitoring\">Monitoring</option></select></label>"
+                    + "<button type=\"button\" data-viewer-command=\"render\">Render</button>"
+                    : "<label class=\"embed-mode-label\">View <select data-viewer-mode>"
+                    + "<option value=\"cyto\">Cyto</option><option value=\"n8n\">N8N</option>"
+                    + "<option value=\"elastic\">Elastic</option></select></label>";
+            String runControls = viewerV2
+                    ? "<label class=\"embed-run-label\">Run <select data-viewer-run "
+                    + "aria-label=\"Live run\" disabled><option value=\"\">No authorized runs</option>"
+                    + "</select></label><span data-viewer-run-empty role=\"status\">No authorized runs.</span>"
+                    + (showStartExecution
+                    ? "<button type=\"button\" data-viewer-start>Start execution</button>" : "")
+                    : "";
             String html = "<!doctype html><html lang=\"en\"" + themeAttribute
                     + "><head><meta charset=\"utf-8\">"
                     + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -181,10 +208,8 @@ public final class EmbedBrowserHttpHandler {
                     + "<header class=\"embed-viewer-header\"><h1 id=\"ravenroot-embed-title\" "
                     + "class=\"embed-viewer-title\">Graph view</h1><p class=\"embed-viewer-metadata\" "
                     + "data-viewer-metadata></p><nav class=\"embed-viewer-controls\" "
-                    + "aria-label=\"Graph view controls\"><label class=\"embed-mode-label\">View "
-                    + "<select data-viewer-mode><option value=\"cyto\">Cyto</option>"
-                    + "<option value=\"n8n\">N8N</option><option value=\"elastic\">Elastic</option>"
-                    + "</select></label><button type=\"button\" "
+                    + "aria-label=\"Graph view controls\">" + viewControls + runControls
+                    + "<button type=\"button\" "
                     + "data-viewer-command=\"zoom-out\" aria-label=\"Zoom out\">&minus;</button>"
                     + "<button type=\"button\" data-viewer-command=\"fit\">Fit</button>"
                     + "<button type=\"button\" data-viewer-command=\"zoom-in\" "
@@ -348,20 +373,26 @@ public final class EmbedBrowserHttpHandler {
             RequestContext context = new RequestContext(requestId.get(),
                     grant.workloadSubject(), PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(),
                     Set.of(Role.VIEWER), Set.of("ravenroot.embed.graph.read"));
-            if (registration.source() instanceof EmbedViewerSource.Deployment deployment) {
+            String deploymentId = deploymentId(registration.source());
+            if (deploymentId != null) {
                 if (deployments == null
                         || !grant.capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)) {
                     unavailable(exchange, false);
                     return;
                 }
-                var view = deployments.localDeploymentView(deploymentContext(requestId.get(), registration),
-                        deployment.deploymentId());
+                RequestContext deploymentContext = deploymentContext(requestId.get(), registration);
+                var view = deployments.localDeploymentView(deploymentContext, deploymentId);
                 if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                     unavailable(exchange, false);
                     return;
                 }
                 audit(requestId.get(), registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
-                json(exchange, 200, view.orElseThrow().toJson());
+                if (registration.source() instanceof EmbedViewerSource.DeploymentV2) {
+                    json(exchange, 200, deploymentV2Json(registration, deploymentContext,
+                            view.orElseThrow()));
+                } else {
+                    json(exchange, 200, view.orElseThrow().toJson());
+                }
                 return;
             }
             EmbedProjectionResolution resolution = configuration.projections().read(context, registration);
@@ -397,14 +428,17 @@ public final class EmbedBrowserHttpHandler {
         if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
         String bearer = bearer(exchange);
         if (bearer == null) { unavailable(exchange, false); return; }
-        Map<String, String> body = body(exchange, Set.of("nonce", "jti", "issuedAt", "signature", "cursor"));
+        Map<String, String> body = bodyOneOf(exchange, Set.of(
+                Set.of("nonce", "jti", "issuedAt", "signature", "cursor"),
+                Set.of("nonce", "jti", "issuedAt", "signature", "cursor", "processInstanceId")));
         if (body == null) return;
         var session = sessions.resolve(bearer, configuration.registrations());
         if (session == null || !session.challenge().equals(body.get("nonce"))) {
             unavailable(exchange, false); return;
         }
         var registration = session.registration();
-        if (!(registration.source() instanceof EmbedViewerSource.Deployment source)
+        String deploymentId = deploymentId(registration.source());
+        if (deploymentId == null
                 || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_OBSERVE)
                 || deployments == null) {
             unavailable(exchange, false); return;
@@ -418,15 +452,21 @@ public final class EmbedBrowserHttpHandler {
                 unavailable(exchange, false); return;
             }
             RequestContext context = deploymentContext(requestId.get(), registration);
-            var view = deployments.localDeploymentView(context, source.deploymentId());
+            var view = deployments.localDeploymentView(context, deploymentId);
             if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
                 unavailable(exchange, false); return;
             }
             var bound = view.orElseThrow();
             var binding = new DeploymentObservationCursorStore.Binding(
                     "embed:" + registration.registrationId() + ":" + registration.revision() + ":"
-                            + EmbedLaunchTicketAuthority.digest(bearer), source.deploymentId(),
-                    bound.source().incarnationId(), bound.source().graphVersion());
+                            + EmbedLaunchTicketAuthority.digest(bearer), deploymentId,
+                    bound.source().incarnationId(), bound.source().graphVersion(),
+                    body.getOrDefault("processInstanceId", "").isBlank()
+                            ? null : body.get("processInstanceId"));
+            if (binding.processInstanceId() != null
+                    && !authorizedRun(context, bound, binding.processInstanceId())) {
+                unavailable(exchange, false); return;
+            }
             long sequence;
             String supplied = body.get("cursor");
             if (supplied.isBlank()) sequence = 0;
@@ -443,6 +483,111 @@ public final class EmbedBrowserHttpHandler {
             }
             audit(requestId.get(), registration, EmbedSecurityAuditSink.Phase.OBSERVATION_READ);
             streamObservation(exchange, bearer, session, context, binding, sequence, supplied.isBlank());
+        } catch (IllegalArgumentException invalid) {
+            invalid(exchange);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            unavailable(exchange, false);
+        } catch (RuntimeException failure) {
+            temporary(exchange);
+        }
+    }
+
+    /** Authoritative, exact-deployment run selector source for v2 viewers. */
+    public void runs(HttpExchange exchange) throws IOException {
+        runs(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void runs(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        runs(exchange, requestContext::requestId);
+    }
+
+    private void runs(HttpExchange exchange, Supplier<String> requestId) throws IOException {
+        if (!requireExactPath(exchange, RUNS_PATH)) return;
+        privateResponse(exchange);
+        if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
+        String bearer = bearer(exchange);
+        if (bearer == null) { unavailable(exchange, false); return; }
+        Map<String, String> body = body(exchange, Set.of("nonce", "jti", "issuedAt", "signature"));
+        if (body == null) return;
+        var session = sessions.resolve(bearer, configuration.registrations());
+        if (session == null || !session.challenge().equals(body.get("nonce"))) {
+            unavailable(exchange, false); return;
+        }
+        var registration = session.registration();
+        if (!(registration.source() instanceof EmbedViewerSource.DeploymentV2 source)
+                || deployments == null
+                || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
+            unavailable(exchange, false); return;
+        }
+        try {
+            validatedParentOrigin(registration);
+            if (!verifyProof(body, bearer, registration, session, RUNS_PATH)) {
+                unavailable(exchange, false); return;
+            }
+            RequestContext context = deploymentContext(requestId.get(), registration);
+            var view = deployments.localDeploymentView(context, source.deploymentId());
+            if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
+                unavailable(exchange, false); return;
+            }
+            json(exchange, 200, runsJson(context, view.orElseThrow()));
+        } catch (IllegalArgumentException invalid) {
+            invalid(exchange);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
+            unavailable(exchange, false);
+        } catch (RuntimeException failure) {
+            temporary(exchange);
+        }
+    }
+
+    /** Separately authorized, idempotent server-side start for an exact v2 deployment binding. */
+    public void startExecution(HttpExchange exchange) throws IOException {
+        startExecution(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void startExecution(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        startExecution(exchange, requestContext::requestId);
+    }
+
+    private void startExecution(HttpExchange exchange, Supplier<String> requestId) throws IOException {
+        if (!requireExactPath(exchange, START_EXECUTION_PATH)) return;
+        privateResponse(exchange);
+        if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
+        String bearer = bearer(exchange);
+        if (bearer == null) { unavailable(exchange, false); return; }
+        Map<String, String> body = body(exchange,
+                Set.of("nonce", "jti", "issuedAt", "signature", "requestId"));
+        if (body == null) return;
+        var session = sessions.resolve(bearer, configuration.registrations());
+        if (session == null || !session.challenge().equals(body.get("nonce"))) {
+            unavailable(exchange, false); return;
+        }
+        var registration = session.registration();
+        if (!(registration.source() instanceof EmbedViewerSource.DeploymentV2 source)
+                || !source.showStartExecution() || deployments == null
+                || !registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)) {
+            unavailable(exchange, false); return;
+        }
+        try {
+            validatedParentOrigin(registration);
+            if (!verifyProof(body, bearer, registration, session, START_EXECUTION_PATH)) {
+                unavailable(exchange, false); return;
+            }
+            RequestContext context = deploymentContext(requestId.get(), registration);
+            var view = deployments.localDeploymentView(context, source.deploymentId());
+            if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) {
+                unavailable(exchange, false); return;
+            }
+            var bound = view.orElseThrow();
+            var result = deployments.startEmbedDeploymentExecution(context, source.deploymentId(),
+                    bound.source().incarnationId(), bound.source().graphVersion(), body.get("requestId"));
+            int status = switch (result.outcome()) {
+                case ACCEPTED -> 202;
+                case DUPLICATE -> 200;
+                case REFUSED -> 409;
+                case RECONCILE -> 503;
+            };
+            json(exchange, status, "{\"outcome\":\"" + result.outcome()
+                    + "\",\"requestId\":\"" + JsonStrings.escape(result.requestId()) + "\"}");
         } catch (IllegalArgumentException invalid) {
             invalid(exchange);
         } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
@@ -479,7 +624,8 @@ public final class EmbedBrowserHttpHandler {
                 var current = resolved.view();
                 var lifecycle = current.lifecycle();
                 writeLifecycle(output, binding, lifecycle);
-                long sent = firstAttachment ? initial.latestSequence()
+                long sent = firstAttachment && binding.processInstanceId() == null
+                        ? initial.latestSequence()
                         : writeObservationBatch(output, bearer, session, context, binding, initial, sequence);
                 if (sent < 0) return;
                 while (!Thread.currentThread().isInterrupted()) {
@@ -543,6 +689,11 @@ public final class EmbedBrowserHttpHandler {
                                        DeploymentEventBatch batch, long sequence) throws IOException {
         long sent = sequence;
         for (var event : batch.events()) {
+            if (binding.processInstanceId() != null
+                    && !binding.processInstanceId().equals(event.processInstanceId().toString())) {
+                sent = event.sequence();
+                continue;
+            }
             var resolved = resolveEmbedView(bearer, session, context, binding);
             if (resolved.view() == null) {
                 writeTerminal(output, "source-invalidated", binding, resolved.reason());
@@ -577,12 +728,89 @@ public final class EmbedBrowserHttpHandler {
 
     private record EmbedViewResolution(DeploymentViewerView view, String reason) { }
 
+    private boolean authorizedRun(RequestContext context, DeploymentViewerView view, String processInstanceId) {
+        try {
+            return deployments.embedDeploymentRun(context, view.source().deploymentId(),
+                    view.source().graphVersion(), java.util.UUID.fromString(processInstanceId)).isPresent();
+        } catch (IllegalArgumentException invalidIdentity) {
+            return false;
+        }
+    }
+
+    private boolean verifyProof(Map<String, String> body, String bearer,
+                                EmbedRegistrationAggregate registration,
+                                EmbedBrowserSessionAuthority.ActiveSession session,
+                                String path) {
+        Instant issuedAt = Instant.parse(body.get("issuedAt"));
+        byte[] signature = decode(body.get("signature"), 64);
+        return proofs.verifyAndConsume(bearer, registration.revision(), body.get("nonce"),
+                body.get("jti"), "POST", path, issuedAt, session.key(), signature);
+    }
+
+    private String deploymentV2Json(EmbedRegistrationAggregate registration, RequestContext context,
+                                    DeploymentViewerView view) {
+        String base = view.toJson().replace("\"viewerSourceVersion\":\"1\"",
+                "\"viewerSourceVersion\":\"2\"");
+        return base.substring(0, base.length() - 1)
+                + ",\"showStartExecution\":"
+                + (((EmbedViewerSource.DeploymentV2) registration.source()).showStartExecution()
+                && registration.sessionGrant().capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE))
+                + ",\"runs\":" + runsArray(context, view) + "}";
+    }
+
+    private String runsJson(RequestContext context, DeploymentViewerView view) {
+        return "{\"deploymentId\":\"" + JsonStrings.escape(view.source().deploymentId())
+                + "\",\"incarnationId\":\"" + JsonStrings.escape(view.source().incarnationId())
+                + "\",\"graphVersion\":\"" + JsonStrings.escape(view.source().graphVersion())
+                + "\",\"runs\":" + runsArray(context, view) + "}";
+    }
+
+    private String runsArray(RequestContext context, DeploymentViewerView view) {
+        Instant terminalCutoff = configuration.clock().instant().minus(Duration.ofHours(1));
+        List<ai.ravenroot.api.persistence.ProcessInventoryEntry> rows = deployments.embedDeploymentRuns(
+                context, view.source().deploymentId(), view.source().graphVersion(), 256).stream()
+                .filter(row -> !row.status().terminal() || !row.updatedAt().isBefore(terminalCutoff))
+                .sorted(java.util.Comparator.comparing(
+                        ai.ravenroot.api.persistence.ProcessInventoryEntry::updatedAt).reversed())
+                .limit(64)
+                .toList();
+        var json = new StringBuilder("[");
+        for (int index = 0; index < rows.size(); index++) {
+            var row = rows.get(index);
+            if (index > 0) json.append(',');
+            String outcome = row.terminationReason() == null
+                    ? (row.status().terminal() ? row.status().name() : null)
+                    : row.terminationReason().name();
+            json.append("{\"processInstanceId\":\"")
+                    .append(row.key().processInstanceId()).append("\",\"status\":\"")
+                    .append(row.status()).append("\",\"outcome\":")
+                    .append(nullable(outcome)).append(",\"updatedAt\":\"")
+                    .append(row.updatedAt()).append("\"}");
+        }
+        return json.append(']').toString();
+    }
+
+    private static String deploymentId(EmbedViewerSource source) {
+        if (source instanceof EmbedViewerSource.Deployment deployment) return deployment.deploymentId();
+        if (source instanceof EmbedViewerSource.DeploymentV2 deployment) return deployment.deploymentId();
+        return null;
+    }
+
     private static RequestContext deploymentContext(String requestId,
                                                      EmbedRegistrationAggregate registration) {
         var grant = registration.sessionGrant();
+        var scopes = new HashSet<String>();
+        scopes.add("ravenroot.embed.graph.read");
+        scopes.add("ravenroot.deployment.observe");
+        if (grant.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
+            scopes.add("ravenroot.embed.deployment.runs.read");
+        }
+        if (grant.capabilities().contains(EmbedCapability.DEPLOYMENT_EXECUTE)) {
+            scopes.add("ravenroot.embed.deployment.execute");
+        }
         return new RequestContext(requestId, grant.workloadSubject(),
                 PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(), Set.of(Role.VIEWER),
-                Set.of("ravenroot.embed.graph.read", "ravenroot.deployment.observe"));
+                Set.copyOf(scopes));
     }
 
     private static void beginObservation(HttpExchange exchange) throws IOException {
@@ -601,6 +829,7 @@ public final class EmbedBrowserHttpHandler {
         return "{\"type\":\"execution\",\"deploymentId\":\"" + JsonStrings.escape(binding.deploymentId())
                 + "\",\"incarnationId\":\"" + JsonStrings.escape(binding.incarnationId())
                 + "\",\"graphVersion\":\"" + JsonStrings.escape(binding.graphVersion())
+                + "\",\"processInstanceId\":\"" + event.processInstanceId()
                 + "\",\"event\":{\"occurredAt\":\"" + event.occurredAt() + "\",\"type\":\""
                 + event.type() + "\",\"nodeId\":" + nullable(event.nodeId())
                 + ",\"edgeId\":" + nullable(event.edgeId())
@@ -706,6 +935,11 @@ public final class EmbedBrowserHttpHandler {
     }
 
     private static Map<String, String> body(HttpExchange exchange, Set<String> schema) throws IOException {
+        return bodyOneOf(exchange, Set.of(schema));
+    }
+
+    private static Map<String, String> bodyOneOf(HttpExchange exchange, Set<Set<String>> schemas)
+            throws IOException {
         String contentType = optionalSingleHeader(exchange, "Content-Type");
         if (contentType == null || !contentType.toLowerCase(java.util.Locale.ROOT).startsWith("application/json")) {
             invalid(exchange); return null;
@@ -713,7 +947,7 @@ public final class EmbedBrowserHttpHandler {
         byte[] bytes;
         try (var input = exchange.getRequestBody()) { bytes = input.readNBytes(MAX_BODY_BYTES + 1); }
         if (bytes.length > MAX_BODY_BYTES) { error(exchange, 413, "EMBED_REQUEST_TOO_LARGE"); return null; }
-        try { return EmbedRequestJson.parse(bytes, schema); }
+        try { return EmbedRequestJson.parseOneOf(bytes, schemas); }
         catch (IllegalArgumentException invalid) { invalid(exchange); return null; }
     }
 

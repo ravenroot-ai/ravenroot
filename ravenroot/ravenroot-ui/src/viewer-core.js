@@ -50,7 +50,7 @@ function projectionEdge(edge) {
  * renderer snapshot, DOM, accessibility tree, or parent messaging surface.
  */
 export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
-  if (projection?.viewerSourceVersion === '1' && projection.projection) {
+  if (['1', '2'].includes(projection?.viewerSourceVersion) && projection.projection) {
     projection = projection.projection;
   }
   if (projection?.viewerContractVersion !== CONTRACT_VERSION) {

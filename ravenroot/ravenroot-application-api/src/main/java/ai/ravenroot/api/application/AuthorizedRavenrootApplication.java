@@ -686,6 +686,50 @@ public final class AuthorizedRavenrootApplication {
                 Objects.requireNonNull(listener, "listener"));
     }
 
+    /** Returns only process rows hosted by the exact deployment and graph version. */
+    public java.util.List<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRuns(
+            RequestContext context, String deploymentId, String graphVersion, int limit) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        String version = requireText(graphVersion, "graph version");
+        if (!delegate.processInventoryAvailable()) return java.util.List.of();
+        int bounded = Math.max(1, Math.min(limit, delegate.processInventoryMaxPageSize()));
+        var query = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder()
+                .hostedBy(deploymentId).includeTerminal(true).limit(bounded).build();
+        return delegate.processInventory(context.tenantId(), query).items().stream()
+                .filter(item -> version.equals(item.graphVersionPin().reference()))
+                .toList();
+    }
+
+    /** Resolves one exact run without depending on its position in the bounded selector page. */
+    public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> embedDeploymentRun(
+            RequestContext context, String deploymentId, String graphVersion,
+            java.util.UUID processInstanceId) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        if (!delegate.processInventoryAvailable()) return java.util.Optional.empty();
+        String version = requireText(graphVersion, "graph version");
+        return delegate.processInstance(context.tenantId(), java.util.Objects.requireNonNull(processInstanceId))
+                .filter(item -> item.deploymentId().filter(deploymentId::equals).isPresent())
+                .filter(item -> version.equals(item.graphVersionPin().reference()));
+    }
+
+    /** Starts one idempotent traversal under an embed-only capability and exact binding. */
+    public EmbedDeploymentStart startEmbedDeploymentExecution(RequestContext context,
+                                                               String deploymentId,
+                                                               String incarnationId,
+                                                               String graphVersion,
+                                                               String requestId) {
+        require(context, AuthorizationAction.EMBED_DEPLOYMENT_EXECUTE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"),
+                        context.tenantId()));
+        return delegate.startEmbedDeploymentExecution(SecurityContext.of(context), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"),
+                requireText(requestId, "request id"));
+    }
+
     /**
  * Starts one of the caller tenant's deployments under the caller's own identity.
  * @param context authenticated request context supplying the owning tenant and serving identity

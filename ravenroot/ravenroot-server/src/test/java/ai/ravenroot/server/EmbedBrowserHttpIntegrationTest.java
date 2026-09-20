@@ -256,7 +256,8 @@ class EmbedBrowserHttpIntegrationTest {
         var expected = Set.of(EmbedBrowserHttpHandler.CREATE_PATH,
                 EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH, EmbedBrowserHttpHandler.LAUNCH_PATH,
                 EmbedBrowserHttpHandler.EXCHANGE_PATH, EmbedBrowserHttpHandler.PROJECTION_PATH,
-                EmbedBrowserHttpHandler.OBSERVATION_PATH);
+                EmbedBrowserHttpHandler.OBSERVATION_PATH, EmbedBrowserHttpHandler.RUNS_PATH,
+                EmbedBrowserHttpHandler.START_EXECUTION_PATH);
         var declared = RouteTable.ALL.stream().filter(route -> route.path().startsWith("/v1/embed/"))
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
                         ai.ravenroot.server.spec.RouteDescriptor::path,
@@ -472,6 +473,48 @@ class EmbedBrowserHttpIntegrationTest {
             assertTrue(launched.body().indexOf("data-theme=\"light\"")
                     < launched.body().indexOf("href=\"/embed-viewer.css\""));
         }
+    }
+
+    @Test
+    void v2LaunchUsesSemanticControlsAndKeepsStartExecutionAbsentByDefault() throws Exception {
+        var registrations = new InMemoryEmbedRegistrationAuthority();
+        provision(registrations, EmbedProvisionCommand.deploymentV2("v2-read", 0, "issuer", "workload",
+                "tenant", PARENT, Optional.empty(), "orders", false));
+        provision(registrations, EmbedProvisionCommand.deploymentV2("v2-start", 0, "issuer", "workload",
+                "tenant", PARENT, Optional.empty(), "orders", true));
+        try (var engine = new PekkoExecutionEngine("embed-http-v2-launch");
+             var server = server(engine, false, registrations)) {
+            server.start();
+            var client = HttpClient.newHttpClient();
+            String base = "http://127.0.0.1:" + server.port();
+
+            String readOnlyHtml = launch(client, base, "v2-read").body();
+            assertTrue(readOnlyHtml.contains("\"viewerSourceVersion\":\"2\""), readOnlyHtml);
+            assertTrue(readOnlyHtml.contains("<option value=\"design\">Design</option>"));
+            assertTrue(readOnlyHtml.contains("<option value=\"monitoring\">Monitoring</option>"));
+            assertTrue(readOnlyHtml.contains("data-viewer-command=\"render\""));
+            assertTrue(readOnlyHtml.contains("data-viewer-run"));
+            assertFalse(readOnlyHtml.contains("data-viewer-start"));
+            assertFalse(readOnlyHtml.contains(">Cyto<"));
+
+            String startHtml = launch(client, base, "v2-start").body();
+            assertTrue(startHtml.contains("\"showStartExecution\":true"), startHtml);
+            assertTrue(startHtml.contains("data-viewer-start>Start execution</button>"));
+        }
+    }
+
+    private static HttpResponse<String> launch(HttpClient client, String base, String registrationId)
+            throws Exception {
+        var created = send(client, request(base + EmbedBrowserHttpHandler.CREATE_PATH)
+                .header("Authorization", "Bearer workload").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"registrationId\":\"" + registrationId + "\"}")));
+        assertEquals(201, created.statusCode(), created.body());
+        URI uri = URI.create(json(created.body(), "launchUrl"));
+        var launched = send(client, request(base + uri.getRawPath() + "?" + uri.getRawQuery())
+                .header("Sec-Fetch-Mode", "navigate").header("Sec-Fetch-Dest", "iframe").GET());
+        assertEquals(200, launched.statusCode(), launched.body());
+        return launched;
     }
 
     @Test

@@ -6,9 +6,15 @@ The embedded viewer exposes only a registered projection whose privacy and taked
 
 - Record deployment, provenance, classification, retention, DSR suppression, takedown, and EEA residence gates before registration.
 - Bind launch and exchange to exact origin, host, source, registration revision, scope, expiry, and one-time use.
-- Exclude mutation, execution control, credentials, raw operator APIs, and non-projected graph data from the viewer.
+- Exclude mutation, global lifecycle control, credentials, raw operator APIs, and non-projected graph data from the viewer.
 - For live sources, bind observation to deployment id, graph version, incarnation, session proof key,
   and an opaque process-local cursor. Emit only allowlisted lifecycle and execution fields.
+- For a selectable v2 source, filter durable process inventory server-side by tenant, deployment, and
+  graph version, then bind observation to one authorized process instance. Never serialize workload,
+  lease, worker, correlation, payload, credential, or tenant-wide discovery metadata.
+- Treat `showStartExecution` as presentation only. Require separate embed-execute authority, exact
+  deployment/version/incarnation reconciliation, and a bounded idempotency identity before the server
+  executes immutable deployed content. No GraphML or operator token reaches the browser.
 - Audit registration, acknowledgement, session issue, projection access, observation access, expiry,
   and revocation without logging token, proof, cursor, or secret values.
 
@@ -17,6 +23,11 @@ or observation events. The frame uses an explicit credentialed request with an a
 it does not use ambient cookies. A gap, authority change, undeploy, or source replacement clears
 observed state and terminates the attachment so stale runtime decoration cannot be mistaken for live
 state.
+
+The run list is reconciled authoritatively. Revocation, authorization loss, undeploy, source
+replacement, or disappearance clears the selection and runtime decoration. Completion may remain as
+a bounded recent terminal row. A visibility check, cached row, or parent-page event never grants
+execution or observation authority.
 
 ## Residual responsibility
 

@@ -116,6 +116,8 @@ the viewer ignores any message that does not.
 | `/v1/embed/exchange` | POST | The viewer, by itself | Trades the bootstrap challenge for a short-lived bearer |
 | `/v1/embed/projection` | POST | The viewer, by itself | Retrieves the read-only projection |
 | `/v1/embed/observation` | POST | The viewer, by itself | Streams lifecycle and allowlisted execution state for a live-deployment source |
+| `/v1/embed/runs` | POST | The v2 viewer, by itself | Reconciles authorized runs for the exact deployment/version/incarnation |
+| `/v1/embed/executions` | POST | The v2 viewer, by itself | Optionally requests one separately-authorized idempotent server-side traversal |
 
 You implement the first and third. The viewer does the rest on its own; you never call `exchange` or
 `projection` or `observation`, and you never see the bearer, projection, or observation stream.
@@ -129,6 +131,10 @@ The operator chooses exactly one source when provisioning the registration:
 - A **deployment source** names one local deployment. Each viewer session resolves that deployment to
   an immutable `(deploymentId, graphVersion, incarnationId)` binding, renders its safe projection,
   and observes lifecycle and execution state only while that binding remains current.
+- A **v2 deployment source** adds an authoritative run selector whose identity is
+  `(tenant, deploymentId, graphVersion, incarnationId, processInstanceId)`. It may request that a
+  Start execution control be shown, but the control remains absent unless separate execute authority
+  is also granted. V1 behavior is unchanged.
 
 The two forms do not fall back to each other. A live registration never reads a GraphML snapshot if
 its deployment disappears or changes version, and a snapshot registration never starts observing a
@@ -458,9 +464,17 @@ If you need the viewer to match your product's theme rather than the reader's sy
 a request to your operator to pin the theme on the registration. Falling back to `dark` is what the
 viewer does when it cannot read a preference at all.
 
-The Cyto, N8N, and Elastic presentation modes share the same read-only node identity, labels,
-bypass treatment, edge meaning, theme tokens, and runtime-state vocabulary. Changing modes or themes
-changes presentation, not the source, authority, or observed deployment binding.
+The v2 **Design** and **Monitoring** presentation modes share the same read-only node identity,
+dimensions, labels, bypass treatment, edge meaning, packaged symbols, theme tokens, and runtime-state
+vocabulary. Switching modes restores each mode's prior view without running layout, fit, or
+simulation. The separate **Render** command recomputes only the selected mode. These preferences do
+not change the source, authority, or selected run binding.
+
+The v2 Run select is disabled with an announced empty state when there are no authorized rows. One
+row is selected deterministically; multiple rows require an explicit choice. A switch clears old
+runtime decoration before attaching the new stream. Refresh preserves the exact process only while
+it remains authorized; completion may retain a bounded recent terminal row, while revocation,
+replacement, undeploy, or disappearance clears the selection.
 
 ## Live-deployment continuity
 

@@ -18,12 +18,19 @@ Ravenroot records the attestations; it does not infer them from the graph, call 
 
 ## Versioned viewer sources
 
-Every registration records `viewerSourceVersion: "1"` and exactly one source:
+V1 registrations continue to record `viewerSourceVersion: "1"` and exactly one source:
 
 | Source | Registration input | Runtime behavior |
 |---|---|---|
 | `snapshot` | GraphML, graph coordinates, deployment snapshot coordinates, lifecycle, policy revision, and seven explicit attestations | Serves the immutable minimized projection captured during provisioning |
 | `deployment` | A process-local deployment id | Resolves a safe projection and immutable graph-version/incarnation binding when the session is used, then permits read-only observation |
+
+The additive v2 deployment source opts into selectable live runs. It adds run-read authority and may
+request a visible Start execution affordance. Visibility is never authority: Start is absent by
+default, and a visible control still requires a separately granted embed-execute capability. Run
+identity is the exact `(tenant, deployment, graph version, incarnation, process instance)` tuple.
+Only active and bounded recent terminal rows are projected; workload, lease, worker, correlation,
+credential, payload, and tenant-wide metadata are excluded.
 
 For the CLI, the presence of `--graphml` selects snapshot provisioning. Its snapshot deployment
 coordinate may be supplied with the compatible `--deployment-id` spelling or the explicit
@@ -42,7 +49,10 @@ source and all snapshot-only inputs are refused.
 7. Expiry, registration revocation, access revocation, undeploy, source replacement, or a replay gap
    ends the attachment.
 
-The projection cannot mutate a graph, start execution, read credentials, install adapters, or expand its own scope. Exact origin and host checks apply at launch and exchange.
+The projection cannot mutate a graph, read credentials, install adapters, or expand its own scope.
+V1 cannot start execution. V2 can request one server-side traversal only when both the presentation
+option and independent capability are present; it cannot stop/restart/undeploy a deployment or
+control the global engine. Exact origin and host checks apply at launch and exchange.
 
 The deployment observation cursor is opaque, bound to the registration revision, session, deployment,
 graph version, and incarnation, and valid only within the process-local replay window. A reconnect can

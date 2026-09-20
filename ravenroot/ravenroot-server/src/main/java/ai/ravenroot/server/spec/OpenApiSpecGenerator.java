@@ -32,6 +32,11 @@ public final class OpenApiSpecGenerator {
     private OpenApiSpecGenerator() {
     }
 
+    /** Writes the canonical checked-in document for release tooling. */
+    public static void main(String[] ignored) {
+        System.out.print(generate(RouteTable.ALL));
+    }
+
     private static final String NOT_A_STABILITY_PROMISE =
             "Ravenroot's HTTP API. This document is generated from the same route table the server "
                     + "registers its endpoints from (RouteTable, RouteDescriptor) and is checked and "

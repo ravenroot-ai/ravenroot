@@ -11,10 +11,12 @@ export function createDeploymentViewState(binding) {
       deploymentId: binding.deploymentId,
       graphVersion: binding.graphVersion,
       incarnationId: binding.incarnationId,
+      processInstanceId: binding.processInstanceId || null,
     }),
     lifecycle: LIFECYCLE.has(binding.lifecycle) ? binding.lifecycle : 'REGISTERED',
     continuity: 'CONNECTING', cursor: null, gap: null,
-    nodeStates: new Map(), edgeStates: new Map(), seen: new Set(),
+    generation: 0, nodeStates: new Map(), edgeStates: new Map(), seen: new Set(),
+    runtime: createMonitoringRuntimeState(),
   };
 }
 
@@ -24,12 +26,15 @@ export function resetDeploymentViewRuntime(state, continuity, gap = null) {
   state.nodeStates.clear();
   state.edgeStates.clear();
   state.seen.clear();
+  resetMonitoringRuntimeState(state.runtime);
 }
 
 function sameBinding(state, frame) {
   return frame?.deploymentId === state.binding.deploymentId
     && frame?.graphVersion === state.binding.graphVersion
-    && frame?.incarnationId === state.binding.incarnationId;
+    && frame?.incarnationId === state.binding.incarnationId
+    && (!state.binding.processInstanceId
+      || frame?.processInstanceId === state.binding.processInstanceId);
 }
 
 export function applyDeploymentViewFrame(state, frame) {
@@ -70,21 +75,22 @@ export function applyDeploymentViewFrame(state, frame) {
   if (state.seen.size > 2048) state.seen.delete(state.seen.values().next().value);
   state.cursor = frame.cursor || identity;
   state.continuity = 'LIVE';
+  const runtimeDeployment = `${state.binding.deploymentId}:${state.binding.processInstanceId || '*'}`;
+  bindMonitoringRuntimeStateToDeployment(state.runtime, runtimeDeployment);
+  const runtimeEvent = { ...event, deploymentId: runtimeDeployment,
+    processInstanceId: frame.processInstanceId || state.binding.processInstanceId || 'deployment',
+    graphVersion: frame.graphVersion, streamSequence: event.sequence || state.seen.size };
+  observeNodeActivity(state.runtime, runtimeEvent);
+  observeEdgeTraversal(state.runtime, runtimeEvent);
   if (event.nodeId) {
-    const runtimeState = event.fallback || event.type === 'NODE_DEFAULTED' ? 'fallback'
-      : event.type === 'NODE_STARTED' ? 'active'
-      : event.type === 'NODE_FAILED' ? 'failed'
-        : event.type === 'NODE_BYPASSED' ? 'bypassed'
-          : event.type === 'NODE_COMPLETED' ? 'completed' : null;
-    if (runtimeState) state.nodeStates.set(event.nodeId, {
-      runtimeState, activeInstances: Number(event.activeInstances) || 0,
-      fallback: Boolean(event.fallback), occurredAt: event.occurredAt || null,
+    const snapshot = nodeActivitySnapshot(state.runtime, event.nodeId);
+    if (snapshot.observed) state.nodeStates.set(event.nodeId, {
+      ...snapshot, runtimeObserved: true, runtimeState: snapshot.state,
+      activeInstances: snapshot.instances,
     });
   }
   if (event.type === 'EDGE_TRAVERSED' && event.edgeId) {
-    const previous = state.edgeStates.get(event.edgeId) || { count: 0, recent: 0 };
-    state.edgeStates.set(event.edgeId, { count: previous.count + 1,
-      recent: Math.min(8, previous.recent + 1), occurredAt: event.occurredAt || null });
+    state.edgeStates.set(event.edgeId, edgeFlowSnapshot(state.runtime, event.edgeId));
   }
   return { accepted: true, reason: 'execution', nodeId: event.nodeId, edgeId: event.edgeId };
 }
@@ -105,3 +111,12 @@ export function applyDeploymentViewStateToRenderer(instance, state) {
     edge.data('runtimeCount', runtime?.count || 0);
   });
 }
+import {
+  bindMonitoringRuntimeStateToDeployment,
+  createMonitoringRuntimeState,
+  edgeFlowSnapshot,
+  nodeActivitySnapshot,
+  observeEdgeTraversal,
+  observeNodeActivity,
+  resetMonitoringRuntimeState,
+} from './monitoring-runtime-state.js';

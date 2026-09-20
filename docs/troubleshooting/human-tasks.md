@@ -19,4 +19,3 @@ are intentionally summary-only; review content appears only on exact authorized 
 For migration faults, stop admission, retain the database, inspect the first startup error, and fix
 the migration/configuration cause before retrying. Do not delete task, revocation, handler, timer,
 continuation, or audit rows independently.
-

@@ -49,4 +49,3 @@ SQLite and PostgreSQL upgrades add presentation columns and capability revocatio
 old rows remain classic tasks. Back up before upgrade, check readiness, list a known pre-upgrade task,
 exercise one dry-run reconciliation, then test capability revocation across a replica/restart before
 restoring traffic.
-

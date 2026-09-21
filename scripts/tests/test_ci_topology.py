@@ -22,9 +22,6 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
 
     def test_full_tier_exposes_independently_actionable_jobs(self) -> None:
         expected = {
-            "admission-policy",
-            "admission-ui",
-            "admission-backend",
             "full-docs-policy",
             "full-python-contracts",
             "full-shell-contracts",
@@ -142,14 +139,22 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "only the download side may repeat a producer's artifact name",
         )
 
-    def test_feature_feedback_is_ultralight_and_does_not_repeat_test_suites(self) -> None:
-        fast = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))["fast-policy"]
+    def test_feature_feedback_stays_light_and_does_not_repeat_regression_suites(self) -> None:
+        """Point 4 retired the review-commit `admission` tier; its cheap checks moved here instead, so
+        this workflow now legitimately carries the CI-contract unittests and the UI unit suite. What
+        it must still never repeat is the expensive regression work owned by the full tier."""
+        fast_all = job_blocks(FAST_WORKFLOW.read_text(encoding="utf-8"))
         all_fast = FAST_WORKFLOW.read_text(encoding="utf-8")
-        self.assertNotIn("python3 -m unittest", all_fast)
+        self.assertIn("python3 -m unittest scripts.tests.test_classify_main_change", fast_all["fast-policy"])
+        self.assertIn("python3 -m unittest scripts.tests.test_ci_required", fast_all["fast-policy"])
+        self.assertIn("python3 -m unittest scripts.tests.test_ci_topology", fast_all["fast-policy"])
+        self.assertIn("npm test", fast_all["fast-ui"])
+        self.assertIn("-DskipTests compile", fast_all["fast-backend"])
         self.assertNotIn("./scripts/tests/", all_fast)
-        self.assertNotIn("npm test", all_fast)
         self.assertNotIn("clean install", all_fast)
-        self.assertIn("fetch-depth: 0", fast)
+        self.assertNotIn("clean verify", all_fast)
+        self.assertNotIn("npx playwright", all_fast)
+        self.assertIn("fetch-depth: 0", fast_all["fast-policy"])
 
     def test_operational_configuration_audit_runs_once_in_the_full_tier(self) -> None:
         block = self.jobs["full-python-contracts"]

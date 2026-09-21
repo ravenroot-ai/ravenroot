@@ -1,6 +1,22 @@
 name: Continuous integration
 
 on:
+  # A pull request into `dev` triggers here directly, and the classifier below gives it the full
+  # tier: `ci-required` on that event is now backed by the complete functional suite, not the
+  # retired `admission` diagnostic. This repository once removed this trigger for `dev`, on the
+  # theory that one dispatched full run on the exact commit before the pull request opens would
+  # satisfy `dev`'s required `ci-required` check just as well, since a check run belongs to the
+  # commit regardless of which event produced it. That theory was tested and proven false: a pull
+  # request's required-checks evaluation and status rollup only see check suites tied to the pull
+  # request's own events (`pull_request`, and pushes to its head branch); a `workflow_dispatch`
+  # suite lives on the commit and is readable through the REST check-runs API, but it never enters
+  # the pull request's rollup. Without this trigger, `ci-required` was not red for a pull request
+  # into `dev` — it was absent, and the pull request could never be queued or merged (observed on
+  # #310's own pull request: three dispatched suites on the head commit, one green, none in the
+  # rollup, `mergeStateStatus: BLOCKED`; a control pull request still carrying this trigger showed
+  # the `pull_request` suite in its rollup, `CLEAN`, and queued). The dispatched review-candidate run
+  # remains useful ahead of opening the pull request, but it cannot substitute for the event's own
+  # run, so the trigger is restored.
   pull_request:
     branches: [dev, main]
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
@@ -214,81 +230,6 @@ jobs:
           git fetch --force --quiet --tags origin
           python3 scripts/release_contract.py check-promotion \
             --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS"
-
-  # Pull requests expose a few independent, high-signal checks. They all start together and keep
-  # running when a sibling fails, so an author gets the useful breakage map without waiting for the
-  # expensive regression suite. The merge queue owns that suite on the actual integration commit.
-  admission-policy:
-    name: admission-policy
-    needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'admission'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out repository history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Validate the review and CI contracts
-        run: |
-          python3 scripts/check_no_raw_control_bytes.py
-          python3 scripts/check_argline.py
-          python3 -m unittest scripts.tests.test_classify_main_change
-          python3 -m unittest scripts.tests.test_ci_required
-          python3 -m unittest scripts.tests.test_ci_topology
-          docker compose --file compose.yaml config --quiet
-          ./dev.sh verify-supervisor
-          git diff --check HEAD^
-          python3 scripts/check_commit_attribution.py
-
-  admission-ui:
-    name: admission-ui
-    needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'admission'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
-      - name: Install UI dependencies
-        working-directory: ravenroot/ravenroot-ui
-        run: npm ci
-      - name: Run the UI unit suite
-        working-directory: ravenroot/ravenroot-ui
-        run: npm test
-
-  admission-backend:
-    name: admission-backend
-    needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'admission'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.merge_sha || github.sha }}
-      - name: Set up Java
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-          cache-dependency-path: |
-            ravenroot/pom.xml
-            ravenroot/**/pom.xml
-      - name: Compile backend production sources
-        working-directory: ravenroot
-        run: mvn -B --no-transfer-progress -DskipTests compile
 
   full-docs-policy:
     name: full-docs-policy
@@ -1100,9 +1041,6 @@ jobs:
     if: always()
     needs:
       - release-classification
-      - admission-policy
-      - admission-ui
-      - admission-backend
       - docs-site
       - full-docs-policy
       - full-python-contracts

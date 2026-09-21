@@ -8,6 +8,7 @@ import ai.ravenroot.api.embed.EmbedViewerSource;
 import ai.ravenroot.api.application.AuthorizedRavenrootApplication;
 import ai.ravenroot.api.application.DeploymentEventBatch;
 import ai.ravenroot.api.application.DeploymentViewerView;
+import ai.ravenroot.api.application.DurableProcessEventPage;
 import ai.ravenroot.api.application.PublicExecutionDescription;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.RequestContext;
@@ -727,28 +728,47 @@ public final class EmbedBrowserHttpHandler {
                                        DeploymentObservationCursorStore.Binding binding) throws IOException {
         java.util.UUID processId = java.util.UUID.fromString(binding.processInstanceId());
         long sequence = 0;
-        boolean first = true;
         output.write(("event: runtime-reset\ndata: {\"type\":\"runtime-reset\",\"deploymentId\":\""
                 + JsonStrings.escape(binding.deploymentId()) + "\",\"incarnationId\":\""
                 + JsonStrings.escape(binding.incarnationId()) + "\",\"graphVersion\":\""
                 + JsonStrings.escape(binding.graphVersion()) + "\",\"processInstanceId\":\""
                 + binding.processInstanceId() + "\"}\n\n").getBytes(StandardCharsets.UTF_8));
         while (sequence < 100_000) {
-            var page = deployments.embedDeploymentRunReplay(context, binding.deploymentId(),
-                    binding.incarnationId(), binding.graphVersion(), processId, sequence, 512);
-            if (page.isEmpty()) break;
-            if (first && page.getFirst().streamSequence() != 1) return false;
-            first = false;
-            for (var event : page) {
+            final DurableProcessEventPage page;
+            try {
+                page = deployments.embedDeploymentRunReplayPage(context, binding.deploymentId(),
+                        binding.incarnationId(), binding.graphVersion(), processId, sequence, 512);
+            } catch (ai.ravenroot.api.persistence.ExecutionStoreException truncated) {
+                return false;
+            }
+            long pageEnd = validateDurableReplayPage(sequence, page, 512);
+            if (pageEnd < 0) return false;
+            for (var event : page.events()) {
                 output.write(("event: execution\ndata: " + durableExecutionJson(binding, event) + "\n\n")
                         .getBytes(StandardCharsets.UTF_8));
-                sequence = event.streamSequence();
             }
-            if (page.size() < 512) break;
+            sequence = pageEnd;
+            if (page.events().isEmpty()) {
+                break;
+            }
+            if (page.events().size() < 512) {
+                break;
+            }
         }
         if (sequence >= 100_000) return false;
         output.flush();
         return true;
+    }
+
+    static long validateDurableReplayPage(long afterSequence, DurableProcessEventPage page, int limit) {
+        if (afterSequence + 1 < page.retainedFromSequence()) return -1;
+        long expected = afterSequence + 1;
+        for (var event : page.events()) {
+            if (event.streamSequence() != expected++) return -1;
+        }
+        long pageEnd = expected - 1;
+        if (page.events().size() < limit && pageEnd + 1 != page.nextSequence()) return -1;
+        return pageEnd;
     }
 
     private EmbedViewResolution resolveEmbedView(String bearer,
@@ -786,7 +806,7 @@ public final class EmbedBrowserHttpHandler {
                                 String path) {
         Instant issuedAt = Instant.parse(body.get("issuedAt"));
         byte[] signature = decode(body.get("signature"), 64);
-        return proofs.verifyAndConsume(bearer, registration.revision(), body.get("nonce"),
+        return proofs.verifyRequestAndConsume(bearer, registration.revision(), body.get("nonce"),
                 body.get("jti"), "POST", path, issuedAt, session.key(), signature);
     }
 

@@ -27,7 +27,9 @@ state.
 
 A selected-run replay-gap recovery reads only that process's durable journal. The viewer receives an
 atomic runtime reset followed by allowlisted node/edge lifecycle facts; correlation, payload, worker,
-lease, workload, and sibling-process records remain server-side.
+lease, workload, and sibling-process records remain server-side. Each bounded journal page reports
+the atomically observed retained floor and next sequence. A fully compacted stream, a discontinuity,
+or compaction between pages fails closed instead of presenting a partial replay as authoritative.
 
 The run list is reconciled authoritatively. Revocation, authorization loss, undeploy, source
 replacement, or disappearance clears the selection and runtime decoration. Completion may remain as

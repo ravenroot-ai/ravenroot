@@ -111,6 +111,9 @@ public final class ManagedExecutionStore implements InvocationHandler {
         if (name.equals("readProcessJournal") && method.getParameterCount() == 3) {
             return invokeDelegate(method, arguments);
         }
+        if (name.equals("readProcessJournalPage") && method.getParameterCount() == 3) {
+            return invokeDelegate(method, arguments);
+        }
         if (name.equals("applyManaged") || name.equals("claimManaged")
                 || name.equals("claimPendingWorkAmong") || name.equals("claimDueTimersAmong")
                 || name.equals("managedClaimCandidates")) {

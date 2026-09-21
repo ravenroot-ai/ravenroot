@@ -67,6 +67,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -1651,11 +1652,41 @@ public final class PostgresExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
                                                                     long afterSequence, int limit) {
+        return readProcessJournalPage(key, afterSequence, limit).thenApply(ProcessJournalPage::records);
+    }
+
+    @Override
+    public CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                       long afterSequence, int limit) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
             if (afterSequence < 0) throw failure(ExecutionStoreFailure.invalid("afterSequence cannot be negative"));
             requireLimit(limit);
             return readFolded(null, connection -> {
+                long next = 1L;
+                try (PreparedStatement boundary = connection.prepareStatement(
+                        "SELECT next_sequence FROM journal_stream_sequence WHERE tenant_id = ? "
+                                + "AND process_instance_id = ?")) {
+                    boundary.setString(1, key.tenantId());
+                    StoredUuid.bind(boundary, 2, key.processInstanceId());
+                    try (ResultSet rows = boundary.executeQuery()) {
+                        if (rows.next()) next = rows.getLong(1);
+                    }
+                }
+                long retainedFrom = next;
+                try (PreparedStatement boundary = connection.prepareStatement(
+                        "SELECT MIN(stream_sequence) FROM event_journal WHERE tenant_id = ? "
+                                + "AND process_instance_id = ?")) {
+                    boundary.setString(1, key.tenantId());
+                    StoredUuid.bind(boundary, 2, key.processInstanceId());
+                    try (ResultSet rows = boundary.executeQuery()) {
+                        if (rows.next() && rows.getObject(1) != null) retainedFrom = rows.getLong(1);
+                    }
+                }
+                if (afterSequence + 1 < retainedFrom) {
+                    throw failure(new ExecutionStoreFailure.JournalTruncated(
+                            key.tenantId(), afterSequence, retainedFrom));
+                }
                 var page = new ArrayList<JournalRecord>();
                 try (PreparedStatement statement = connection.prepareStatement(
                         "SELECT * FROM event_journal WHERE tenant_id = ? AND process_instance_id = ? "
@@ -1668,7 +1699,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         while (rows.next()) page.add(readJournalRecord(key.tenantId(), rows));
                     }
                 }
-                return List.copyOf(page);
+                return new ProcessJournalPage(page, retainedFrom, next);
             });
         });
     }

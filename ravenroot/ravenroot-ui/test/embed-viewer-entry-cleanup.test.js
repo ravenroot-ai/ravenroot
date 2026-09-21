@@ -7,7 +7,11 @@ const mocks = vi.hoisted(() => ({
   cytoscapeAdapter: null,
 }));
 
-vi.mock('cytoscape', () => ({ default: vi.fn(() => mocks.instance) }));
+vi.mock('cytoscape', () => {
+  const cytoscape = vi.fn(() => mocks.instance);
+  cytoscape.use = vi.fn();
+  return { default: cytoscape };
+});
 vi.mock('../src/viewer-renderer-adapter.js', () => ({
   createCytoscapeReadOnlyRendererAdapter: vi.fn(() => mocks.cytoscapeAdapter),
   createReadOnlyRendererAdapter: vi.fn(contract => contract),
@@ -62,7 +66,7 @@ describe('embed viewer failed-mount cleanup', () => {
       nodes: vi.fn(() => []), edges: vi.fn(() => []), style: vi.fn(), on: vi.fn(),
       elements: vi.fn(() => ({ boundingBox: vi.fn() })), extent: vi.fn(),
       width: vi.fn(() => 800), height: vi.fn(() => 500), zoom: vi.fn(() => 1),
-      pan: vi.fn(), resize: vi.fn(),
+      pan: vi.fn(), resize: vi.fn(), layout: vi.fn(),
     };
     mocks.core = {
       state: 'ready',
@@ -159,6 +163,31 @@ describe('embed viewer failed-mount cleanup', () => {
         { processInstanceId: 'dddddddd-0000', status: 'FAILED', outcome: 'FAILURE' },
       ] }, 'cccccccc-0000')).toBe('cccccccc-0000');
       expect(select.value).toBe('cccccccc-0000');
+      viewer.destroy();
+    } finally {
+      globalThis.ResizeObserver = oldResizeObserver;
+    }
+  });
+
+  it('Render recomputes only Design with the persisted arrangement and never fits', async () => {
+    const oldResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+    const layout = { one: vi.fn(), run: vi.fn() };
+    mocks.instance.layout.mockReturnValue(layout);
+    mocks.core.mount.mockResolvedValue({ nodes: [], edges: [], designArrangement: 'flow' });
+    try {
+      const root = semanticShell();
+      const viewer = createEmbedViewer(root);
+      await viewer.mount({});
+      root.querySelector('[data-viewer-command="render"]').click();
+
+      expect(mocks.instance.layout).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'dagre', rankDir: 'LR', fit: false,
+      }));
+      expect(layout.one).toHaveBeenCalledWith('layoutstop', expect.any(Function));
+      expect(layout.run).toHaveBeenCalledOnce();
+      expect(mocks.core.fit).not.toHaveBeenCalled();
+      expect(root.querySelector('[data-viewer-status]').textContent).toBe('Design view rendered.');
       viewer.destroy();
     } finally {
       globalThis.ResizeObserver = oldResizeObserver;

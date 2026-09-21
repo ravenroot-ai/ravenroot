@@ -452,8 +452,24 @@ public interface RavenrootApplication extends AutoCloseable {
      * @return ordered durable events after the requested sequence
      */
     default List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
-                                                                long afterSequence, int limit) {
+                                                                 long afterSequence, int limit) {
         return List.of();
+    }
+
+    /**
+     * Returns one process replay page with its atomically observed retention boundary.
+     * @param tenantId exact owning tenant
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable process sequence
+     * @param limit maximum event count
+     * @return bounded events and authoritative retained/allocation boundaries
+     */
+    default DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
+                                                                long afterSequence, int limit) {
+        List<DurableExecutionEvent> events = durableEventsForProcess(
+                tenantId, processInstanceId, afterSequence, limit);
+        return new DurableProcessEventPage(events, 1,
+                events.isEmpty() ? afterSequence + 1 : events.getLast().streamSequence() + 1);
     }
 
     /**

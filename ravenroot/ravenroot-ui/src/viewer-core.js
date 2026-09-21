@@ -4,6 +4,9 @@ import { viewerProjectionElements } from './viewer-presentation.js';
 const CONTRACT_VERSION = '1.0';
 export const VIEWER_BUDGET = Object.freeze({ nodes: 5_000, edges: 10_000, renderMilliseconds: 5_000 });
 const NODE_KINDS = new Set(['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR']);
+const DESIGN_ARRANGEMENTS = new Set([
+  'hierarchical', 'flow', 'organic', 'keep', 'hierarchical-new', 'layered-down',
+]);
 function requireText(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
     throw new TypeError(`Invalid viewer projection: ${field}.`);
@@ -73,12 +76,18 @@ export function createViewerSnapshot(projection, budget = VIEWER_BUDGET) {
     data: Object.freeze(element.data),
     ...(element.position ? { position: Object.freeze(element.position) } : {}),
   }));
+  const designArrangement = projection.designArrangement == null ? null
+    : requireText(projection.designArrangement, 'designArrangement');
+  if (designArrangement != null && !DESIGN_ARRANGEMENTS.has(designArrangement)) {
+    throw new TypeError('Invalid viewer projection: designArrangement.');
+  }
 
   return Object.freeze({
     viewerContractVersion: CONTRACT_VERSION,
     graphId: requireText(projection.graphId, 'graphId'),
     graphVersionId: requireText(projection.graphVersionId, 'graphVersionId'),
     canonicalDigest: requireText(projection.canonicalDigest, 'canonicalDigest'),
+    designArrangement,
     nodes: Object.freeze(nodes),
     edges: Object.freeze(edges),
     elements: Object.freeze(elements),

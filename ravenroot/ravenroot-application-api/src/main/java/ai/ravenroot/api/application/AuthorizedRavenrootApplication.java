@@ -751,10 +751,28 @@ public final class AuthorizedRavenrootApplication {
     public java.util.List<DurableExecutionEvent> embedDeploymentRunReplay(
             RequestContext context, String deploymentId, String incarnationId, String graphVersion,
             java.util.UUID processInstanceId, long afterSequence, int limit) {
+        return embedDeploymentRunReplayPage(context, deploymentId, incarnationId, graphVersion,
+                processInstanceId, afterSequence, limit).events();
+    }
+
+    /**
+     * Replays one selected run with an authoritative per-process retention boundary.
+     * @param context authenticated request context
+     * @param deploymentId exact tenant-scoped deployment identifier
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact immutable graph version
+     * @param processInstanceId exact process identity
+     * @param afterSequence exclusive durable per-process sequence
+     * @param limit maximum number of events to return
+     * @return bounded events and their atomic durable stream boundary
+     */
+    public DurableProcessEventPage embedDeploymentRunReplayPage(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion,
+            java.util.UUID processInstanceId, long afterSequence, int limit) {
         var run = embedDeploymentRun(context, deploymentId, incarnationId, graphVersion, processInstanceId);
-        if (run.isEmpty()) return java.util.List.of();
+        if (run.isEmpty()) return new DurableProcessEventPage(java.util.List.of(), 1, 1);
         int bounded = Math.max(1, Math.min(limit, 512));
-        return delegate.durableEventsForProcess(context.tenantId(), processInstanceId,
+        return delegate.durableEventPageForProcess(context.tenantId(), processInstanceId,
                 afterSequence, bounded);
     }
 

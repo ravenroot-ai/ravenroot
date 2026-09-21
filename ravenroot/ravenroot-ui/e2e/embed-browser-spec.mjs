@@ -106,7 +106,12 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     const consoleMessages = [];
     const requestedUrls = [];
     const observationRequests = [];
+    const responseStatuses = [];
     page.on('console', message => consoleMessages.push(message.text()));
+    page.on('response', response => {
+      const path = new URL(response.url()).pathname;
+      if (path.startsWith('/v1/embed/')) responseStatuses.push(`${path}:${response.status()}`);
+    });
     page.on('request', async networkRequest => {
       requestedUrls.push(networkRequest.url());
       if (new URL(networkRequest.url()).pathname === '/v1/embed/observation') {
@@ -129,30 +134,51 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
     await expect.poll(() => page.frames().some(frame => frame.url().startsWith(viewerOrigin)), {
       timeout: 10_000,
     }).toBe(true);
-    await expect.poll(() => page.evaluate(() => window.embedHello)).toEqual(expect.any(Object));
+    await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId))).toBe(true);
     const viewer = page.frames().find(frame => frame.url().startsWith(viewerOrigin));
     expect(viewer).toBeDefined();
     expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
     await page.evaluate(() => window.postViewerAcknowledgement());
-    await expect.poll(() => page.evaluate(() => window.embedMessages.some(
-      message => message.type === 'READY'))).toBe(true);
+    await page.waitForTimeout(1_000);
+    const ready = await page.evaluate(() => window.embedMessages.some(message => message.type === 'READY'));
+    if (!ready) throw new Error(`viewer did not become ready: ${JSON.stringify(responseStatuses)}`);
 
     const shell = viewer.locator('#ravenroot-embed-viewer');
     await expect(shell).toHaveAttribute('data-viewer-state', 'ready');
-    await expect(shell).toHaveAttribute('data-viewer-lifecycle', 'ready');
-    await expect(shell).toHaveAttribute('data-viewer-continuity', 'live');
     await expect(viewer.locator('[data-viewer-alternative] > li')).toHaveCount(2);
+    await expect(viewer.locator('[data-viewer-mode]')).toHaveValue('design');
+    await expect(viewer.locator('[data-viewer-mode] option')).toHaveText(['Design', 'Monitoring']);
+    await expect(viewer.locator('[data-viewer-command="render"]')).toHaveAccessibleName('Render');
+    const runs = viewer.locator('[data-viewer-run]');
+    await expect(runs).toBeDisabled();
+    await expect(viewer.locator('[data-viewer-run-empty]')).toBeVisible();
+    await viewer.locator('[data-viewer-start]').click();
+    await expect(runs).toBeEnabled();
+    await expect(runs.locator('option')).toHaveCount(1);
     await expect.poll(() => observationRequests.length).toBe(1);
+
+    expect((await page.evaluate(() => fetch('/__drop-next-start', {
+      method: 'POST', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
+    }).then(response => response.status)))).toBe(204);
+    await viewer.locator('[data-viewer-start]').click();
+    await expect(runs.locator('option')).toHaveCount(3);
+    await viewer.locator('[data-viewer-start]').click();
+    await expect(runs.locator('option')).toHaveCount(4);
+    await runs.selectOption({ index: 2 });
+    await expect(viewer.locator('[data-viewer-status]')).not.toHaveText('No authorized runs.');
 
     const observed = observationRequests[0];
     const observedBody = JSON.parse(observed.body);
-    expect(Object.keys(observedBody).sort()).toEqual(['cursor', 'issuedAt', 'jti', 'nonce', 'signature']);
+    expect(Object.keys(observedBody).sort()).toEqual([
+      'cursor', 'issuedAt', 'jti', 'nonce', 'processInstanceId', 'signature',
+    ]);
     expect(observedBody.cursor).toBe('');
     expect(observed.headers.authorization).toMatch(/^Bearer [A-Za-z0-9_-]+$/u);
     const fetches = await viewer.evaluate(() => window.__embedFetchOptions);
-    expect(fetches.map(entry => entry.path)).toEqual([
-      '/v1/embed/exchange', '/v1/embed/projection', '/v1/embed/observation',
-    ]);
+    expect(fetches.map(entry => entry.path)).toEqual(expect.arrayContaining([
+      '/v1/embed/exchange', '/v1/embed/projection', '/v1/embed/runs',
+      '/v1/embed/executions', '/v1/embed/observation',
+    ]));
     expect(fetches.every(entry => entry.credentials === 'omit' && entry.cache === 'no-store'
       && entry.referrerPolicy === 'no-referrer')).toBe(true);
 
@@ -187,6 +213,29 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
       && !url.includes(observed.headers.authorization.slice('Bearer '.length)))).toBe(true);
     expect(consoleMessages.every(message => !message.includes('browser-secret-topology')
       && !message.includes('browser-secret-runtime-payload'))).toBe(true);
+  });
+
+test('invalidates a selected production run after same-id deployment replacement',
+  async ({ page, request }) => {
+    await page.goto('/deployment-stale');
+    await expect.poll(() => page.evaluate(() => Boolean(window.embedHello?.acknowledgementId))).toBe(true);
+    const viewer = page.frames().find(frame => frame.url().startsWith(viewerOrigin));
+    expect(viewer).toBeDefined();
+    expect(await page.evaluate(() => window.acknowledgeBackend())).toBe(200);
+    await page.evaluate(() => window.postViewerAcknowledgement());
+    await expect.poll(() => page.evaluate(() => window.embedMessages.some(
+      message => message.type === 'READY'))).toBe(true);
+
+    await viewer.locator('[data-viewer-start]').click();
+    await expect(viewer.locator('[data-viewer-run]')).toBeEnabled();
+    await expect(viewer.locator('#ravenroot-embed-viewer')).toHaveAttribute(
+      'data-viewer-continuity', /live|durable/u);
+    const replaced = await request.post(`${controlOrigin}/replace`);
+    expect(replaced.ok()).toBe(true);
+    await expect(viewer.locator('[data-viewer-status]'))
+      .toHaveText('The deployment version changed. This view is no longer live.', { timeout: 10_000 });
+    await expect(viewer.locator('#ravenroot-embed-viewer'))
+      .toHaveAttribute('data-viewer-continuity', 'version_mismatch');
   });
 
 test('isolates the real bootstrap and projection flow across three origins', async ({ page, request }) => {

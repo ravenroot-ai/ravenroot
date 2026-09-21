@@ -1,4 +1,6 @@
 import cytoscape from 'cytoscape';
+import cytoscapeDagre from 'cytoscape-dagre';
+import cytoscapeElk from 'cytoscape-elk';
 
 import { createEmbedShellLifecycle, EmbedShellFailure } from './embed-shell-lifecycle.js';
 import { createReadOnlyViewerCore } from './viewer-core.js';
@@ -21,6 +23,8 @@ import {
   viewerSupportsElastic,
 } from './viewer-route-budget.js';
 import { mountD3ElasticRenderer } from './viewer-elastic-renderer.js';
+import { registerLayeredLayout } from './layered-layout.js';
+import { viewerDesignLayoutOptions } from './viewer-design-layout.js';
 import {
   clampViewportCenter,
   minimapToWorld,
@@ -31,6 +35,10 @@ import {
 export function viewerStylesheet(mode = 'cyto', theme = 'dark') {
   return createViewerStylesheet(requireEmbedTheme(theme), mode);
 }
+
+cytoscape.use(cytoscapeDagre);
+cytoscape.use(cytoscapeElk);
+registerLayeredLayout(cytoscape);
 
 export function applyResolvedRoutes(instance, mode) {
   if (mode !== 'cyto') return;
@@ -242,7 +250,14 @@ export function createEmbedViewer(container, {
   const runCommand = command => {
     if (command === 'render' && semanticModes) {
       if (isMonitoring()) elasticMount?.simulation.alpha(1).restart();
-      else instance.layout({ name: 'cose', animate: false, fit: false }).run();
+      else {
+        const layout = instance.layout(viewerDesignLayoutOptions(currentSnapshot?.designArrangement));
+        layout.one?.('layoutstop', () => {
+          applyResolvedRoutes(instance, 'cyto');
+          scheduleMinimap();
+        });
+        layout.run();
+      }
       status.textContent = `${isMonitoring() ? 'Monitoring' : 'Design'} view rendered.`;
     } else if (command === 'fit') activeRenderer().fit(60);
     else if (command === 'zoom-in') activeRenderer().zoomBy(1.2);
@@ -600,6 +615,8 @@ export function createEmbedViewer(container, {
       if (deploymentState) {
         resetDeploymentViewRuntime(deploymentState, 'DETACHED', reason);
         applyDeploymentViewStateToRenderer(instance, deploymentState);
+        container.dataset.viewerContinuity = deploymentState.continuity.toLowerCase();
+        container.dataset.viewerLifecycle = deploymentState.lifecycle.toLowerCase();
       }
       status.textContent = reason;
     },

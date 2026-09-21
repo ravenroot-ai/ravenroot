@@ -23,10 +23,13 @@ budget that allows renderer-owned geometry, then saves the rendered native view,
 pixel diff for each matrix cell.
 
 The v2 unit matrix covers zero, one, and three authorized selector rows and generation-fenced runtime
-reset. Before release, exercise rapid switching, exact-selection refresh, stale version/incarnation,
-completion retention, disappearance, revocation, authorization loss, and replay-gap reconciliation.
-Also confirm that mode switching preserves each viewport without layout, fit, or simulation and that
-Render affects only the selected mode.
+reset. The production three-origin fixture exercises zero/one/three reconciliation, a lost Start
+response retried with the same idempotency identity, selected-process observation and durable replay,
+same-id deployment replacement, and registration revocation. Store contract tests cover a fully
+compacted process stream and compaction between bounded replay pages. Mode switching preserves each
+viewport without layout, fit, or simulation; **Render** affects only the selected mode. Design Render
+uses the projected persisted arrangement (`keep`, `flow`, `organic`, `hierarchical`,
+`hierarchical-new`, or `layered-down`) and recomputes edge routes after layout completion.
 
 The historical image rows below retain their filenames for release continuity. In the public v2 UI,
 Cyto is the Design renderer and Elastic is Monitoring; N8N is no longer a public choice. The v2

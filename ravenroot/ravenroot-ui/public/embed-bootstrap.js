@@ -236,7 +236,9 @@
     const value = JSON.parse(node.textContent);
     const v1Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt',
       'grantRevision', 'parentOrigin', 'theme', 'viewerOrigin'];
-    const v2Keys = [...v1Keys, 'showStartExecution', 'viewerSourceVersion'];
+    const v2Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt',
+      'grantRevision', 'parentOrigin', 'showStartExecution', 'theme', 'viewerOrigin',
+      'viewerSourceVersion'];
     const v2 = value?.viewerSourceVersion === '2';
     if (!exactKeys(value, v2 ? v2Keys : v1Keys)
         || !boundedString(value.exchangeId)
@@ -453,8 +455,15 @@
     };
     const startExecution = async () => {
       const requestId = correlationId();
-      await postJson(START_EXECUTION_PATH,
-        await signedBody(START_EXECUTION_PATH, { requestId }), exchanged.bearer);
+      try {
+        await postJson(START_EXECUTION_PATH,
+          await signedBody(START_EXECUTION_PATH, { requestId }), exchanged.bearer);
+      } catch (firstFailure) {
+        // The server may have committed before the response was lost. Reconcile by retrying the
+        // exact bounded idempotency identity with a fresh request proof.
+        await postJson(START_EXECUTION_PATH,
+          await signedBody(START_EXECUTION_PATH, { requestId }), exchanged.bearer);
+      }
       await refreshRuns();
     };
     viewer = createEmbedViewer(document.getElementById('ravenroot-embed-viewer'), {

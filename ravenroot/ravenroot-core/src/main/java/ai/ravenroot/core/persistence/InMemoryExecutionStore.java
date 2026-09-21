@@ -49,6 +49,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
@@ -2683,6 +2684,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
                                                                     long afterSequence, int limit) {
+        return readProcessJournalPage(key, afterSequence, limit).thenApply(ProcessJournalPage::records);
+    }
+
+    @Override
+    public CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                       long afterSequence, int limit) {
         return complete(() -> {
             requireCapability(StoreCapability.EVENT_JOURNAL);
             java.util.Objects.requireNonNull(key, "key");
@@ -2690,6 +2697,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 throw failure(ExecutionStoreFailure.invalid("process journal cursor and limit are invalid"));
             }
             synchronized (monitor) {
+                long next = streamSequences.getOrDefault(key, 0L) + 1;
+                long retainedFrom = journalOf(key.tenantId()).records.stream()
+                        .filter(record -> record.key().equals(key))
+                        .mapToLong(JournalRecord::streamSequence).min().orElse(next);
+                if (afterSequence + 1 < retainedFrom) {
+                    throw failure(new ExecutionStoreFailure.JournalTruncated(
+                            key.tenantId(), afterSequence, retainedFrom));
+                }
                 var page = new ArrayList<JournalRecord>();
                 for (JournalRecord record : journalOf(key.tenantId()).records) {
                     if (!record.key().equals(key) || record.streamSequence() <= afterSequence) continue;
@@ -2701,7 +2716,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     if (page.size() == limit) break;
                 }
                 page.sort(java.util.Comparator.comparingLong(JournalRecord::streamSequence));
-                return List.copyOf(page);
+                return new ProcessJournalPage(page, retainedFrom, next);
             }
         });
     }

@@ -28,6 +28,7 @@ import ai.ravenroot.api.persistence.EventDigest;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
@@ -4963,11 +4964,32 @@ public final class SqliteExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<List<JournalRecord>> readProcessJournal(ExecutionKey key,
                                                                     long afterSequence, int limit) {
+        return readProcessJournalPage(key, afterSequence, limit).thenApply(ProcessJournalPage::records);
+    }
+
+    @Override
+    public CompletionStage<ProcessJournalPage> readProcessJournalPage(ExecutionKey key,
+                                                                       long afterSequence, int limit) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
             if (afterSequence < 0) throw failure(ExecutionStoreFailure.invalid("afterSequence cannot be negative"));
             requireLimit(limit);
             return inReadTransaction(null, () -> {
+                long next = readNextStreamSequence(key);
+                long retainedFrom = next;
+                try (PreparedStatement boundary = connection.prepareStatement(
+                        "SELECT MIN(stream_sequence) FROM event_journal WHERE tenant_id = ? "
+                                + "AND process_instance_id = ?")) {
+                    boundary.setString(1, key.tenantId());
+                    boundary.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = boundary.executeQuery()) {
+                        if (rows.next() && rows.getObject(1) != null) retainedFrom = rows.getLong(1);
+                    }
+                }
+                if (afterSequence + 1 < retainedFrom) {
+                    throw failure(new ExecutionStoreFailure.JournalTruncated(
+                            key.tenantId(), afterSequence, retainedFrom));
+                }
                 var page = new ArrayList<JournalRecord>();
                 try (PreparedStatement statement = connection.prepareStatement(
                         "SELECT * FROM event_journal WHERE tenant_id = ? AND process_instance_id = ? "
@@ -4980,7 +5002,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         while (rows.next()) page.add(readJournalRecord(key.tenantId(), rows));
                     }
                 }
-                return List.copyOf(page);
+                return new ProcessJournalPage(page, retainedFrom, next);
             });
         });
     }

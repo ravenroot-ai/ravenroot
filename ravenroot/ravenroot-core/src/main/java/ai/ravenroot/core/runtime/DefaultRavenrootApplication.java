@@ -9,6 +9,7 @@ import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.DurableProcessEventPage;
 import ai.ravenroot.api.application.ExecutionSubmission;
 import ai.ravenroot.api.application.GraphSummary;
 import ai.ravenroot.api.application.LiveExecution;
@@ -2365,12 +2366,18 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     @Override
     public List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
                                                                long afterSequence, int limit) {
-        if (!durableEventJournalAvailable()) return List.of();
+        return durableEventPageForProcess(tenantId, processInstanceId, afterSequence, limit).events();
+    }
+
+    @Override
+    public DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
+                                                               long afterSequence, int limit) {
+        if (!durableEventJournalAvailable()) return new DurableProcessEventPage(List.of(), 1, 1);
         var key = new ExecutionKey(requireTenant(tenantId), java.util.Objects.requireNonNull(processInstanceId));
-        List<JournalRecord> page = await(executionStore.readProcessJournal(key, afterSequence, limit));
+        var page = await(executionStore.readProcessJournalPage(key, afterSequence, limit));
         var nodeNames = loadInvocationNodeNames(key);
-        var events = new ArrayList<DurableExecutionEvent>(page.size());
-        for (JournalRecord record : page) {
+        var events = new ArrayList<DurableExecutionEvent>(page.records().size());
+        for (JournalRecord record : page.records()) {
             EventEnvelope envelope = record.envelope();
             String nodeId = envelope.invocation().map(nodeNames::get).orElse(null);
             events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
@@ -2382,7 +2389,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
                             .orElse(null) : null));
         }
-        return List.copyOf(events);
+        return new DurableProcessEventPage(events, page.retainedFromSequence(), page.nextSequence());
     }
 
     /**

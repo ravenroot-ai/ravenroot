@@ -65,9 +65,10 @@ public final class EmbedGraphProjectionCodec {
         expect(',');
         key("edges");
         List<EmbedGraphProjection.Edge> edges = edges();
+        String designArrangement = optionalStringMember("designArrangement");
         expect('}');
         return new EmbedGraphProjection(contractVersion, graphId, graphVersionId, canonicalDigest,
-                nodes, edges);
+                nodes, edges, designArrangement);
     }
 
     private List<EmbedGraphProjection.Node> nodes() {

@@ -43,6 +43,7 @@ import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
+import ai.ravenroot.api.persistence.ProcessJournalPage;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
@@ -4782,6 +4783,41 @@ public abstract class ExecutionStoreContract {
         assertEquals(2L, selectedOnly.getLast().streamSequence());
         assertEquals(List.of("selected.two"), await(store().readProcessJournal(selected, 1, 10)).stream()
                 .map(row -> row.envelope().eventType()).toList());
+    }
+
+    @Test
+    final void processJournalBoundaryRejectsFullyCompactedAndInterPageGaps() {
+        assumeCapability(StoreCapability.JOURNAL_COMPACTION);
+        var key = new ExecutionKey(DEFAULT_TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        var created = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .publish(event(key, traversal, "one"))
+                .publish(event(key, traversal, "two"))
+                .publish(event(key, traversal, "three")).build()));
+
+        ProcessJournalPage first = await(store().readProcessJournalPage(key, 0, 1));
+        assertEquals(1L, first.retainedFromSequence());
+        assertEquals(4L, first.nextSequence());
+        assertEquals(1L, first.records().getFirst().streamSequence());
+
+        List<JournalRecord> tenant = await(store().readJournal(DEFAULT_TENANT, 0, 10));
+        await(store().advanceOutboxCursor(await(store().outboxCursor(DEFAULT_TENANT, "process-replay")),
+                tenant.getLast().journalOffset()));
+        clock().advance(store().journalRetention().plusMinutes(1));
+        assertEquals(3L, await(store().compactJournal(DEFAULT_TENANT)));
+
+        var interPage = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 1, 1))));
+        assertEquals(4L, interPage.retainedFrom());
+        var fullyCompacted = assertInstanceOf(ExecutionStoreFailure.JournalTruncated.class,
+                failureOf(() -> await(store().readProcessJournalPage(key, 0, 10))));
+        assertEquals(4L, fullyCompacted.retainedFrom());
+        ProcessJournalPage current = await(store().readProcessJournalPage(key, 3, 10));
+        assertTrue(current.records().isEmpty());
+        assertEquals(4L, current.retainedFromSequence());
+        assertEquals(4L, current.nextSequence());
     }
 
     @Test

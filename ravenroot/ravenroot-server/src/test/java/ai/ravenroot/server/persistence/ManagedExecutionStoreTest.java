@@ -85,7 +85,7 @@ class ManagedExecutionStoreTest {
         var safe = (java.util.Set<String>) field.get(null);
         var managedPublic = java.util.Set.of(
                 "protectsManagedPersistence", "apply", "claim", "claimPendingWork", "claimDueTimers",
-                "readProcessJournal");
+                "readProcessJournal", "readProcessJournalPage");
         var managedInternal = java.util.Set.of(
                 "applyManaged", "claimManaged", "claimPendingWorkAmong", "claimDueTimersAmong",
                 "managedClaimCandidates");

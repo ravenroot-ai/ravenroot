@@ -47,6 +47,7 @@ class SqliteProcessControlMigrationTest {
             statement.execute("DROP TABLE runner_availability");
             statement.execute("DROP TABLE runner_retention_guard");
             statement.execute("DROP TABLE human_task_interaction_revocation");
+            statement.execute("DROP TABLE deployment_identity_binding");
             statement.execute("ALTER TABLE human_task DROP COLUMN presentation_schema_digest");
             statement.execute("ALTER TABLE human_task DROP COLUMN presentation_form_schema");
             statement.execute("ALTER TABLE human_task DROP COLUMN presentation_profile_version");

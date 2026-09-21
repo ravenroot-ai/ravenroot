@@ -39,6 +39,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
     private final Limits limits;
     private final Map<Key, Entry> entries = new HashMap<>();
     private final Map<CreateLedgerKey, Recorded> createLedger = new HashMap<>();
+    private final Map<CreateLedgerKey, IdentityBinding> identityBindings = new HashMap<>();
 
     public InMemoryDeploymentRegistry(Clock clock) {
         this(clock, tenant -> DeploymentId.of(UUID.randomUUID().toString()),
@@ -64,8 +65,25 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             Objects.requireNonNull(content, "content");
             Objects.requireNonNull(command, "command");
             CreateLedgerKey ledgerKey = new CreateLedgerKey(command.tenantId(), command.key());
+            IdentityBinding binding = command.retainIdentity() ? identityBindings.get(ledgerKey) : null;
+            if (binding != null) {
+                if (!binding.digest().equals(command.digest())) {
+                    throw failure(new FailureReason.Conflict());
+                }
+                Entry current = entries.get(binding.deployment());
+                if (current == null) throw failure(new FailureReason.NotFound());
+                return current.record();
+            }
             Recorded prior = createLedger.get(ledgerKey);
-            if (prior != null) return replay(prior, command.digest());
+            if (prior != null) {
+                Record replay = replay(prior, command.digest());
+                if (command.retainIdentity()) {
+                    Key deployment = new Key(command.tenantId(), replay.deploymentId());
+                    identityBindings.put(ledgerKey, new IdentityBinding(command.digest(), deployment));
+                    return entries.get(deployment).record();
+                }
+                return replay;
+            }
             if (content.createdAt().isAfter(now())) throw invalid("createdAt is in the future");
 
             DeploymentId id = Objects.requireNonNull(ids.mint(command.tenantId()), "minted deploymentId");
@@ -76,7 +94,20 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
             entries.put(key, entry);
             Record result = entry.record();
             createLedger.put(ledgerKey, new Recorded(command.digest(), result));
+            if (command.retainIdentity()) {
+                identityBindings.put(ledgerKey, new IdentityBinding(command.digest(), key));
+            }
             return result;
+        });
+    }
+
+    @Override
+    public synchronized CompletionStage<Optional<Record>> retainedIdentity(String tenantId, String bindingKey) {
+        return complete(() -> {
+            IdentityBinding binding = identityBindings.get(new CreateLedgerKey(tenantId, bindingKey));
+            if (binding == null) return Optional.empty();
+            Entry entry = entries.get(binding.deployment());
+            return entry == null ? Optional.empty() : Optional.of(entry.record());
         });
     }
 
@@ -349,6 +380,7 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
 
     private record Key(String tenant, DeploymentId id) {}
     private record CreateLedgerKey(String tenant, String key) {}
+    private record IdentityBinding(String digest, Key deployment) {}
     private record LedgerKey(Action action, String key) {}
     private record Recorded(String digest, Record record) {}
 

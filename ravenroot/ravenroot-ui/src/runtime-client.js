@@ -173,6 +173,58 @@ export function validateSourceSessionStatus(value, expectedSessionId = '') {
 const LOCAL_DEPLOYMENT_STATES = new Set([
   'REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING', 'STOPPED', 'FAILED',
 ]);
+const DEPLOYMENT_COMMAND_OUTCOMES = new Set([
+  'ACCEPTED', 'CONVERGED', 'REPLAYED', 'IDEMPOTENCY_CONFLICT', 'STALE_GENERATION',
+  'SUPERSEDED', 'REFUSED', 'FAILED', 'TERMINAL',
+]);
+
+function safeGeneration(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function ambiguousDeploymentDelivery(error) {
+  return error instanceof RuntimeRequestError
+    && (error.status == null || (error.status === 200
+      && /could not be read|not valid JSON/i.test(error.message)));
+}
+
+export function validateDeploymentCommandOutcome(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !DEPLOYMENT_COMMAND_OUTCOMES.has(value.outcome)) {
+    throw new Error('Deployment command response is not a valid durable outcome');
+  }
+  const valid = (() => {
+    switch (value.outcome) {
+      case 'ACCEPTED':
+        return typeof value.commandId === 'string' && value.commandId
+          && safeGeneration(value.fromGeneration) && safeGeneration(value.generation)
+          && value.generation === value.fromGeneration + 1;
+      case 'CONVERGED':
+        return typeof value.commandId === 'string' && value.commandId
+          && safeGeneration(value.generation) && typeof value.observed === 'string' && value.observed;
+      case 'REPLAYED':
+        return value.original?.outcome !== 'REPLAYED'
+          && Boolean(validateDeploymentCommandOutcome(value.original));
+      case 'IDEMPOTENCY_CONFLICT':
+        return typeof value.key === 'string' && value.key;
+      case 'STALE_GENERATION':
+        return safeGeneration(value.expected) && safeGeneration(value.generation)
+          && value.expected !== value.generation;
+      case 'SUPERSEDED':
+        return typeof value.by === 'string' && value.by && safeGeneration(value.generation);
+      case 'REFUSED':
+        return typeof value.reason === 'string' && value.reason;
+      case 'FAILED':
+        return typeof value.cause === 'string' && value.cause;
+      case 'TERMINAL':
+        return typeof value.commandId === 'string' && value.commandId && safeGeneration(value.generation);
+      default:
+        return false;
+    }
+  })();
+  if (!valid) throw new Error('Deployment command response is not a valid durable outcome');
+  return value;
+}
 
 const EXECUTION_CONTROL_OUTCOMES = Object.freeze({
   pause: new Set(['PAUSED', 'ALREADY_PAUSED', 'NOT_ACTIVE']),
@@ -196,6 +248,8 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
+      || (value.deploymentGeneration !== null && value.deploymentGeneration !== undefined
+        && !safeGeneration(value.deploymentGeneration))
       || (value.graphVersion !== null && value.graphVersion !== undefined
         && (typeof value.graphVersion !== 'string' || !value.graphVersion))
       || (value.diagnostic !== null && value.diagnostic !== undefined
@@ -563,48 +617,115 @@ export class RavenrootRuntimeClient {
 
   /** Starts a registered deployment; the call answers only once it has reached READY, or the
    * truthful FAILED state if startup rolled back -- never merely "accepted". */
-  async startDeployment(deploymentId) {
-    const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment start requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/start`, {
-      method: 'POST', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+  async startDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'start', options);
   }
 
   /** Stops a deployment and leaves it registered and re-startable -- distinct from
    * {@link #undeployDeployment}, which stops it and then removes the registration. */
-  async stopDeployment(deploymentId) {
-    const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment stop requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/stop`, {
-      method: 'POST', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+  async stopDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'stop', options);
   }
 
   /** A completed stop followed by a start, never the two overlapping (server-side
    * guarantee; see RouteTable's own note on `/v1/deployments/{id}/restart`). */
-  async restartDeployment(deploymentId) {
-    const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment restart requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/restart`, {
-      method: 'POST', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+  async restartDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'restart', options);
   }
 
-  /** Stops the deployment and then removes its registration -- the operation that turns
-   * "registered and controlled as a local deployment" back into nothing, so an abandoned registration
-   * does not outlive the editor session that created it. The response is the STOPPED status captured
-   * at the moment of removal, not a fresh GET (the id no longer resolves after this call). */
-  async undeployDeployment(deploymentId) {
+  /** Stops the deployment and then removes its registration. Legacy servers return the STOPPED
+   * status captured at removal; durable servers return a typed terminal outcome and retain a tombstone
+   * for exact replay even though the id no longer resolves through GET. */
+  async undeployDeployment(deploymentId, options = {}) {
+    return this.#deploymentCommand(deploymentId, 'undeploy', options);
+  }
+
+  async #deploymentCommand(deploymentId, action,
+    { expectedGeneration, idempotencyKey, reason, disposition } = {}) {
     const id = String(deploymentId || '');
-    if (!id) throw new Error('Deployment undeploy requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: { Accept: 'application/json' },
-    });
-    return validateLocalDeploymentStatus(result, id);
+    if (!id) throw new Error(`Deployment ${action} requires an id`);
+    const path = action === 'undeploy' ? `/v1/deployments/${encodeURIComponent(id)}`
+      : `/v1/deployments/${encodeURIComponent(id)}/${action}`;
+    const method = action === 'undeploy' ? 'DELETE' : 'POST';
+
+    // Absence means a compatibility deployment. Presence switches the entire command onto the
+    // durable contract; unsafe int64 values are refused rather than rounded into another fence.
+    if (expectedGeneration === undefined || expectedGeneration === null) {
+      const result = await this.#json(path, { method, headers: { Accept: 'application/json' } });
+      return validateLocalDeploymentStatus(result, id);
+    }
+    if (!safeGeneration(expectedGeneration)) {
+      throw new Error('Deployment generation is outside JavaScript’s safe integer range');
+    }
+    if ((action === 'stop' || action === 'undeploy')
+        && (typeof reason !== 'string' || !reason.trim() || reason.length > 256)) {
+      throw new Error(`Deployment ${action} requires a reason of at most 256 characters`);
+    }
+    if (action === 'undeploy'
+        && !['DRAIN_FIRST', 'CANCEL_IN_FLIGHT', 'REFUSE_IF_BUSY'].includes(disposition)) {
+      throw new Error('Deployment undeploy requires an explicit supported disposition');
+    }
+    const key = idempotencyKey || globalThis.crypto?.randomUUID?.();
+    if (typeof key !== 'string' || !key) {
+      throw new Error('Secure deployment idempotency key generation is unavailable');
+    }
+    const headers = {
+      Accept: 'application/json',
+      'Idempotency-Key': key,
+      'X-Ravenroot-Expected-Generation': String(expectedGeneration),
+      ...((action === 'stop' || action === 'undeploy') ? { 'X-Ravenroot-Reason': reason.trim() } : {}),
+      ...(action === 'undeploy' ? { 'X-Ravenroot-Undeploy-Disposition': disposition } : {}),
+    };
+    let result;
+    try {
+      result = await this.#json(path, { method, headers });
+    } catch (error) {
+      if (!ambiguousDeploymentDelivery(error)) throw error;
+      // A single transport retry is the only automatic resubmission, and it reuses the exact intent.
+      try {
+        result = await this.#json(path, { method, headers });
+      } catch (secondError) {
+        if (!ambiguousDeploymentDelivery(secondError)) throw secondError;
+        try {
+          const status = await this.deployment(id);
+          return { outcome: null, status, reconciliation: {
+            delivery: 'AMBIGUOUS', authoritative: 'STATE',
+          } };
+        } catch (readError) {
+          if (action === 'undeploy' && readError instanceof RuntimeRequestError
+              && readError.status === 404) {
+            return { outcome: null, status: null, reconciliation: {
+              delivery: 'AMBIGUOUS', authoritative: 'NOT_FOUND',
+            } };
+          }
+          throw readError;
+        }
+      }
+    }
+    const outcome = validateDeploymentCommandOutcome(result);
+    const terminal = outcome.outcome === 'TERMINAL'
+      || (outcome.outcome === 'REPLAYED' && outcome.original.outcome === 'TERMINAL');
+    const refreshOnly = ['STALE_GENERATION', 'SUPERSEDED', 'REFUSED', 'FAILED',
+      'IDEMPOTENCY_CONFLICT'].includes(outcome.outcome);
+    let status = null;
+    const attempts = refreshOnly || terminal ? 1 : 40;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        status = await this.deployment(id);
+      } catch (error) {
+        if (error instanceof RuntimeRequestError && error.status === 404 && action === 'undeploy') {
+          status = null;
+          break;
+        }
+        throw error;
+      }
+      const settled = action === 'stop' ? ['STOPPED', 'FAILED'].includes(status.state)
+        : action === 'undeploy' ? false
+          : ['READY', 'DEGRADED', 'FAILED'].includes(status.state);
+      if (settled || refreshOnly) break;
+      await this.sleep(250);
+    }
+    return { outcome, status };
   }
 
   async execution(executionId, { signal } = {}) {

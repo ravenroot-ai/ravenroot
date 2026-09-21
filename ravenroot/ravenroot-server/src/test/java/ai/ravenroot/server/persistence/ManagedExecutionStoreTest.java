@@ -31,11 +31,32 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ManagedExecutionStoreTest {
+    @Test
+    void selectedProcessJournalReadDelegatesWithoutManagedMutationAuthority() {
+        ExecutionKey key = key(7);
+        var called = new AtomicBoolean();
+        ExecutionStore delegate = executionStore((method, arguments) -> switch (method.getName()) {
+            case "readProcessJournal" -> {
+                assertEquals(key, arguments[0]);
+                assertEquals(11L, arguments[1]);
+                assertEquals(23, arguments[2]);
+                called.set(true);
+                yield CompletableFuture.completedFuture(List.of());
+            }
+            default -> defaultStoreValue(method.getName());
+        });
+        ExecutionStore managed = ManagedExecutionStore.protect(delegate, manifestStore(Map.of()));
+
+        assertTrue(managed.readProcessJournal(key, 11, 23).toCompletableFuture().join().isEmpty());
+        assertTrue(called.get(), "bounded process journal reads must reach the durable delegate");
+    }
+
     @Test
     void stableSourceOwnershipIsDelegatedWithoutBypassingTheAdaptersExclusiveScope(
             @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
@@ -63,7 +84,8 @@ class ManagedExecutionStoreTest {
         @SuppressWarnings("unchecked")
         var safe = (java.util.Set<String>) field.get(null);
         var managedPublic = java.util.Set.of(
-                "protectsManagedPersistence", "apply", "claim", "claimPendingWork", "claimDueTimers");
+                "protectsManagedPersistence", "apply", "claim", "claimPendingWork", "claimDueTimers",
+                "readProcessJournal");
         var managedInternal = java.util.Set.of(
                 "applyManaged", "claimManaged", "claimPendingWorkAmong", "claimDueTimersAmong",
                 "managedClaimCandidates");
